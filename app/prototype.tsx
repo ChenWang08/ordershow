@@ -175,7 +175,6 @@ function H5Prototype() {
                     </button>
                   ))}
                 </div>
-                <button className="entry-back" onClick={() => setStep("channel")}>返回选择客户类型</button>
               </div>
             </section>
           )}
