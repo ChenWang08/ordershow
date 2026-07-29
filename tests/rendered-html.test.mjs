@@ -36,8 +36,9 @@ test("server-renders the ordering prototype shell", async () => {
   assert.match(html, /专题战报/);
   assert.match(html, /幸运抽奖/);
   assert.match(html, /管理后台/);
-  assert.match(html, /输入白名单手机号/);
-  assert.match(html, /13800138000/);
+  assert.match(html, /选择您的订货通道/);
+  assert.match(html, /综合客户订货/);
+  assert.match(html, /特渠专业客户订货/);
   assert.match(html, /\/og\.png/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton|Your site is taking shape/);
 });

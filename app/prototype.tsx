@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 type Surface = "h5" | "ranking" | "report" | "lottery" | "admin";
-type H5Step = "verify" | "order" | "confirm" | "success";
+type H5Step = "channel" | "region" | "verify" | "order" | "confirm" | "success";
+type H5Channel = "综合客户" | "特渠专业客户" | "";
 type CandidateScope = "all" | "attended" | "ordered";
 type LotteryRoundStatus = "draft" | "published" | "completed";
 type LotteryRound = {
@@ -89,7 +90,9 @@ function ProductArt({ atlas }: { atlas: number }) {
 }
 
 function H5Prototype() {
-  const [step, setStep] = useState<H5Step>("verify");
+  const [step, setStep] = useState<H5Step>("channel");
+  const [channel, setChannel] = useState<H5Channel>("");
+  const [region, setRegion] = useState("");
   const [phone, setPhone] = useState("13800138000");
   const [rebate, setRebate] = useState(true);
   const [line, setLine] = useState("全部");
@@ -102,6 +105,8 @@ function H5Prototype() {
   const selected = products.filter((p) => (quantities[p.id] || 0) > 0);
   const totalBoxes = selected.reduce((sum, p) => sum + quantities[p.id], 0);
   const totalAmount = selected.reduce((sum, p) => sum + quantities[p.id] * p.price, 0);
+  const identityLabel = channel === "综合客户" ? `综合客户 · ${region}` : "特渠专业客户";
+  const dealerName = channel === "综合客户" ? "上海爱尚真贸易有限公司" : "北京智享云采经贸有限公司";
 
   const changeQty = (id: number, delta: number) => {
     setQuantities((old) => ({ ...old, [id]: Math.max(0, (old[id] || 0) + delta) }));
@@ -116,8 +121,68 @@ function H5Prototype() {
       <div className="phone-shell">
         <div className="phone-screen">
           <FestivalDecor />
+          {step === "channel" && (
+            <section className="h5-page verify-page entry-page">
+              <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
+              <div className="h5-hero-copy entry-hero">
+                <span className="eyebrow">2026 年中秋订货会</span>
+                <h1>月满家圆<br /><em>味启新程</em></h1>
+                <p>新品发布及中秋旺季动员会</p>
+              </div>
+              <div className="verify-card entry-card">
+                <span className="step-tag">订货通道</span>
+                <h2>选择您的订货通道</h2>
+                <p>请选择白名单中登记的客户类型，进入对应订货专区。</p>
+                <div className="channel-options">
+                  <button onClick={() => { setChannel("综合客户"); setRegion(""); setStep("region"); }}>
+                    <i className="channel-icon">综</i>
+                    <span><b>综合客户订货</b><small>综合经销商 · 进入后选择所属大区</small></span>
+                    <em>›</em>
+                  </button>
+                  <button onClick={() => { setChannel("特渠专业客户"); setRegion(""); setStep("verify"); }}>
+                    <i className="channel-icon special">特</i>
+                    <span><b>特渠专业客户订货</b><small>专业渠道经销商 · 手机号验证身份</small></span>
+                    <em>›</em>
+                  </button>
+                </div>
+                <small>通道选择不会改变白名单中的客户身份</small>
+              </div>
+            </section>
+          )}
+
+          {step === "region" && (
+            <section className="h5-page verify-page entry-page">
+              <div className="entry-nav"><button onClick={() => setStep("channel")}>‹</button><span>综合客户订货</span></div>
+              <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
+              <div className="h5-hero-copy region-hero">
+                <span className="eyebrow">2026 年中秋订货会</span>
+                <h1>选择所属<br /><em>经营大区</em></h1>
+                <p>请按白名单登记信息选择</p>
+              </div>
+              <div className="verify-card entry-card region-card">
+                <span className="step-tag">综合客户</span>
+                <h2>请选择所属大区</h2>
+                <p>验证手机号时，系统会再次核对客户类型和经营区域。</p>
+                <div className="region-options">
+                  {[
+                    ["东区", "华东区域综合经销商"],
+                    ["南区", "华南区域综合经销商"],
+                    ["北1区", "华北一部综合经销商"],
+                    ["北2区", "华北二部综合经销商"],
+                  ].map(([name, detail], index) => (
+                    <button key={name} onClick={() => { setRegion(name); setStep("verify"); }}>
+                      <i>{["东", "南", "北", "北"][index]}</i><b>{name}</b><small>{detail}</small>
+                    </button>
+                  ))}
+                </div>
+                <button className="entry-back" onClick={() => setStep("channel")}>返回选择客户类型</button>
+              </div>
+            </section>
+          )}
+
           {step === "verify" && (
             <section className="h5-page verify-page">
+              <div className="entry-nav"><button onClick={() => setStep(channel === "综合客户" ? "region" : "channel")}>‹</button><span>{identityLabel}</span></div>
               <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
               <div className="h5-hero-copy">
                 <span className="eyebrow">2026 年中秋订货会</span>
@@ -125,9 +190,9 @@ function H5Prototype() {
                 <p>新品发布及中秋旺季动员会</p>
               </div>
               <div className="verify-card">
-                <span className="step-tag">经销商身份验证</span>
+                <div className="verify-context"><span className="step-tag">{identityLabel}</span><button onClick={() => setStep("channel")}>重新选择</button></div>
                 <h2>输入白名单手机号</h2>
-                <p>验证通过后，将为您展示对应渠道的订货商品。</p>
+                <p>验证通过后，将为您展示{channel === "综合客户" ? `${region}综合客户` : "特渠专业客户"}的订货商品。</p>
                 <label>
                   <span>手机号</span>
                   <input value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 11))} inputMode="numeric" />
@@ -142,13 +207,13 @@ function H5Prototype() {
             <section className="h5-page order-page">
               <header className="order-header">
                 <button className="text-btn" onClick={() => setStep("verify")}>‹</button>
-                <div><b>2026 中秋订货会</b><span>特渠专业客户</span></div>
+                <div><b>2026 中秋订货会</b><span>{identityLabel}</span></div>
                 <button className="round-btn" aria-label="更多">•••</button>
               </header>
               <div className="dealer-card">
                 <span>已识别经销商</span>
-                <b>上海爱尚真贸易有限公司</b>
-                <small>联系人 王女士 · 138****8000</small>
+                <b>{dealerName}</b>
+                <small>{identityLabel} · 联系人王女士 · 138****8000</small>
               </div>
               <div className="policy-note"><b>订货提示</b><span>所有商品按箱订购，提交后可在截止时间前修改。</span></div>
               <div className="product-toolbar">
@@ -227,7 +292,7 @@ function H5Prototype() {
           {step === "confirm" && (
             <section className="h5-page confirm-page">
               <header className="simple-header"><button onClick={() => setStep("order")}>‹</button><b>确认订单</b><span /></header>
-              <div className="confirm-hero"><span>请核对订货信息</span><h2>上海爱尚真贸易有限公司</h2><small>特渠专业客户 · 上海分</small></div>
+              <div className="confirm-hero"><span>请核对订货信息</span><h2>{dealerName}</h2><small>{identityLabel}{channel === "特渠专业客户" ? " · 北京分" : ""}</small></div>
               <div className="confirm-list">
                 {selected.map((product) => (
                   <div key={product.id}>
@@ -254,7 +319,7 @@ function H5Prototype() {
               <div className="success-amount"><span>订单总金额</span><b>¥{money(totalAmount)}</b><small>{totalBoxes} 箱 · {selected.length} 种商品</small></div>
               <div className="success-note">订货截止前，您可以再次进入并修改订单。看板将在数秒内同步最新数据。</div>
               <button className="primary-btn" onClick={() => setStep("order")}>查看并修改订单</button>
-              <button className="ghost-btn" onClick={() => setStep("verify")}>返回活动首页</button>
+              <button className="ghost-btn" onClick={() => { setChannel(""); setRegion(""); setStep("channel"); }}>返回活动首页</button>
             </section>
           )}
         </div>
