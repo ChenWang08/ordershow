@@ -40,3 +40,17 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+
+# Local business source files and sensitive data
+/*.xlsx
+/*.xls
+/*.docx
+~$*
+
+# Local requirement and design reference files
+/订购会PRD*.md
+/数据看板背景.png
+/H5背景.png
+
+# Local preview logs
+/_local_preview*.log

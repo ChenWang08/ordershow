@@ -1,98 +1,151 @@
-# vinext-starter
+# 2026 中秋订货会系统原型
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+面向调味品事业部订货会的多端交互原型，覆盖客户订货 H5、订货排行、专题战报、现场抽奖和运营管理后台。
 
-## Prerequisites
+> 当前版本是前端演示原型，使用 Mock 数据。尚未接入真实 Excel 解析、后端接口、数据库、文件存储、权限系统和实时数据推送，不能直接用于正式订货会。
 
-- Node.js `>=22.13.0`
+## 当前页面
 
-## Quick Start
+项目通过顶部导航切换五个演示端：
+
+| 页面 | 用途 | 当前能力 |
+| --- | --- | --- |
+| 订货 H5 | 经销商手机端订货 | 手机号验证演示、商品筛选、购物明细、箱数填写、订单确认和提交结果 |
+| 订货排行 | 现场大屏 | 下拉选择特渠或综合区域、公司订单金额 TOP120、分公司订货榜 |
+| 专题战报 | 现场大屏 | 九类战报切换、TOP5、总战绩、区域及产品线统计 |
+| 幸运抽奖 | 现场大屏 | 抽奖动画和中奖名单展示 |
+| 管理后台 | 运营人员 | 商品及白名单导入预览、订单详情、看板配置、抽奖规则、主题装修 |
+
+## 已实现的原型功能
+
+### 客户订货 H5
+
+- 输入白名单手机号并进入订货页。
+- 返利产品与非返利产品切换。
+- 按产品线和关键词筛选。
+- 按箱增加、减少或直接输入订货数量，输入框具有明确的编辑状态。
+- 实时计算已选商品数、总箱数和订单金额。
+- 点击底部订货栏可以打开已选商品明细。
+- 购物明细支持修改数量、删除单品、清空商品并查看单项金额。
+- 确认订单页展示完整经销商名称、商品明细和订单总金额。
+- 支持提交成功和再次修改订单流程。
+- 底部订货栏采用吸附布局，不遮挡商品。
+- 使用虚拟商品图片，后续可替换为正式商品图。
+
+### 商品管理
+
+- 模拟读取特渠和综合商品文件。
+- 关注“参与订货会返利产品”和“不参与订货会返利产品”Sheet。
+- 支持按客户类型、返利状态筛选导入预览。
+- 展示产品大类、产品线、物料代码、物料名称、品牌、品种、规格、箱规、元/瓶、元/箱、吨箱转换系数和礼盒标记等字段。
+- 提供追加导入、覆盖更新、清空重导三种模式的交互原型。
+- 缺失字段以空值或待完善状态展示。
+- 商品名称包含“礼盒”时可自动标记为礼盒。
+
+### 白名单管理
+
+- 模拟读取综合客户和特渠客户白名单。
+- 支持按综合客户、特渠专业客户筛选。
+- 展示序号、大区、分公司简称、分公司全称、经销商类型、经销商姓名、经销商电话、分公司确认人姓名和电话。
+- 提供追加导入、覆盖更新、清空重导三种模式的交互原型。
+- 手机号在页面中脱敏展示。
+
+### 订单管理
+
+- 查看订单列表。
+- 点击订单行打开订单详情。
+- 查看商品明细、订单金额、箱数和吨数。
+- 展示创建、首次提交、最后修改和锁定时间。
+- 展示订单操作记录。
+- 演示订单锁定、作废和导出入口。
+
+### 看板、抽奖与主题
+
+- 订货排行通过下拉筛选器切换五个渠道或区域，不在页面中常驻展示全部选项。
+- 专题战报支持九类内容切换。
+- 抽奖客户类型、轮次、奖品和人数在管理后台配置；当前原型尚未通过后端与现场抽奖页持久联动。
+- 现场抽奖页仅保留抽奖执行和结果展示。
+- H5、数据看板和抽奖页背景均支持自定义图片上传预览。
+
+## 本地运行
+
+### 环境要求
+
+- Node.js `>= 22.13.0`
+- npm
+
+### 安装与启动
 
 ```bash
 npm install
 npm run dev
+```
+
+启动后访问终端显示的本地地址，通常为：
+
+```text
+http://localhost:3000/
+```
+
+### 构建与测试
+
+```bash
 npm run build
+npm test
 ```
 
-This starter does not use `wrangler.jsonc`.
+`npm test` 会先执行生产构建，再检查页面服务端渲染和关键资源。
 
-## Included Shape
+## 项目结构
 
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```text
+order_show/
+├─ app/
+│  ├─ globals.css          # 全站样式和响应式布局
+│  ├─ layout.tsx           # 页面元信息和根布局
+│  ├─ page.tsx             # 页面入口
+│  └─ prototype.tsx        # 五个端的主要交互原型
+├─ public/
+│  ├─ product-atlas.png    # 虚拟商品图片图集
+│  └─ og.png               # 分享预览图
+├─ tests/
+│  └─ rendered-html.test.mjs
+├─ 订购会PRD....md          # 原始产品需求文档
+├─ PROJECT.md              # 项目范围、数据和正式开发方案
+├─ package.json
+└─ README.md
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+## 当前技术栈
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+- React 19
+- TypeScript
+- Next.js 兼容 API
+- Vinext
+- Vite
+- CSS
+- Node.js Test Runner
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
+项目中已经包含 Drizzle 和 Cloudflare D1 的基础依赖，但当前数据库结构为空，原型没有使用数据库。
 
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
+## 正式开发前必须补充
 
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
+- 后端 API 和正式数据库。
+- 测试、预发布、正式环境及数据库隔离。
+- Excel 文件上传、解析、校验、导入批次和回滚。
+- 商品、白名单、订单、抽奖及操作日志持久化。
+- 服务端手机号验证和短期操作凭证。
+- 服务端订单金额与吨数计算。
+- 订单幂等、版本历史、锁定和截止控制。
+- 实时或准实时看板统计。
+- 后端抽奖、候选人快照和中奖结果保存。
+- 管理员登录、角色权限及敏感操作审计。
+- 正式图片对象存储、备份、监控和压力测试。
 
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
+完整规划见 [PROJECT.md](./PROJECT.md)。
 
-## Useful Commands
+## 数据安全提示
 
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
+不要将真实客户手机号、正式订单或中奖名单写入前端源码。正式数据必须保存在受权限控制的后端和数据库中。
 
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+测试环境与正式环境应使用不同的域名、后端、数据库、对象存储和配置。正式启用时应重新导入审核后的商品与白名单，不应将测试数据库直接转换为正式数据库。
