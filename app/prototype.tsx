@@ -13,8 +13,6 @@ type LotteryRound = {
   winnerCount: number;
   customerType: "全部客户" | "特渠专业客户" | "综合客户";
   scope: CandidateScope;
-  mustAttend: boolean;
-  mustOrder: boolean;
   minAmount: number;
   cutoff: string;
   excludeWinners: boolean;
@@ -66,9 +64,9 @@ const reports = [
 ];
 
 const initialLotteryRounds: LotteryRound[] = [
-  { id: 1, name: "第一轮", prize: "御品中秋礼盒", winnerCount: 15, customerType: "特渠专业客户", scope: "attended", mustAttend: true, mustOrder: false, minAmount: 0, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "completed", candidateCount: 286 },
-  { id: 2, name: "第二轮", prize: "蜀绣双面绣熊猫摆件", winnerCount: 15, customerType: "综合客户", scope: "ordered", mustAttend: false, mustOrder: true, minAmount: 5000, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "published", candidateCount: 418 },
-  { id: 3, name: "第三轮", prize: "中秋尊享礼盒", winnerCount: 10, customerType: "全部客户", scope: "all", mustAttend: true, mustOrder: true, minAmount: 10000, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "draft", candidateCount: 163 },
+  { id: 1, name: "第一轮", prize: "御品中秋礼盒", winnerCount: 15, customerType: "特渠专业客户", scope: "attended", minAmount: 0, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "completed", candidateCount: 286 },
+  { id: 2, name: "第二轮", prize: "蜀绣双面绣熊猫摆件", winnerCount: 15, customerType: "综合客户", scope: "ordered", minAmount: 5000, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "published", candidateCount: 418 },
+  { id: 3, name: "第三轮", prize: "中秋尊享礼盒", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "draft", candidateCount: 1665 },
 ];
 
 function money(value: number) {
@@ -403,7 +401,7 @@ function LotteryBoard({ rounds, onComplete }: { rounds: LotteryRound[]; onComple
       </div>
       <div className="lottery-title"><b>{currentRound.name} 幸运抽奖</b><span>实物奖品：{currentRound.prize}</span></div>
       {status === "ready" ? (
-        <div className="lottery-ready"><div className="lucky-seal">福</div><h2>好运即将揭晓</h2><p>本轮将从 {scopeLabel} 中抽取 {currentRound.winnerCount} 名幸运客户</p><div className="lottery-rule-summary">{currentRound.mustAttend && <span>已到场</span>}{currentRound.mustOrder && <span>有效订单</span>}{currentRound.minAmount > 0 && <span>满 ¥{currentRound.minAmount.toLocaleString()}</span>}{currentRound.excludeWinners && <span>排除已中奖</span>}</div></div>
+        <div className="lottery-ready"><div className="lucky-seal">福</div><h2>好运即将揭晓</h2><p>本轮将从 {scopeLabel} 中抽取 {currentRound.winnerCount} 名幸运客户</p><div className="lottery-rule-summary"><span>{currentRound.scope === "all" ? "活动白名单" : currentRound.scope === "attended" ? "现场已到场" : "有效订单"}</span>{currentRound.scope === "ordered" && currentRound.minAmount > 0 && <span>订单满 ¥{currentRound.minAmount.toLocaleString()}</span>}{currentRound.excludeWinners && <span>排除已中奖</span>}</div></div>
       ) : (
         <div className={`winner-grid ${status}`}>
           {winners.map((name, index) => <div key={index}><span>{String(index + 1).padStart(2, "0")}</span><b>{name}</b></div>)}
@@ -580,7 +578,7 @@ function LotterySettings({ rounds, onChange }: { rounds: LotteryRound[]; onChang
   const updateSelected = (patch: Partial<LotteryRound>) => onChange(rounds.map((item) => item.id === selected.id ? { ...item, ...patch } : item));
   const addRound = () => {
     const id = Math.max(...rounds.map((item) => item.id)) + 1;
-    const next: LotteryRound = { id, name: `第${rounds.length + 1}轮`, prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", mustAttend: false, mustOrder: false, minAmount: 0, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "draft", candidateCount: 1680 };
+    const next: LotteryRound = { id, name: `第${rounds.length + 1}轮`, prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "draft", candidateCount: 1665 };
     onChange([...rounds, next]);
     setSelectedId(id);
   };
@@ -595,7 +593,13 @@ function LotterySettings({ rounds, onChange }: { rounds: LotteryRound[]; onChang
     onChange(rest);
     setSelectedId(rest[0].id);
   };
-  const ruleSummary = `${selected.customerType} · ${selected.scope === "all" ? "活动白名单" : selected.scope === "attended" ? "现场已到场" : "有效下单"}${selected.mustAttend && selected.scope !== "attended" ? " + 必须到场" : ""}${selected.mustOrder && selected.scope !== "ordered" ? " + 必须下单" : ""}${selected.minAmount > 0 ? ` + 满 ¥${selected.minAmount.toLocaleString()}` : ""} · ${selected.excludeWinners ? "排除已中奖" : "允许重复中奖"}`;
+  const ruleSummary = `${selected.customerType} · ${selected.scope === "all" ? "活动白名单" : selected.scope === "attended" ? "现场已到场" : "有效下单"}${selected.scope === "ordered" && selected.minAmount > 0 ? ` · 订单满 ¥${selected.minAmount.toLocaleString()}` : ""} · ${selected.excludeWinners ? "排除已中奖" : "允许重复中奖"}`;
+  const candidateSteps: [string, number][] = selected.scope === "all"
+    ? [["活动白名单", 1680], ["客户类型匹配", selected.customerType === "全部客户" ? 1680 : 1073], ["排除已中奖", selected.candidateCount]]
+    : selected.scope === "attended"
+      ? [["活动白名单", 1680], ["客户类型匹配", selected.customerType === "全部客户" ? 1680 : 607], ["现场到场匹配", selected.candidateCount + 15], ["排除已中奖", selected.candidateCount]]
+      : [["活动白名单", 1680], ["客户类型匹配", selected.customerType === "全部客户" ? 1680 : 1073], ["有效订单匹配", selected.minAmount > 0 ? 612 : selected.candidateCount + 15], ...(selected.minAmount > 0 ? [["金额门槛匹配", selected.candidateCount + 15] as [string, number]] : []), ["排除已中奖", selected.candidateCount]];
+  const candidateMeta = selected.scope === "all" ? "白名单有效" : selected.scope === "attended" ? "现场已到场" : "有效订单";
   return (
     <div className="admin-panel lottery-settings">
       <div className="panel-title"><div><h2>抽奖规则工作台</h2><p>配置轮次、候选资格与现场执行顺序；已完成轮次自动锁定</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setAttendanceImported(true)}>导入到场名单</button><button className="admin-primary" onClick={() => updateSelected({ status: "published" })}>保存并发布</button></div></div>
@@ -614,19 +618,15 @@ function LotterySettings({ rounds, onChange }: { rounds: LotteryRound[]; onChang
           <label><span>奖品名称</span><input value={selected.prize} disabled={selected.status === "completed"} onChange={(e) => updateSelected({ prize: e.target.value })} /></label>
           <label><span>中奖人数</span><input type="number" min="1" value={selected.winnerCount} disabled={selected.status === "completed"} onChange={(e) => updateSelected({ winnerCount: Number(e.target.value) })} /></label>
           <label><span>客户类型</span><select value={selected.customerType} disabled={selected.status === "completed"} onChange={(e) => updateSelected({ customerType: e.target.value as LotteryRound["customerType"] })}>{["全部客户", "特渠专业客户", "综合客户"].map((x) => <option key={x}>{x}</option>)}</select></label>
-          <fieldset className="candidate-scope"><legend>候选客户范围</legend>{scopeOptions.map((option) => <button type="button" key={option.key} className={selected.scope === option.key ? "active" : ""} disabled={selected.status === "completed"} onClick={() => updateSelected({ scope: option.key, mustAttend: option.key === "attended" || selected.mustAttend, mustOrder: option.key === "ordered" || selected.mustOrder })}><i>{selected.scope === option.key ? "✓" : ""}</i><span><b>{option.title}</b><small>{option.detail}</small></span></button>)}</fieldset>
-          <div className="condition-grid">
-            <label className="check-setting"><input type="checkbox" checked={selected.mustAttend} disabled={selected.scope === "attended" || selected.status === "completed"} onChange={(e) => updateSelected({ mustAttend: e.target.checked })} /><span><b>必须现场到场</b><small>使用签到或导入的到场状态</small></span></label>
-            <label className="check-setting"><input type="checkbox" checked={selected.mustOrder} disabled={selected.scope === "ordered" || selected.status === "completed"} onChange={(e) => updateSelected({ mustOrder: e.target.checked })} /><span><b>必须有有效订单</b><small>已提交或已锁定且未作废</small></span></label>
-          </div>
-          <label><span>最低订单金额</span><div className="amount-input"><b>¥</b><input type="number" min="0" value={selected.minAmount} disabled={selected.status === "completed"} onChange={(e) => updateSelected({ minAmount: Number(e.target.value), mustOrder: Number(e.target.value) > 0 || selected.mustOrder })} /></div></label>
-          <label><span>资格截止时间</span><input type="datetime-local" value={selected.cutoff} disabled={selected.status === "completed"} onChange={(e) => updateSelected({ cutoff: e.target.value })} /></label>
+          <fieldset className="candidate-scope"><legend>候选客户范围</legend>{scopeOptions.map((option) => <button type="button" key={option.key} className={selected.scope === option.key ? "active" : ""} disabled={selected.status === "completed"} onClick={() => updateSelected({ scope: option.key, minAmount: option.key === "ordered" ? selected.minAmount : 0, candidateCount: option.key === "all" ? 1665 : option.key === "attended" ? 592 : 518 })}><i>{selected.scope === option.key ? "✓" : ""}</i><span><b>{option.title}</b><small>{option.detail}</small></span></button>)}</fieldset>
+          {selected.scope === "ordered" && <label><span>最低订单金额</span><div className="amount-input"><b>¥</b><input type="number" min="0" value={selected.minAmount} disabled={selected.status === "completed"} onChange={(e) => updateSelected({ minAmount: Number(e.target.value), candidateCount: Number(e.target.value) > 0 ? 418 : 518 })} /></div><small className="field-help">填写 0 表示不限制订单金额</small></label>}
+          <label className={selected.scope === "ordered" ? "" : "wide-field"}><span>资格截止时间</span><input type="datetime-local" value={selected.cutoff} disabled={selected.status === "completed"} onChange={(e) => updateSelected({ cutoff: e.target.value })} /></label>
           <label className="check-setting repeat-setting"><input type="checkbox" checked={selected.excludeWinners} disabled={selected.status === "completed"} onChange={(e) => updateSelected({ excludeWinners: e.target.checked })} /><span><b>排除本活动已中奖客户</b><small>避免客户跨轮次重复中奖</small></span></label>
           <div className="rule-summary"><span>当前规则</span><p>{ruleSummary}</p></div>
           <div className="candidate-preview"><div><span>预计候选池</span><strong>{selected.candidateCount}<small> 人</small></strong><p>白名单 1,680 · 条件排除 {1680 - selected.candidateCount} · 已中奖排除 15</p></div><button onClick={() => setPreviewOpen(true)}>查看候选名单</button></div>
         </section>
       </div>
-      {previewOpen && <div className="order-drawer-backdrop" onClick={() => setPreviewOpen(false)}><aside className="order-drawer candidate-drawer" onClick={(e) => e.stopPropagation()}><header><div><span>候选池预览</span><h2>{selected.name} · {selected.candidateCount} 人</h2></div><button onClick={() => setPreviewOpen(false)}>×</button></header><div className="candidate-funnel">{[["活动白名单", 1680], ["客户类型匹配", selected.customerType === "全部客户" ? 1680 : 1073], ["到场状态匹配", selected.mustAttend ? 804 : 1073], ["订单与金额匹配", selected.candidateCount], ["排除已中奖", Math.max(selected.candidateCount - 15, 0)]].map(([label, count]) => <div key={label as string}><span>{label}</span><b>{count}</b></div>)}</div><div className="candidate-table">{dealerNames.slice(0, 12).map((name, index) => <div key={name}><span>{String(index + 1).padStart(3, "0")}</span><b>{name}</b><em>{index % 3 === 0 ? "特渠" : "综合"}</em><small>已到场 · ¥{(8200 + index * 1680).toLocaleString()}</small></div>)}</div><footer><button>导出候选名单</button><button className="admin-primary" onClick={() => setPreviewOpen(false)}>确认候选池</button></footer></aside></div>}
+      {previewOpen && <div className="order-drawer-backdrop" onClick={() => setPreviewOpen(false)}><aside className="order-drawer candidate-drawer" onClick={(e) => e.stopPropagation()}><header><div><span>候选池预览</span><h2>{selected.name} · {selected.candidateCount} 人</h2></div><button onClick={() => setPreviewOpen(false)}>×</button></header><div className="candidate-funnel">{candidateSteps.map(([label, count]) => <div key={label}><span>{label}</span><b>{count}</b></div>)}</div><div className="candidate-table">{dealerNames.slice(0, 12).map((name, index) => <div key={name}><span>{String(index + 1).padStart(3, "0")}</span><b>{name}</b><em>{index % 3 === 0 ? "特渠" : "综合"}</em><small>{candidateMeta}{selected.scope === "ordered" ? ` · ¥${(8200 + index * 1680).toLocaleString()}` : ""}</small></div>)}</div><footer><button>导出候选名单</button><button className="admin-primary" onClick={() => setPreviewOpen(false)}>确认候选池</button></footer></aside></div>}
     </div>
   );
 }
