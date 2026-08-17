@@ -29,7 +29,7 @@ test("server-renders the ordering prototype shell", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>2026 中秋订货会 · 交互原型<\/title>/);
+  assert.match(html, /<title>订货会 · 交互原型<\/title>/);
   assert.match(html, /客户订货 H5、实时数据大屏、幸运抽奖和管理后台交互原型/);
   assert.match(html, /订货 H5/);
   assert.match(html, /订货排行/);

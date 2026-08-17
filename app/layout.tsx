@@ -7,7 +7,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("host") || "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") || (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "2026 中秋订货会 · 交互原型";
+  const title = "订货会 · 交互原型";
   const description = "客户订货 H5、实时数据大屏、幸运抽奖和管理后台交互原型。";
   return {
     title,

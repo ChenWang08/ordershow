@@ -6,6 +6,7 @@ type Surface = "h5" | "ranking" | "report" | "lottery" | "admin";
 type H5Step = "channel" | "region" | "verify" | "order" | "confirm" | "success" | "submitted";
 type H5OrderStatus = "none" | "submitted" | "withdrawn";
 type H5Channel = "综合客户" | "特渠专业客户" | "";
+type MockWhitelistIdentity = { phone: string; channel: Exclude<H5Channel, "">; region: string };
 type CandidateScope = "all" | "attended" | "ordered";
 type LotteryRoundStatus = "draft" | "published" | "completed";
 type LotteryRound = {
@@ -32,6 +33,17 @@ type Product = {
   atlas: number;
 };
 
+const mockWhitelistIdentities: MockWhitelistIdentity[] = [
+  { phone: "13800138000", channel: "特渠专业客户", region: "" },
+  { phone: "13812348000", channel: "特渠专业客户", region: "" },
+  { phone: "14712341979", channel: "综合客户", region: "南区" },
+  { phone: "18612345036", channel: "综合客户", region: "北区" },
+];
+
+function normalizePhone(value: string) {
+  return value.replace(/\D/g, "");
+}
+
 const products: Product[] = [
   { id: 1, name: "金芝御礼芝麻油礼盒", line: "调味油", spec: "225mL×4 / 5盒", price: 172.5, rebate: true, gift: true, atlas: 3 },
   { id: 2, name: "福运添香芝麻油", line: "调味油", spec: "225mL×20瓶", price: 144, rebate: true, gift: false, atlas: 0 },
@@ -40,7 +52,7 @@ const products: Product[] = [
   { id: 5, name: "零添加特级味极鲜", line: "酱油", spec: "500mL×12瓶", price: 78, rebate: true, gift: false, atlas: 1 },
   { id: 6, name: "纯粮香醋", line: "食醋", spec: "500mL×12瓶", price: 82.8, rebate: false, gift: false, atlas: 2 },
   { id: 7, name: "鲜香花椒油", line: "调味油", spec: "225mL×20瓶", price: 236, rebate: false, gift: false, atlas: 0 },
-  { id: 8, name: "中秋团圆调味礼盒", line: "酱油", spec: "4瓶×6盒", price: 420, rebate: false, gift: true, atlas: 3 },
+  { id: 8, name: "经典调味礼盒", line: "酱油", spec: "4瓶×6盒", price: 420, rebate: false, gift: true, atlas: 3 },
  ];
 
 const dealerNames = [
@@ -66,9 +78,9 @@ const reports = [
 ];
 
 const initialLotteryRounds: LotteryRound[] = [
-  { id: 1, name: "第一轮", prize: "御品中秋礼盒", winnerCount: 15, customerType: "特渠专业客户", scope: "attended", minAmount: 0, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "completed", candidateCount: 286 },
-  { id: 2, name: "第二轮", prize: "蜀绣双面绣熊猫摆件", winnerCount: 15, customerType: "综合客户", scope: "ordered", minAmount: 5000, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "published", candidateCount: 418 },
-  { id: 3, name: "第三轮", prize: "中秋尊享礼盒", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "draft", candidateCount: 1665 },
+  { id: 1, name: "第一轮", prize: "御品礼盒", winnerCount: 15, customerType: "特渠专业客户", scope: "attended", minAmount: 0, cutoff: "2030-07-30T18:00", excludeWinners: true, status: "completed", candidateCount: 286 },
+  { id: 2, name: "第二轮", prize: "蜀绣双面绣熊猫摆件", winnerCount: 15, customerType: "综合客户", scope: "ordered", minAmount: 5000, cutoff: "2030-07-30T18:00", excludeWinners: true, status: "published", candidateCount: 418 },
+  { id: 3, name: "第三轮", prize: "尊享礼盒", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, cutoff: "2030-07-30T18:00", excludeWinners: true, status: "draft", candidateCount: 1665 },
 ];
 
 function money(value: number) {
@@ -95,6 +107,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
   const [channel, setChannel] = useState<H5Channel>("");
   const [region, setRegion] = useState("");
   const [phone, setPhone] = useState("13800138000");
+  const [verifyError, setVerifyError] = useState("");
   const [rebate, setRebate] = useState(true);
   const [line, setLine] = useState("全部");
   const [search, setSearch] = useState("");
@@ -102,7 +115,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
   const [orderStatus, setOrderStatus] = useState<H5OrderStatus>("none");
   const [submitMode, setSubmitMode] = useState<"first" | "update">("first");
   const [orderVersion, setOrderVersion] = useState(0);
-  const [orderUpdatedAt, setOrderUpdatedAt] = useState("2026-07-28 14:52");
+  const [orderUpdatedAt, setOrderUpdatedAt] = useState("07-28 14:52");
   const [orderWithdrawnAt, setOrderWithdrawnAt] = useState("");
   const [orderEvents, setOrderEvents] = useState<Array<{ time: string; title: string; detail: string }>>([]);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
@@ -130,6 +143,22 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
     setStep("order");
   };
 
+  const verifyIdentity = () => {
+    if (activityClosed && orderStatus === "none") return;
+    const normalizedPhone = normalizePhone(phone);
+    const identity = mockWhitelistIdentities.find((item) => item.phone === normalizedPhone);
+    if (!identity) {
+      setVerifyError("该手机号不在本次活动白名单中，请核对后重新输入。");
+      return;
+    }
+    if (identity.channel !== channel || (channel === "综合客户" && identity.region !== region)) {
+      setVerifyError(`该手机号登记为${identity.channel}${identity.region ? ` · ${identity.region}` : ""}，请重新选择订货入口。`);
+      return;
+    }
+    setVerifyError("");
+    setStep(orderStatus === "none" ? "order" : "submitted");
+  };
+
   return (
     <div className="h5-stage">
       <div className="device-caption">
@@ -143,9 +172,9 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
             <section className="h5-page verify-page entry-page">
               <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
               <div className="h5-hero-copy entry-hero">
-                <span className="eyebrow">2026 年中秋订货会</span>
+                <span className="eyebrow">订货会</span>
                 <h1>月满家圆<br /><em>味启新程</em></h1>
-                <p>新品发布及中秋旺季动员会</p>
+                <p>新品发布及旺季动员会</p>
               </div>
               <div className="verify-card entry-card">
                 <span className="step-tag">订货通道</span>
@@ -173,7 +202,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
               <div className="entry-nav"><button onClick={() => setStep("channel")}>‹</button><span>综合客户订货</span></div>
               <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
               <div className="h5-hero-copy region-hero">
-                <span className="eyebrow">2026 年中秋订货会</span>
+                <span className="eyebrow">订货会</span>
                 <h1>选择所属<br /><em>经营大区</em></h1>
                 <p>请按白名单登记信息选择</p>
               </div>
@@ -202,9 +231,9 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
               <div className="entry-nav"><button onClick={() => setStep(channel === "综合客户" ? "region" : "channel")}>‹</button><span>{identityLabel}</span></div>
               <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
               <div className="h5-hero-copy">
-                <span className="eyebrow">2026 年中秋订货会</span>
+                <span className="eyebrow">订货会</span>
                 <h1>月满家圆<br /><em>味启新程</em></h1>
-                <p>新品发布及中秋旺季动员会</p>
+                <p>新品发布及旺季动员会</p>
               </div>
               <div className="verify-card">
                 <div className="verify-context"><span className="step-tag">{identityLabel}</span><button onClick={() => setStep("channel")}>重新选择</button></div>
@@ -212,9 +241,10 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
                 <p>验证通过后，将为您展示{channel === "综合客户" ? `${region}综合客户` : "特渠专业客户"}的订货商品。</p>
                 <label>
                   <span>手机号</span>
-                  <input value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 11))} inputMode="numeric" />
+                  <input value={phone} onChange={(e) => { setPhone(e.target.value); setVerifyError(""); }} inputMode="tel" />
                 </label>
-                <button className="primary-btn" disabled={phone.length !== 11 || (activityClosed && orderStatus === "none")} onClick={() => setStep(orderStatus === "none" ? "order" : "submitted")}>{activityClosed && orderStatus === "none" ? "活动已截止" : orderStatus === "none" ? "验证并进入订货" : "验证并查看订单"}</button>
+                {verifyError && <div className="verify-error" role="alert">{verifyError}</div>}
+                <button className="primary-btn" disabled={!phone.trim() || (activityClosed && orderStatus === "none")} onClick={verifyIdentity}>{activityClosed && orderStatus === "none" ? "活动已截止" : orderStatus === "none" ? "验证并进入订货" : "验证并查看订单"}</button>
                 <small>{activityClosed && orderStatus === "none" ? "订货活动已截止，暂不接受新订单" : "仅用于本次订货会身份识别"}</small>
               </div>
             </section>
@@ -224,7 +254,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
             <section className="h5-page order-page">
               <header className="order-header">
                 <button className="text-btn" onClick={() => setStep(orderStatus === "none" ? "verify" : "submitted")}>‹</button>
-                <div><b>2026 中秋订货会</b><span>{identityLabel}</span></div>
+                <div><b>订货会</b><span>{identityLabel}</span></div>
                 <button className="round-btn" aria-label="更多">•••</button>
               </header>
               <div className="dealer-card">
@@ -325,7 +355,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
               <label className="agreement"><input type="checkbox" defaultChecked /> 我已核对商品与订货数量</label>
               <button className="submit-order" disabled={activityClosed} onClick={() => {
                 const isFirstSubmit = orderStatus === "none";
-                const actionTime = isFirstSubmit ? "2026-07-28 14:52" : orderStatus === "withdrawn" ? "2026-07-28 15:18" : "2026-07-28 15:08";
+                const actionTime = isFirstSubmit ? "07-28 14:52" : orderStatus === "withdrawn" ? "07-28 15:18" : "07-28 15:08";
                 const nextVersion = orderVersion + 1;
                 setSubmitMode(isFirstSubmit ? "first" : "update");
                 setOrderVersion(nextVersion);
@@ -348,7 +378,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
                 <p>{orderStatus === "withdrawn" ? "商品明细和订单号已保留，截止前可继续订货并重新提交。" : "订单截止前可修改或取消本次订货，修改后将以最新提交内容为准。"}</p>
               </div>
               <div className="submitted-meta">
-                <p><span>订单编号</span><b>ZY202607280018</b></p>
+                <p><span>订单编号</span><b>ZYORDER280018</b></p>
                 <p><span>最后提交时间</span><b>{orderUpdatedAt}</b></p>
                 <p><span>当前版本</span><b>V{orderVersion}</b></p>
                 <p><span>编辑权限</span><b className={activityClosed ? "muted" : ""}>{activityClosed ? "已截止" : orderStatus === "withdrawn" ? "可重新提交" : "可修改或取消"}</b></p>
@@ -382,7 +412,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
               <div className="success-mark">✓</div>
               <span>{submitMode === "first" ? "提交成功" : "修改成功"}</span>
               <h2>{submitMode === "first" ? "您的订货已成功提交" : "订单修改已重新提交"}</h2>
-              <p>订单编号：ZY202607280018</p>
+              <p>订单编号：ZYORDER280018</p>
               <div className="success-amount"><span>订单总金额</span><b>¥{money(totalAmount)}</b><small>{totalBoxes} 箱 · {selected.length} 种商品</small></div>
               <div className="success-note">订单号保持不变，截止前您可以再次进入并修改或取消本次订货。看板将在数秒内同步最新数据。</div>
               <button className="primary-btn" onClick={() => setStep("submitted")}>查看订单</button>
@@ -395,7 +425,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
                 <h3>确认取消本次订货？</h3>
                 <p>取消后不会生成空订单，系统会保留最近一次非空提交的商品、金额和订单号，并将当前订单标记为已撤回。</p>
                 <div><button className="ghost-btn" onClick={() => setCancelConfirmOpen(false)}>继续修改</button><button className="primary-btn" onClick={() => {
-                  const actionTime = "2026-07-28 15:12";
+                  const actionTime = "07-28 15:12";
                   setOrderStatus("withdrawn");
                   setOrderWithdrawnAt(actionTime);
                   setQuantities({});
@@ -462,11 +492,12 @@ function RankingBoard() {
   );
 }
 
-function MetricTable({ title, labels, values }: { title: string; labels: string[]; values: number[] }) {
+function MetricTable({ title, labels, values, kind = "category" }: { title: string; labels: string[]; values: number[]; kind?: "area" | "product" | "category" }) {
   return (
-    <div className="metric-table">
-      <h2>{title}</h2>
-      <div className="metric-head"><span>分类</span><span>金额（元）</span></div>
+    <div className={`metric-table metric-table-${kind}`}>
+      <i className="metric-frame-corner corner-tl" aria-hidden="true" /><i className="metric-frame-corner corner-tr" aria-hidden="true" /><i className="metric-frame-corner corner-bl" aria-hidden="true" /><i className="metric-frame-corner corner-br" aria-hidden="true" />
+      <h2><span className="metric-table-title">{title}</span></h2>
+      <div className="metric-head"><span><i className="metric-column-icon" aria-hidden="true" />分类</span><span><i className="metric-amount-icon" aria-hidden="true" />金额（元）</span></div>
       {labels.map((label, index) => <div key={label}><span>{label}</span><b>{values[index].toLocaleString()}</b></div>)}
       <div className="metric-total"><span>合计</span><b>{values.reduce((a, b) => a + b, 0).toLocaleString()}</b></div>
     </div>
@@ -489,7 +520,7 @@ function ReportBoard() {
     <section className="screen-board report-board">
       <FestivalDecor />
       <header className="report-header">
-        <span>2026 年调味品事业部新品发布及中秋旺季动员会</span>
+        <span>调味品事业部新品发布及旺季动员会</span>
         <h1>月满家圆 · 味启新程</h1>
         <label>当前看板：
           <select value={report} onChange={(e) => setReport(e.target.value)}>
@@ -502,18 +533,19 @@ function ReportBoard() {
           <div className="total-performance"><span>总战绩</span><strong>1.56<small>亿</small></strong></div>
         ) : isTop ? (
           <div className="top-five">
+            <i className="metric-frame-corner corner-tl" aria-hidden="true" /><i className="metric-frame-corner corner-tr" aria-hidden="true" /><i className="metric-frame-corner corner-bl" aria-hidden="true" /><i className="metric-frame-corner corner-br" aria-hidden="true" />
             <h2>{report}</h2>
             {dealerNames.slice(0, 5).map((name, index) => <div key={name}><span>{index + 1}</span><b>{name}</b></div>)}
           </div>
         ) : isDual ? (
           <>
-            <MetricTable title="综合客户 · 区域" labels={["东区", "南区", "北1区", "北2区"]} values={[44979349, 29342256, 63086424, 18270000]} />
-            <MetricTable title="综合客户 · 产品线" labels={["调味油", "酱油", "食醋", "料酒", "礼盒"]} values={[103445585, 24615018, 6624881, 1781348, 931195]} />
+            <MetricTable kind="area" title="综合客户 · 区域" labels={["东区", "南区", "北1区", "北2区"]} values={[44979349, 29342256, 63086424, 18270000]} />
+            <MetricTable kind="product" title="综合客户 · 产品线" labels={["调味油", "酱油", "食醋", "料酒", "礼盒"]} values={[103445585, 24615018, 6624881, 1781348, 931195]} />
           </>
         ) : report.includes("产品线") ? (
-          <MetricTable title={displayTitle} labels={["调味油", "酱油", "食醋", "料酒", "蚝油", "礼盒"]} values={[103445585, 24615018, 6624881, 1781348, 1435672, 931195]} />
+          <MetricTable kind="product" title={displayTitle} labels={["调味油", "酱油", "食醋", "料酒", "蚝油", "礼盒"]} values={[103445585, 24615018, 6624881, 1781348, 1435672, 931195]} />
         ) : report.includes("东、南") ? (
-          <MetricTable title="综合客户" labels={["东区", "南区", "北1区", "北2区"]} values={[44979349, 29342256, 63086424, 18270000]} />
+          <MetricTable kind="area" title="综合客户" labels={["东区", "南区", "北1区", "北2区"]} values={[44979349, 29342256, 63086424, 18270000]} />
         ) : (
           <MetricTable title={displayTitle} labels={["特渠专业客户", "综合客户"]} values={report.includes("礼盒") ? [9789094, 11811559] : [19462405, 137408029]} />
         )}
@@ -609,9 +641,9 @@ type AdminOrderRecord = {
 };
 
 const orderRecords: AdminOrderRecord[] = [
-  { no: "ZY202607280018", dealer: "上海爱尚真", dealerPhone: "13812348000", company: "上海分公司", type: "特渠", amount: "¥2,281.50", boxes: 13, tons: "0.012", createdAt: "07-28 14:36", submittedAt: "07-28 14:52", updatedAt: "07-28 14:52", withdrawnAt: "—", withdrawReason: "—", permission: "可修改", status: "已提交", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:52", amount: "¥2,281.50", detail: "5 箱礼盒、6 箱芝麻香油、2 箱味极鲜", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 5, unitPrice: "172.50", subtotal: "862.50" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 6, unitPrice: "210.00", subtotal: "1,260.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 2, unitPrice: "78.00", subtotal: "156.00" }] }] },
-  { no: "ZY202607280017", dealer: "长沙久茂", dealerPhone: "14712341979", company: "长沙分公司", type: "综合", amount: "¥82,017.00", boxes: 286, tons: "0.244", createdAt: "07-28 14:31", submittedAt: "07-28 14:47", updatedAt: "07-28 15:02", withdrawnAt: "07-28 15:06", withdrawReason: "经销商主动撤回", permission: "可重新提交", status: "已撤回", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:47", amount: "¥80,860.00", detail: "当前订单初次提交", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 120, unitPrice: "250.00", subtotal: "30,000.00" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 96, unitPrice: "300.00", subtotal: "28,800.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 70, unitPrice: "315.14", subtotal: "22,060.00" }] }, { version: "V2", action: "修改后提交", at: "07-28 15:02", amount: "¥82,017.00", detail: "调整商品数量后重新提交", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 120, unitPrice: "250.00", subtotal: "30,000.00" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 100, unitPrice: "315.00", subtotal: "31,500.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 66, unitPrice: "310.86", subtotal: "20,517.00" }] }] },
-  { no: "ZY202607280016", dealer: "青岛大优供应链", dealerPhone: "18612345036", company: "青岛分公司", type: "综合", amount: "¥65,424.00", boxes: 194, tons: "0.176", createdAt: "07-28 14:29", submittedAt: "07-28 14:43", updatedAt: "07-28 14:58", withdrawnAt: "—", withdrawReason: "—", permission: "已截止", status: "已提交", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:43", amount: "¥64,850.00", detail: "当前订单初次提交", operator: "经销商手机端", items: [{ materialCode: "7455-02F003", name: "金龙鱼芝麻香油礼盒", spec: "145mL×4", quantity: 80, unitPrice: "420.00", subtotal: "33,600.00" }, { materialCode: "7217-0001957", name: "四海祯享礼盒", spec: "500mL×2+500mL+530g", quantity: 54, unitPrice: "320.00", subtotal: "17,280.00" }, { materialCode: "7455-01P702", name: "香满园芝麻油", spec: "245mL×12", quantity: 60, unitPrice: "232.83", subtotal: "13,970.00" }] }, { version: "V2", action: "修改后提交", at: "07-28 14:58", amount: "¥65,424.00", detail: "调整 2 个商品的订货箱数", operator: "经销商手机端", items: [{ materialCode: "7455-02F003", name: "金龙鱼芝麻香油礼盒", spec: "145mL×4", quantity: 80, unitPrice: "420.00", subtotal: "33,600.00" }, { materialCode: "7217-0001957", name: "四海祯享礼盒", spec: "500mL×2+500mL+530g", quantity: 56, unitPrice: "320.00", subtotal: "17,920.00" }, { materialCode: "7455-01P702", name: "香满园芝麻油", spec: "245mL×12", quantity: 58, unitPrice: "239.72", subtotal: "13,904.00" }] }] },
+  { no: "ZYORDER280018", dealer: "上海爱尚真", dealerPhone: "13812348000", company: "上海分公司", type: "特渠", amount: "¥2,281.50", boxes: 13, tons: "0.012", createdAt: "07-28 14:36", submittedAt: "07-28 14:52", updatedAt: "07-28 14:52", withdrawnAt: "—", withdrawReason: "—", permission: "可修改", status: "已提交", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:52", amount: "¥2,281.50", detail: "5 箱礼盒、6 箱芝麻香油、2 箱味极鲜", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 5, unitPrice: "172.50", subtotal: "862.50" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 6, unitPrice: "210.00", subtotal: "1,260.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 2, unitPrice: "78.00", subtotal: "156.00" }] }] },
+  { no: "ZYORDER280017", dealer: "长沙久茂", dealerPhone: "14712341979", company: "长沙分公司", type: "综合", amount: "¥82,017.00", boxes: 286, tons: "0.244", createdAt: "07-28 14:31", submittedAt: "07-28 14:47", updatedAt: "07-28 15:02", withdrawnAt: "07-28 15:06", withdrawReason: "经销商主动撤回", permission: "可重新提交", status: "已撤回", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:47", amount: "¥80,860.00", detail: "当前订单初次提交", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 120, unitPrice: "250.00", subtotal: "30,000.00" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 96, unitPrice: "300.00", subtotal: "28,800.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 70, unitPrice: "315.14", subtotal: "22,060.00" }] }, { version: "V2", action: "修改后提交", at: "07-28 15:02", amount: "¥82,017.00", detail: "调整商品数量后重新提交", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 120, unitPrice: "250.00", subtotal: "30,000.00" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 100, unitPrice: "315.00", subtotal: "31,500.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 66, unitPrice: "310.86", subtotal: "20,517.00" }] }] },
+  { no: "ZYORDER280016", dealer: "青岛大优供应链", dealerPhone: "18612345036", company: "青岛分公司", type: "综合", amount: "¥65,424.00", boxes: 194, tons: "0.176", createdAt: "07-28 14:29", submittedAt: "07-28 14:43", updatedAt: "07-28 14:58", withdrawnAt: "—", withdrawReason: "—", permission: "已截止", status: "已提交", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:43", amount: "¥64,850.00", detail: "当前订单初次提交", operator: "经销商手机端", items: [{ materialCode: "7455-02F003", name: "金龙鱼芝麻香油礼盒", spec: "145mL×4", quantity: 80, unitPrice: "420.00", subtotal: "33,600.00" }, { materialCode: "7217-0001957", name: "四海祯享礼盒", spec: "500mL×2+500mL+530g", quantity: 54, unitPrice: "320.00", subtotal: "17,280.00" }, { materialCode: "7455-01P702", name: "香满园芝麻油", spec: "245mL×12", quantity: 60, unitPrice: "232.83", subtotal: "13,970.00" }] }, { version: "V2", action: "修改后提交", at: "07-28 14:58", amount: "¥65,424.00", detail: "调整 2 个商品的订货箱数", operator: "经销商手机端", items: [{ materialCode: "7455-02F003", name: "金龙鱼芝麻香油礼盒", spec: "145mL×4", quantity: 80, unitPrice: "420.00", subtotal: "33,600.00" }, { materialCode: "7217-0001957", name: "四海祯享礼盒", spec: "500mL×2+500mL+530g", quantity: 56, unitPrice: "320.00", subtotal: "17,920.00" }, { materialCode: "7455-01P702", name: "香满园芝麻油", spec: "245mL×12", quantity: 58, unitPrice: "239.72", subtotal: "13,904.00" }] }] },
 ];
 
 const maskPhone = (phone: string) => phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2");
@@ -901,7 +933,7 @@ function LotterySettings({ rounds, onChange }: { rounds: LotteryRound[]; onChang
   const updateSelected = (patch: Partial<LotteryRound>) => onChange(rounds.map((item) => item.id === selected.id ? { ...item, ...patch } : item));
   const addRound = () => {
     const id = Math.max(...rounds.map((item) => item.id)) + 1;
-    const next: LotteryRound = { id, name: `第${rounds.length + 1}轮`, prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, cutoff: "2026-07-30T18:00", excludeWinners: true, status: "draft", candidateCount: 1665 };
+    const next: LotteryRound = { id, name: `第${rounds.length + 1}轮`, prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, cutoff: "2030-07-30T18:00", excludeWinners: true, status: "draft", candidateCount: 1665 };
     onChange([...rounds, next]);
     setSelectedId(id);
   };
@@ -964,10 +996,10 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
   const [whitelistFormOpen, setWhitelistFormOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState("");
   const [productFiles, setProductFiles] = useState({
-    special: "【特渠】26年中秋订货会单品明细表7-1【下发终版】.xlsx",
-    general: "【分公司综合经销商】26年中秋订货会单品明细表7-1【下发终版】.xlsx",
+    special: "【特渠】商品明细表（示例）.xlsx",
+    general: "【分公司综合经销商】商品明细表（示例）.xlsx",
   });
-  const [whitelistFile, setWhitelistFile] = useState("【白名单】26年中秋订货会经销商白名单7.2.xlsx");
+  const [whitelistFile, setWhitelistFile] = useState("【白名单】经销商白名单（示例）.xlsx");
   const nav = ["活动概览", "商品导入", "白名单", "订单管理", "看板配置", "抽奖规则", "主题装修"];
   const parsedProductCount = (productFiles.special ? 50 : 0) + (productFiles.general ? 192 : 0);
   const parsedProductFileCount = (productFiles.special ? 1 : 0) + (productFiles.general ? 1 : 0);
@@ -982,7 +1014,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
         <div className="admin-user"><span>陈</span><p><b>运营管理员</b><small>调味品事业部</small></p></div>
       </aside>
       <main className="admin-main">
-        <header><div><span>2026 年中秋订货会</span><b>{tab}</b></div><div className="admin-actions"><button>操作日志</button><span className={activityClosed ? "closed" : ""}>{activityClosed ? "已截止" : "进行中"}</span></div></header>
+        <header><div><span>通用订货会</span><b>{tab}</b></div><div className="admin-actions"><button>操作日志</button><span className={activityClosed ? "closed" : ""}>{activityClosed ? "已截止" : "进行中"}</span></div></header>
         {tab === "活动概览" && (
           <>
             <div className="admin-stats">
@@ -990,7 +1022,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
             </div>
             <div className="admin-grid">
               <article className="progress-card"><h2>客户提交进度</h2>{[["综合客户", 1073, 826], ["特渠专业客户", 607, 320]].map((x) => <div key={x[0] as string}><p><b>{x[0]}</b><span>{x[2]} / {x[1]}</span></p><i><em style={{ width: `${Number(x[2]) / Number(x[1]) * 100}%` }} /></i></div>)}</article>
-              <article className="activity-card"><h2>活动信息</h2><p><span>活动状态</span><b className={activityClosed ? "closed-text" : "green"}>{activityClosed ? "已截止" : "进行中"}</b></p><p><span>订货开始</span><b>2026-07-28 14:30</b></p><p><span>订货截止</span><b>2026-07-30 18:30</b></p><button onClick={() => onActivityStatusChange(!activityClosed)}>{activityClosed ? "恢复进行中" : "模拟活动截止"}</button></article>
+              <article className="activity-card"><h2>活动信息</h2><p><span>活动状态</span><b className={activityClosed ? "closed-text" : "green"}>{activityClosed ? "已截止" : "进行中"}</b></p><p><span>订货开始</span><b>07-28 14:30</b></p><p><span>订货截止</span><b>07-30 18:30</b></p><button onClick={() => onActivityStatusChange(!activityClosed)}>{activityClosed ? "恢复进行中" : "模拟活动截止"}</button></article>
             </div>
           </>
         )}
@@ -1054,7 +1086,7 @@ export function Prototype() {
   return (
     <main className={`prototype-root surface-${surface}`}>
       <nav className="prototype-nav">
-        <div className="prototype-title"><span>金</span><p><b>2026 中秋订货会</b><small>交互原型 · Mock Data</small></p></div>
+        <div className="prototype-title"><span>金</span><p><b>通用订货会</b><small>交互原型 · Mock Data</small></p></div>
         <div className="surface-tabs">{surfaces.map((item) => <button key={item.key} className={surface === item.key ? "active" : ""} onClick={() => setSurface(item.key)}><b>{item.label}</b><small>{item.sub}</small></button>)}</div>
         <div className="prototype-status"><i /> 原型预览</div>
       </nav>
