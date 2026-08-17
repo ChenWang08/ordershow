@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 type Surface = "h5" | "ranking" | "report" | "lottery" | "admin";
-type H5Step = "channel" | "region" | "verify" | "order" | "confirm" | "success";
+type H5Step = "channel" | "region" | "verify" | "order" | "confirm" | "success" | "submitted";
+type H5OrderStatus = "none" | "submitted" | "withdrawn";
 type H5Channel = "综合客户" | "特渠专业客户" | "";
 type CandidateScope = "all" | "attended" | "ordered";
 type LotteryRoundStatus = "draft" | "published" | "completed";
@@ -39,8 +40,8 @@ const products: Product[] = [
   { id: 5, name: "零添加特级味极鲜", line: "酱油", spec: "500mL×12瓶", price: 78, rebate: true, gift: false, atlas: 1 },
   { id: 6, name: "纯粮香醋", line: "食醋", spec: "500mL×12瓶", price: 82.8, rebate: false, gift: false, atlas: 2 },
   { id: 7, name: "鲜香花椒油", line: "调味油", spec: "225mL×20瓶", price: 236, rebate: false, gift: false, atlas: 0 },
-  { id: 8, name: "中秋团圆调味礼盒", line: "礼盒", spec: "4瓶×6盒", price: 420, rebate: false, gift: true, atlas: 3 },
-];
+  { id: 8, name: "中秋团圆调味礼盒", line: "酱油", spec: "4瓶×6盒", price: 420, rebate: false, gift: true, atlas: 3 },
+ ];
 
 const dealerNames = [
   "上海爱尚真", "江苏徐工电子公司", "江苏四合商贸发展", "北京智享云采经贸", "北京惠通达行商贸",
@@ -89,7 +90,7 @@ function ProductArt({ atlas }: { atlas: number }) {
   return <span className={`product-art atlas-${atlas}`} role="img" aria-label="临时商品图" />;
 }
 
-function H5Prototype() {
+function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
   const [step, setStep] = useState<H5Step>("channel");
   const [channel, setChannel] = useState<H5Channel>("");
   const [region, setRegion] = useState("");
@@ -98,6 +99,14 @@ function H5Prototype() {
   const [line, setLine] = useState("全部");
   const [search, setSearch] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
+  const [orderStatus, setOrderStatus] = useState<H5OrderStatus>("none");
+  const [submitMode, setSubmitMode] = useState<"first" | "update">("first");
+  const [orderVersion, setOrderVersion] = useState(0);
+  const [orderUpdatedAt, setOrderUpdatedAt] = useState("2026-07-28 14:52");
+  const [orderWithdrawnAt, setOrderWithdrawnAt] = useState("");
+  const [orderEvents, setOrderEvents] = useState<Array<{ time: string; title: string; detail: string }>>([]);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [submittedQuantities, setSubmittedQuantities] = useState<Record<number, number>>({});
   const [quantities, setQuantities] = useState<Record<number, number>>({ 1: 2, 3: 1 });
   const visibleProducts = products.filter(
     (p) => p.rebate === rebate && (line === "全部" || p.line === line) && p.name.includes(search),
@@ -105,11 +114,20 @@ function H5Prototype() {
   const selected = products.filter((p) => (quantities[p.id] || 0) > 0);
   const totalBoxes = selected.reduce((sum, p) => sum + quantities[p.id], 0);
   const totalAmount = selected.reduce((sum, p) => sum + quantities[p.id] * p.price, 0);
+  const orderViewQuantities = orderStatus === "withdrawn" ? submittedQuantities : quantities;
+  const orderViewSelected = products.filter((p) => (orderViewQuantities[p.id] || 0) > 0);
+  const orderViewBoxes = orderViewSelected.reduce((sum, p) => sum + orderViewQuantities[p.id], 0);
+  const orderViewAmount = orderViewSelected.reduce((sum, p) => sum + orderViewQuantities[p.id] * p.price, 0);
   const identityLabel = channel === "综合客户" ? `综合客户 · ${region}` : "特渠专业客户";
   const dealerName = channel === "综合客户" ? "上海爱尚真贸易有限公司" : "北京智享云采经贸有限公司";
 
   const changeQty = (id: number, delta: number) => {
     setQuantities((old) => ({ ...old, [id]: Math.max(0, (old[id] || 0) + delta) }));
+  };
+
+  const startEditingOrder = () => {
+    if (orderStatus === "withdrawn") setQuantities({ ...submittedQuantities });
+    setStep("order");
   };
 
   return (
@@ -196,8 +214,8 @@ function H5Prototype() {
                   <span>手机号</span>
                   <input value={phone} onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 11))} inputMode="numeric" />
                 </label>
-                <button className="primary-btn" disabled={phone.length !== 11} onClick={() => setStep("order")}>验证并进入订货</button>
-                <small>仅用于本次订货会身份识别</small>
+                <button className="primary-btn" disabled={phone.length !== 11 || (activityClosed && orderStatus === "none")} onClick={() => setStep(orderStatus === "none" ? "order" : "submitted")}>{activityClosed && orderStatus === "none" ? "活动已截止" : orderStatus === "none" ? "验证并进入订货" : "验证并查看订单"}</button>
+                <small>{activityClosed && orderStatus === "none" ? "订货活动已截止，暂不接受新订单" : "仅用于本次订货会身份识别"}</small>
               </div>
             </section>
           )}
@@ -205,7 +223,7 @@ function H5Prototype() {
           {step === "order" && (
             <section className="h5-page order-page">
               <header className="order-header">
-                <button className="text-btn" onClick={() => setStep("verify")}>‹</button>
+                <button className="text-btn" onClick={() => setStep(orderStatus === "none" ? "verify" : "submitted")}>‹</button>
                 <div><b>2026 中秋订货会</b><span>{identityLabel}</span></div>
                 <button className="round-btn" aria-label="更多">•••</button>
               </header>
@@ -214,7 +232,7 @@ function H5Prototype() {
                 <b>{dealerName}</b>
                 <small>{identityLabel} · 联系人王女士 · 138****8000</small>
               </div>
-              <div className="policy-note"><b>订货提示</b><span>所有商品按箱订购，提交后可在截止时间前修改。</span></div>
+              <div className="policy-note"><b>订货提示</b><span>{activityClosed ? "活动已截止，当前订单仅可查看。" : "所有商品按箱订购，提交后可在截止时间前修改或取消本次订货。"}</span></div>
               <div className="product-toolbar">
                 <div className="segment">
                   <button className={rebate ? "active" : ""} onClick={() => setRebate(true)}>返利产品</button>
@@ -223,7 +241,7 @@ function H5Prototype() {
                 <label className="search-box">⌕<input placeholder="搜索商品" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
               </div>
               <div className="line-tabs">
-                {["全部", "调味油", "酱油", "食醋", "礼盒"].map((item) => (
+                {["全部", "调味油", "酱油", "食醋"].map((item) => (
                   <button key={item} className={line === item ? "active" : ""} onClick={() => setLine(item)}>{item}</button>
                 ))}
               </div>
@@ -238,9 +256,9 @@ function H5Prototype() {
                       <div className="product-action">
                         <strong>¥{money(product.price)}<small>/箱</small></strong>
                         <div className="stepper">
-                          <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={!quantities[product.id]}>−</button>
-                          <input aria-label={`${product.name}订货箱数`} inputMode="numeric" type="number" min="0" max="9999" value={quantities[product.id] || 0} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setQuantities({ ...quantities, [product.id]: Math.min(9999, Math.max(0, Math.floor(Number(e.target.value) || 0))) })} />
-                          <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)}>＋</button>
+                          <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={activityClosed || !quantities[product.id]}>−</button>
+                          <input aria-label={`${product.name}订货箱数`} disabled={activityClosed} inputMode="numeric" type="number" min="0" max="9999" value={quantities[product.id] || 0} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setQuantities({ ...quantities, [product.id]: Math.min(9999, Math.max(0, Math.floor(Number(e.target.value) || 0))) })} />
+                          <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)} disabled={activityClosed}>＋</button>
                         </div>
                       </div>
                     </div>
@@ -249,10 +267,10 @@ function H5Prototype() {
                 {visibleProducts.length === 0 && <div className="empty-state">没有符合条件的商品</div>}
               </div>
               <div className="order-bar">
-                <button className="cart-summary" disabled={!totalBoxes} onClick={() => setCartOpen(true)}>
+                <button className="cart-summary" disabled={activityClosed || !totalBoxes} onClick={() => setCartOpen(true)}>
                   <span>已选 {selected.length} 种 · {totalBoxes} 箱 <em>查看明细⌃</em></span><b>¥{money(totalAmount)}</b>
                 </button>
-                <button className="confirm-cart-btn" disabled={!totalBoxes} onClick={() => setStep("confirm")}>确认订单</button>
+                <button className="confirm-cart-btn" disabled={activityClosed || (!totalBoxes && orderStatus === "none")} onClick={() => totalBoxes ? setStep("confirm") : setCancelConfirmOpen(true)}>{totalBoxes ? "确认订单" : "取消本次订货"}</button>
               </div>
             </section>
           )}
@@ -272,18 +290,18 @@ function H5Prototype() {
                         <strong>小计 ¥{money(product.price * quantities[product.id])}</strong>
                       </div>
                       <div className="cart-item-actions">
-                        <button className="remove-item" onClick={() => setQuantities((old) => ({ ...old, [product.id]: 0 }))}>删除</button>
+                        <button className="remove-item" disabled={activityClosed} onClick={() => setQuantities((old) => ({ ...old, [product.id]: 0 }))}>删除</button>
                         <div className="stepper">
-                          <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)}>−</button>
-                          <input aria-label={`${product.name}订货箱数`} inputMode="numeric" type="number" min="0" max="9999" value={quantities[product.id]} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setQuantities({ ...quantities, [product.id]: Math.min(9999, Math.max(0, Math.floor(Number(e.target.value) || 0))) })} />
-                          <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)}>＋</button>
+                          <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={activityClosed}>−</button>
+                          <input aria-label={`${product.name}订货箱数`} disabled={activityClosed} inputMode="numeric" type="number" min="0" max="9999" value={quantities[product.id]} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setQuantities({ ...quantities, [product.id]: Math.min(9999, Math.max(0, Math.floor(Number(e.target.value) || 0))) })} />
+                          <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)} disabled={activityClosed}>＋</button>
                         </div>
                       </div>
                     </article>
                   ))}
                   {!selected.length && <div className="cart-empty">还没有选择商品</div>}
                 </div>
-                <footer><div><span>合计</span><b>¥{money(totalAmount)}</b><small>共 {totalBoxes} 箱</small></div><button disabled={!totalBoxes} onClick={() => { setCartOpen(false); setStep("confirm"); }}>去确认订单</button></footer>
+                <footer><div><span>合计</span><b>¥{money(totalAmount)}</b><small>共 {totalBoxes} 箱</small></div><button disabled={activityClosed || (!totalBoxes && orderStatus === "none")} onClick={() => { setCartOpen(false); totalBoxes ? setStep("confirm") : setCancelConfirmOpen(true); }}>{totalBoxes ? "去确认订单" : "取消本次订货"}</button></footer>
               </section>
             </div>
           )}
@@ -305,21 +323,89 @@ function H5Prototype() {
                 <p className="grand-total"><span>订单总金额</span><b>¥{money(totalAmount)}</b></p>
               </div>
               <label className="agreement"><input type="checkbox" defaultChecked /> 我已核对商品与订货数量</label>
-              <button className="submit-order" onClick={() => setStep("success")}>确认提交订单</button>
+              <button className="submit-order" disabled={activityClosed} onClick={() => {
+                const isFirstSubmit = orderStatus === "none";
+                const actionTime = isFirstSubmit ? "2026-07-28 14:52" : orderStatus === "withdrawn" ? "2026-07-28 15:18" : "2026-07-28 15:08";
+                const nextVersion = orderVersion + 1;
+                setSubmitMode(isFirstSubmit ? "first" : "update");
+                setOrderVersion(nextVersion);
+                setOrderStatus("submitted");
+                setSubmittedQuantities({ ...quantities });
+                setOrderWithdrawnAt("");
+                setOrderUpdatedAt(actionTime);
+                setOrderEvents((events) => [{ time: actionTime, title: isFirstSubmit ? "已提交订单" : "重新提交订单", detail: isFirstSubmit ? "经销商手机端提交 · 当前版本 V1" : `经销商修改后重新提交 · 当前版本 V${nextVersion} · 订单号不变` }, ...events]);
+                setStep("success");
+              }}>{orderStatus === "none" ? "确认提交订单" : orderStatus === "withdrawn" ? "重新提交订单" : "确认修改并提交"}</button>
+            </section>
+          )}
+
+          {step === "submitted" && (
+            <section className="h5-page submitted-page">
+              <header className="simple-header"><button onClick={() => setStep("verify")}>‹</button><b>我的订单</b><span /></header>
+              <div className={`submitted-state-card ${orderStatus === "withdrawn" ? "withdrawn" : ""}`}>
+                <span className="submitted-status">{orderStatus === "withdrawn" ? "已撤回" : "已提交"}</span>
+                <h2>{orderStatus === "withdrawn" ? "当前订单已撤回" : "您的订货已成功提交"}</h2>
+                <p>{orderStatus === "withdrawn" ? "商品明细和订单号已保留，截止前可继续订货并重新提交。" : "订单截止前可修改或取消本次订货，修改后将以最新提交内容为准。"}</p>
+              </div>
+              <div className="submitted-meta">
+                <p><span>订单编号</span><b>ZY202607280018</b></p>
+                <p><span>最后提交时间</span><b>{orderUpdatedAt}</b></p>
+                <p><span>当前版本</span><b>V{orderVersion}</b></p>
+                <p><span>编辑权限</span><b className={activityClosed ? "muted" : ""}>{activityClosed ? "已截止" : orderStatus === "withdrawn" ? "可重新提交" : "可修改或取消"}</b></p>
+                {orderStatus === "withdrawn" && orderWithdrawnAt && <p><span>取消时间</span><b>{orderWithdrawnAt}</b></p>}
+                <p><span>经销商</span><b>{dealerName}</b></p>
+              </div>
+              <div className="confirm-list submitted-list">
+                {orderViewSelected.map((product) => (
+                  <div key={product.id}>
+                    <ProductArt atlas={product.atlas} />
+                    <p><b>{product.name}</b><span>{product.spec} · ¥{money(product.price)}/箱</span></p>
+                    <strong>× {orderViewQuantities[product.id]}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="summary-card">
+                <p className="grand-total"><span>订单总金额</span><b>¥{money(orderViewAmount)}</b></p>
+                <p><span>订货数量</span><b>{orderViewBoxes} 箱 · {orderViewSelected.length} 种商品</b></p>
+              </div>
+              <div className="submitted-note">{activityClosed ? "活动已截止，当前订单仅可查看，不能修改、取消或重新提交。" : orderStatus === "withdrawn" ? "该订单当前不计入有效订单、金额统计和抽奖资格；截止前可点击“继续订货”恢复提交。" : "订单状态会同步至管理后台和活动看板；如需调整商品或数量，请点击“修改订单”。"}</div>
+              {orderEvents.length > 0 && <section className="submitted-events"><h3>操作记录</h3>{orderEvents.map((event, index) => <p key={`${event.time}-${index}`}><b>{event.time.slice(11)} {event.title}</b><span>{event.detail}</span></p>)}</section>}
+              <div className="submitted-actions">
+                {!activityClosed && (orderStatus === "withdrawn" ? <button className="primary-btn" onClick={startEditingOrder}>继续订货</button> : <button className="primary-btn" onClick={startEditingOrder}>修改订单</button>)}
+                <button className="ghost-btn" onClick={() => setStep("channel")}>返回活动首页</button>
+              </div>
             </section>
           )}
 
           {step === "success" && (
             <section className="h5-page success-page">
               <div className="success-mark">✓</div>
-              <span>提交成功</span>
-              <h2>您的订货已成功提交</h2>
+              <span>{submitMode === "first" ? "提交成功" : "修改成功"}</span>
+              <h2>{submitMode === "first" ? "您的订货已成功提交" : "订单修改已重新提交"}</h2>
               <p>订单编号：ZY202607280018</p>
               <div className="success-amount"><span>订单总金额</span><b>¥{money(totalAmount)}</b><small>{totalBoxes} 箱 · {selected.length} 种商品</small></div>
-              <div className="success-note">订货截止前，您可以再次进入并修改订单。看板将在数秒内同步最新数据。</div>
-              <button className="primary-btn" onClick={() => setStep("order")}>查看并修改订单</button>
+              <div className="success-note">订单号保持不变，截止前您可以再次进入并修改或取消本次订货。看板将在数秒内同步最新数据。</div>
+              <button className="primary-btn" onClick={() => setStep("submitted")}>查看订单</button>
               <button className="ghost-btn" onClick={() => { setChannel(""); setRegion(""); setStep("channel"); }}>返回活动首页</button>
             </section>
+          )}
+          {cancelConfirmOpen && (
+            <div className="h5-modal-layer" role="dialog" aria-modal="true" aria-label="取消本次订货确认">
+              <div className="h5-modal">
+                <h3>确认取消本次订货？</h3>
+                <p>取消后不会生成空订单，系统会保留最近一次非空提交的商品、金额和订单号，并将当前订单标记为已撤回。</p>
+                <div><button className="ghost-btn" onClick={() => setCancelConfirmOpen(false)}>继续修改</button><button className="primary-btn" onClick={() => {
+                  const actionTime = "2026-07-28 15:12";
+                  setOrderStatus("withdrawn");
+                  setOrderWithdrawnAt(actionTime);
+                  setQuantities({});
+                  setOrderEvents((events) => [{ time: actionTime, title: "取消本次订货", detail: `取消当前订单版本 V${orderVersion} · 最近一次非空明细保留` }, ...events]);
+                  setCancelConfirmOpen(false);
+                  setCartOpen(false);
+                  setStep("submitted");
+                }}>确认取消</button></div>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -392,6 +478,13 @@ function ReportBoard() {
   const isTop = report.includes("TOP5");
   const isTotal = report === "总战绩";
   const isDual = report === reports[8];
+  const displayTitles: Record<string, string> = {
+    "特渠专业客户金额、综合客户金额及合计": "特渠专业客户+综合客户",
+    "礼盒：特渠专业客户金额、综合客户金额及合计": "礼盒",
+    "综合客户各产品线金额及合计": "综合客户",
+    "特渠专业客户与综合客户各产品线金额及合计": "特渠专业客户+综合客户",
+  };
+  const displayTitle = displayTitles[report] ?? report;
   return (
     <section className="screen-board report-board">
       <FestivalDecor />
@@ -406,11 +499,11 @@ function ReportBoard() {
       </header>
       <div className={`report-content ${isDual ? "dual" : ""}`}>
         {isTotal ? (
-          <div className="total-performance"><span>总战绩</span><strong>1.56<small>亿</small></strong><p>实时汇聚特渠专业客户与综合客户有效订单</p></div>
+          <div className="total-performance"><span>总战绩</span><strong>1.56<small>亿</small></strong></div>
         ) : isTop ? (
           <div className="top-five">
             <h2>{report}</h2>
-            {dealerNames.slice(0, 5).map((name, index) => <div key={name}><span>{index + 1}</span><b>{name}</b><strong>{(832017 - index * 36017).toLocaleString()} 元</strong></div>)}
+            {dealerNames.slice(0, 5).map((name, index) => <div key={name}><span>{index + 1}</span><b>{name}</b></div>)}
           </div>
         ) : isDual ? (
           <>
@@ -418,11 +511,11 @@ function ReportBoard() {
             <MetricTable title="综合客户 · 产品线" labels={["调味油", "酱油", "食醋", "料酒", "礼盒"]} values={[103445585, 24615018, 6624881, 1781348, 931195]} />
           </>
         ) : report.includes("产品线") ? (
-          <MetricTable title={report} labels={["调味油", "酱油", "食醋", "料酒", "蚝油", "礼盒"]} values={[103445585, 24615018, 6624881, 1781348, 1435672, 931195]} />
+          <MetricTable title={displayTitle} labels={["调味油", "酱油", "食醋", "料酒", "蚝油", "礼盒"]} values={[103445585, 24615018, 6624881, 1781348, 1435672, 931195]} />
         ) : report.includes("东、南") ? (
           <MetricTable title="综合客户" labels={["东区", "南区", "北1区", "北2区"]} values={[44979349, 29342256, 63086424, 18270000]} />
         ) : (
-          <MetricTable title={report} labels={report.includes("礼盒") ? ["特渠专业客户", "综合客户"] : ["特渠专业客户", "综合客户"]} values={report.includes("礼盒") ? [9789094, 11811559] : [19462405, 137408029]} />
+          <MetricTable title={displayTitle} labels={["特渠专业客户", "综合客户"]} values={report.includes("礼盒") ? [9789094, 11811559] : [19462405, 137408029]} />
         )}
       </div>
     </section>
@@ -430,8 +523,9 @@ function ReportBoard() {
 }
 
 function LotteryBoard({ rounds, onComplete }: { rounds: LotteryRound[]; onComplete: (id: number) => void }) {
-  const [status, setStatus] = useState<"ready" | "rolling" | "done">("ready");
+  const [status, setStatus] = useState<"ready" | "rolling" | "done" | "finished">("ready");
   const [ticker, setTicker] = useState(0);
+  const [sessionFinished, setSessionFinished] = useState(false);
   const availableRounds = rounds.filter((item) => item.status !== "draft");
   const [roundId, setRoundId] = useState(availableRounds.find((item) => item.status === "published")?.id ?? availableRounds[0]?.id ?? 0);
   const currentRound = availableRounds.find((item) => item.id === roundId) ?? availableRounds[0];
@@ -442,73 +536,148 @@ function LotteryBoard({ rounds, onComplete }: { rounds: LotteryRound[]; onComple
   }, [status]);
   const winners = Array.from({ length: currentRound?.winnerCount ?? 0 }, (_, i) => dealerNames[(ticker + i * 3) % dealerNames.length]);
   if (!currentRound) return <section className="screen-board lottery-board"><div className="lottery-ready"><h2>暂无已发布抽奖轮次</h2></div></section>;
-  const scopeLabel = currentRound.scope === "all" ? "活动白名单客户" : currentRound.scope === "attended" ? "现场已到场客户" : "已下有效订单客户";
   const handleAction = () => {
+    if (sessionFinished) return;
     if (status === "ready") setStatus("rolling");
     else if (status === "rolling") {
       setStatus("done");
+    } else if (status === "done") {
       onComplete(currentRound.id);
-    } else {
       const next = availableRounds.find((item) => item.id > currentRound.id && item.status !== "completed");
       if (next) {
         setRoundId(next.id);
         setStatus("ready");
-      }
+      } else setSessionFinished(true);
     }
   };
   return (
     <section className="screen-board lottery-board">
       <FestivalDecor />
       <div className="lottery-controls">
-        <label>抽奖轮次<select value={roundId} onChange={(e) => { setRoundId(Number(e.target.value)); setStatus("ready"); }}>{availableRounds.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.status === "completed" ? "已完成" : "待抽取"}</option>)}</select></label>
-        <span>{currentRound.customerType} · 候选 {currentRound.candidateCount} 人</span>
+        <label>抽奖轮次<select value={roundId} onChange={(e) => { setRoundId(Number(e.target.value)); setStatus("ready"); setSessionFinished(false); }}>{availableRounds.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
       </div>
       <div className="lottery-title"><b>{currentRound.name} 幸运抽奖</b><span>实物奖品：{currentRound.prize}</span></div>
       {status === "ready" ? (
-        <div className="lottery-ready"><div className="lucky-seal">福</div><h2>好运即将揭晓</h2><p>本轮将从 {scopeLabel} 中抽取 {currentRound.winnerCount} 名幸运客户</p><div className="lottery-rule-summary"><span>{currentRound.scope === "all" ? "活动白名单" : currentRound.scope === "attended" ? "现场已到场" : "有效订单"}</span>{currentRound.scope === "ordered" && currentRound.minAmount > 0 && <span>订单满 ¥{currentRound.minAmount.toLocaleString()}</span>}{currentRound.excludeWinners && <span>排除已中奖</span>}</div></div>
+        <div className="lottery-ready"><div className="lucky-seal">福</div><h2>好运即将揭晓</h2></div>
       ) : (
         <div className={`winner-grid ${status}`}>
           {winners.map((name, index) => <div key={index}><span>{String(index + 1).padStart(2, "0")}</span><b>{name}</b></div>)}
         </div>
       )}
-      <button className={`lottery-action ${status}`} onClick={handleAction} disabled={currentRound.status === "completed" && status === "ready"}>
-        {currentRound.status === "completed" && status === "ready" ? "本轮已完成" : status === "ready" ? "确认规则并开始抽奖" : status === "rolling" ? "停止并揭晓" : "进入下一轮"}
+      <button className={`lottery-action ${status}`} onClick={handleAction} disabled={sessionFinished || (currentRound.status === "completed" && status === "ready")}>
+        {sessionFinished ? "本场抽奖已完成" : currentRound.status === "completed" && status === "ready" ? "本轮已完成" : status === "ready" ? "开始抽奖" : status === "rolling" ? "停止并揭晓" : "完成本轮抽奖"}
       </button>
     </section>
   );
 }
 
-const orderRecords = [
-  { no: "ZY202607280018", dealer: "上海爱尚真", company: "上海分公司", type: "特渠", amount: "¥2,281.50", boxes: 13, tons: "0.012", createdAt: "07-28 14:36", submittedAt: "07-28 14:52", updatedAt: "07-28 14:52", lockedAt: "—", status: "已提交" },
-  { no: "ZY202607280017", dealer: "长沙久茂", company: "长沙分公司", type: "综合", amount: "¥82,017.00", boxes: 286, tons: "0.244", createdAt: "07-28 14:31", submittedAt: "07-28 14:47", updatedAt: "07-28 15:06", lockedAt: "07-28 15:10", status: "已锁定" },
-  { no: "ZY202607280016", dealer: "青岛大优供应链", company: "青岛分公司", type: "综合", amount: "¥65,424.00", boxes: 194, tons: "0.176", createdAt: "07-28 14:29", submittedAt: "07-28 14:43", updatedAt: "07-28 14:58", lockedAt: "—", status: "已提交" },
+type AdminOrderStatus = "已提交" | "已撤回";
+type AdminOrderVersionItem = {
+  materialCode: string;
+  name: string;
+  spec: string;
+  quantity: number;
+  unitPrice: string;
+  subtotal: string;
+};
+type AdminOrderVersion = {
+  version: string;
+  action: string;
+  at: string;
+  amount: string;
+  detail: string;
+  operator: string;
+  items: AdminOrderVersionItem[];
+};
+type AdminOrderRecord = {
+  no: string;
+  dealer: string;
+  dealerPhone: string;
+  company: string;
+  type: string;
+  amount: string;
+  boxes: number;
+  tons: string;
+  createdAt: string;
+  submittedAt: string;
+  updatedAt: string;
+  withdrawnAt: string;
+  withdrawReason: string;
+  versions: AdminOrderVersion[];
+  permission: "可修改" | "可重新提交" | "已截止";
+  status: AdminOrderStatus;
+};
+
+const orderRecords: AdminOrderRecord[] = [
+  { no: "ZY202607280018", dealer: "上海爱尚真", dealerPhone: "13812348000", company: "上海分公司", type: "特渠", amount: "¥2,281.50", boxes: 13, tons: "0.012", createdAt: "07-28 14:36", submittedAt: "07-28 14:52", updatedAt: "07-28 14:52", withdrawnAt: "—", withdrawReason: "—", permission: "可修改", status: "已提交", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:52", amount: "¥2,281.50", detail: "5 箱礼盒、6 箱芝麻香油、2 箱味极鲜", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 5, unitPrice: "172.50", subtotal: "862.50" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 6, unitPrice: "210.00", subtotal: "1,260.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 2, unitPrice: "78.00", subtotal: "156.00" }] }] },
+  { no: "ZY202607280017", dealer: "长沙久茂", dealerPhone: "14712341979", company: "长沙分公司", type: "综合", amount: "¥82,017.00", boxes: 286, tons: "0.244", createdAt: "07-28 14:31", submittedAt: "07-28 14:47", updatedAt: "07-28 15:02", withdrawnAt: "07-28 15:06", withdrawReason: "经销商主动撤回", permission: "可重新提交", status: "已撤回", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:47", amount: "¥80,860.00", detail: "当前订单初次提交", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 120, unitPrice: "250.00", subtotal: "30,000.00" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 96, unitPrice: "300.00", subtotal: "28,800.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 70, unitPrice: "315.14", subtotal: "22,060.00" }] }, { version: "V2", action: "修改后提交", at: "07-28 15:02", amount: "¥82,017.00", detail: "调整商品数量后重新提交", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 120, unitPrice: "250.00", subtotal: "30,000.00" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 100, unitPrice: "315.00", subtotal: "31,500.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 66, unitPrice: "310.86", subtotal: "20,517.00" }] }] },
+  { no: "ZY202607280016", dealer: "青岛大优供应链", dealerPhone: "18612345036", company: "青岛分公司", type: "综合", amount: "¥65,424.00", boxes: 194, tons: "0.176", createdAt: "07-28 14:29", submittedAt: "07-28 14:43", updatedAt: "07-28 14:58", withdrawnAt: "—", withdrawReason: "—", permission: "已截止", status: "已提交", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:43", amount: "¥64,850.00", detail: "当前订单初次提交", operator: "经销商手机端", items: [{ materialCode: "7455-02F003", name: "金龙鱼芝麻香油礼盒", spec: "145mL×4", quantity: 80, unitPrice: "420.00", subtotal: "33,600.00" }, { materialCode: "7217-0001957", name: "四海祯享礼盒", spec: "500mL×2+500mL+530g", quantity: 54, unitPrice: "320.00", subtotal: "17,280.00" }, { materialCode: "7455-01P702", name: "香满园芝麻油", spec: "245mL×12", quantity: 60, unitPrice: "232.83", subtotal: "13,970.00" }] }, { version: "V2", action: "修改后提交", at: "07-28 14:58", amount: "¥65,424.00", detail: "调整 2 个商品的订货箱数", operator: "经销商手机端", items: [{ materialCode: "7455-02F003", name: "金龙鱼芝麻香油礼盒", spec: "145mL×4", quantity: 80, unitPrice: "420.00", subtotal: "33,600.00" }, { materialCode: "7217-0001957", name: "四海祯享礼盒", spec: "500mL×2+500mL+530g", quantity: 56, unitPrice: "320.00", subtotal: "17,920.00" }, { materialCode: "7455-01P702", name: "香满园芝麻油", spec: "245mL×12", quantity: 58, unitPrice: "239.72", subtotal: "13,904.00" }] }] },
 ];
 
-function OrderManagement() {
-  const [selected, setSelected] = useState<(typeof orderRecords)[number] | null>(null);
+const maskPhone = (phone: string) => phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2");
+
+function OrderManagement({ activityClosed }: { activityClosed: boolean }) {
+  const [orders, setOrders] = useState(orderRecords);
+  const [orderFilter, setOrderFilter] = useState<"全部" | AdminOrderStatus>("全部");
+  const [orderCustomerType, setOrderCustomerType] = useState<"全部" | "综合" | "特渠">("全部");
+  const [orderSearch, setOrderSearch] = useState("");
+  const [selectedNo, setSelectedNo] = useState<string | null>(null);
+  const [expandedVersion, setExpandedVersion] = useState<string | null>(null);
+  const [adminWithdrawConfirm, setAdminWithdrawConfirm] = useState(false);
+  const [adminWithdrawReason, setAdminWithdrawReason] = useState("");
+  const selected = orders.find((order) => order.no === selectedNo) ?? null;
+  const selectedPermission = selected && activityClosed ? "已截止" : selected?.permission;
+  const currentVersionId = selected?.versions[selected.versions.length - 1]?.version;
+  const modifiedVersion = selected?.versions.find((version) => version.action.includes("修改"));
+  const operationRecords = selected ? [
+    ...(selected.status === "已撤回" ? [{ time: selected.withdrawnAt, title: "撤回订单", detail: `${selected.withdrawReason} · 商品明细保留` }] : []),
+    { time: selected.submittedAt, title: "已提交订单", detail: "经销商手机端提交 · 当前订单号不变" },
+    ...(modifiedVersion ? [{ time: modifiedVersion.at, title: modifiedVersion.action, detail: `${modifiedVersion.detail} · 当前版本 ${modifiedVersion.version}` }] : []),
+  ].sort((a, b) => b.time.localeCompare(a.time)) : [];
+  const filteredOrders = orders.filter((order) => {
+    const matchesFilter = orderFilter === "全部" || order.status === orderFilter;
+    const matchesCustomerType = orderCustomerType === "全部" || order.type === orderCustomerType;
+    const keyword = orderSearch.trim();
+    const normalizedKeyword = keyword.replace(/\D/g, "");
+    const matchesPhone = Boolean(keyword) && (order.dealerPhone.includes(keyword) || (normalizedKeyword.length > 0 && order.dealerPhone.includes(normalizedKeyword)));
+    return matchesFilter && matchesCustomerType && (!keyword || order.dealer.includes(keyword) || matchesPhone);
+  });
+  const withdrawSelectedOrder = () => {
+    if (!selected || activityClosed || selected.permission !== "可修改" || !adminWithdrawReason.trim()) return;
+    setOrders((current) => current.map((order) => order.no === selected.no ? { ...order, status: "已撤回", permission: "可重新提交", withdrawnAt: "07-28 15:20", updatedAt: order.updatedAt, withdrawReason: adminWithdrawReason.trim() } : order));
+    setAdminWithdrawConfirm(false);
+    setAdminWithdrawReason("");
+  };
   return (
     <div className="admin-panel">
       <div className="panel-title"><div><h2>订单管理</h2><p>点击订单行可查看商品明细、金额和操作记录</p></div><button className="admin-primary">导出订单</button></div>
-      <div className="filter-row"><button className="active">全部 1,146</button><button>已提交 1,104</button><button>已锁定 42</button><button>已作废 3</button><input placeholder="搜索经销商" /></div>
+      {activityClosed && <div className="activity-closed-banner"><b>活动已截止</b><span>所有订单进入只读状态，当前仅可查看商品明细和版本记录。</span></div>}
+      <div className="filter-row">
+        {([["全部", "全部 1,146"], ["已提交", "已提交 1,104"], ["已撤回", "已撤回 42"]] as const).map(([value, label]) => <button key={value} className={orderFilter === value ? "active" : ""} onClick={() => setOrderFilter(value)}>{label}</button>)}
+        <label className="order-type-filter"><span>客户类型</span><select value={orderCustomerType} onChange={(event) => setOrderCustomerType(event.target.value as typeof orderCustomerType)}><option>全部</option><option>综合</option><option>特渠</option></select></label>
+        <input placeholder="搜索经销商名称或电话" value={orderSearch} onChange={(event) => setOrderSearch(event.target.value)} />
+      </div>
       <div className="data-table order-table">
-        <div className="table-row table-head">{["订单编号", "经销商", "类型", "金额", "创建时间", "最后修改", "状态"].map((x) => <b key={x}>{x}</b>)}</div>
-        {orderRecords.map((order) => (
-          <button className="table-row clickable-row" key={order.no} onClick={() => setSelected(order)}>
-            <span>{order.no}</span><span>{order.dealer}</span><span>{order.type}</span><span>{order.amount}</span><span>{order.createdAt}</span><span>{order.updatedAt}</span><span className="status-cell">{order.status}</span>
+        <div className="table-row table-head">{["订单编号", "经销商", "经销商电话", "类型", "金额", "创建时间", "最后修改", "状态 / 编辑权限"].map((x) => <b key={x}>{x}</b>)}</div>
+        {filteredOrders.map((order) => (
+          <button className="table-row clickable-row" key={order.no} onClick={() => { setSelectedNo(order.no); setExpandedVersion(null); }}>
+            <span>{order.no}</span><span>{order.dealer}</span><span>{maskPhone(order.dealerPhone)}</span><span>{order.type}</span><span>{order.amount}</span><span>{order.createdAt}</span><span>{order.updatedAt}</span><span className={`status-cell ${order.status === "已撤回" ? "withdrawn" : ""}`}><b>{order.status}</b><small>{activityClosed ? "已截止" : order.permission}</small></span>
           </button>
         ))}
+        {filteredOrders.length === 0 && <div className="order-empty-row">没有符合条件的订单</div>}
       </div>
       {selected && (
-        <div className="order-drawer-backdrop" onClick={() => setSelected(null)}>
+        <div className="order-drawer-backdrop" onClick={() => { setSelectedNo(null); setExpandedVersion(null); setAdminWithdrawConfirm(false); }}>
           <aside className="order-drawer" onClick={(e) => e.stopPropagation()}>
-            <header><div><span>订单详情</span><h2>{selected.no}</h2></div><button onClick={() => setSelected(null)}>×</button></header>
+            <header><div><span>订单详情 · {selected.status}</span><h2>{selected.no}</h2></div><button onClick={() => { setSelectedNo(null); setExpandedVersion(null); }}>×</button></header>
             <div className="order-summary-grid">
-              <p><span>经销商</span><b>{selected.dealer}</b><small>{selected.company}</small></p>
+              <p><span>经销商</span><b>{selected.dealer}</b><small>{selected.company} · {maskPhone(selected.dealerPhone)}</small></p>
               <p><span>客户类型</span><b>{selected.type}</b><small>{selected.status}</small></p>
               <p><span>订货箱数</span><b>{selected.boxes} 箱</b><small>{selected.tons} 吨</small></p>
               <p><span>订单金额</span><b className="red">{selected.amount}</b><small>含税经销价</small></p>
               <p><span>创建 / 首次提交</span><b>{selected.createdAt}</b><small>{selected.submittedAt}</small></p>
-              <p><span>最后修改 / 锁定</span><b>{selected.updatedAt}</b><small>{selected.lockedAt}</small></p>
+              <p><span>最后修改 / 编辑权限</span><b>{selected.updatedAt}</b><small>{selectedPermission}</small></p>
+              {selected.status === "已撤回" && <p><span>撤回时间</span><b>{selected.withdrawnAt}</b><small>{selected.withdrawReason} · 明细和订单号保留</small></p>}
             </div>
             <section className="drawer-section">
               <h3>商品明细</h3>
@@ -518,8 +687,13 @@ function OrderManagement() {
                 <div><span>7245-0000005</span><b>零添加特级味极鲜</b><em>¥78.00 × 2 箱</em><strong>¥156.00</strong></div>
               </div>
             </section>
-            <section className="drawer-section"><h3>操作记录</h3><div className="order-timeline"><p><b>14:52 已提交订单</b><span>经销商手机端提交 · 当前版本 V2</span></p><p><b>14:41 修改订货数量</b><span>订单金额由 ¥2,071.50 调整为 ¥2,281.50</span></p></div></section>
-            <footer><button>作废订单</button><button>锁定订单</button><button className="admin-primary" onClick={() => setSelected(null)}>关闭详情</button></footer>
+            <section className="drawer-section"><h3>版本记录 <small>共 {selected.versions.length} 个版本</small></h3><div className="order-version-list">{selected.versions.map((version) => { const isCurrentVersion = version.version === currentVersionId; return <div className="order-version-record" key={`${selected.no}-${version.version}`}><div className="order-version-summary"><span>{version.version}</span><div><b>{version.action}{isCurrentVersion && <em className="version-current-badge">当前版本</em>}</b><small>{version.at} · {version.operator}</small><p>{version.detail}</p></div><strong>{version.amount}</strong>{isCurrentVersion ? <span className="version-current-note">商品明细见上方</span> : <button type="button" onClick={() => setExpandedVersion(expandedVersion === version.version ? null : version.version)}>{expandedVersion === version.version ? "收起明细" : "查看商品明细"}</button>}</div>{expandedVersion === version.version && !isCurrentVersion && <div className="order-version-detail"><div className="order-version-detail-head"><b>{version.version} 商品快照</b><span>{version.items.length} 种商品 · {version.amount}</span></div><div className="order-version-items"><div className="order-version-item-head"><span>物料代码</span><b>商品名称</b><span>规格</span><span>数量</span><span>元/箱</span><strong>小计</strong></div>{version.items.map((item) => <div key={`${version.version}-${item.materialCode}`}><span>{item.materialCode}</span><b>{item.name}</b><span>{item.spec}</span><span>{item.quantity} 箱</span><span>¥{item.unitPrice}</span><strong>¥{item.subtotal}</strong></div>)}</div></div>}</div>; })}</div></section>
+            <section className="drawer-section"><h3>操作记录</h3><div className="order-timeline">{operationRecords.map((record, index) => <p key={`${record.time}-${record.title}-${index}`}><b>{record.time} {record.title}</b><span>{record.detail}</span></p>)}</div></section>
+            <footer>
+              {selected.status === "已提交" && selected.permission === "可修改" && !activityClosed && <button className="admin-danger-outline" onClick={() => { setAdminWithdrawReason(""); setAdminWithdrawConfirm(true); }}>撤回订单</button>}
+              <button className="admin-primary" onClick={() => setSelectedNo(null)}>关闭详情</button>
+            </footer>
+            {adminWithdrawConfirm && <div className="drawer-confirm" role="dialog" aria-modal="true" aria-label="后台撤回订单确认"><div><h3>确认撤回订单？</h3><p>撤回后订单不会删除，商品明细和订单号会保留，并从有效订单统计中排除。</p><input value={adminWithdrawReason} onChange={(event) => setAdminWithdrawReason(event.target.value)} placeholder="请输入撤回原因（必填）" /><div><button onClick={() => setAdminWithdrawConfirm(false)}>取消</button><button className="admin-primary" disabled={!adminWithdrawReason.trim()} onClick={withdrawSelectedOrder}>确认撤回</button></div></div></div>}
           </aside>
         </div>
       )}
@@ -527,37 +701,58 @@ function OrderManagement() {
   );
 }
 
-type ImportMode = "append" | "update" | "replace";
+type ProductImportRow = {
+  sequence: number;
+  customerType: "特渠" | "综合";
+  rebate: "参与" | "不参与";
+  category: string;
+  line: string;
+  materialCode: string;
+  materialName: string;
+  brand: string;
+  variety: string;
+  spec: string;
+  casePack: string;
+  unitPrice: string;
+  casePrice: string;
+  conversion: string;
+  gift: "是" | "否";
+  status: "有效" | "待完善" | "停用";
+};
 
-function ImportModeSelector({ value, onChange }: { value: ImportMode; onChange: (mode: ImportMode) => void }) {
-  const details: Record<ImportMode, string> = {
-    append: "仅新增不存在的数据；发现相同唯一标识时跳过并提示。",
-    update: "新增数据，同时按唯一标识覆盖更新已有数据。",
-    replace: "清空当前活动对应数据后重新导入；已有订单时禁止执行。",
-  };
-  return (
-    <div className={`import-mode ${value === "replace" ? "danger" : ""}`}>
-      <div><b>本次导入方式</b><span>{details[value]}</span></div>
-      <div className="import-mode-buttons">
-        <button className={value === "append" ? "active" : ""} onClick={() => onChange("append")}>追加导入</button>
-        <button className={value === "update" ? "active" : ""} onClick={() => onChange("update")}>覆盖更新</button>
-        <button className={value === "replace" ? "active danger" : ""} onClick={() => onChange("replace")}>清空重导</button>
-      </div>
-    </div>
-  );
-}
+type WhitelistRow = {
+  sequence: number;
+  customerType: "综合客户" | "特渠专业客户";
+  region: string;
+  branch: string;
+  dealerShort: string;
+  dealerFull: string;
+  dealerType: string;
+  dealerName: string;
+  dealerPhone: string;
+  confirmerName: string;
+  confirmerPhone: string;
+};
 
-function ProductImportTable() {
+const initialProductImportRows: ProductImportRow[] = [
+  { sequence: 1, customerType: "特渠", rebate: "参与", category: "特渠定制产品", line: "调味油", materialCode: "7245-0002307", materialName: "金芝御礼225ML×4礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "225mL×5", casePack: "5盒/箱", unitPrice: "34.50", casePrice: "172.50", conversion: "0.00092", gift: "是", status: "有效" },
+  { sequence: 1, customerType: "特渠", rebate: "不参与", category: "特渠定制品", line: "酱油", materialCode: "7217-0001957", materialName: "四海祯享礼盒", brand: "金龙鱼", variety: "礼盒", spec: "500mL×2+500mL+530g", casePack: "6盒/箱", unitPrice: "19.30", casePrice: "117.00", conversion: "", gift: "是", status: "待完善" },
+  { sequence: 1, customerType: "综合", rebate: "参与", category: "全渠道适用通品", line: "调味油", materialCode: "7455-02F003", materialName: "金龙鱼芝麻香油礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "145mL×4", casePack: "15盒/箱", unitPrice: "28.00", casePrice: "420.00", conversion: "0.00125", gift: "是", status: "有效" },
+  { sequence: 1, customerType: "综合", rebate: "不参与", category: "通用品调味油", line: "调味油", materialCode: "7455-01P702", materialName: "香满园芝麻油245mL×12", brand: "香满园", variety: "芝麻油", spec: "245mL", casePack: "12瓶/箱", unitPrice: "6.90", casePrice: "82.80", conversion: "0.00270", gift: "否", status: "有效" },
+];
+
+const initialWhitelistRows: WhitelistRow[] = [
+  { sequence: 1, customerType: "综合客户", region: "南区", branch: "长沙分", dealerShort: "长沙久茂", dealerFull: "长沙久茂食品有限公司", dealerType: "综合经销商", dealerName: "王惠", dealerPhone: "147****1979", confirmerName: "张学文", confirmerPhone: "139****6386" },
+  { sequence: 2, customerType: "综合客户", region: "南区", branch: "长沙分", dealerShort: "湘潭餐乐", dealerFull: "湘潭餐乐商贸有限公司", dealerType: "综合经销商", dealerName: "刘宇剑", dealerPhone: "137****0822", confirmerName: "张学文", confirmerPhone: "139****6386" },
+  { sequence: 1, customerType: "特渠专业客户", region: "南区", branch: "长沙分", dealerShort: "深圳市智臻云采", dealerFull: "深圳市智臻云采科技有限公司", dealerType: "特渠专业经销商", dealerName: "王凡", dealerPhone: "188****4733", confirmerName: "官国梁", confirmerPhone: "159****6519" },
+  { sequence: 2, customerType: "特渠专业客户", region: "南区", branch: "厦门分", dealerShort: "泉州乐食光", dealerFull: "泉州乐食光商贸有限公司", dealerType: "特渠专业经销商", dealerName: "郑总", dealerPhone: "152****7241", confirmerName: "窦任重", confirmerPhone: "186****2331" },
+];
+
+function ProductImportTable({ rows }: { rows: ProductImportRow[] }) {
   const [customerType, setCustomerType] = useState("全部");
   const [rebate, setRebate] = useState("全部");
-  const heads = ["客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否礼盒", "状态"];
-  const rows = [
-    ["特渠", "参与", "油脂", "调味油", "7245-0002307", "金芝御礼芝麻油礼盒", "金龙鱼", "芝麻油", "225mL×4/5盒", "5盒/箱", "34.50", "172.50", "0.00092", "是", "有效"],
-    ["特渠", "不参与", "组合装", "礼盒", "待出", "中秋团圆调味礼盒", "", "", "", "", "", "", "", "是", "待完善"],
-    ["综合", "参与", "调味品", "酱油", "7217-0001957", "四海祯享礼盒", "金龙鱼", "酱油", "500mL×6瓶", "6瓶/箱", "19.50", "117.00", "0.00076", "是", "有效"],
-    ["综合", "不参与", "调味品", "食醋", "7218-0002086", "零添加糯米香醋", "金龙鱼", "香醋", "500mL×12瓶", "12瓶/箱", "6.50", "78.00", "0.00118", "否", "有效"],
-  ];
-  const visibleRows = rows.filter((row) => (customerType === "全部" || row[0] === customerType) && (rebate === "全部" || row[1] === rebate));
+  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否礼盒", "状态"];
+  const visibleRows = rows.filter((row) => (customerType === "全部" || row.customerType === customerType) && (rebate === "全部" || row.rebate === rebate));
   return (
     <>
       <div className="data-filters">
@@ -568,23 +763,20 @@ function ProductImportTable() {
       <div className="table-scroll">
         <div className="data-table product-import-table">
           <div className="table-row table-head">{heads.map((x) => <b key={x}>{x}</b>)}</div>
-          {visibleRows.map((row, i) => <div className="table-row" key={`${row[4]}-${i}`}>{row.map((x, j) => <span key={j} className={j === 14 ? "status-cell" : ""}>{x || "—"}</span>)}</div>)}
+          {visibleRows.map((row) => {
+            const values = [row.sequence, row.customerType, row.rebate, row.category, row.line, row.materialCode, row.materialName, row.brand, row.variety, row.spec, row.casePack, row.unitPrice, row.casePrice, row.conversion, row.gift, row.status];
+            return <div className="table-row" key={`${row.customerType}-${row.rebate}-${row.materialCode}`}>{values.map((value, index) => <span key={index} className={index === 15 ? `status-cell ${row.status === "待完善" ? "pending" : ""}` : ""}>{value || "—"}</span>)}</div>;
+          })}
         </div>
       </div>
     </>
   );
 }
 
-function CustomerWhitelistTable() {
+function CustomerWhitelistTable({ rows }: { rows: WhitelistRow[] }) {
   const [customerType, setCustomerType] = useState("全部");
-  const heads = ["序号", "大区", "分公司名称简", "分公司名称全", "经销商类型", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话"];
-  const rows = [
-    ["1", "东区", "上海分", "益海嘉里食品营销有限公司上海分公司", "特渠专业客户", "上海爱尚真贸易有限公司", "138****8000", "王敏", "139****6021"],
-    ["2", "南区", "长沙分", "益海嘉里食品营销有限公司长沙分公司", "综合客户", "长沙久茂商贸有限公司", "147****1979", "李娟", "186****3148"],
-    ["3", "南区", "厦门分", "益海嘉里食品营销有限公司厦门分公司", "特渠专业客户", "泉州乐食光商贸有限公司", "152****7241", "陈华", "135****5280"],
-    ["4", "北区", "青岛分", "益海嘉里食品营销有限公司青岛分公司", "综合客户", "青岛大优供应链有限公司", "186****5036", "张磊", "158****9166"],
-  ];
-  const visibleRows = rows.filter((row) => customerType === "全部" || row[4] === customerType);
+  const heads = ["序号", "客户类型", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商类型", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话"];
+  const visibleRows = rows.filter((row) => customerType === "全部" || row.customerType === customerType);
   return (
     <>
       <div className="data-filters">
@@ -594,10 +786,77 @@ function CustomerWhitelistTable() {
       <div className="table-scroll">
         <div className="data-table whitelist-table">
           <div className="table-row table-head">{heads.map((x) => <b key={x}>{x}</b>)}</div>
-          {visibleRows.map((row) => <div className="table-row" key={row[0]}>{row.map((x, j) => <span key={j}>{x}</span>)}</div>)}
+          {visibleRows.map((row) => {
+            const values = [row.sequence, row.customerType, row.region, row.branch, row.dealerShort, row.dealerFull, row.dealerType, row.dealerName, row.dealerPhone, row.confirmerName, row.confirmerPhone];
+            return <div className="table-row" key={`${row.customerType}-${row.sequence}-${row.dealerPhone}`}>{values.map((value, index) => <span key={index}>{value}</span>)}</div>;
+          })}
         </div>
       </div>
     </>
+  );
+}
+
+function ProductFormDrawer({ rows, onClose, onSave }: { rows: ProductImportRow[]; onClose: () => void; onSave: (row: ProductImportRow) => void }) {
+  const [form, setForm] = useState<ProductImportRow>({ sequence: 0, customerType: "特渠", rebate: "参与", category: "", line: "", materialCode: "", materialName: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", conversion: "", gift: "否", status: "有效" });
+  const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
+  const nextSequence = Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
+  const canSave = form.materialCode.trim() !== "" && form.materialName.trim() !== "" && form.casePrice.trim() !== "";
+  return (
+    <div className="order-drawer-backdrop" onClick={onClose}>
+      <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
+        <header><div><span>活动商品</span><h2>手动添加商品</h2></div><button aria-label="关闭" onClick={onClose}>×</button></header>
+        <div className="auto-sequence-note"><span>序号自动生成</span><b>保存后编号：{nextSequence}</b><small>{form.customerType} · {form.rebate}返利分组</small></div>
+        <div className="drawer-form-body"><div className="drawer-form-grid">
+          <label><span>客户类型</span><select value={form.customerType} onChange={(e) => update("customerType", e.target.value)}><option>特渠</option><option>综合</option></select></label>
+          <label><span>是否参与返利</span><select value={form.rebate} onChange={(e) => update("rebate", e.target.value)}><option>参与</option><option>不参与</option></select></label>
+          <label><span>产品大类</span><input value={form.category} onChange={(e) => update("category", e.target.value)} placeholder="例如：特渠定制产品" /></label>
+          <label><span>产品线</span><input value={form.line} onChange={(e) => update("line", e.target.value)} placeholder="例如：调味油" /></label>
+          <label><span>物料代码 *</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /></label>
+          <label className="wide-field"><span>物料名称 *</span><input value={form.materialName} onChange={(e) => update("materialName", e.target.value)} /></label>
+          <label><span>品牌</span><input value={form.brand} onChange={(e) => update("brand", e.target.value)} /></label>
+          <label><span>品种</span><input value={form.variety} onChange={(e) => update("variety", e.target.value)} /></label>
+          <label><span>规格</span><input value={form.spec} onChange={(e) => update("spec", e.target.value)} /></label>
+          <label><span>箱规</span><input value={form.casePack} onChange={(e) => update("casePack", e.target.value)} /></label>
+          <label><span>元/瓶</span><input inputMode="decimal" value={form.unitPrice} onChange={(e) => update("unitPrice", e.target.value)} /></label>
+          <label><span>元/箱 *</span><input inputMode="decimal" value={form.casePrice} onChange={(e) => update("casePrice", e.target.value)} /></label>
+          <label><span>吨箱转换系数</span><input inputMode="decimal" value={form.conversion} onChange={(e) => update("conversion", e.target.value)} /></label>
+          <label><span>是否礼盒</span><select value={form.gift} onChange={(e) => update("gift", e.target.value)}><option>否</option><option>是</option></select></label>
+          <label><span>状态</span><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>有效</option><option>待完善</option><option>停用</option></select></label>
+        </div>
+        <p className="drawer-form-note">带 * 的字段为必填项；此处为前端原型，保存结果仅在当前页面有效。</p></div>
+        <footer><button onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave} onClick={() => { onSave({ ...form, sequence: nextSequence }); onClose(); }}>保存商品</button></footer>
+      </aside>
+    </div>
+  );
+}
+
+function WhitelistFormDrawer({ rows, onClose, onSave }: { rows: WhitelistRow[]; onClose: () => void; onSave: (row: WhitelistRow) => void }) {
+  const [form, setForm] = useState<WhitelistRow>({ sequence: 0, customerType: "综合客户", region: "", branch: "", dealerShort: "", dealerFull: "", dealerType: "综合经销商", dealerName: "", dealerPhone: "", confirmerName: "", confirmerPhone: "" });
+  const update = (field: keyof WhitelistRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
+  const nextSequence = Math.max(0, ...rows.filter((row) => row.customerType === form.customerType).map((row) => row.sequence)) + 1;
+  const phoneValid = /^1\d{10}$/.test(form.dealerPhone);
+  const canSave = form.region.trim() !== "" && form.branch.trim() !== "" && form.dealerShort.trim() !== "" && form.dealerFull.trim() !== "" && phoneValid;
+  return (
+    <div className="order-drawer-backdrop" onClick={onClose}>
+      <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
+        <header><div><span>客户身份</span><h2>手动添加白名单</h2></div><button aria-label="关闭" onClick={onClose}>×</button></header>
+        <div className="auto-sequence-note"><span>序号自动生成</span><b>保存后编号：{nextSequence}</b><small>{form.customerType}分组</small></div>
+        <div className="drawer-form-body"><div className="drawer-form-grid">
+          <label><span>客户类型</span><select value={form.customerType} onChange={(e) => { const type = e.target.value as WhitelistRow["customerType"]; setForm((current) => ({ ...current, customerType: type, dealerType: type === "综合客户" ? "综合经销商" : "特渠专业经销商" })); }}><option>综合客户</option><option>特渠专业客户</option></select></label>
+          <label><span>大区 *</span><select value={form.region} onChange={(e) => update("region", e.target.value)}><option value="">请选择</option><option>东区</option><option>南区</option><option>北区</option><option>西区</option></select></label>
+          <label><span>分公司名称 *</span><input value={form.branch} onChange={(e) => update("branch", e.target.value)} placeholder="例如：长沙分" /></label>
+          <label><span>经销商名称（简）*</span><input value={form.dealerShort} onChange={(e) => update("dealerShort", e.target.value)} /><small>{form.dealerShort.length}/10 字</small></label>
+          <label className="wide-field"><span>经销商名称（全）*</span><input value={form.dealerFull} onChange={(e) => update("dealerFull", e.target.value)} /></label>
+          <label><span>经销商类型</span><input value={form.dealerType} onChange={(e) => update("dealerType", e.target.value)} /></label>
+          <label><span>经销商姓名</span><input value={form.dealerName} onChange={(e) => update("dealerName", e.target.value)} /></label>
+          <label><span>经销商电话 *</span><input inputMode="tel" maxLength={11} value={form.dealerPhone} onChange={(e) => update("dealerPhone", e.target.value.replace(/\D/g, ""))} placeholder="11 位手机号" /><small className={form.dealerPhone && !phoneValid ? "field-error" : ""}>{form.dealerPhone && !phoneValid ? "请输入正确的 11 位手机号" : "用于 H5 身份验证"}</small></label>
+          <label><span>分公司确认人姓名</span><input value={form.confirmerName} onChange={(e) => update("confirmerName", e.target.value)} /></label>
+          <label><span>分公司确认人电话</span><input inputMode="tel" maxLength={11} value={form.confirmerPhone} onChange={(e) => update("confirmerPhone", e.target.value.replace(/\D/g, ""))} /></label>
+        </div>
+        <p className="drawer-form-note">客户类型在 Excel 导入时由 Sheet 自动确定；手动添加时由管理员选择。</p></div>
+        <footer><button onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave} onClick={() => { onSave({ ...form, sequence: nextSequence }); onClose(); }}>保存白名单</button></footer>
+      </aside>
+    </div>
   );
 }
 
@@ -637,7 +896,7 @@ function LotterySettings({ rounds, onChange }: { rounds: LotteryRound[]; onChang
   const scopeOptions: { key: CandidateScope; title: string; detail: string }[] = [
     { key: "all", title: "所有活动客户", detail: "当前活动有效白名单" },
     { key: "attended", title: "现场到场客户", detail: "按签到或导入结果筛选" },
-    { key: "ordered", title: "有效下单客户", detail: "已提交或已锁定订单" },
+    { key: "ordered", title: "有效下单客户", detail: "当前已提交订单" },
   ];
   const updateSelected = (patch: Partial<LotteryRound>) => onChange(rounds.map((item) => item.id === selected.id ? { ...item, ...patch } : item));
   const addRound = () => {
@@ -695,12 +954,26 @@ function LotterySettings({ rounds, onChange }: { rounds: LotteryRound[]; onChang
   );
 }
 
-function AdminPrototype({ lotteryRounds, onLotteryChange }: { lotteryRounds: LotteryRound[]; onLotteryChange: (rounds: LotteryRound[]) => void }) {
+function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActivityStatusChange }: { lotteryRounds: LotteryRound[]; onLotteryChange: (rounds: LotteryRound[]) => void; activityClosed: boolean; onActivityStatusChange: (closed: boolean) => void }) {
   const [tab, setTab] = useState("活动概览");
-  const [imported, setImported] = useState(false);
-  const [productImportMode, setProductImportMode] = useState<ImportMode>("append");
-  const [customerImportMode, setCustomerImportMode] = useState<ImportMode>("append");
+  const [productRows, setProductRows] = useState<ProductImportRow[]>(initialProductImportRows);
+  const [whitelistRows, setWhitelistRows] = useState<WhitelistRow[]>(initialWhitelistRows);
+  const [productImportCompleted, setProductImportCompleted] = useState(false);
+  const [whitelistImportCompleted, setWhitelistImportCompleted] = useState(false);
+  const [productFormOpen, setProductFormOpen] = useState(false);
+  const [whitelistFormOpen, setWhitelistFormOpen] = useState(false);
+  const [actionNotice, setActionNotice] = useState("");
+  const [productFiles, setProductFiles] = useState({
+    special: "【特渠】26年中秋订货会单品明细表7-1【下发终版】.xlsx",
+    general: "【分公司综合经销商】26年中秋订货会单品明细表7-1【下发终版】.xlsx",
+  });
+  const [whitelistFile, setWhitelistFile] = useState("【白名单】26年中秋订货会经销商白名单7.2.xlsx");
   const nav = ["活动概览", "商品导入", "白名单", "订单管理", "看板配置", "抽奖规则", "主题装修"];
+  const parsedProductCount = (productFiles.special ? 50 : 0) + (productFiles.general ? 192 : 0);
+  const parsedProductFileCount = (productFiles.special ? 1 : 0) + (productFiles.general ? 1 : 0);
+  const productUpdatedCount = Math.min(4, parsedProductCount);
+  const productNewCount = Math.max(0, parsedProductCount - productUpdatedCount);
+  const productRetiredCount = parsedProductCount > 0 ? (parsedProductCount === 242 ? 42 : Math.max(1, Math.round(parsedProductCount * 0.1))) : 0;
   return (
     <section className="admin-app">
       <aside className="admin-sidebar">
@@ -709,7 +982,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange }: { lotteryRounds: Lot
         <div className="admin-user"><span>陈</span><p><b>运营管理员</b><small>调味品事业部</small></p></div>
       </aside>
       <main className="admin-main">
-        <header><div><span>2026 年中秋订货会</span><b>{tab}</b></div><div className="admin-actions"><button>操作日志</button><span>进行中</span></div></header>
+        <header><div><span>2026 年中秋订货会</span><b>{tab}</b></div><div className="admin-actions"><button>操作日志</button><span className={activityClosed ? "closed" : ""}>{activityClosed ? "已截止" : "进行中"}</span></div></header>
         {tab === "活动概览" && (
           <>
             <div className="admin-stats">
@@ -717,32 +990,48 @@ function AdminPrototype({ lotteryRounds, onLotteryChange }: { lotteryRounds: Lot
             </div>
             <div className="admin-grid">
               <article className="progress-card"><h2>客户提交进度</h2>{[["综合客户", 1073, 826], ["特渠专业客户", 607, 320]].map((x) => <div key={x[0] as string}><p><b>{x[0]}</b><span>{x[2]} / {x[1]}</span></p><i><em style={{ width: `${Number(x[2]) / Number(x[1]) * 100}%` }} /></i></div>)}</article>
-              <article className="activity-card"><h2>活动信息</h2><p><span>活动状态</span><b className="green">进行中</b></p><p><span>订货开始</span><b>2026-07-28 14:30</b></p><p><span>订货截止</span><b>2026-07-30 18:30</b></p><button>编辑活动设置</button></article>
+              <article className="activity-card"><h2>活动信息</h2><p><span>活动状态</span><b className={activityClosed ? "closed-text" : "green"}>{activityClosed ? "已截止" : "进行中"}</b></p><p><span>订货开始</span><b>2026-07-28 14:30</b></p><p><span>订货截止</span><b>2026-07-30 18:30</b></p><button onClick={() => onActivityStatusChange(!activityClosed)}>{activityClosed ? "恢复进行中" : "模拟活动截止"}</button></article>
             </div>
           </>
         )}
         {tab === "商品导入" && (
           <div className="admin-panel">
-            <div className="panel-title"><div><h2>活动商品导入</h2><p>分别导入特渠与综合客户商品明细表</p></div><button className="admin-primary" onClick={() => setImported(true)}>上传 Excel</button></div>
-            <ImportModeSelector value={productImportMode} onChange={setProductImportMode} />
-            {imported ? (
-              <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>文件解析完成 · {productImportMode === "append" ? "追加导入" : productImportMode === "update" ? "覆盖更新" : "清空重导"}</b><small>【特渠】26年中秋订货会单品明细表7-1.xlsx</small></p><strong>50 条商品</strong></div><div className="warning-box"><b>发现 7 项需要确认</b><span>缺失字段暂时留空；商品名称含“礼盒”时自动标记为礼盒。异常商品将以“待完善”状态导入。</span></div><ProductImportTable /><button className="admin-primary wide">确认执行本次导入</button></div>
-            ) : <div className="upload-zone"><span>XL</span><h3>拖拽或点击上传商品明细表</h3><p>系统将读取“参与订货会返利产品”和“不参与订货会返利产品”两个 Sheet</p><button onClick={() => setImported(true)}>选择 Excel 文件</button></div>}
+            <div className="panel-title"><div><h2>{productImportCompleted ? "当前活动商品" : "活动商品导入"}</h2><p>{productImportCompleted ? "商品已进入当前活动，可继续导入文件或手动添加" : "解析特渠、综合客户商品文件，确认后进入当前活动商品"}</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setProductFormOpen(true)}>＋ 手动添加商品</button>{productImportCompleted && <button className="admin-primary" onClick={() => { setProductImportCompleted(false); setProductFiles({ special: "", general: "" }); }}>继续导入 Excel</button>}</div></div>
+            {!productImportCompleted && <div className="import-rule-hint"><b>Excel 覆盖规则</b><span>本次上传文件会覆盖对应客户类型的上一次 Excel 导入结果；相同商品自动更新，旧 Excel 中不再存在的商品将停用，手动添加的数据保留。</span></div>}
+            {!productImportCompleted && <div className="dual-upload-grid">
+              {([
+                ["special", "特渠商品文件", "特渠", "50", productFiles.special],
+                ["general", "综合商品文件", "综合", "192", productFiles.general],
+              ] as const).map(([key, title, type, count, fileName]) => (
+                <article className={`file-upload-card ${fileName ? "ready" : ""}`} key={key}>
+                  <div className="file-card-heading"><span>XL</span><div><b>{title}</b><small>文件客户类型：{type}</small></div><em>{fileName ? "解析完成" : "待上传"}</em></div>
+                  {fileName ? <p title={fileName}>{fileName}</p> : <p>请选择对应的商品明细 Excel</p>}
+                  <div className="sheet-tags"><span>参与订货会返利产品</span><span>不参与订货会返利产品</span></div>
+                  <footer><small>{fileName ? `识别 ${count} 条商品` : "仅识别上述两个 Sheet"}</small><div>{fileName && <button onClick={() => setProductFiles((current) => ({ ...current, [key]: "" }))}>移除</button>}<label><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) { setProductFiles((current) => ({ ...current, [key]: file.name })); setProductImportCompleted(false); } }} />{fileName ? "替换文件" : "选择文件"}</label></div></footer>
+                </article>
+              ))}
+            </div>}
+            {!productImportCompleted && (productFiles.special || productFiles.general) && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{parsedProductFileCount} 个文件解析完成 · 等待确认</b><small>客户类型由文件确定，返利状态由 Sheet 自动确定</small></p><strong>{parsedProductCount} 条商品</strong></div><div className="warning-box"><b>确认后将覆盖对应客户类型的上次 Excel 导入结果</b><span>预计新增 {productNewCount} 条、更新 {productUpdatedCount} 条、停用旧数据 {productRetiredCount} 条；手动添加的数据保留。缺少吨箱转换系数等信息的商品标记为“待完善”。</span></div><ProductImportTable rows={productRows} /><button className="admin-primary wide" onClick={() => { setProductImportCompleted(true); setActionNotice("商品导入完成，已覆盖对应 Excel 数据；手动添加的数据已保留。当前原型不会写入后端。"); }}>确认导入 {parsedProductCount} 条商品</button></div>}
+            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品导入完成</b><small>对应客户类型的上次 Excel 数据已覆盖；手动添加的数据保留，7 条信息不完整的商品待完善。</small></p><div><strong>{parsedProductCount}</strong><small>本次导入</small></div><div><strong>{productNewCount}</strong><small>新增</small></div><div><strong>{productUpdatedCount}</strong><small>更新</small></div><div><strong>{productRetiredCount}</strong><small>停用旧数据</small></div></div><div className="data-section-title"><div><b>当前活动商品</b><span>最近导入：特渠 50 条 · 综合 192 条 · 手动添加数据已保留</span></div><button onClick={() => setProductImportCompleted(false)}>查看本次导入结果</button></div><ProductImportTable rows={productRows} /></>}
           </div>
         )}
         {tab === "白名单" && (
           <div className="admin-panel">
-            <div className="panel-title"><div><h2>客户白名单</h2><p>共 1,680 名客户 · 手机号用于 H5 身份验证</p></div><button className="admin-primary">导入白名单</button></div>
-            <ImportModeSelector value={customerImportMode} onChange={setCustomerImportMode} />
-            <div className="warning-box"><b>数据校验提醒</b><span>发现 59 个跨客户类型重复手机号、9 个手机号格式异常，请在活动发布前处理。</span></div>
-            <CustomerWhitelistTable />
+            <div className="panel-title"><div><h2>{whitelistImportCompleted ? "当前客户白名单" : "客户白名单导入"}</h2><p>共 1,680 名有效客户 · 手机号用于 H5 身份验证</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setWhitelistFormOpen(true)}>＋ 手动添加白名单</button>{whitelistImportCompleted ? <button className="admin-primary" onClick={() => { setWhitelistImportCompleted(false); setWhitelistFile(""); }}>继续导入 Excel</button> : <label className="admin-primary file-button"><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) { setWhitelistFile(file.name); setWhitelistImportCompleted(false); } }} />导入白名单</label>}</div></div>
+            {!whitelistImportCompleted && <div className="import-rule-hint"><b>Excel 覆盖规则</b><span>本次上传会覆盖综合客户白名单和特渠客户白名单的上一次 Excel 导入结果；相同手机号自动更新，旧名单中不再存在的客户将停用，手动添加的数据保留。</span></div>}
+            {!whitelistImportCompleted && whitelistFile && <><div className="whitelist-file-summary"><span className="success-icon">✓</span><p><b>{whitelistFile}</b><small>只读取“综合客户白名单”和“特渠客户白名单”，其他 Sheet 自动忽略</small></p><div className="sheet-tags"><span>综合客户白名单</span><span>特渠客户白名单</span></div></div><div className="warning-box"><b>确认后将覆盖上次 Excel 白名单</b><span>预计新增 1,676 条、更新 4 条、停用旧数据 9 条；手动添加的数据保留。另有 9 个手机号格式异常，请在活动发布前处理。</span></div><CustomerWhitelistTable rows={whitelistRows} /><button className="admin-primary wide" onClick={() => { setWhitelistImportCompleted(true); setActionNotice("白名单导入完成，已覆盖 Excel 数据；手动添加的数据已保留。当前原型不会写入后端。"); }}>确认导入 1,689 条白名单</button></>}
+            {!whitelistImportCompleted && !whitelistFile && <div className="upload-zone compact-upload"><span>XL</span><h3>选择白名单 Excel</h3><p>仅解析“综合客户白名单”和“特渠客户白名单”两个 Sheet</p><label className="secondary-button file-button"><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) setWhitelistFile(file.name); }} />选择 Excel 文件</label></div>}
+            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单导入完成</b><small>两个白名单 Sheet 已覆盖上次 Excel 数据；手动添加的数据保留，9 条手机号异常数据待处理。</small></p><div><strong>1,689</strong><small>本次导入</small></div><div><strong>1,676</strong><small>新增</small></div><div><strong>4</strong><small>更新</small></div><div><strong>9</strong><small>停用/待处理</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>综合客户 1,073 名 · 特渠专业客户 607 名 · 手动添加数据已保留</span></div><button onClick={() => setWhitelistImportCompleted(false)}>查看本次导入结果</button></div><CustomerWhitelistTable rows={whitelistRows} /></>}
           </div>
         )}
-        {tab === "订单管理" && <OrderManagement />}
+        {tab === "订单管理" && <OrderManagement activityClosed={activityClosed} />}
         {tab === "看板配置" && <SettingsPanel title="数据看板配置" items={["默认展示：特渠专业客户", "TOP120 自动轮播：开启", "轮播间隔：20 秒", "大屏实时刷新：开启"]} />}
         {tab === "抽奖规则" && <LotterySettings rounds={lotteryRounds} onChange={onLotteryChange} />}
         {tab === "主题装修" && <ThemePanel />}
       </main>
+      {productFormOpen && <ProductFormDrawer rows={productRows} onClose={() => setProductFormOpen(false)} onSave={(row) => { setProductRows((current) => [...current, row]); setActionNotice(`已自动编号 ${row.sequence}，并添加商品：${row.materialName}`); }} />}
+      {whitelistFormOpen && <WhitelistFormDrawer rows={whitelistRows} onClose={() => setWhitelistFormOpen(false)} onSave={(row) => { setWhitelistRows((current) => [...current, row]); setActionNotice(`已自动编号 ${row.sequence}，并添加白名单：${row.dealerShort}`); }} />}
+      {actionNotice && <div className="admin-toast" role="status"><span>✓</span>{actionNotice}<button aria-label="关闭提示" onClick={() => setActionNotice("")}>×</button></div>}
     </section>
   );
 }
@@ -754,6 +1043,7 @@ function SettingsPanel({ title, items }: { title: string; items: string[] }) {
 export function Prototype() {
   const [surface, setSurface] = useState<Surface>("h5");
   const [lotteryRounds, setLotteryRounds] = useState<LotteryRound[]>(initialLotteryRounds);
+  const [activityClosed, setActivityClosed] = useState(false);
   const surfaces: { key: Surface; label: string; sub: string }[] = [
     { key: "h5", label: "订货 H5", sub: "手机端" },
     { key: "ranking", label: "订货排行", sub: "大屏 A" },
@@ -769,11 +1059,11 @@ export function Prototype() {
         <div className="prototype-status"><i /> 原型预览</div>
       </nav>
       <div className="prototype-canvas">
-        {surface === "h5" && <H5Prototype />}
+        <div className={surface === "h5" ? "surface-slot" : "surface-slot surface-hidden"}><H5Prototype activityClosed={activityClosed} /></div>
         {surface === "ranking" && <RankingBoard />}
         {surface === "report" && <ReportBoard />}
         {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed" } : item))} />}
-        {surface === "admin" && <AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} />}
+        {surface === "admin" && <AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityClosed={activityClosed} onActivityStatusChange={setActivityClosed} />}
       </div>
     </main>
   );
