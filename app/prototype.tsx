@@ -64,7 +64,13 @@ const dealerNames = [
   "湖北省诚新物流", "北京金联创科贸", "深圳曹销分", "河南满粮商贸", "益丰万立",
 ];
 
-const branches = ["上海分", "青岛分", "北京分", "徐州分", "秦皇岛分", "天津分", "郑州分", "石家庄分", "南京分", "武汉分"];
+const branches = [
+  "上海分", "青岛分", "北京分", "徐州分", "秦皇岛分", "天津分", "郑州分", "石家庄分", "南京分", "武汉分",
+  "济南分", "杭州分", "宁波分", "合肥分", "福州分", "厦门分", "广州分", "深圳分", "南宁分", "长沙分",
+  "成都分", "重庆分", "昆明分", "西安分", "太原分", "沈阳分", "大连分", "哈尔滨分", "长春分", "乌鲁木齐分",
+  "兰州分", "贵阳分", "海口分", "南昌分", "珠海分", "东莞分",
+];
+const branchPageSize = 30;
 const reports = [
   "特渠专业客户 TOP5",
   "综合客户 TOP5",
@@ -445,11 +451,12 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
 
 function RankingBoard() {
   const [channel, setChannel] = useState("特渠专业客户");
-  const ranking = useMemo(() => Array.from({ length: 120 }, (_, index) => ({
+  const ranking = useMemo(() => Array.from({ length: 90 }, (_, index) => ({
     rank: index + 1,
     name: dealerNames[index % dealerNames.length] + (index >= dealerNames.length ? `${Math.floor(index / dealerNames.length) + 1}` : ""),
     value: Math.max(22612, 832017 - index * 6827 + (index % 4) * 931),
   })), []);
+  const isBranchOverflowing = branches.length > branchPageSize;
 
   return (
     <section className="screen-board ranking-board">
@@ -468,12 +475,12 @@ function RankingBoard() {
       </header>
       <div className="ranking-layout">
         <div className="ranking-columns">
-          {[0, 30, 60, 90].map((start) => (
+          {[0, 30, 60].map((start) => (
             <div className="rank-column" key={start}>
-              <h2>公司订单金额排行 {start + 1}–{start + 30}<small>单位：元</small></h2>
+              <h2>公司订单金额排行 {start + 1}–{Math.min(start + 30, ranking.length)}<small>单位：元</small></h2>
               {ranking.slice(start, start + 30).map((item) => (
-                <div className="rank-row" key={item.rank}>
-                  <span className={item.rank <= 3 ? "crown" : ""}>{item.rank <= 3 ? "♛" : ""} {item.rank}</span>
+                <div className={`rank-row ${item.rank <= 3 ? "top-three" : ""}`} key={item.rank}>
+                  <span className={item.rank <= 6 ? "crown" : ""}><i aria-hidden="true">{item.rank <= 6 ? "♛" : ""}</i> {item.rank}</span>
                   <b>{item.name}</b>
                   <strong>{item.value.toLocaleString()}元</strong>
                 </div>
@@ -481,10 +488,10 @@ function RankingBoard() {
             </div>
           ))}
         </div>
-        <aside className="branch-rank">
+        <aside className={`branch-rank${isBranchOverflowing ? " branch-rank-scrollable" : ""}`}>
           <h2>分公司订货榜</h2>
           {branches.map((branch, index) => (
-            <div key={branch}><span className={index < 5 ? "crown" : ""}>{index < 5 ? "♛" : ""} {index + 1}</span><b>{branch}</b><strong>{(3104358 - index * 226543).toLocaleString()}元</strong></div>
+            <div className={index < 5 ? "branch-top-five" : ""} key={branch}><span className={index < 5 ? "crown" : ""}><i aria-hidden="true">{index < 5 ? "♛" : ""}</i> {index + 1}</span><b>{branch}</b><strong>{Math.max(320000, 3104358 - index * 98000).toLocaleString()}元</strong></div>
           ))}
         </aside>
       </div>
@@ -734,6 +741,7 @@ function OrderManagement({ activityClosed }: { activityClosed: boolean }) {
 }
 
 type ProductImportRow = {
+  id: string;
   sequence: number;
   customerType: "特渠" | "综合";
   rebate: "参与" | "不参与";
@@ -750,9 +758,11 @@ type ProductImportRow = {
   conversion: string;
   gift: "是" | "否";
   status: "有效" | "待完善" | "停用";
+  manuallyEdited?: boolean;
 };
 
 type WhitelistRow = {
+  id: string;
   sequence: number;
   customerType: "综合客户" | "特渠专业客户";
   region: string;
@@ -764,26 +774,33 @@ type WhitelistRow = {
   dealerPhone: string;
   confirmerName: string;
   confirmerPhone: string;
+  manuallyEdited?: boolean;
+};
+
+let localImportRowId = 0;
+const createImportRowId = (prefix: string) => {
+  localImportRowId += 1;
+  return `${prefix}-${localImportRowId}`;
 };
 
 const initialProductImportRows: ProductImportRow[] = [
-  { sequence: 1, customerType: "特渠", rebate: "参与", category: "特渠定制产品", line: "调味油", materialCode: "7245-0002307", materialName: "金芝御礼225ML×4礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "225mL×5", casePack: "5盒/箱", unitPrice: "34.50", casePrice: "172.50", conversion: "0.00092", gift: "是", status: "有效" },
-  { sequence: 1, customerType: "特渠", rebate: "不参与", category: "特渠定制品", line: "酱油", materialCode: "7217-0001957", materialName: "四海祯享礼盒", brand: "金龙鱼", variety: "礼盒", spec: "500mL×2+500mL+530g", casePack: "6盒/箱", unitPrice: "19.30", casePrice: "117.00", conversion: "", gift: "是", status: "待完善" },
-  { sequence: 1, customerType: "综合", rebate: "参与", category: "全渠道适用通品", line: "调味油", materialCode: "7455-02F003", materialName: "金龙鱼芝麻香油礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "145mL×4", casePack: "15盒/箱", unitPrice: "28.00", casePrice: "420.00", conversion: "0.00125", gift: "是", status: "有效" },
-  { sequence: 1, customerType: "综合", rebate: "不参与", category: "通用品调味油", line: "调味油", materialCode: "7455-01P702", materialName: "香满园芝麻油245mL×12", brand: "香满园", variety: "芝麻油", spec: "245mL", casePack: "12瓶/箱", unitPrice: "6.90", casePrice: "82.80", conversion: "0.00270", gift: "否", status: "有效" },
+  { id: "product-1", sequence: 1, customerType: "特渠", rebate: "参与", category: "特渠定制产品", line: "调味油", materialCode: "7245-0002307", materialName: "金芝御礼225ML×4礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "225mL×5", casePack: "5盒/箱", unitPrice: "34.50", casePrice: "172.50", conversion: "0.00092", gift: "是", status: "有效" },
+  { id: "product-2", sequence: 1, customerType: "特渠", rebate: "不参与", category: "特渠定制品", line: "酱油", materialCode: "7217-0001957", materialName: "四海祯享礼盒", brand: "金龙鱼", variety: "礼盒", spec: "500mL×2+500mL+530g", casePack: "6盒/箱", unitPrice: "19.30", casePrice: "117.00", conversion: "", gift: "是", status: "待完善" },
+  { id: "product-3", sequence: 1, customerType: "综合", rebate: "参与", category: "全渠道适用通品", line: "调味油", materialCode: "7455-02F003", materialName: "金龙鱼芝麻香油礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "145mL×4", casePack: "15盒/箱", unitPrice: "28.00", casePrice: "420.00", conversion: "0.00125", gift: "是", status: "有效" },
+  { id: "product-4", sequence: 1, customerType: "综合", rebate: "不参与", category: "通用品调味油", line: "调味油", materialCode: "7455-01P702", materialName: "香满园芝麻油245mL×12", brand: "香满园", variety: "芝麻油", spec: "245mL", casePack: "12瓶/箱", unitPrice: "6.90", casePrice: "82.80", conversion: "0.00270", gift: "否", status: "有效" },
 ];
 
 const initialWhitelistRows: WhitelistRow[] = [
-  { sequence: 1, customerType: "综合客户", region: "南区", branch: "长沙分", dealerShort: "长沙久茂", dealerFull: "长沙久茂食品有限公司", dealerType: "综合经销商", dealerName: "王惠", dealerPhone: "147****1979", confirmerName: "张学文", confirmerPhone: "139****6386" },
-  { sequence: 2, customerType: "综合客户", region: "南区", branch: "长沙分", dealerShort: "湘潭餐乐", dealerFull: "湘潭餐乐商贸有限公司", dealerType: "综合经销商", dealerName: "刘宇剑", dealerPhone: "137****0822", confirmerName: "张学文", confirmerPhone: "139****6386" },
-  { sequence: 1, customerType: "特渠专业客户", region: "南区", branch: "长沙分", dealerShort: "深圳市智臻云采", dealerFull: "深圳市智臻云采科技有限公司", dealerType: "特渠专业经销商", dealerName: "王凡", dealerPhone: "188****4733", confirmerName: "官国梁", confirmerPhone: "159****6519" },
-  { sequence: 2, customerType: "特渠专业客户", region: "南区", branch: "厦门分", dealerShort: "泉州乐食光", dealerFull: "泉州乐食光商贸有限公司", dealerType: "特渠专业经销商", dealerName: "郑总", dealerPhone: "152****7241", confirmerName: "窦任重", confirmerPhone: "186****2331" },
+  { id: "whitelist-1", sequence: 1, customerType: "综合客户", region: "南区", branch: "长沙分", dealerShort: "长沙久茂", dealerFull: "长沙久茂食品有限公司", dealerType: "综合经销商", dealerName: "王惠", dealerPhone: "147****1979", confirmerName: "张学文", confirmerPhone: "139****6386" },
+  { id: "whitelist-2", sequence: 2, customerType: "综合客户", region: "南区", branch: "长沙分", dealerShort: "湘潭餐乐", dealerFull: "湘潭餐乐商贸有限公司", dealerType: "综合经销商", dealerName: "刘宇剑", dealerPhone: "137****0822", confirmerName: "张学文", confirmerPhone: "139****6386" },
+  { id: "whitelist-3", sequence: 1, customerType: "特渠专业客户", region: "南区", branch: "长沙分", dealerShort: "深圳市智臻云采", dealerFull: "深圳市智臻云采科技有限公司", dealerType: "特渠专业经销商", dealerName: "王凡", dealerPhone: "188****4733", confirmerName: "官国梁", confirmerPhone: "159****6519" },
+  { id: "whitelist-4", sequence: 2, customerType: "特渠专业客户", region: "南区", branch: "厦门分", dealerShort: "泉州乐食光", dealerFull: "泉州乐食光商贸有限公司", dealerType: "特渠专业经销商", dealerName: "郑总", dealerPhone: "152****7241", confirmerName: "窦任重", confirmerPhone: "186****2331" },
 ];
 
-function ProductImportTable({ rows }: { rows: ProductImportRow[] }) {
+function ProductImportTable({ rows, onEdit }: { rows: ProductImportRow[]; onEdit: (row: ProductImportRow) => void }) {
   const [customerType, setCustomerType] = useState("全部");
   const [rebate, setRebate] = useState("全部");
-  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否礼盒", "状态"];
+  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否礼盒", "状态", "操作"];
   const visibleRows = rows.filter((row) => (customerType === "全部" || row.customerType === customerType) && (rebate === "全部" || row.rebate === rebate));
   return (
     <>
@@ -797,7 +814,7 @@ function ProductImportTable({ rows }: { rows: ProductImportRow[] }) {
           <div className="table-row table-head">{heads.map((x) => <b key={x}>{x}</b>)}</div>
           {visibleRows.map((row) => {
             const values = [row.sequence, row.customerType, row.rebate, row.category, row.line, row.materialCode, row.materialName, row.brand, row.variety, row.spec, row.casePack, row.unitPrice, row.casePrice, row.conversion, row.gift, row.status];
-            return <div className="table-row" key={`${row.customerType}-${row.rebate}-${row.materialCode}`}>{values.map((value, index) => <span key={index} className={index === 15 ? `status-cell ${row.status === "待完善" ? "pending" : ""}` : ""}>{value || "—"}</span>)}</div>;
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{values.map((value, index) => <span key={index} className={index === 15 ? `status-cell ${row.status === "待完善" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
         </div>
       </div>
@@ -805,9 +822,9 @@ function ProductImportTable({ rows }: { rows: ProductImportRow[] }) {
   );
 }
 
-function CustomerWhitelistTable({ rows }: { rows: WhitelistRow[] }) {
+function CustomerWhitelistTable({ rows, onEdit }: { rows: WhitelistRow[]; onEdit: (row: WhitelistRow) => void }) {
   const [customerType, setCustomerType] = useState("全部");
-  const heads = ["序号", "客户类型", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商类型", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话"];
+  const heads = ["序号", "客户类型", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商类型", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话", "操作"];
   const visibleRows = rows.filter((row) => customerType === "全部" || row.customerType === customerType);
   return (
     <>
@@ -820,7 +837,7 @@ function CustomerWhitelistTable({ rows }: { rows: WhitelistRow[] }) {
           <div className="table-row table-head">{heads.map((x) => <b key={x}>{x}</b>)}</div>
           {visibleRows.map((row) => {
             const values = [row.sequence, row.customerType, row.region, row.branch, row.dealerShort, row.dealerFull, row.dealerType, row.dealerName, row.dealerPhone, row.confirmerName, row.confirmerPhone];
-            return <div className="table-row" key={`${row.customerType}-${row.sequence}-${row.dealerPhone}`}>{values.map((value, index) => <span key={index}>{value}</span>)}</div>;
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{values.map((value, index) => <span key={index}>{value}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
         </div>
       </div>
@@ -828,22 +845,27 @@ function CustomerWhitelistTable({ rows }: { rows: WhitelistRow[] }) {
   );
 }
 
-function ProductFormDrawer({ rows, onClose, onSave }: { rows: ProductImportRow[]; onClose: () => void; onSave: (row: ProductImportRow) => void }) {
-  const [form, setForm] = useState<ProductImportRow>({ sequence: 0, customerType: "特渠", rebate: "参与", category: "", line: "", materialCode: "", materialName: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", conversion: "", gift: "否", status: "有效" });
+function ProductFormDrawer({ rows, initialRow, onClose, onSave }: { rows: ProductImportRow[]; initialRow?: ProductImportRow; onClose: () => void; onSave: (row: ProductImportRow) => void }) {
+  const isEditing = Boolean(initialRow);
+  const [form, setForm] = useState<ProductImportRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("product"), sequence: 0, customerType: "特渠", rebate: "参与", category: "", line: "", materialCode: "", materialName: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", conversion: "", gift: "否", status: "有效" });
+  useEffect(() => {
+    if (initialRow) setForm({ ...initialRow });
+  }, [initialRow]);
   const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
-  const nextSequence = Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
-  const canSave = form.materialCode.trim() !== "" && form.materialName.trim() !== "" && form.casePrice.trim() !== "";
+  const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
+  const duplicateMaterialCode = form.materialCode.trim() !== "" && rows.some((row) => row.id !== form.id && row.materialCode.trim().toLowerCase() === form.materialCode.trim().toLowerCase());
+  const canSave = form.materialCode.trim() !== "" && form.materialName.trim() !== "" && form.casePrice.trim() !== "" && !duplicateMaterialCode;
   return (
     <div className="order-drawer-backdrop" onClick={onClose}>
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
-        <header><div><span>活动商品</span><h2>手动添加商品</h2></div><button aria-label="关闭" onClick={onClose}>×</button></header>
-        <div className="auto-sequence-note"><span>序号自动生成</span><b>保存后编号：{nextSequence}</b><small>{form.customerType} · {form.rebate}返利分组</small></div>
+        <header><div><span>活动商品</span><h2>{isEditing ? "编辑商品" : "手动添加商品"}</h2></div><button aria-label="关闭" onClick={onClose}>×</button></header>
+        <div className="auto-sequence-note"><span>{isEditing ? "当前商品" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>{form.customerType} · {form.rebate}返利分组</small></div>
         <div className="drawer-form-body"><div className="drawer-form-grid">
           <label><span>客户类型</span><select value={form.customerType} onChange={(e) => update("customerType", e.target.value)}><option>特渠</option><option>综合</option></select></label>
           <label><span>是否参与返利</span><select value={form.rebate} onChange={(e) => update("rebate", e.target.value)}><option>参与</option><option>不参与</option></select></label>
           <label><span>产品大类</span><input value={form.category} onChange={(e) => update("category", e.target.value)} placeholder="例如：特渠定制产品" /></label>
           <label><span>产品线</span><input value={form.line} onChange={(e) => update("line", e.target.value)} placeholder="例如：调味油" /></label>
-          <label><span>物料代码 *</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /></label>
+          <label><span>物料代码 *</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /><small className={duplicateMaterialCode ? "field-error" : ""}>{duplicateMaterialCode ? "物料代码已存在，请检查解析结果" : "用于匹配同一商品"}</small></label>
           <label className="wide-field"><span>物料名称 *</span><input value={form.materialName} onChange={(e) => update("materialName", e.target.value)} /></label>
           <label><span>品牌</span><input value={form.brand} onChange={(e) => update("brand", e.target.value)} /></label>
           <label><span>品种</span><input value={form.variety} onChange={(e) => update("variety", e.target.value)} /></label>
@@ -855,24 +877,29 @@ function ProductFormDrawer({ rows, onClose, onSave }: { rows: ProductImportRow[]
           <label><span>是否礼盒</span><select value={form.gift} onChange={(e) => update("gift", e.target.value)}><option>否</option><option>是</option></select></label>
           <label><span>状态</span><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>有效</option><option>待完善</option><option>停用</option></select></label>
         </div>
-        <p className="drawer-form-note">带 * 的字段为必填项；此处为前端原型，保存结果仅在当前页面有效。</p></div>
-        <footer><button onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave} onClick={() => { onSave({ ...form, sequence: nextSequence }); onClose(); }}>保存商品</button></footer>
+        <p className="drawer-form-note">带 * 的字段为必填项；{isEditing ? "保存后会覆盖当前解析行，并标记为人工修正。" : "此处为前端原型，保存结果仅在当前页面有效。"}</p></div>
+        <footer><button onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave} onClick={() => { onSave({ ...form, sequence: nextSequence, manuallyEdited: isEditing || form.manuallyEdited }); onClose(); }}>{isEditing ? "保存修改" : "保存商品"}</button></footer>
       </aside>
     </div>
   );
 }
 
-function WhitelistFormDrawer({ rows, onClose, onSave }: { rows: WhitelistRow[]; onClose: () => void; onSave: (row: WhitelistRow) => void }) {
-  const [form, setForm] = useState<WhitelistRow>({ sequence: 0, customerType: "综合客户", region: "", branch: "", dealerShort: "", dealerFull: "", dealerType: "综合经销商", dealerName: "", dealerPhone: "", confirmerName: "", confirmerPhone: "" });
+function WhitelistFormDrawer({ rows, initialRow, onClose, onSave }: { rows: WhitelistRow[]; initialRow?: WhitelistRow; onClose: () => void; onSave: (row: WhitelistRow) => void }) {
+  const isEditing = Boolean(initialRow);
+  const [form, setForm] = useState<WhitelistRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("whitelist"), sequence: 0, customerType: "综合客户", region: "", branch: "", dealerShort: "", dealerFull: "", dealerType: "综合经销商", dealerName: "", dealerPhone: "", confirmerName: "", confirmerPhone: "" });
+  useEffect(() => {
+    if (initialRow) setForm({ ...initialRow });
+  }, [initialRow]);
   const update = (field: keyof WhitelistRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
-  const nextSequence = Math.max(0, ...rows.filter((row) => row.customerType === form.customerType).map((row) => row.sequence)) + 1;
-  const phoneValid = /^1\d{10}$/.test(form.dealerPhone);
-  const canSave = form.region.trim() !== "" && form.branch.trim() !== "" && form.dealerShort.trim() !== "" && form.dealerFull.trim() !== "" && phoneValid;
+  const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType).map((row) => row.sequence)) + 1;
+  const phoneValid = /^1\d{10}$/.test(form.dealerPhone) || /^\d{3}\*{4}\d{4}$/.test(form.dealerPhone);
+  const duplicateDealerPhone = form.dealerPhone.trim() !== "" && rows.some((row) => row.id !== form.id && row.dealerPhone === form.dealerPhone);
+  const canSave = form.region.trim() !== "" && form.branch.trim() !== "" && form.dealerShort.trim() !== "" && form.dealerFull.trim() !== "" && phoneValid && !duplicateDealerPhone;
   return (
     <div className="order-drawer-backdrop" onClick={onClose}>
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
-        <header><div><span>客户身份</span><h2>手动添加白名单</h2></div><button aria-label="关闭" onClick={onClose}>×</button></header>
-        <div className="auto-sequence-note"><span>序号自动生成</span><b>保存后编号：{nextSequence}</b><small>{form.customerType}分组</small></div>
+        <header><div><span>客户身份</span><h2>{isEditing ? "编辑白名单" : "手动添加白名单"}</h2></div><button aria-label="关闭" onClick={onClose}>×</button></header>
+        <div className="auto-sequence-note"><span>{isEditing ? "当前客户" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>{form.customerType}分组</small></div>
         <div className="drawer-form-body"><div className="drawer-form-grid">
           <label><span>客户类型</span><select value={form.customerType} onChange={(e) => { const type = e.target.value as WhitelistRow["customerType"]; setForm((current) => ({ ...current, customerType: type, dealerType: type === "综合客户" ? "综合经销商" : "特渠专业经销商" })); }}><option>综合客户</option><option>特渠专业客户</option></select></label>
           <label><span>大区 *</span><select value={form.region} onChange={(e) => update("region", e.target.value)}><option value="">请选择</option><option>东区</option><option>南区</option><option>北区</option><option>西区</option></select></label>
@@ -881,40 +908,13 @@ function WhitelistFormDrawer({ rows, onClose, onSave }: { rows: WhitelistRow[]; 
           <label className="wide-field"><span>经销商名称（全）*</span><input value={form.dealerFull} onChange={(e) => update("dealerFull", e.target.value)} /></label>
           <label><span>经销商类型</span><input value={form.dealerType} onChange={(e) => update("dealerType", e.target.value)} /></label>
           <label><span>经销商姓名</span><input value={form.dealerName} onChange={(e) => update("dealerName", e.target.value)} /></label>
-          <label><span>经销商电话 *</span><input inputMode="tel" maxLength={11} value={form.dealerPhone} onChange={(e) => update("dealerPhone", e.target.value.replace(/\D/g, ""))} placeholder="11 位手机号" /><small className={form.dealerPhone && !phoneValid ? "field-error" : ""}>{form.dealerPhone && !phoneValid ? "请输入正确的 11 位手机号" : "用于 H5 身份验证"}</small></label>
+          <label><span>经销商电话 *</span><input inputMode="tel" maxLength={11} value={form.dealerPhone} onChange={(e) => update("dealerPhone", e.target.value.replace(/\D/g, ""))} placeholder="11 位手机号" /><small className={duplicateDealerPhone || (form.dealerPhone !== "" && !phoneValid) ? "field-error" : ""}>{duplicateDealerPhone ? "手机号已存在，请检查解析结果" : form.dealerPhone && !phoneValid ? "请输入正确的 11 位手机号" : "用于 H5 身份验证；已脱敏号码可直接覆盖"}</small></label>
           <label><span>分公司确认人姓名</span><input value={form.confirmerName} onChange={(e) => update("confirmerName", e.target.value)} /></label>
           <label><span>分公司确认人电话</span><input inputMode="tel" maxLength={11} value={form.confirmerPhone} onChange={(e) => update("confirmerPhone", e.target.value.replace(/\D/g, ""))} /></label>
         </div>
-        <p className="drawer-form-note">客户类型在 Excel 导入时由 Sheet 自动确定；手动添加时由管理员选择。</p></div>
-        <footer><button onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave} onClick={() => { onSave({ ...form, sequence: nextSequence }); onClose(); }}>保存白名单</button></footer>
+        <p className="drawer-form-note">客户类型在 Excel 导入时由 Sheet 自动确定；{isEditing ? "保存后会覆盖当前解析行，并标记为人工修正。" : "手动添加时由管理员选择。"}</p></div>
+        <footer><button onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave} onClick={() => { onSave({ ...form, sequence: nextSequence, manuallyEdited: isEditing || form.manuallyEdited }); onClose(); }}>{isEditing ? "保存修改" : "保存白名单"}</button></footer>
       </aside>
-    </div>
-  );
-}
-
-function ThemePanel() {
-  const [images, setImages] = useState<Record<string, string>>({});
-  const themes = [
-    ["h5", "H5 页面背景", "建议尺寸 750 × 1624 px", "linear-gradient(145deg,#a91519,#e75c35)"],
-    ["board", "数据看板背景", "建议尺寸 1920 × 1080 px", "linear-gradient(145deg,#380406,#811316)"],
-    ["lottery", "抽奖页面背景", "建议尺寸 1920 × 1080 px", "radial-gradient(circle,#b62323,#520b0e)"],
-  ];
-  return (
-    <div className="admin-panel theme-panel">
-      <div className="panel-title"><div><h2>活动主题装修</h2><p>三类终端可分别上传背景图，保存后立即用于对应页面</p></div><button className="admin-primary">保存并发布</button></div>
-      <div className="theme-grid">
-        {themes.map(([key, title, hint, fallback]) => (
-          <article key={key}>
-            <div className="theme-preview" style={{ backgroundImage: images[key] ? `url(${images[key]})` : fallback }}><span>{images[key] ? "自定义图片预览" : "当前默认主题"}</span></div>
-            <div><h3>{title}</h3><p>{hint} · JPG/PNG，建议小于 5MB</p></div>
-            <label className="upload-button"><input type="file" accept="image/png,image/jpeg" onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) setImages((current) => ({ ...current, [key]: URL.createObjectURL(file) }));
-            }} />{images[key] ? "更换图片" : "上传图片"}</label>
-          </article>
-        ))}
-      </div>
-      <div className="theme-options"><label><span>主按钮颜色</span><input defaultValue="#D12B27" /></label><label><span>背景显示方式</span><select defaultValue="cover"><option value="cover">铺满裁切</option><option value="contain">完整显示</option><option value="repeat">平铺</option></select></label></div>
     </div>
   );
 }
@@ -994,13 +994,15 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
   const [whitelistImportCompleted, setWhitelistImportCompleted] = useState(false);
   const [productFormOpen, setProductFormOpen] = useState(false);
   const [whitelistFormOpen, setWhitelistFormOpen] = useState(false);
+  const [editingProductRow, setEditingProductRow] = useState<ProductImportRow | null>(null);
+  const [editingWhitelistRow, setEditingWhitelistRow] = useState<WhitelistRow | null>(null);
   const [actionNotice, setActionNotice] = useState("");
   const [productFiles, setProductFiles] = useState({
     special: "【特渠】商品明细表（示例）.xlsx",
     general: "【分公司综合经销商】商品明细表（示例）.xlsx",
   });
   const [whitelistFile, setWhitelistFile] = useState("【白名单】经销商白名单（示例）.xlsx");
-  const nav = ["活动概览", "商品导入", "白名单", "订单管理", "看板配置", "抽奖规则", "主题装修"];
+  const nav = ["活动概览", "商品导入", "白名单", "订单管理", "抽奖规则"];
   const parsedProductCount = (productFiles.special ? 50 : 0) + (productFiles.general ? 192 : 0);
   const parsedProductFileCount = (productFiles.special ? 1 : 0) + (productFiles.general ? 1 : 0);
   const productUpdatedCount = Math.min(4, parsedProductCount);
@@ -1043,33 +1045,27 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
                 </article>
               ))}
             </div>}
-            {!productImportCompleted && (productFiles.special || productFiles.general) && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{parsedProductFileCount} 个文件解析完成 · 等待确认</b><small>客户类型由文件确定，返利状态由 Sheet 自动确定</small></p><strong>{parsedProductCount} 条商品</strong></div><div className="warning-box"><b>确认后将覆盖对应客户类型的上次 Excel 导入结果</b><span>预计新增 {productNewCount} 条、更新 {productUpdatedCount} 条、停用旧数据 {productRetiredCount} 条；手动添加的数据保留。缺少吨箱转换系数等信息的商品标记为“待完善”。</span></div><ProductImportTable rows={productRows} /><button className="admin-primary wide" onClick={() => { setProductImportCompleted(true); setActionNotice("商品导入完成，已覆盖对应 Excel 数据；手动添加的数据已保留。当前原型不会写入后端。"); }}>确认导入 {parsedProductCount} 条商品</button></div>}
-            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品导入完成</b><small>对应客户类型的上次 Excel 数据已覆盖；手动添加的数据保留，7 条信息不完整的商品待完善。</small></p><div><strong>{parsedProductCount}</strong><small>本次导入</small></div><div><strong>{productNewCount}</strong><small>新增</small></div><div><strong>{productUpdatedCount}</strong><small>更新</small></div><div><strong>{productRetiredCount}</strong><small>停用旧数据</small></div></div><div className="data-section-title"><div><b>当前活动商品</b><span>最近导入：特渠 50 条 · 综合 192 条 · 手动添加数据已保留</span></div><button onClick={() => setProductImportCompleted(false)}>查看本次导入结果</button></div><ProductImportTable rows={productRows} /></>}
+            {!productImportCompleted && (productFiles.special || productFiles.general) && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{parsedProductFileCount} 个文件解析完成 · 等待确认</b><small>客户类型由文件确定，返利状态由 Sheet 自动确定</small></p><strong>{parsedProductCount} 条商品</strong></div><div className="warning-box"><b>确认后将覆盖对应客户类型的上次 Excel 导入结果</b><span>预计新增 {productNewCount} 条、更新 {productUpdatedCount} 条、停用旧数据 {productRetiredCount} 条；手动添加的数据保留。缺少吨箱转换系数等信息的商品标记为“待完善”。表格中的解析结果可先编辑修正。</span></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} /><button className="admin-primary wide" onClick={() => { setProductImportCompleted(true); setActionNotice("商品导入完成，已覆盖对应 Excel 数据；手动添加的数据已保留。当前原型不会写入后端。"); }}>确认导入 {parsedProductCount} 条商品</button></div>}
+            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品导入完成</b><small>对应客户类型的上次 Excel 数据已覆盖；手动添加的数据保留，7 条信息不完整的商品待完善。</small></p><div><strong>{parsedProductCount}</strong><small>本次导入</small></div><div><strong>{productNewCount}</strong><small>新增</small></div><div><strong>{productUpdatedCount}</strong><small>更新</small></div><div><strong>{productRetiredCount}</strong><small>停用旧数据</small></div></div><div className="data-section-title"><div><b>当前活动商品</b><span>最近导入：特渠 50 条 · 综合 192 条 · 手动添加数据已保留</span></div><button onClick={() => setProductImportCompleted(false)}>查看本次导入结果</button></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} /></>}
           </div>
         )}
         {tab === "白名单" && (
           <div className="admin-panel">
             <div className="panel-title"><div><h2>{whitelistImportCompleted ? "当前客户白名单" : "客户白名单导入"}</h2><p>共 1,680 名有效客户 · 手机号用于 H5 身份验证</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setWhitelistFormOpen(true)}>＋ 手动添加白名单</button>{whitelistImportCompleted ? <button className="admin-primary" onClick={() => { setWhitelistImportCompleted(false); setWhitelistFile(""); }}>继续导入 Excel</button> : <label className="admin-primary file-button"><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) { setWhitelistFile(file.name); setWhitelistImportCompleted(false); } }} />导入白名单</label>}</div></div>
             {!whitelistImportCompleted && <div className="import-rule-hint"><b>Excel 覆盖规则</b><span>本次上传会覆盖综合客户白名单和特渠客户白名单的上一次 Excel 导入结果；相同手机号自动更新，旧名单中不再存在的客户将停用，手动添加的数据保留。</span></div>}
-            {!whitelistImportCompleted && whitelistFile && <><div className="whitelist-file-summary"><span className="success-icon">✓</span><p><b>{whitelistFile}</b><small>只读取“综合客户白名单”和“特渠客户白名单”，其他 Sheet 自动忽略</small></p><div className="sheet-tags"><span>综合客户白名单</span><span>特渠客户白名单</span></div></div><div className="warning-box"><b>确认后将覆盖上次 Excel 白名单</b><span>预计新增 1,676 条、更新 4 条、停用旧数据 9 条；手动添加的数据保留。另有 9 个手机号格式异常，请在活动发布前处理。</span></div><CustomerWhitelistTable rows={whitelistRows} /><button className="admin-primary wide" onClick={() => { setWhitelistImportCompleted(true); setActionNotice("白名单导入完成，已覆盖 Excel 数据；手动添加的数据已保留。当前原型不会写入后端。"); }}>确认导入 1,689 条白名单</button></>}
+            {!whitelistImportCompleted && whitelistFile && <><div className="whitelist-file-summary"><span className="success-icon">✓</span><p><b>{whitelistFile}</b><small>只读取“综合客户白名单”和“特渠客户白名单”，其他 Sheet 自动忽略</small></p><div className="sheet-tags"><span>综合客户白名单</span><span>特渠客户白名单</span></div></div><div className="warning-box"><b>确认后将覆盖上次 Excel 白名单</b><span>预计新增 1,676 条、更新 4 条、停用旧数据 9 条；手动添加的数据保留。另有 9 个手机号格式异常，请在活动发布前处理。表格中的解析结果可先编辑修正。</span></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} /><button className="admin-primary wide" onClick={() => { setWhitelistImportCompleted(true); setActionNotice("白名单导入完成，已覆盖 Excel 数据；手动添加的数据已保留。当前原型不会写入后端。"); }}>确认导入 1,689 条白名单</button></>}
             {!whitelistImportCompleted && !whitelistFile && <div className="upload-zone compact-upload"><span>XL</span><h3>选择白名单 Excel</h3><p>仅解析“综合客户白名单”和“特渠客户白名单”两个 Sheet</p><label className="secondary-button file-button"><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) setWhitelistFile(file.name); }} />选择 Excel 文件</label></div>}
-            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单导入完成</b><small>两个白名单 Sheet 已覆盖上次 Excel 数据；手动添加的数据保留，9 条手机号异常数据待处理。</small></p><div><strong>1,689</strong><small>本次导入</small></div><div><strong>1,676</strong><small>新增</small></div><div><strong>4</strong><small>更新</small></div><div><strong>9</strong><small>停用/待处理</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>综合客户 1,073 名 · 特渠专业客户 607 名 · 手动添加数据已保留</span></div><button onClick={() => setWhitelistImportCompleted(false)}>查看本次导入结果</button></div><CustomerWhitelistTable rows={whitelistRows} /></>}
+            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单导入完成</b><small>两个白名单 Sheet 已覆盖上次 Excel 数据；手动添加的数据保留，9 条手机号异常数据待处理。</small></p><div><strong>1,689</strong><small>本次导入</small></div><div><strong>1,676</strong><small>新增</small></div><div><strong>4</strong><small>更新</small></div><div><strong>9</strong><small>停用/待处理</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>综合客户 1,073 名 · 特渠专业客户 607 名 · 手动添加数据已保留</span></div><button onClick={() => setWhitelistImportCompleted(false)}>查看本次导入结果</button></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} /></>}
           </div>
         )}
         {tab === "订单管理" && <OrderManagement activityClosed={activityClosed} />}
-        {tab === "看板配置" && <SettingsPanel title="数据看板配置" items={["默认展示：特渠专业客户", "TOP120 自动轮播：开启", "轮播间隔：20 秒", "大屏实时刷新：开启"]} />}
         {tab === "抽奖规则" && <LotterySettings rounds={lotteryRounds} onChange={onLotteryChange} />}
-        {tab === "主题装修" && <ThemePanel />}
       </main>
-      {productFormOpen && <ProductFormDrawer rows={productRows} onClose={() => setProductFormOpen(false)} onSave={(row) => { setProductRows((current) => [...current, row]); setActionNotice(`已自动编号 ${row.sequence}，并添加商品：${row.materialName}`); }} />}
-      {whitelistFormOpen && <WhitelistFormDrawer rows={whitelistRows} onClose={() => setWhitelistFormOpen(false)} onSave={(row) => { setWhitelistRows((current) => [...current, row]); setActionNotice(`已自动编号 ${row.sequence}，并添加白名单：${row.dealerShort}`); }} />}
+      {(productFormOpen || editingProductRow) && <ProductFormDrawer rows={productRows} initialRow={editingProductRow ?? undefined} onClose={() => { setProductFormOpen(false); setEditingProductRow(null); }} onSave={(row) => { if (editingProductRow) { setProductRows((current) => current.map((item) => item.id === row.id ? row : item)); setActionNotice(`已保存商品修改：${row.materialName}`); } else { setProductRows((current) => [...current, row]); setActionNotice(`已自动编号 ${row.sequence}，并添加商品：${row.materialName}`); } }} />}
+      {(whitelistFormOpen || editingWhitelistRow) && <WhitelistFormDrawer rows={whitelistRows} initialRow={editingWhitelistRow ?? undefined} onClose={() => { setWhitelistFormOpen(false); setEditingWhitelistRow(null); }} onSave={(row) => { if (editingWhitelistRow) { setWhitelistRows((current) => current.map((item) => item.id === row.id ? row : item)); setActionNotice(`已保存白名单修改：${row.dealerShort}`); } else { setWhitelistRows((current) => [...current, row]); setActionNotice(`已自动编号 ${row.sequence}，并添加白名单：${row.dealerShort}`); } }} />}
       {actionNotice && <div className="admin-toast" role="status"><span>✓</span>{actionNotice}<button aria-label="关闭提示" onClick={() => setActionNotice("")}>×</button></div>}
     </section>
   );
-}
-
-function SettingsPanel({ title, items }: { title: string; items: string[] }) {
-  return <div className="admin-panel settings-panel"><div className="panel-title"><div><h2>{title}</h2><p>此处为可点击原型配置预览</p></div><button className="admin-primary">保存配置</button></div><div className="settings-list">{items.map((item, i) => <label key={item}><span>{item.split("：")[0]}</span><input defaultValue={item.split("：")[1]} /><i className={i % 2 ? "" : "on"} /></label>)}</div></div>;
 }
 
 export function Prototype() {
