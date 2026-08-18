@@ -797,50 +797,129 @@ const initialWhitelistRows: WhitelistRow[] = [
   { id: "whitelist-4", sequence: 2, customerType: "特渠专业客户", region: "南区", branch: "厦门分", dealerShort: "泉州乐食光", dealerFull: "泉州乐食光商贸有限公司", dealerType: "特渠专业经销商", dealerName: "郑总", dealerPhone: "152****7241", confirmerName: "窦任重", confirmerPhone: "186****2331" },
 ];
 
-function ProductImportTable({ rows, onEdit }: { rows: ProductImportRow[]; onEdit: (row: ProductImportRow) => void }) {
+type DeleteTarget = {
+  ids: string[];
+  labels: string[];
+  kind: "商品" | "白名单客户";
+};
+
+function DeleteConfirmDialog({ target, onCancel, onConfirm }: { target: DeleteTarget; onCancel: () => void; onConfirm: () => void }) {
+  const labelPreview = target.labels.slice(0, 3).join("、");
+  const extraCount = target.labels.length - 3;
+  const countLabel = target.ids.length === 1 ? target.kind : `${target.ids.length} 条${target.kind}`;
+  return (
+    <div className="delete-confirm" role="dialog" aria-modal="true" aria-label={`删除${target.kind}确认`} onClick={onCancel}>
+      <div onClick={(event) => event.stopPropagation()}>
+        <span className="delete-confirm-eyebrow">删除{target.kind}</span>
+        <h3>确认删除{countLabel}？</h3>
+        <p>删除后将从当前活动的可下单或身份验证列表中移除，已有订单不会被删除，订单明细和金额保持不变。</p>
+        <div className="delete-confirm-items">
+          <b>{labelPreview}{extraCount > 0 ? ` 等 ${extraCount} 条` : ""}</b>
+          <small>已选择 {target.ids.length} 条</small>
+        </div>
+        <div className="delete-confirm-actions">
+          <button type="button" onClick={onCancel}>取消</button>
+          <button type="button" className="delete-confirm-danger" onClick={onConfirm}>确认删除</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false }: { rows: ProductImportRow[]; onEdit: (row: ProductImportRow) => void; onDelete?: (ids: string[]) => void; allowDelete?: boolean }) {
   const [customerType, setCustomerType] = useState("全部");
   const [rebate, setRebate] = useState("全部");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否礼盒", "状态", "操作"];
-  const visibleRows = rows.filter((row) => (customerType === "全部" || row.customerType === customerType) && (rebate === "全部" || row.rebate === rebate));
+  const visibleRows = useMemo(() => rows.filter((row) => (customerType === "全部" || row.customerType === customerType) && (rebate === "全部" || row.rebate === rebate)), [rows, customerType, rebate]);
+  const visibleIds = useMemo(() => visibleRows.map((row) => row.id), [visibleRows]);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+  const openDelete = (ids: string[]) => {
+    const targetRows = rows.filter((row) => ids.includes(row.id));
+    setDeleteTarget({ ids, labels: targetRows.map((row) => row.materialName || row.materialCode), kind: "商品" });
+  };
+  const toggleVisibleRows = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return [...next];
+    });
+  };
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    onDelete?.(deleteTarget.ids);
+    setSelectedIds((current) => current.filter((id) => !deleteTarget.ids.includes(id)));
+    setDeleteTarget(null);
+  };
   return (
     <>
       <div className="data-filters">
-        <label><span>客户类型</span><select value={customerType} onChange={(e) => setCustomerType(e.target.value)}><option>全部</option><option>特渠</option><option>综合</option></select></label>
-        <label><span>是否参与返利</span><select value={rebate} onChange={(e) => setRebate(e.target.value)}><option>全部</option><option>参与</option><option>不参与</option></select></label>
-        <small>当前显示 {visibleRows.length} 条商品</small>
+        <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setSelectedIds([]); }}><option>全部</option><option>特渠</option><option>综合</option></select></label>
+        <label><span>是否参与返利</span><select value={rebate} onChange={(e) => { setRebate(e.target.value); setSelectedIds([]); }}><option>全部</option><option>参与</option><option>不参与</option></select></label>
+        <small>当前显示 {visibleRows.length} 条商品{allowDelete ? "，可勾选删除" : "，导入确认前可编辑"}</small>
       </div>
+      {allowDelete && selectedIds.length > 0 && <div className="selection-toolbar"><span>已选择 <b>{selectedIds.length}</b> 条商品</span><div><button type="button" className="selection-clear" onClick={() => setSelectedIds([])}>取消选择</button><button type="button" className="selection-delete" onClick={() => openDelete(selectedIds)}>删除所选</button></div></div>}
       <div className="table-scroll">
-        <div className="data-table product-import-table">
-          <div className="table-row table-head">{heads.map((x) => <b key={x}>{x}</b>)}</div>
+        <div className={`data-table product-import-table ${allowDelete ? "with-selection" : ""}`}>
+          <div className="table-row table-head">{allowDelete && <b className="select-cell"><input type="checkbox" aria-label="全选当前商品" checked={allVisibleSelected} onChange={toggleVisibleRows} /></b>}{heads.map((x) => <b key={x}>{x}</b>)}</div>
           {visibleRows.map((row) => {
             const values = [row.sequence, row.customerType, row.rebate, row.category, row.line, row.materialCode, row.materialName, row.brand, row.variety, row.spec, row.casePack, row.unitPrice, row.casePrice, row.conversion, row.gift, row.status];
-            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{values.map((value, index) => <span key={index} className={index === 15 ? `status-cell ${row.status === "待完善" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{row.manuallyEdited && <small>已修正</small>}</span></div>;
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择商品 ${row.materialName}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index} className={index === 15 ? `status-cell ${row.status === "待完善" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
+          {visibleRows.length === 0 && <div className="table-empty">当前筛选条件下没有商品</div>}
         </div>
       </div>
+      {deleteTarget && <DeleteConfirmDialog target={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={confirmDelete} />}
     </>
   );
 }
 
-function CustomerWhitelistTable({ rows, onEdit }: { rows: WhitelistRow[]; onEdit: (row: WhitelistRow) => void }) {
+function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = false }: { rows: WhitelistRow[]; onEdit: (row: WhitelistRow) => void; onDelete?: (ids: string[]) => void; allowDelete?: boolean }) {
   const [customerType, setCustomerType] = useState("全部");
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const heads = ["序号", "客户类型", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商类型", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话", "操作"];
-  const visibleRows = rows.filter((row) => customerType === "全部" || row.customerType === customerType);
+  const visibleRows = useMemo(() => rows.filter((row) => customerType === "全部" || row.customerType === customerType), [rows, customerType]);
+  const visibleIds = useMemo(() => visibleRows.map((row) => row.id), [visibleRows]);
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+  const openDelete = (ids: string[]) => {
+    const targetRows = rows.filter((row) => ids.includes(row.id));
+    setDeleteTarget({ ids, labels: targetRows.map((row) => row.dealerShort || row.dealerFull), kind: "白名单客户" });
+  };
+  const toggleVisibleRows = () => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
+      else visibleIds.forEach((id) => next.add(id));
+      return [...next];
+    });
+  };
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    onDelete?.(deleteTarget.ids);
+    setSelectedIds((current) => current.filter((id) => !deleteTarget.ids.includes(id)));
+    setDeleteTarget(null);
+  };
   return (
     <>
       <div className="data-filters">
-        <label><span>客户类型</span><select value={customerType} onChange={(e) => setCustomerType(e.target.value)}><option>全部</option><option>综合客户</option><option>特渠专业客户</option></select></label>
-        <small>当前显示 {visibleRows.length} 名客户</small>
+        <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setSelectedIds([]); }}><option>全部</option><option>综合客户</option><option>特渠专业客户</option></select></label>
+        <small>当前显示 {visibleRows.length} 名客户{allowDelete ? "，可勾选删除" : "，导入确认前可编辑"}</small>
       </div>
+      {allowDelete && selectedIds.length > 0 && <div className="selection-toolbar"><span>已选择 <b>{selectedIds.length}</b> 名客户</span><div><button type="button" className="selection-clear" onClick={() => setSelectedIds([])}>取消选择</button><button type="button" className="selection-delete" onClick={() => openDelete(selectedIds)}>删除所选</button></div></div>}
       <div className="table-scroll">
-        <div className="data-table whitelist-table">
-          <div className="table-row table-head">{heads.map((x) => <b key={x}>{x}</b>)}</div>
+        <div className={`data-table whitelist-table ${allowDelete ? "with-selection" : ""}`}>
+          <div className="table-row table-head">{allowDelete && <b className="select-cell"><input type="checkbox" aria-label="全选当前白名单" checked={allVisibleSelected} onChange={toggleVisibleRows} /></b>}{heads.map((x) => <b key={x}>{x}</b>)}</div>
           {visibleRows.map((row) => {
             const values = [row.sequence, row.customerType, row.region, row.branch, row.dealerShort, row.dealerFull, row.dealerType, row.dealerName, row.dealerPhone, row.confirmerName, row.confirmerPhone];
-            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{values.map((value, index) => <span key={index}>{value}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{row.manuallyEdited && <small>已修正</small>}</span></div>;
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择白名单客户 ${row.dealerShort}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index}>{value}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
+          {visibleRows.length === 0 && <div className="table-empty">当前筛选条件下没有白名单客户</div>}
         </div>
       </div>
+      {deleteTarget && <DeleteConfirmDialog target={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={confirmDelete} />}
     </>
   );
 }
@@ -1008,6 +1087,16 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
   const productUpdatedCount = Math.min(4, parsedProductCount);
   const productNewCount = Math.max(0, parsedProductCount - productUpdatedCount);
   const productRetiredCount = parsedProductCount > 0 ? (parsedProductCount === 242 ? 42 : Math.max(1, Math.round(parsedProductCount * 0.1))) : 0;
+  const deleteProductRows = (ids: string[]) => {
+    setProductRows((current) => current.filter((row) => !ids.includes(row.id)));
+    setEditingProductRow((current) => current && ids.includes(current.id) ? null : current);
+    setActionNotice(`已删除 ${ids.length} 条商品，已有订单明细和金额不受影响。`);
+  };
+  const deleteWhitelistRows = (ids: string[]) => {
+    setWhitelistRows((current) => current.filter((row) => !ids.includes(row.id)));
+    setEditingWhitelistRow((current) => current && ids.includes(current.id) ? null : current);
+    setActionNotice(`已删除 ${ids.length} 名白名单客户，已有订单不会被删除。`);
+  };
   return (
     <section className="admin-app">
       <aside className="admin-sidebar">
@@ -1046,7 +1135,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
               ))}
             </div>}
             {!productImportCompleted && (productFiles.special || productFiles.general) && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{parsedProductFileCount} 个文件解析完成 · 等待确认</b><small>客户类型由文件确定，返利状态由 Sheet 自动确定</small></p><strong>{parsedProductCount} 条商品</strong></div><div className="warning-box"><b>确认后将覆盖对应客户类型的上次 Excel 导入结果</b><span>预计新增 {productNewCount} 条、更新 {productUpdatedCount} 条、停用旧数据 {productRetiredCount} 条；手动添加的数据保留。缺少吨箱转换系数等信息的商品标记为“待完善”。表格中的解析结果可先编辑修正。</span></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} /><button className="admin-primary wide" onClick={() => { setProductImportCompleted(true); setActionNotice("商品导入完成，已覆盖对应 Excel 数据；手动添加的数据已保留。当前原型不会写入后端。"); }}>确认导入 {parsedProductCount} 条商品</button></div>}
-            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品导入完成</b><small>对应客户类型的上次 Excel 数据已覆盖；手动添加的数据保留，7 条信息不完整的商品待完善。</small></p><div><strong>{parsedProductCount}</strong><small>本次导入</small></div><div><strong>{productNewCount}</strong><small>新增</small></div><div><strong>{productUpdatedCount}</strong><small>更新</small></div><div><strong>{productRetiredCount}</strong><small>停用旧数据</small></div></div><div className="data-section-title"><div><b>当前活动商品</b><span>最近导入：特渠 50 条 · 综合 192 条 · 手动添加数据已保留</span></div><button onClick={() => setProductImportCompleted(false)}>查看本次导入结果</button></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} /></>}
+            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品导入完成</b><small>对应客户类型的上次 Excel 数据已覆盖；手动添加的数据保留，7 条信息不完整的商品待完善。</small></p><div><strong>{parsedProductCount}</strong><small>本次导入</small></div><div><strong>{productNewCount}</strong><small>新增</small></div><div><strong>{productUpdatedCount}</strong><small>更新</small></div><div><strong>{productRetiredCount}</strong><small>停用旧数据</small></div></div><div className="data-section-title"><div><b>当前活动商品</b><span>最近导入：特渠 50 条 · 综合 192 条 · 手动添加数据已保留</span></div><button onClick={() => setProductImportCompleted(false)}>查看本次导入结果</button></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} allowDelete={productImportCompleted} onDelete={deleteProductRows} /></>}
           </div>
         )}
         {tab === "白名单" && (
@@ -1055,7 +1144,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
             {!whitelistImportCompleted && <div className="import-rule-hint"><b>Excel 覆盖规则</b><span>本次上传会覆盖综合客户白名单和特渠客户白名单的上一次 Excel 导入结果；相同手机号自动更新，旧名单中不再存在的客户将停用，手动添加的数据保留。</span></div>}
             {!whitelistImportCompleted && whitelistFile && <><div className="whitelist-file-summary"><span className="success-icon">✓</span><p><b>{whitelistFile}</b><small>只读取“综合客户白名单”和“特渠客户白名单”，其他 Sheet 自动忽略</small></p><div className="sheet-tags"><span>综合客户白名单</span><span>特渠客户白名单</span></div></div><div className="warning-box"><b>确认后将覆盖上次 Excel 白名单</b><span>预计新增 1,676 条、更新 4 条、停用旧数据 9 条；手动添加的数据保留。另有 9 个手机号格式异常，请在活动发布前处理。表格中的解析结果可先编辑修正。</span></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} /><button className="admin-primary wide" onClick={() => { setWhitelistImportCompleted(true); setActionNotice("白名单导入完成，已覆盖 Excel 数据；手动添加的数据已保留。当前原型不会写入后端。"); }}>确认导入 1,689 条白名单</button></>}
             {!whitelistImportCompleted && !whitelistFile && <div className="upload-zone compact-upload"><span>XL</span><h3>选择白名单 Excel</h3><p>仅解析“综合客户白名单”和“特渠客户白名单”两个 Sheet</p><label className="secondary-button file-button"><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) setWhitelistFile(file.name); }} />选择 Excel 文件</label></div>}
-            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单导入完成</b><small>两个白名单 Sheet 已覆盖上次 Excel 数据；手动添加的数据保留，9 条手机号异常数据待处理。</small></p><div><strong>1,689</strong><small>本次导入</small></div><div><strong>1,676</strong><small>新增</small></div><div><strong>4</strong><small>更新</small></div><div><strong>9</strong><small>停用/待处理</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>综合客户 1,073 名 · 特渠专业客户 607 名 · 手动添加数据已保留</span></div><button onClick={() => setWhitelistImportCompleted(false)}>查看本次导入结果</button></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} /></>}
+            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单导入完成</b><small>两个白名单 Sheet 已覆盖上次 Excel 数据；手动添加的数据保留，9 条手机号异常数据待处理。</small></p><div><strong>1,689</strong><small>本次导入</small></div><div><strong>1,676</strong><small>新增</small></div><div><strong>4</strong><small>更新</small></div><div><strong>9</strong><small>停用/待处理</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>综合客户 1,073 名 · 特渠专业客户 607 名 · 手动添加数据已保留</span></div><button onClick={() => setWhitelistImportCompleted(false)}>查看本次导入结果</button></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} allowDelete={whitelistImportCompleted} onDelete={deleteWhitelistRows} /></>}
           </div>
         )}
         {tab === "订单管理" && <OrderManagement activityClosed={activityClosed} />}
