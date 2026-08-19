@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import JSZip from "jszip";
 import * as XLSX from "xlsx";
 
 type Surface = "h5" | "ranking" | "report" | "lottery" | "admin";
@@ -37,6 +38,8 @@ type Product = {
   status: "有效" | "待完善" | "停用";
   materialCode?: string;
   casePack?: string;
+  imageUrl?: string;
+  imageUrls?: string[];
 };
 
 const mockWhitelistIdentities: MockWhitelistIdentity[] = [
@@ -75,6 +78,7 @@ function splitBranchScope(value: string) {
 
 function productRowToProduct(row: ProductImportRow): Product {
   const lineAtlas = row.line === "酱油" ? 1 : row.line === "食醋" ? 2 : row.gift === "是" ? 3 : 0;
+  const imageUrls = row.imageStatus === "已匹配" || row.imageStatus === "手动维护" ? row.images?.map((image) => image.url) : [];
   return {
     id: row.id,
     name: row.materialName,
@@ -89,6 +93,8 @@ function productRowToProduct(row: ProductImportRow): Product {
     status: row.status,
     materialCode: row.materialCode,
     casePack: row.casePack,
+    imageUrl: imageUrls?.[0],
+    imageUrls,
   };
 }
 
@@ -256,7 +262,7 @@ async function parseWhitelistWorkbook(file: File): Promise<WhitelistImportParseR
         status,
         source: "excel",
         sourceSheet: config.name,
-        identityKey: `${config.customerType}:${dealerPhone}`,
+        identityKey: `${config.customerType}:${normalizeWhitelistName(get(values, "经销商名称（全）"))}`,
       });
     }
     const blankOrInvalidCount = parsedRows.filter(({ dealerPhone }) => !/^1\d{10}$/.test(dealerPhone)).length;
@@ -325,8 +331,56 @@ function FestivalDecor() {
   );
 }
 
-function ProductArt({ atlas }: { atlas: number }) {
-  return <span className={`product-art atlas-${atlas}`} role="img" aria-label="临时商品图" />;
+function ProductArt({ atlas, imageUrl, alt = "商品图片" }: { atlas: number; imageUrl?: string; alt?: string }) {
+  return imageUrl ? <img className="product-art product-photo" src={imageUrl} alt={alt} /> : <span className={`product-art atlas-${atlas}`} role="img" aria-label="临时商品图" />;
+}
+
+type PreviewImage = { url: string; fileName?: string };
+
+function ProductImageViewer({ productName, images, initialIndex = 0, status, onClose }: { productName: string; images: PreviewImage[]; initialIndex?: number; status?: string; onClose: () => void }) {
+  const [activeIndex, setActiveIndex] = useState(Math.min(Math.max(initialIndex, 0), Math.max(images.length - 1, 0)));
+  const [zoomed, setZoomed] = useState(false);
+  const touchStartX = useRef<number | null>(null);
+  const currentImage = images[activeIndex];
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+      if (images.length > 1 && event.key === "ArrowLeft") setActiveIndex((index) => (index - 1 + images.length) % images.length);
+      if (images.length > 1 && event.key === "ArrowRight") setActiveIndex((index) => (index + 1) % images.length);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [images.length, onClose]);
+  if (!currentImage) return null;
+  const goTo = (index: number) => {
+    setActiveIndex((index + images.length) % images.length);
+    setZoomed(false);
+  };
+  const handleTouchEnd = (event: React.TouchEvent) => {
+    if (touchStartX.current === null || images.length < 2) return;
+    const distance = event.changedTouches[0].clientX - touchStartX.current;
+    if (Math.abs(distance) > 45) goTo(activeIndex + (distance < 0 ? 1 : -1));
+    touchStartX.current = null;
+  };
+  return (
+    <div className="product-image-viewer" role="dialog" aria-modal="true" aria-label={`${productName}图片预览`} onClick={onClose}>
+      <div className="product-image-viewer-panel" onClick={(event) => event.stopPropagation()}>
+        <header><div><b>{productName}</b><small>{images.length > 1 ? `${activeIndex + 1} / ${images.length}` : "商品图片"}{status ? ` · ${status}` : ""}</small></div><button type="button" aria-label="关闭图片预览" onClick={onClose}>×</button></header>
+        <div className={`product-image-viewer-stage ${zoomed ? "zoomed" : ""}`} onTouchStart={(event) => { touchStartX.current = event.touches[0].clientX; }} onTouchEnd={handleTouchEnd}>
+          {images.length > 1 && <button type="button" className="product-image-viewer-arrow prev" aria-label="上一张图片" onClick={() => goTo(activeIndex - 1)}>‹</button>}
+          <img src={currentImage.url} alt={`${productName} ${activeIndex + 1}`} onClick={() => setZoomed((value) => !value)} />
+          {images.length > 1 && <button type="button" className="product-image-viewer-arrow next" aria-label="下一张图片" onClick={() => goTo(activeIndex + 1)}>›</button>}
+        </div>
+        <footer><span>{currentImage.fileName || `${activeIndex + 1} / ${images.length}`}</span><button type="button" className="product-image-viewer-zoom" onClick={() => setZoomed((value) => !value)}>{zoomed ? "还原大小" : "放大图片"}</button></footer>
+        {images.length > 1 && <div className="product-image-viewer-thumbs" aria-label="图片缩略图列表">{images.map((image, index) => <button type="button" key={`${image.url}-${index}`} className={index === activeIndex ? "active" : ""} aria-label={`查看第 ${index + 1} 张图片`} onClick={() => goTo(index)}><img src={image.url} alt="" /></button>)}</div>}
+      </div>
+    </div>
+  );
 }
 
 type SubmittedOrderItem = { product: Product; quantity: number };
@@ -344,6 +398,7 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { 
   const [rebate, setRebate] = useState(true);
   const [line, setLine] = useState("全部");
   const [search, setSearch] = useState("");
+  const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [orderStatus, setOrderStatus] = useState<H5OrderStatus>("none");
   const [submitMode, setSubmitMode] = useState<"first" | "update">("first");
@@ -543,7 +598,7 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { 
               <div className="product-list">
                 {visibleProducts.map((product) => (
                   <article className="product-card" key={product.id}>
-                    <div className="product-image"><ProductArt atlas={product.atlas} />{product.gift && <span className="gift-badge">礼盒</span>}</div>
+                    <button type="button" className="product-image product-image-button" disabled={!product.imageUrls?.length} aria-label={`查看${product.name}商品图片`} onClick={() => product.imageUrls?.length && setPreviewProduct(product)}><ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />{product.gift && <span className="gift-badge">礼盒</span>}</button>
                     <div className="product-info">
                       <span className="material-code">物料 {product.materialCode || `原型-${product.id}`}</span>
                       <h3>{product.name}</h3>
@@ -578,7 +633,7 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { 
                 <div className="cart-sheet-list">
                   {selected.map((product) => (
                     <article key={product.id}>
-                      <ProductArt atlas={product.atlas} />
+                      <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
                       <div className="cart-item-info">
                         <b>{product.name}</b>
                         <span>{product.spec} · ¥{money(product.price)}/箱</span>
@@ -608,7 +663,7 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { 
               <div className="confirm-list">
                 {selected.map((product) => (
                   <div key={product.id}>
-                    <ProductArt atlas={product.atlas} />
+                    <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
                     <p><b>{product.name}</b><span>{product.spec} · ¥{money(product.price)}/箱</span></p>
                     <strong>× {quantities[product.id]}</strong>
                   </div>
@@ -655,7 +710,7 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { 
               <div className="confirm-list submitted-list">
                 {orderViewSelected.map((product) => (
                   <div key={product.id}>
-                    <ProductArt atlas={product.atlas} />
+                    <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
                     <p><b>{product.name}</b><span>{product.spec} · ¥{money(product.price)}/箱</span></p>
                     <strong>× {orderViewQuantities[product.id]}</strong>
                   </div>
@@ -706,6 +761,7 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { 
           )}
         </div>
       </div>
+      {previewProduct && <ProductImageViewer productName={previewProduct.name} images={(previewProduct.imageUrls ?? []).map((url, index) => ({ url, fileName: `${previewProduct.name} · 第 ${index + 1} 张` }))} onClose={() => setPreviewProduct(null)} />}
     </div>
   );
 }
@@ -1023,6 +1079,40 @@ type ProductImportRow = {
   manuallyEdited?: boolean;
   source?: "excel" | "manual";
   sourceSheet?: string;
+  images?: ProductImageAsset[];
+  imageStatus?: ProductImageStatus;
+  importAction?: ProductImportAction;
+};
+
+type ProductImportAction = "新增" | "更新" | "未变更" | "疑似重复" | "待确认";
+
+type ProductImportStats = {
+  added: number;
+  updated: number;
+  unchanged: number;
+  suspected: number;
+  pending: number;
+};
+
+const emptyProductImportStats: ProductImportStats = { added: 0, updated: 0, unchanged: 0, suspected: 0, pending: 0 };
+
+type ProductImageStatus = "未上传" | "已匹配" | "待确认" | "未匹配" | "手动维护";
+
+type ProductImageSource = "zip" | "manual";
+
+type ProductImageAsset = {
+  id: string;
+  fileName: string;
+  url: string;
+  normalizedName: string;
+  source?: ProductImageSource;
+};
+
+type ProductImageStats = {
+  totalImages: number;
+  matchedProducts: number;
+  pendingProducts: number;
+  unmatchedProducts: number;
 };
 
 type WhitelistRow = {
@@ -1043,6 +1133,162 @@ type WhitelistRow = {
   source?: "excel" | "manual";
   sourceSheet?: string;
   manuallyEdited?: boolean;
+  importAction?: WhitelistImportAction;
+};
+
+type WhitelistImportAction = "新增" | "电话已更新" | "信息已更新" | "未变更" | "名称重复" | "电话待处理" | "名称待处理";
+
+type WhitelistImportStats = {
+  added: number;
+  phoneUpdated: number;
+  updated: number;
+  unchanged: number;
+  duplicateName: number;
+  pendingPhone: number;
+  pendingName: number;
+};
+
+const emptyWhitelistImportStats: WhitelistImportStats = { added: 0, phoneUpdated: 0, updated: 0, unchanged: 0, duplicateName: 0, pendingPhone: 0, pendingName: 0 };
+
+type AttendanceRow = {
+  id: string;
+  sequence: number;
+  dealerName: string;
+  contactPhone: string;
+  branch: string;
+  dealerCompany: string;
+  customerType: string;
+  manuallyEdited?: boolean;
+};
+
+function normalizeWhitelistName(value: string) {
+  return normalizeSearchText(value).replace(/[\s\-_/\\()[\]【】{}：:，,。·]/g, "");
+}
+
+function whitelistIdentityKey(row: WhitelistRow) {
+  const name = normalizeWhitelistName(row.dealerFull);
+  return name ? `${row.customerType}:${name}` : "";
+}
+
+function whitelistPhoneIsValid(value: string) {
+  return /^1\d{10}$/.test(normalizePhone(value));
+}
+
+function whitelistProfileEqual(a: WhitelistRow, b: WhitelistRow) {
+  const fields: Array<keyof WhitelistRow> = ["customerType", "region", "branch", "dealerShort", "dealerFull", "dealerType", "dealerName", "confirmerName", "confirmerPhone"];
+  return fields.every((field) => String(a[field] ?? "").trim() === String(b[field] ?? "").trim());
+}
+
+function whitelistRowsEqual(a: WhitelistRow, b: WhitelistRow) {
+  return whitelistProfileEqual(a, b) && normalizePhone(a.dealerPhone) === normalizePhone(b.dealerPhone) && a.status === b.status;
+}
+
+function cloneWhitelistRows(rows: WhitelistRow[]) {
+  return rows.map((row) => ({ ...row }));
+}
+
+function getCrossSheetPhoneCount(rows: WhitelistRow[]) {
+  const phonesByType = new Map<string, Set<WhitelistRow["customerType"]>>();
+  rows.forEach((row) => {
+    const phone = normalizePhone(row.dealerPhone);
+    if (!whitelistPhoneIsValid(phone) || row.status !== "有效") return;
+    const types = phonesByType.get(phone) ?? new Set<WhitelistRow["customerType"]>();
+    types.add(row.customerType);
+    phonesByType.set(phone, types);
+  });
+  return [...phonesByType.values()].filter((types) => types.size > 1).length;
+}
+
+function mergeWhitelistImportRows(existingRows: WhitelistRow[], incomingRows: WhitelistRow[]) {
+  const rows = existingRows.map((row) => ({ ...row, importAction: undefined }));
+  const stats: WhitelistImportStats = { ...emptyWhitelistImportStats };
+  const warnings: string[] = [];
+  const incomingNameCounts = new Map<string, number>();
+  incomingRows.forEach((row) => {
+    const key = whitelistIdentityKey(row);
+    if (key) incomingNameCounts.set(key, (incomingNameCounts.get(key) ?? 0) + 1);
+  });
+
+  incomingRows.forEach((incomingRow) => {
+    const identityKey = whitelistIdentityKey(incomingRow);
+    const incomingPhoneValid = whitelistPhoneIsValid(incomingRow.dealerPhone);
+    const incomingPhonePending = !incomingPhoneValid || incomingRow.status !== "有效";
+    const nameIsMissing = !identityKey;
+    const nameIsDuplicated = Boolean(identityKey && (incomingNameCounts.get(identityKey) ?? 0) > 1);
+
+    if (nameIsMissing || nameIsDuplicated) {
+      rows.push({ ...incomingRow, status: "待处理", identityKey: identityKey || undefined, importAction: nameIsMissing ? "名称待处理" : "名称重复" });
+      if (nameIsMissing) stats.pendingName += 1;
+      else stats.duplicateName += 1;
+      return;
+    }
+
+    const matchingIndexes = rows.map((row, index) => whitelistIdentityKey(row) === identityKey ? index : -1).filter((index) => index >= 0);
+    if (matchingIndexes.length > 1) {
+      rows.push({ ...incomingRow, status: "待处理", identityKey, importAction: "名称重复" });
+      stats.duplicateName += 1;
+      return;
+    }
+
+    if (matchingIndexes.length === 1) {
+      const matchedIndex = matchingIndexes[0];
+      const current = rows[matchedIndex];
+      const nextPhone = incomingPhonePending && whitelistPhoneIsValid(current.dealerPhone) ? current.dealerPhone : incomingRow.dealerPhone;
+      const nextStatus: WhitelistRow["status"] = incomingPhonePending ? "待处理" : "有效";
+      const nextRow: WhitelistRow = {
+        ...current,
+        ...incomingRow,
+        id: current.id,
+        sequence: incomingRow.sequence,
+        source: current.source === "manual" ? "manual" : "excel",
+        sourceSheet: incomingRow.sourceSheet,
+        identityKey,
+        dealerPhone: nextPhone,
+        status: nextStatus,
+        importAction: undefined,
+        manuallyEdited: current.manuallyEdited,
+      };
+      if (incomingPhonePending) {
+        nextRow.importAction = "电话待处理";
+        stats.pendingPhone += 1;
+      } else if (normalizePhone(current.dealerPhone) !== normalizePhone(incomingRow.dealerPhone)) {
+        nextRow.importAction = "电话已更新";
+        stats.phoneUpdated += 1;
+      } else if (whitelistRowsEqual(current, nextRow)) {
+        nextRow.importAction = "未变更";
+        stats.unchanged += 1;
+      } else {
+        nextRow.importAction = "信息已更新";
+        stats.updated += 1;
+      }
+      rows[matchedIndex] = nextRow;
+      return;
+    }
+
+    const nextRow: WhitelistRow = { ...incomingRow, identityKey, status: incomingPhonePending ? "待处理" : "有效", importAction: incomingPhonePending ? "电话待处理" : "新增" };
+    rows.push(nextRow);
+    stats.added += 1;
+    if (incomingPhonePending) stats.pendingPhone += 1;
+  });
+
+  if (stats.duplicateName > 0) warnings.push(`有 ${stats.duplicateName} 条白名单客户在同一客户类型下名称全称重复，已标记为“名称重复”。`);
+  if (stats.pendingName > 0) warnings.push(`有 ${stats.pendingName} 条白名单客户缺少经销商名称全称，已标记为“名称待处理”。`);
+  if (stats.pendingPhone > 0) warnings.push(`有 ${stats.pendingPhone} 条白名单客户电话为空、格式异常或存在重复，已标记为“电话待处理”。`);
+  return { rows, stats, warnings };
+}
+
+function clearWhitelistImportAction(row: WhitelistRow) {
+  const cleanRow = { ...row };
+  delete cleanRow.importAction;
+  return cleanRow;
+}
+
+type AttendanceFieldKey = "dealerName" | "contactPhone" | "branch" | "dealerCompany" | "customerType";
+
+type AttendanceImportParseResult = {
+  rows: AttendanceRow[];
+  warnings: string[];
+  sheetCounts: Array<{ name: string; count: number }>;
 };
 
 let localImportRowId = 0;
@@ -1050,6 +1296,107 @@ const createImportRowId = (prefix: string) => {
   localImportRowId += 1;
   return `${prefix}-${localImportRowId}`;
 };
+
+function normalizeProductIdentityText(value: string) {
+  return normalizeSearchText(value).replace(/[\s\-_/\\()[\]【】{}：:，,。·×xX*]/g, "");
+}
+
+function productChannelKey(row: ProductImportRow) {
+  return `${row.customerType}|${row.rebate}`;
+}
+
+function productCodeKey(row: ProductImportRow) {
+  const code = normalizeMaterialCode(row.materialCode);
+  return code ? `${productChannelKey(row)}|${code}` : "";
+}
+
+function productNoCodeKey(row: ProductImportRow) {
+  return `${productChannelKey(row)}|${normalizeProductIdentityText(row.materialName)}|${normalizeProductIdentityText(row.spec)}|${normalizeProductIdentityText(row.casePack)}`;
+}
+
+function productNameKey(row: ProductImportRow) {
+  return `${productChannelKey(row)}|${normalizeProductIdentityText(row.materialName)}`;
+}
+
+function productRowsEqual(a: ProductImportRow, b: ProductImportRow) {
+  const fields: Array<keyof ProductImportRow> = ["customerType", "rebate", "category", "line", "materialCode", "materialName", "brand", "variety", "spec", "casePack", "unitPrice", "casePrice", "conversion", "gift", "branchScope", "status"];
+  return fields.every((field) => String(a[field] ?? "").trim() === String(b[field] ?? "").trim());
+}
+
+function mergeProductImportRows(existingRows: ProductImportRow[], incomingRows: ProductImportRow[]) {
+  const rows = existingRows.map((row) => ({ ...row, importAction: undefined }));
+  const stats: ProductImportStats = { ...emptyProductImportStats };
+  const warnings: string[] = [];
+
+  incomingRows.forEach((incomingRow) => {
+    const code = productCodeKey(incomingRow);
+    const legacyKey = productNoCodeKey(incomingRow);
+    let matchingIndexes = code
+      ? rows.map((row, index) => productCodeKey(row) === code ? index : -1).filter((index) => index >= 0)
+      : rows.map((row, index) => !row.materialCode.trim() && productNoCodeKey(row) === legacyKey ? index : -1).filter((index) => index >= 0);
+
+    // 首次没有物料代码、后续补上物料代码时，允许唯一的无代码旧记录被识别为同一商品。
+    if (matchingIndexes.length === 0 && code) {
+      matchingIndexes = rows.map((row, index) => !row.materialCode.trim() && productNoCodeKey(row) === legacyKey ? index : -1).filter((index) => index >= 0);
+    }
+
+    if (matchingIndexes.length > 1) {
+      stats.pending += 1;
+      rows.push({ ...incomingRow, importAction: "待确认" });
+      return;
+    }
+
+    if (matchingIndexes.length === 1) {
+      const matchedIndex = matchingIndexes[0];
+      const current = rows[matchedIndex];
+      const manualImages = current.images?.filter((image) => image.source === "manual") ?? [];
+      const same = productRowsEqual(current, incomingRow);
+      rows[matchedIndex] = {
+        ...current,
+        ...incomingRow,
+        id: current.id,
+        images: manualImages.length > 0 ? manualImages : incomingRow.images,
+        imageStatus: manualImages.length > 0 ? "手动维护" : incomingRow.imageStatus,
+        manuallyEdited: current.manuallyEdited,
+        importAction: same ? "未变更" : "更新",
+      };
+      if (same) stats.unchanged += 1;
+      else stats.updated += 1;
+      return;
+    }
+
+    const sameNameExists = rows.some((row) => productNameKey(row) === productNameKey(incomingRow));
+    const importAction: ProductImportAction = sameNameExists ? "疑似重复" : "新增";
+    rows.push({ ...incomingRow, importAction });
+    if (importAction === "疑似重复") stats.suspected += 1;
+    else stats.added += 1;
+  });
+
+  if (stats.suspected > 0) warnings.push(`有 ${stats.suspected} 条商品名称相同但未能按物料代码唯一匹配，已标记为“疑似重复”，请确认后再导入。`);
+  if (stats.pending > 0) warnings.push(`有 ${stats.pending} 条商品存在多个候选匹配，已标记为“待确认”，请编辑或删除异常行。`);
+  return { rows, stats, warnings };
+}
+
+function clearProductImportAction(row: ProductImportRow) {
+  const cleanRow = { ...row };
+  delete cleanRow.importAction;
+  return cleanRow;
+}
+
+function cloneProductRows(rows: ProductImportRow[]) {
+  return rows.map((row) => ({ ...row, images: row.images ? [...row.images] : undefined }));
+}
+
+const initialAttendanceRows: AttendanceRow[] = [
+  { id: "attendance-demo-1", sequence: 1, dealerName: "王惠", contactPhone: "13800000001", branch: "长沙分", dealerCompany: "长沙久茂食品有限公司", customerType: "综合客户" },
+  { id: "attendance-demo-2", sequence: 2, dealerName: "刘宇剑", contactPhone: "13800000002", branch: "长沙分", dealerCompany: "湘潭餐乐商贸有限公司", customerType: "综合客户" },
+  { id: "attendance-demo-3", sequence: 3, dealerName: "赵敏", contactPhone: "13800000003", branch: "北京分", dealerCompany: "北京惠通达行商贸有限公司", customerType: "综合客户" },
+  { id: "attendance-demo-4", sequence: 4, dealerName: "陈涛", contactPhone: "13800000004", branch: "武汉分", dealerCompany: "湖北中合誉品商贸有限公司", customerType: "综合客户" },
+  { id: "attendance-demo-5", sequence: 5, dealerName: "王凡", contactPhone: "13800000005", branch: "长沙分", dealerCompany: "深圳市智臻云采科技有限公司", customerType: "特渠专业客户" },
+  { id: "attendance-demo-6", sequence: 6, dealerName: "郑总", contactPhone: "13800000006", branch: "厦门分", dealerCompany: "泉州乐食光商贸有限公司", customerType: "特渠专业客户" },
+  { id: "attendance-demo-7", sequence: 7, dealerName: "李想", contactPhone: "13800000007", branch: "北京分", dealerCompany: "北京谷力供应链管理有限公司", customerType: "特渠专业客户" },
+  { id: "attendance-demo-8", sequence: 8, dealerName: "周宁", contactPhone: "13800000008", branch: "上海分", dealerCompany: "上海爱尚真贸易有限公司", customerType: "综合客户" },
+];
 
 const initialProductImportRows: ProductImportRow[] = [
   { id: "product-1", sequence: 1, customerType: "特渠", rebate: "参与", category: "特渠定制产品", line: "调味油", materialCode: "7245-0002307", materialName: "金芝御礼225ML×4礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "225mL×5", casePack: "5盒/箱", unitPrice: "34.50", casePrice: "172.50", conversion: "0.00092", gift: "是", branchScope: "", status: "有效", source: "excel", sourceSheet: "特渠参与返利" },
@@ -1065,10 +1412,220 @@ const initialWhitelistRows: WhitelistRow[] = [
   { id: "whitelist-4", sequence: 2, customerType: "特渠专业客户", region: "南区", branch: "厦门分", dealerShort: "泉州乐食光", dealerFull: "泉州乐食光商贸有限公司", dealerType: "特渠专业经销商", dealerName: "郑总", dealerPhone: "15212347241", confirmerName: "窦任重", confirmerPhone: "18612342331", status: "有效", source: "excel" },
 ];
 
+const attendanceFieldConfig: Array<{ key: AttendanceFieldKey; label: string; aliases: string[] }> = [
+  { key: "dealerName", label: "经销商姓名", aliases: ["经销商姓名", "联系人姓名", "客户姓名", "姓名"] },
+  { key: "contactPhone", label: "联系电话", aliases: ["联系电话", "经销商电话", "手机号", "手机号码", "电话"] },
+  { key: "branch", label: "分公司", aliases: ["分公司", "分公司名称", "所属分公司"] },
+  { key: "dealerCompany", label: "经销商名称", aliases: ["经销商名称", "经销商名称（全）", "经销商全称", "客户名称", "单位名称"] },
+  { key: "customerType", label: "客户类型", aliases: ["客户类型", "客户类别", "订货通道", "渠道类型"] },
+];
+
+function findAttendanceFieldIndex(header: string[], aliases: string[]) {
+  const normalized = header.map(normalizedHeader);
+  const normalizedAliases = aliases.map(normalizedHeader);
+  const exactIndex = normalized.findIndex((value) => normalizedAliases.includes(value));
+  if (exactIndex >= 0) return exactIndex;
+  return normalized.findIndex((value) => normalizedAliases.some((alias) => value.includes(alias)));
+}
+
+async function parseAttendanceWorkbook(file: File): Promise<AttendanceImportParseResult> {
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", raw: false });
+  const rows: AttendanceRow[] = [];
+  const warnings: string[] = [];
+  const sheetCounts: Array<{ name: string; count: number }> = [];
+  for (const sheetName of workbook.SheetNames) {
+    const sheet = workbook.Sheets[sheetName];
+    if (!sheet) continue;
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false });
+    const headerIndex = matrix.findIndex((values) => values.filter((value) => textCell(value) !== "").length >= 2);
+    if (headerIndex < 0) {
+      warnings.push(`${sheetName} 没有识别到表头，已跳过。`);
+      continue;
+    }
+    const header = (matrix[headerIndex] ?? []).map((value) => textCell(value));
+    const indexes = Object.fromEntries(attendanceFieldConfig.map((field) => [field.key, findAttendanceFieldIndex(header, field.aliases)])) as Record<AttendanceFieldKey, number>;
+    const missingFields = attendanceFieldConfig.filter((field) => indexes[field.key] < 0).map((field) => field.label);
+    if (missingFields.length > 0) warnings.push(`${sheetName} 未识别到：${missingFields.join("、")}；已保留为空，仍可继续导入。`);
+    let sheetCount = 0;
+    for (let index = headerIndex + 1; index < matrix.length; index += 1) {
+      const values = matrix[index] ?? [];
+      if (values.every((value) => textCell(value) === "")) continue;
+      const get = (field: AttendanceFieldKey) => indexes[field] >= 0 ? textCell(values[indexes[field]]) : "";
+      rows.push({
+        id: createImportRowId("attendance"),
+        sequence: rows.length + 1,
+        dealerName: get("dealerName"),
+        contactPhone: get("contactPhone"),
+        branch: get("branch"),
+        dealerCompany: get("dealerCompany"),
+        customerType: get("customerType"),
+      });
+      sheetCount += 1;
+    }
+    sheetCounts.push({ name: sheetName, count: sheetCount });
+  }
+  if (rows.length === 0) throw new Error("Excel 中没有找到可展示的数据行，请检查文件内容。" );
+  return { rows, warnings, sheetCounts };
+}
+
+const productImageExtensions = /\.(jpg|jpeg|png|webp|gif|bmp)$/i;
+
+function productImageBaseName(path: string) {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+function normalizeProductImageName(value: string) {
+  return productImageBaseName(value)
+    .replace(productImageExtensions, "")
+    .replace(/^20\d{6,8}/, "")
+    .replace(/[-_](?:o|ok)$/i, "")
+    .replace(/(?:主图|正面|背面|侧面|清晰图|清)\d*$/g, "")
+    .replace(/(?:主图|正面|背面|侧面|清晰图|清)\d*$/g, "")
+    .replace(/毫升/g, "ml")
+    .replace(/[＊xX*]/g, "×")
+    .replace(/\s+/g, "")
+    .replace(/[-_，,。·／/\\()[\]【】{}：:]/g, "")
+    .toLocaleLowerCase("zh-CN");
+}
+
+function productImageNameVariants(value: string) {
+  const normalized = normalizeProductImageName(value);
+  const withoutPackCount = normalized.replace(/×\d+$/, "");
+  const withoutPackaging = normalized.replace(/玻璃瓶|纸箱|塑料袋|pe瓶|pet|葫芦瓶|礼盒随货|组装好发货|天津定制|河南定制|北京定制|武汉分特渠/g, "");
+  const variants = [
+    normalized,
+    withoutPackCount,
+    withoutPackaging,
+    withoutPackaging.replace(/×\d+$/, ""),
+    normalized.replace(/×/g, ""),
+    withoutPackaging.replace(/×/g, ""),
+  ];
+  return [...new Set(variants)].filter((item) => item.length >= 6);
+}
+
+function productImageTextKey(value: string) {
+  return normalizeProductImageName(value).replace(/[0-9.×]/g, "");
+}
+
+function productImageNumberTokens(value: string) {
+  return new Set(normalizeProductImageName(value).match(/\d+(?:\.\d+)?/g) ?? []);
+}
+
+function productImageSimilarity(a: string, b: string) {
+  const first = [...new Set(Array.from(a).map((_, index) => a.slice(index, index + 2)).filter((item) => item.length === 2))];
+  const second = new Set(Array.from(b).map((_, index) => b.slice(index, index + 2)).filter((item) => item.length === 2));
+  if (first.length === 0 || second.size === 0) return a === b ? 1 : 0;
+  const common = first.filter((item) => second.has(item)).length;
+  return (2 * common) / (first.length + second.size);
+}
+
+function scoreProductImageMatch(materialName: string, fileName: string) {
+  const productVariants = productImageNameVariants(materialName);
+  const imageVariants = productImageNameVariants(fileName);
+  const strictMatch = productVariants.some((productVariant) => imageVariants.some((imageVariant) => imageVariant.includes(productVariant)));
+  if (strictMatch) return 1;
+  const productText = productImageTextKey(materialName);
+  const imageText = productImageTextKey(fileName);
+  const productNumbers = productImageNumberTokens(materialName);
+  const imageNumbers = productImageNumberTokens(fileName);
+  const commonNumbers = [...productNumbers].filter((item) => imageNumbers.has(item)).length;
+  if (productText.length < 6 || commonNumbers === 0) return 0;
+  const similarity = productImageSimilarity(productText, imageText);
+  return similarity >= 0.5 && commonNumbers / productNumbers.size >= 0.5 ? similarity * 0.8 + commonNumbers / productNumbers.size * 0.2 : 0;
+}
+
+function matchProductImages(rows: ProductImportRow[], assets: ProductImageAsset[]) {
+  const nextRows = rows.map((row) => {
+    const manualImages = row.images?.filter((asset) => asset.source === "manual") ?? [];
+    if (manualImages.length > 0 && row.imageStatus === "手动维护") return { ...row, images: manualImages, imageStatus: "手动维护" as const };
+    if (assets.length === 0) return { ...row, images: undefined, imageStatus: "未上传" as const };
+    const scored = assets.map((asset) => ({ asset, score: scoreProductImageMatch(row.materialName, asset.fileName) })).filter((item) => item.score > 0).sort((a, b) => b.score - a.score);
+    if (scored.length === 0) return { ...row, images: undefined, imageStatus: "未匹配" as const };
+    if (scored[0].score === 1) {
+      const exactAssets = scored.filter((item) => item.score === 1).map((item) => item.asset);
+      return { ...row, images: exactAssets, imageStatus: "已匹配" as const };
+    }
+    const best = scored[0];
+    const nextBest = scored[1];
+    const isUnique = best.score >= 0.6 && (!nextBest || best.score - nextBest.score >= 0.08);
+    return isUnique
+      ? { ...row, images: [best.asset], imageStatus: "已匹配" as const }
+      : { ...row, images: scored.slice(0, 4).map((item) => item.asset), imageStatus: "待确认" as const };
+  });
+  return {
+    rows: nextRows,
+    stats: {
+      totalImages: assets.length,
+      matchedProducts: nextRows.filter((row) => row.imageStatus === "已匹配").length,
+      pendingProducts: nextRows.filter((row) => row.imageStatus === "待确认").length,
+      unmatchedProducts: nextRows.filter((row) => row.imageStatus === "未匹配").length,
+    } satisfies ProductImageStats,
+  };
+}
+
+async function parseProductImageZip(file: File) {
+  const zip = await JSZip.loadAsync(await file.arrayBuffer());
+  const entries = Object.values(zip.files).filter((entry) => !entry.dir && productImageExtensions.test(entry.name));
+  if (entries.length === 0) throw new Error("ZIP 中没有找到 JPG、PNG、WEBP、GIF 或 BMP 图片。");
+  const assets = await Promise.all(entries.map(async (entry, index) => {
+    const blob = await entry.async("blob");
+    return { id: `product-image-${Date.now()}-${index}`, fileName: productImageBaseName(entry.name), url: URL.createObjectURL(blob), normalizedName: normalizeProductImageName(entry.name), source: "zip" } satisfies ProductImageAsset;
+  }));
+  return assets;
+}
+
+function revokeProductImageAssets(assets: ProductImageAsset[]) {
+  assets.filter((asset) => asset.source !== "manual").forEach((asset) => URL.revokeObjectURL(asset.url));
+}
+
+const maxManualProductImageSize = 10 * 1024 * 1024;
+
+function readManualProductImage(file: File) {
+  return new Promise<ProductImageAsset>((resolve, reject) => {
+    if (!productImageExtensions.test(file.name)) {
+      reject(new Error(`${file.name} 不是支持的图片格式，请选择 JPG、PNG、WEBP、GIF 或 BMP。`));
+      return;
+    }
+    if (file.size > maxManualProductImageSize) {
+      reject(new Error(`${file.name} 超过 10MB，请压缩图片后再上传。`));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        reject(new Error(`${file.name} 读取失败，请重新选择。`));
+        return;
+      }
+      resolve({
+        id: createImportRowId("product-image-manual"),
+        fileName: file.name,
+        url: reader.result,
+        normalizedName: normalizeProductImageName(file.name),
+        source: "manual",
+      });
+    };
+    reader.onerror = () => reject(new Error(`${file.name} 读取失败，请重新选择。`));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function createManualProductImageAssets(files: File[]) {
+  return Promise.all(files.map((file) => readManualProductImage(file)));
+}
+
+function productImageStatusForAssets(images: ProductImageAsset[] | undefined, previousStatus: ProductImageStatus = "未上传") {
+  if (!images?.length) return "未上传" as const;
+  if (images.some((asset) => asset.source === "manual")) return "手动维护" as const;
+  return previousStatus === "待确认" ? "待确认" as const : "已匹配" as const;
+}
+
 type DeleteTarget = {
   ids: string[];
   labels: string[];
   kind: "商品" | "白名单客户";
+  label?: string;
+  description?: string;
+  summary?: string;
 };
 
 const productSheetOrder = new Map(productSheetConfig.map((item, index) => [item.name, index]));
@@ -1091,16 +1648,16 @@ function compareWhitelistRows(a: WhitelistRow, b: WhitelistRow) {
 function DeleteConfirmDialog({ target, onCancel, onConfirm }: { target: DeleteTarget; onCancel: () => void; onConfirm: () => void }) {
   const labelPreview = target.labels.slice(0, 3).join("、");
   const extraCount = target.labels.length - 3;
-  const countLabel = target.ids.length === 1 ? target.kind : `${target.ids.length} 条${target.kind}`;
+  const countLabel = target.label ?? (target.ids.length === 1 ? target.kind : `${target.ids.length} 条${target.kind}`);
   return (
     <div className="delete-confirm" role="dialog" aria-modal="true" aria-label={`删除${target.kind}确认`} onClick={onCancel}>
       <div onClick={(event) => event.stopPropagation()}>
         <span className="delete-confirm-eyebrow">删除{target.kind}</span>
         <h3>确认删除{countLabel}？</h3>
-        <p>删除后将从当前活动的可下单或身份验证列表中移除，已有订单不会被删除，订单明细和金额保持不变。</p>
+        <p>{target.description ?? "删除后将从当前活动的可下单或身份验证列表中移除，已有订单不会被删除，订单明细和金额保持不变。"}</p>
         <div className="delete-confirm-items">
-          <b>{labelPreview}{extraCount > 0 ? ` 等 ${extraCount} 条` : ""}</b>
-          <small>已选择 {target.ids.length} 条</small>
+          <b>{labelPreview || countLabel}{extraCount > 0 ? ` 等 ${extraCount} 条` : ""}</b>
+          <small>{target.summary ?? `已选择 ${target.ids.length} 条`}</small>
         </div>
         <div className="delete-confirm-actions">
           <button type="button" onClick={onCancel}>取消</button>
@@ -1111,7 +1668,60 @@ function DeleteConfirmDialog({ target, onCancel, onConfirm }: { target: DeleteTa
   );
 }
 
-function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false }: { rows: ProductImportRow[]; onEdit: (row: ProductImportRow) => void; onDelete?: (ids: string[]) => void; allowDelete?: boolean }) {
+function ProductImageEditor({ materialName, images, imageStatus, onChange }: { materialName: string; images?: ProductImageAsset[]; imageStatus?: ProductImageStatus; onChange: (images: ProductImageAsset[] | undefined, status: ProductImageStatus) => void }) {
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const currentImages = images ?? [];
+  const handleFiles = async (files: File[], replace: boolean) => {
+    if (files.length === 0) return;
+    setError("");
+    setUploading(true);
+    try {
+      const uploadedImages = await createManualProductImageAssets(files);
+      const nextImages = replace ? uploadedImages : [...currentImages, ...uploadedImages];
+      onChange(nextImages, "手动维护");
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "图片上传失败，请重新选择。" );
+    } finally {
+      setUploading(false);
+    }
+  };
+  const removeImage = (id: string) => {
+    const nextImages = currentImages.filter((image) => image.id !== id);
+    onChange(nextImages.length > 0 ? nextImages : undefined, productImageStatusForAssets(nextImages, imageStatus));
+    setPreviewIndex((current) => current === null ? null : Math.min(current, Math.max(0, nextImages.length - 1)));
+  };
+  const setPrimary = (index: number) => {
+    if (index <= 0 || index >= currentImages.length) return;
+    onChange([currentImages[index], ...currentImages.slice(0, index), ...currentImages.slice(index + 1)], imageStatus ?? "已匹配");
+  };
+  return (
+    <div className="product-image-editor">
+      {currentImages.length > 0 ? <div className="product-image-gallery">
+        {currentImages.map((image, index) => <div className={`product-image-tile ${index === 0 ? "primary" : ""}`} key={`${image.id}-${index}`}>
+          <button type="button" className="product-image-tile-preview" disabled={uploading} onClick={() => setPreviewIndex(index)}>
+            <img src={image.url} alt={`${materialName} ${index + 1}`} />
+            <span>{index === 0 ? "主图" : `第 ${index + 1} 张`}</span>
+          </button>
+          <div className="product-image-tile-actions">
+            {index > 0 && <button type="button" disabled={uploading} onClick={() => setPrimary(index)}>设为主图</button>}
+            <button type="button" className="danger" disabled={uploading} onClick={() => removeImage(image.id)}>删除</button>
+          </div>
+        </div>)}
+      </div> : <div className="product-image-editor-empty"><i>暂无图片</i><span>可以上传一张或多张商品图片</span></div>}
+      <div className="product-image-editor-actions">
+        <label className="product-image-upload-button"><input type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.bmp" multiple disabled={uploading} onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; void handleFiles(files, false); }} />{uploading ? "读取中…" : "添加图片"}</label>
+        {currentImages.length > 0 && <label className="product-image-upload-button secondary"><input type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.bmp" multiple disabled={uploading} onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; void handleFiles(files, true); }} />替换全部</label>}
+      </div>
+      <small className="product-image-editor-hint">{imageStatus ?? "未上传"}{currentImages.length > 0 ? ` · ${currentImages.length} 张 · 第一张为主图` : ""} · 单张图片不超过 10MB</small>
+      {error && <small className="product-image-editor-error">{error}</small>}
+      {previewIndex !== null && currentImages.length > 0 && <ProductImageViewer productName={materialName} images={currentImages} initialIndex={previewIndex} status={imageStatus} onClose={() => setPreviewIndex(null)} />}
+    </div>
+  );
+}
+
+function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false, allowDeleteAll = false }: { rows: ProductImportRow[]; onEdit: (row: ProductImportRow) => void; onDelete?: (ids: string[]) => void; allowDelete?: boolean; allowDeleteAll?: boolean }) {
   const [customerType, setCustomerType] = useState("全部");
   const [rebate, setRebate] = useState("全部");
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -1119,7 +1729,8 @@ function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false }: { r
   const [pageSize, setPageSize] = useState(50);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否礼盒", "分公司限制", "状态", "操作"];
+  const [imagePreview, setImagePreview] = useState<{ productName: string; images: ProductImageAsset[]; status: ProductImageStatus } | null>(null);
+  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "商品图片", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否礼盒", "分公司限制", "状态", "操作"];
   const filteredRows = useMemo(() => {
     const normalizedKeyword = normalizeSearchText(searchKeyword);
     const normalizedCodeKeyword = normalizeMaterialCode(searchKeyword);
@@ -1137,10 +1748,25 @@ function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false }: { r
   const pageStart = (currentPage - 1) * pageSize;
   const pageRows = sortedRows.slice(pageStart, pageStart + pageSize);
   const pageIds = useMemo(() => pageRows.map((row) => row.id), [pageRows]);
+  const filteredIds = useMemo(() => sortedRows.map((row) => row.id), [sortedRows]);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
+  const allFilteredSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIds.includes(id));
+  const importedRows = useMemo(() => rows.filter((row) => row.source === "excel"), [rows]);
   const openDelete = (ids: string[]) => {
     const targetRows = rows.filter((row) => ids.includes(row.id));
     setDeleteTarget({ ids, labels: targetRows.map((row) => row.materialName || row.materialCode), kind: "商品" });
+  };
+  const openDeleteAllImported = () => {
+    const ids = importedRows.map((row) => row.id);
+    if (ids.length === 0) return;
+    setDeleteTarget({
+      ids,
+      labels: importedRows.map((row) => row.materialName || row.materialCode),
+      kind: "商品",
+      label: "全部导入商品",
+      description: "将删除当前商品目录中由 Excel 导入的商品；手动添加的商品会保留，已有订单不会被删除，订单明细和金额保持不变。",
+      summary: `当前共有 ${ids.length} 条 Excel 导入商品`,
+    });
   };
   const togglePageRows = () => {
     setSelectedIds((current) => {
@@ -1149,6 +1775,12 @@ function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false }: { r
       else pageIds.forEach((id) => next.add(id));
       return [...next];
     });
+  };
+  const selectFilteredRows = () => {
+    setSelectedIds((current) => [...new Set([...current, ...filteredIds])]);
+  };
+  const clearFilteredRows = () => {
+    setSelectedIds((current) => current.filter((id) => !filteredIds.includes(id)));
   };
   const confirmDelete = () => {
     if (!deleteTarget) return;
@@ -1164,24 +1796,40 @@ function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false }: { r
         <label className="data-filter-search"><span>搜索商品</span><input type="search" value={searchKeyword} onChange={(e) => { setSearchKeyword(e.target.value); setPage(1); setSelectedIds([]); }} placeholder="物料代码 / 物料名称" aria-label="搜索物料代码或物料名称" /></label>
         <small>当前显示 {sortedRows.length} 条商品 · 第 {currentPage}/{totalPages} 页{allowDelete ? "，可勾选删除" : "，导入确认前可编辑"}</small>
       </div>
-      {allowDelete && selectedIds.length > 0 && <div className="selection-toolbar"><span>已选择 <b>{selectedIds.length}</b> 条商品</span><div><button type="button" className="selection-clear" onClick={() => setSelectedIds([])}>取消选择</button><button type="button" className="selection-delete" onClick={() => openDelete(selectedIds)}>删除所选</button></div></div>}
+      {allowDelete && allowDeleteAll && importedRows.length > 0 && <div className="selection-toolbar selection-toolbar-all"><span>Excel 导入商品 <b>{importedRows.length}</b> 条，手动添加商品不受影响</span><button type="button" className="selection-delete" onClick={openDeleteAllImported}>删除全部导入商品</button></div>}
+      {allowDelete && selectedIds.length > 0 && <div className="selection-toolbar"><span>已选择 <b>{selectedIds.length}</b> 条商品{allFilteredSelected ? "（当前筛选结果）" : ""}</span><div>{!allFilteredSelected && filteredIds.length > pageIds.length && <button type="button" className="selection-select-all" onClick={selectFilteredRows}>选择全部 {filteredIds.length} 条</button>}{allFilteredSelected && <button type="button" className="selection-select-all" onClick={clearFilteredRows}>取消全选结果</button>}<button type="button" className="selection-clear" onClick={() => setSelectedIds([])}>取消选择</button><button type="button" className="selection-delete" onClick={() => openDelete(selectedIds)}>删除所选</button></div></div>}
       <div className="table-scroll">
         <div className={`data-table product-import-table ${allowDelete ? "with-selection" : ""}`}>
           <div className="table-row table-head">{allowDelete && <b className="select-cell"><input type="checkbox" aria-label="全选当前页商品" checked={allPageSelected} onChange={togglePageRows} /></b>}{heads.map((x) => <b key={x}>{x}</b>)}</div>
           {pageRows.map((row, index) => {
-            const values = [pageStart + index + 1, row.customerType, row.rebate, row.category, row.line, row.materialCode, row.materialName, row.brand, row.variety, row.spec, row.casePack, row.unitPrice, row.casePrice, row.conversion, row.gift, row.branchScope || "全部分公司", row.status];
-            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择商品 ${row.materialName}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index} className={index === 16 ? `status-cell ${row.status === "待完善" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
+            const values = [pageStart + index + 1, row.customerType, row.rebate, row.category, row.line, row.materialCode, row.materialName, null, row.brand, row.variety, row.spec, row.casePack, row.unitPrice, row.casePrice, row.conversion, row.gift, row.branchScope || "全部分公司", row.importAction ? `${row.importAction} · ${row.status}` : row.status];
+            const imageStatus = row.imageStatus ?? "未上传";
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择商品 ${row.materialName}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => index === 7 ? <button type="button" key={index} className={`product-image-cell product-image-button-cell ${imageStatus === "待确认" ? "pending" : imageStatus === "已匹配" || imageStatus === "手动维护" ? "matched" : "unmatched"}`} disabled={!row.images?.length} aria-label={`查看${row.materialName}商品图片`} onClick={() => row.images?.length && setImagePreview({ productName: row.materialName, images: row.images, status: imageStatus })}>{row.images?.[0]?.url ? <img src={row.images[0].url} alt={row.materialName} /> : <i>—</i>}<small>{imageStatus}{row.images && row.images.length > 1 ? ` · ${row.images.length} 张` : ""}</small></button> : <span key={index} className={index === 17 ? `status-cell ${row.status === "待完善" || row.importAction === "疑似重复" || row.importAction === "待确认" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
           {sortedRows.length === 0 && <div className="table-empty">{searchKeyword.trim() ? "当前搜索和筛选条件下没有商品" : "当前筛选条件下没有商品"}</div>}
         </div>
       </div>
       <div className="table-pagination"><span>共 {sortedRows.length} 条</span><div><label>每页<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option></select>条</label><button type="button" disabled={currentPage <= 1} onClick={() => setPage(1)}>首页</button><button type="button" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button><b>{currentPage} / {totalPages}</b><button type="button" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button><button type="button" disabled={currentPage >= totalPages} onClick={() => setPage(totalPages)}>末页</button></div></div>
       {deleteTarget && <DeleteConfirmDialog target={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={confirmDelete} />}
+      {imagePreview && <ProductImageViewer productName={imagePreview.productName} images={imagePreview.images} status={imagePreview.status} onClose={() => setImagePreview(null)} />}
     </>
   );
 }
 
-function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = false }: { rows: WhitelistRow[]; onEdit: (row: WhitelistRow) => void; onDelete?: (ids: string[]) => void; allowDelete?: boolean }) {
+function ProductImageUploadCard({ fileName, stats, error, disabled = false, onFile, onRemove }: { fileName: string; stats: ProductImageStats; error: string; disabled?: boolean; onFile: (file: File) => void | Promise<void>; onRemove: () => void }) {
+  const ready = Boolean(fileName && !error);
+  return (
+    <article className={`file-upload-card image-upload-card ${ready ? "ready" : ""}`}>
+      <div className="file-card-heading"><span>图</span><div><b>商品图片 ZIP</b><small>按商品物料名称匹配图片</small></div><em>{error ? "解析失败" : fileName ? "解析完成" : "待上传"}</em></div>
+      {fileName ? <p title={fileName}>{fileName}</p> : <p>请选择：产品图片6月30日-OK(1).zip</p>}
+      <div className="image-import-stats"><span>图片<b>{stats.totalImages}</b></span><span>已匹配商品<b>{stats.matchedProducts}</b></span><span>待确认<b>{stats.pendingProducts}</b></span><span>未匹配<b>{stats.unmatchedProducts}</b></span></div>
+      {error && <small className="image-upload-error">{error}</small>}
+      <footer><small>{disabled ? "请先上传商品 Excel" : ready ? `已读取 ${stats.totalImages} 张图片，匹配结果已写入商品表` : "支持 JPG、PNG、WEBP、GIF、BMP"}</small><div>{fileName && <button type="button" onClick={onRemove}>移除</button>}<label><input type="file" accept=".zip,application/zip" disabled={disabled} onChange={(event) => { const file = event.target.files?.[0]; if (file) void onFile(file); event.currentTarget.value = ""; }} />{fileName ? "替换 ZIP" : "选择 ZIP"}</label></div></footer>
+    </article>
+  );
+}
+
+function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = false, allowDeleteAll = false }: { rows: WhitelistRow[]; onEdit: (row: WhitelistRow) => void; onDelete?: (ids: string[]) => void; allowDelete?: boolean; allowDeleteAll?: boolean }) {
   const [customerType, setCustomerType] = useState("全部");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [page, setPage] = useState(1);
@@ -1206,10 +1854,38 @@ function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = false }:
   const pageStart = (currentPage - 1) * pageSize;
   const pageRows = sortedRows.slice(pageStart, pageStart + pageSize);
   const pageIds = useMemo(() => pageRows.map((row) => row.id), [pageRows]);
+  const filteredIds = useMemo(() => sortedRows.map((row) => row.id), [sortedRows]);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
+  const allFilteredSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIds.includes(id));
+  const importedRows = useMemo(() => rows.filter((row) => row.source === "excel"), [rows]);
+  const manualRows = useMemo(() => rows.filter((row) => row.source === "manual"), [rows]);
   const openDelete = (ids: string[]) => {
     const targetRows = rows.filter((row) => ids.includes(row.id));
     setDeleteTarget({ ids, labels: targetRows.map((row) => row.dealerShort || row.dealerFull), kind: "白名单客户" });
+  };
+  const openDeleteAllImported = () => {
+    const ids = importedRows.map((row) => row.id);
+    if (ids.length === 0) return;
+    setDeleteTarget({
+      ids,
+      labels: importedRows.map((row) => row.dealerShort || row.dealerFull),
+      kind: "白名单客户",
+      label: "全部导入白名单",
+      description: "将删除当前白名单中由 Excel 导入的客户；手动添加的客户会保留，已有订单不会被删除。",
+      summary: `当前共有 ${ids.length} 名 Excel 导入客户`,
+    });
+  };
+  const openClearAll = () => {
+    const ids = rows.map((row) => row.id);
+    if (ids.length === 0) return;
+    setDeleteTarget({
+      ids,
+      labels: rows.map((row) => row.dealerShort || row.dealerFull),
+      kind: "白名单客户",
+      label: "全部白名单",
+      description: "将删除当前页面中的全部白名单，包括 Excel 导入和手动添加的客户；已有订单不会被删除。",
+      summary: `当前共有 ${ids.length} 名白名单客户`,
+    });
   };
   const togglePageRows = () => {
     setSelectedIds((current) => {
@@ -1218,6 +1894,12 @@ function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = false }:
       else pageIds.forEach((id) => next.add(id));
       return [...next];
     });
+  };
+  const selectFilteredRows = () => {
+    setSelectedIds((current) => [...new Set([...current, ...filteredIds])]);
+  };
+  const clearFilteredRows = () => {
+    setSelectedIds((current) => current.filter((id) => !filteredIds.includes(id)));
   };
   const confirmDelete = () => {
     if (!deleteTarget) return;
@@ -1232,13 +1914,16 @@ function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = false }:
         <label className="data-filter-search"><span>搜索白名单</span><input type="search" value={searchKeyword} onChange={(e) => { setSearchKeyword(e.target.value); setPage(1); setSelectedIds([]); }} placeholder="经销商名称 / 姓名 / 电话" aria-label="搜索经销商名称、经销商姓名或电话" /></label>
         <small>当前显示 {sortedRows.length} 名客户 · 第 {currentPage}/{totalPages} 页{allowDelete ? "，可勾选删除" : "，导入确认前可编辑"}</small>
       </div>
-      {allowDelete && selectedIds.length > 0 && <div className="selection-toolbar"><span>已选择 <b>{selectedIds.length}</b> 名客户</span><div><button type="button" className="selection-clear" onClick={() => setSelectedIds([])}>取消选择</button><button type="button" className="selection-delete" onClick={() => openDelete(selectedIds)}>删除所选</button></div></div>}
+      {allowDelete && allowDeleteAll && rows.length > 0 && <div className="selection-toolbar selection-toolbar-all"><span>当前白名单 <b>{rows.length}</b> 名（导入 {importedRows.length}，手动添加 {manualRows.length}）</span><div>{importedRows.length > 0 && <button type="button" className="selection-clear" onClick={openDeleteAllImported}>删除全部导入</button>}<button type="button" className="selection-delete" onClick={openClearAll}>清空全部白名单</button></div></div>}
+      {allowDelete && selectedIds.length > 0 && <div className="selection-toolbar"><span>已选择 <b>{selectedIds.length}</b> 名客户{allFilteredSelected ? "（当前筛选结果）" : ""}</span><div>{!allFilteredSelected && filteredIds.length > pageIds.length && <button type="button" className="selection-select-all" onClick={selectFilteredRows}>选择全部 {filteredIds.length} 名</button>}{allFilteredSelected && <button type="button" className="selection-select-all" onClick={clearFilteredRows}>取消全选结果</button>}<button type="button" className="selection-clear" onClick={() => setSelectedIds([])}>取消选择</button><button type="button" className="selection-delete" onClick={() => openDelete(selectedIds)}>删除所选</button></div></div>}
       <div className="table-scroll">
         <div className={`data-table whitelist-table ${allowDelete ? "with-selection" : ""}`}>
           <div className="table-row table-head">{allowDelete && <b className="select-cell"><input type="checkbox" aria-label="全选当前页白名单" checked={allPageSelected} onChange={togglePageRows} /></b>}{heads.map((x) => <b key={x}>{x}</b>)}</div>
           {pageRows.map((row, index) => {
-            const values = [pageStart + index + 1, row.customerType, row.region, row.branch, row.dealerShort, row.dealerFull, row.dealerType, row.dealerName, row.dealerPhone, row.confirmerName, row.confirmerPhone, row.status];
-            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择白名单客户 ${row.dealerShort}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index} className={index === 11 ? `status-cell ${row.status === "待处理" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
+            const importStatus = row.importAction ? `${row.importAction} · ${row.status}` : row.status;
+            const values = [pageStart + index + 1, row.customerType, row.region, row.branch, row.dealerShort, row.dealerFull, row.dealerType, row.dealerName, row.dealerPhone, row.confirmerName, row.confirmerPhone, importStatus];
+            const importPending = row.importAction === "名称重复" || row.importAction === "名称待处理" || row.importAction === "电话待处理";
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择白名单客户 ${row.dealerShort}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index} className={index === 11 ? `status-cell ${row.status === "待处理" || importPending ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
           {sortedRows.length === 0 && <div className="table-empty">{searchKeyword.trim() ? "当前搜索和筛选条件下没有白名单客户" : "当前筛选条件下没有白名单客户"}</div>}
         </div>
@@ -1252,9 +1937,6 @@ function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = false }:
 function ProductFormDrawer({ rows, initialRow, onClose, onSave }: { rows: ProductImportRow[]; initialRow?: ProductImportRow; onClose: () => void; onSave: (row: ProductImportRow) => void }) {
   const isEditing = Boolean(initialRow);
   const [form, setForm] = useState<ProductImportRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("product"), sequence: 0, customerType: "特渠", rebate: "参与", category: "", line: "", materialCode: "", materialName: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", conversion: "", gift: "否", branchScope: "", status: "有效", source: "manual" });
-  useEffect(() => {
-    if (initialRow) setForm({ ...initialRow });
-  }, [initialRow]);
   const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
   const duplicateMaterialCode = form.materialCode.trim() !== "" && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && row.rebate === form.rebate && row.materialCode.trim().toLowerCase() === form.materialCode.trim().toLowerCase());
@@ -1271,6 +1953,7 @@ function ProductFormDrawer({ rows, initialRow, onClose, onSave }: { rows: Produc
           <label><span>产品线</span><input value={form.line} onChange={(e) => update("line", e.target.value)} placeholder="例如：调味油" /></label>
           <label><span>物料代码 *</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /><small className={duplicateMaterialCode ? "field-error" : ""}>{duplicateMaterialCode ? "同客户类型、同返利分组内已存在，请检查解析结果" : "跨 Sheet 可重复；用于识别同一商品"}</small></label>
           <label className="wide-field"><span>物料名称 *</span><input value={form.materialName} onChange={(e) => update("materialName", e.target.value)} /></label>
+          <div className="product-form-image-field wide-field"><span>商品图片</span><ProductImageEditor materialName={form.materialName} images={form.images} imageStatus={form.imageStatus} onChange={(images, status) => setForm((current) => ({ ...current, images, imageStatus: status }))} /></div>
           <label><span>品牌</span><input value={form.brand} onChange={(e) => update("brand", e.target.value)} /></label>
           <label><span>品种</span><input value={form.variety} onChange={(e) => update("variety", e.target.value)} /></label>
           <label><span>规格</span><input value={form.spec} onChange={(e) => update("spec", e.target.value)} /></label>
@@ -1292,14 +1975,12 @@ function ProductFormDrawer({ rows, initialRow, onClose, onSave }: { rows: Produc
 function WhitelistFormDrawer({ rows, initialRow, onClose, onSave }: { rows: WhitelistRow[]; initialRow?: WhitelistRow; onClose: () => void; onSave: (row: WhitelistRow) => void }) {
   const isEditing = Boolean(initialRow);
   const [form, setForm] = useState<WhitelistRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("whitelist"), sequence: 0, customerType: "综合客户", region: "", branch: "", dealerShort: "", dealerFull: "", dealerType: "综合经销商", dealerName: "", dealerPhone: "", confirmerName: "", confirmerPhone: "", status: "有效", source: "manual" });
-  useEffect(() => {
-    if (initialRow) setForm({ ...initialRow });
-  }, [initialRow]);
   const update = (field: keyof WhitelistRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType).map((row) => row.sequence)) + 1;
-  const phoneValid = /^1\d{10}$/.test(form.dealerPhone) || /^\d{3}\*{4}\d{4}$/.test(form.dealerPhone);
+  const phoneValid = whitelistPhoneIsValid(form.dealerPhone);
+  const duplicateDealerName = normalizeWhitelistName(form.dealerFull) !== "" && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && whitelistIdentityKey(row) === whitelistIdentityKey(form));
   const duplicateDealerPhone = form.dealerPhone.trim() !== "" && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && normalizePhone(row.dealerPhone) === normalizePhone(form.dealerPhone));
-  const canSave = form.region.trim() !== "" && form.branch.trim() !== "" && form.dealerShort.trim() !== "" && form.dealerFull.trim() !== "" && phoneValid && !duplicateDealerPhone;
+  const canSave = form.region.trim() !== "" && form.branch.trim() !== "" && form.dealerShort.trim() !== "" && form.dealerFull.trim() !== "" && phoneValid && !duplicateDealerName && !duplicateDealerPhone;
   return (
     <div className="order-drawer-backdrop" onClick={onClose}>
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
@@ -1310,7 +1991,7 @@ function WhitelistFormDrawer({ rows, initialRow, onClose, onSave }: { rows: Whit
           <label><span>大区 *</span><select value={form.region} onChange={(e) => update("region", e.target.value)}><option value="">请选择</option><option>东区</option><option>南区</option><option>北区</option><option>西区</option></select></label>
           <label><span>分公司名称 *</span><input value={form.branch} onChange={(e) => update("branch", e.target.value)} placeholder="例如：长沙分" /></label>
           <label><span>经销商名称（简）*</span><input value={form.dealerShort} onChange={(e) => update("dealerShort", e.target.value)} /><small>{form.dealerShort.length}/10 字</small></label>
-          <label className="wide-field"><span>经销商名称（全）*</span><input value={form.dealerFull} onChange={(e) => update("dealerFull", e.target.value)} /></label>
+          <label className="wide-field"><span>经销商名称（全）*</span><input value={form.dealerFull} onChange={(e) => update("dealerFull", e.target.value)} /><small className={duplicateDealerName ? "field-error" : ""}>{duplicateDealerName ? "同客户类型下已存在，请直接编辑原客户" : "客户身份匹配使用客户类型 + 名称全称；电话变化时会更新原客户"}</small></label>
           <label><span>经销商类型</span><input value={form.dealerType} onChange={(e) => update("dealerType", e.target.value)} /></label>
           <label><span>经销商姓名</span><input value={form.dealerName} onChange={(e) => update("dealerName", e.target.value)} /></label>
           <label><span>经销商电话 *</span><input inputMode="tel" maxLength={11} value={form.dealerPhone} onChange={(e) => update("dealerPhone", e.target.value.replace(/\D/g, ""))} placeholder="11 位手机号" /><small className={duplicateDealerPhone || (form.dealerPhone !== "" && !phoneValid) ? "field-error" : ""}>{duplicateDealerPhone ? "同客户类型内手机号已存在；综合和特渠可以同号" : form.dealerPhone && !phoneValid ? "请输入正确的 11 位手机号" : "用于 H5 身份验证；请输入完整的 11 位手机号"}</small></label>
@@ -1318,7 +1999,7 @@ function WhitelistFormDrawer({ rows, initialRow, onClose, onSave }: { rows: Whit
           <label><span>分公司确认人电话</span><input inputMode="tel" maxLength={11} value={form.confirmerPhone} onChange={(e) => update("confirmerPhone", e.target.value.replace(/\D/g, ""))} /></label>
         </div>
         <p className="drawer-form-note">客户类型在 Excel 导入时由 Sheet 自动确定；{isEditing ? "保存后会覆盖当前解析行，并标记为人工修正。" : "手动添加时由管理员选择。"}</p></div>
-        <footer><button onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave} onClick={() => { onSave({ ...form, sequence: nextSequence, status: "有效", source: "manual", identityKey: `${form.customerType}:${normalizePhone(form.dealerPhone)}`, manuallyEdited: isEditing || form.manuallyEdited }); onClose(); }}>{isEditing ? "保存修改" : "保存白名单"}</button></footer>
+        <footer><button onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave} onClick={() => { onSave({ ...form, sequence: nextSequence, status: "有效", source: isEditing ? form.source ?? "manual" : "manual", identityKey: whitelistIdentityKey(form), importAction: undefined, manuallyEdited: isEditing || form.manuallyEdited }); onClose(); }}>{isEditing ? "保存修改" : "保存白名单"}</button></footer>
       </aside>
     </div>
   );
@@ -1391,10 +2072,106 @@ function LotterySettings({ rounds, onChange }: { rounds: LotteryRound[]; onChang
   );
 }
 
+function cloneAttendanceRows(rows: AttendanceRow[]) {
+  return rows.map((row) => ({ ...row }));
+}
+
+function AttendanceFormDrawer({ rows, initialRow, onClose, onSave }: { rows: AttendanceRow[]; initialRow?: AttendanceRow; onClose: () => void; onSave: (row: AttendanceRow) => void }) {
+  const isEditing = Boolean(initialRow);
+  const [form, setForm] = useState<AttendanceRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("attendance-manual"), sequence: 0, dealerName: "", contactPhone: "", branch: "", dealerCompany: "", customerType: "" });
+  const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.map((row) => row.sequence)) + 1;
+  const update = (field: AttendanceFieldKey, value: string) => setForm((current) => ({ ...current, [field]: value }));
+  return (
+    <div className="order-drawer-backdrop" onClick={onClose}>
+      <aside className="order-drawer form-drawer attendance-form-drawer" onClick={(event) => event.stopPropagation()}>
+        <header><div><span>现场到场客户</span><h2>{isEditing ? "编辑到场客户" : "手动添加到场客户"}</h2></div><button type="button" aria-label="关闭" onClick={onClose}>×</button></header>
+        <div className="auto-sequence-note"><span>{isEditing ? "当前记录" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>当前仅用于到场名单页面展示</small></div>
+        <div className="drawer-form-body"><div className="drawer-form-grid">
+          <label><span>经销商姓名</span><input value={form.dealerName} onChange={(event) => update("dealerName", event.target.value)} placeholder="请输入经销商姓名" /></label>
+          <label><span>联系电话</span><input inputMode="tel" value={form.contactPhone} onChange={(event) => update("contactPhone", event.target.value)} placeholder="请输入联系电话" /></label>
+          <label><span>分公司</span><input value={form.branch} onChange={(event) => update("branch", event.target.value)} placeholder="请输入分公司" /></label>
+          <label className="wide-field"><span>经销商名称</span><input value={form.dealerCompany} onChange={(event) => update("dealerCompany", event.target.value)} placeholder="请输入经销商名称" /></label>
+          <label className="wide-field"><span>客户类型</span><input value={form.customerType} onChange={(event) => update("customerType", event.target.value)} placeholder="例如：综合客户 / 特渠专业客户" /></label>
+        </div><p className="drawer-form-note">当前字段均可暂时留空；保存结果只保存在当前原型页面，后续可继续编辑。</p></div>
+        <footer><button type="button" onClick={onClose}>取消</button><button type="button" className="admin-primary" onClick={() => { onSave({ ...form, sequence: nextSequence, manuallyEdited: true }); onClose(); }}>{isEditing ? "保存修改" : "保存到场客户"}</button></footer>
+      </aside>
+    </div>
+  );
+}
+
+function AttendanceTable({ rows, onEdit }: { rows: AttendanceRow[]; onEdit: (row: AttendanceRow) => void }) {
+  const [customerType, setCustomerType] = useState("全部");
+  const [branch, setBranch] = useState("全部");
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
+  const branchOptions = useMemo(() => ["全部", ...Array.from(new Set(rows.map((row) => row.branch).filter(Boolean)))], [rows]);
+  const customerTypeOptions = useMemo(() => ["全部", ...Array.from(new Set(rows.map((row) => row.customerType).filter(Boolean)))], [rows]);
+  const filteredRows = useMemo(() => {
+    const keyword = normalizeSearchText(searchKeyword);
+    return rows.filter((row) => {
+      const values = [row.dealerName, row.contactPhone, row.branch, row.dealerCompany, row.customerType];
+      const matchesSearch = !keyword || values.some((value) => normalizeSearchText(value).includes(keyword));
+      return (customerType === "全部" || row.customerType === customerType) && (branch === "全部" || row.branch === branch) && matchesSearch;
+    });
+  }, [rows, customerType, branch, searchKeyword]);
+  const sortedRows = useMemo(() => [...filteredRows].sort((a, b) => a.sequence - b.sequence || a.id.localeCompare(b.id)), [filteredRows]);
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageRows = sortedRows.slice(pageStart, pageStart + pageSize);
+  return (
+    <>
+      <div className="data-filters attendance-filters">
+        <label><span>客户类型</span><select value={customerType} onChange={(event) => { setCustomerType(event.target.value); setPage(1); }}><option>全部</option>{customerTypeOptions.filter((value) => value !== "全部").map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label><span>分公司</span><select value={branch} onChange={(event) => { setBranch(event.target.value); setPage(1); }}><option>全部</option>{branchOptions.filter((value) => value !== "全部").map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label className="data-filter-search"><span>搜索到场客户</span><input type="search" value={searchKeyword} onChange={(event) => { setSearchKeyword(event.target.value); setPage(1); }} placeholder="姓名 / 联系电话 / 经销商名称" aria-label="搜索现场到场客户" /></label>
+        <small>当前显示 {sortedRows.length} 名 · 第 {currentPage}/{totalPages} 页</small>
+      </div>
+      <div className="table-scroll">
+        <div className="data-table attendance-table">
+          <div className="table-row table-head"><b>序号</b><b>经销商姓名</b><b>联系电话</b><b>分公司</b><b>经销商名称</b><b>客户类型</b><b>操作</b></div>
+          {pageRows.map((row, index) => <div className="table-row" key={row.id}>
+            <span>{pageStart + index + 1}</span><span>{row.dealerName || "—"}</span><span>{row.contactPhone || "—"}</span><span>{row.branch || "—"}</span><span>{row.dealerCompany || "—"}</span><span>{row.customerType || "—"}</span><span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button></span>
+          </div>)}
+          {sortedRows.length === 0 && <div className="table-empty">当前条件下没有到场客户</div>}
+        </div>
+      </div>
+      <div className="table-pagination"><span>共 {sortedRows.length} 名</span><div><label>每页<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option></select>名</label><button type="button" disabled={currentPage <= 1} onClick={() => setPage(1)}>首页</button><button type="button" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button><b>{currentPage} / {totalPages}</b><button type="button" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button><button type="button" disabled={currentPage >= totalPages} onClick={() => setPage(totalPages)}>末页</button></div></div>
+    </>
+  );
+}
+
+function AttendancePage({ rows, fileName, isDemo, warnings, sheetCounts, error, onFile, onRestoreDemo, onAdd, onEdit }: { rows: AttendanceRow[]; fileName: string; isDemo: boolean; warnings: string[]; sheetCounts: Array<{ name: string; count: number }>; error: string; onFile: (file: File) => void | Promise<void>; onRestoreDemo: () => void; onAdd: () => void; onEdit: (row: AttendanceRow) => void }) {
+  const comprehensiveCount = rows.filter((row) => row.customerType.includes("综合")).length;
+  const specialCount = rows.filter((row) => row.customerType.includes("特渠")).length;
+  const blankTypeCount = rows.filter((row) => !row.customerType).length;
+  const phoneCount = rows.filter((row) => row.contactPhone).length;
+  return (
+    <div className="admin-panel attendance-panel">
+      <div className="panel-title"><div><h2>现场到场客户</h2><p>当前支持导入、手动添加和编辑；后续再接入白名单匹配和抽奖候选池。</p></div><div className="panel-actions"><button className="secondary-button" onClick={onAdd}>＋ 手动添加到场客户</button><button className="secondary-button" onClick={onRestoreDemo}>恢复演示数据</button></div></div>
+      <div className="import-rule-hint"><b>当前原型规则</b><span>当前页面默认展示演示数据。真实 Excel 上传后按表头自动识别经销商姓名、联系电话、分公司、经销商名称和客户类型；字段缺失时留空，不因缺少字段而阻断导入。</span></div>
+      <div className="attendance-upload-grid">
+        <article className={`file-upload-card attendance-upload-card ${isDemo ? "demo" : fileName && !error ? "ready" : ""}`}>
+          <div className="file-card-heading"><span>XL</span><div><b>现场到场客户 Excel</b><small>演示数据已预置，可随时替换为真实文件</small></div><em>{isDemo ? "演示数据" : error ? "解析失败" : fileName ? "解析完成" : "待上传"}</em></div>
+          <p title={fileName}>{fileName || "尚未选择真实 Excel 文件"}</p>
+          <div className="sheet-counts">{sheetCounts.length > 0 ? sheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>) : <span>演示名单<b>{rows.length}</b></span>}</div>
+          {error && <div className="warning-box"><b>文件无法导入</b><span>{error}</span></div>}
+          <footer><small>{isDemo ? "仅用于展示页面效果，不进入真实抽奖候选池" : fileName && !error ? `已读取 ${rows.length} 名客户` : "支持 .xlsx、.xls 文件"}</small><div><label className="file-button"><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void onFile(file); }} />{fileName && !isDemo ? "替换文件" : "选择真实 Excel"}</label></div></footer>
+        </article>
+        <div className="attendance-overview-card"><div><span>当前名单</span><strong>{rows.length}<small> 名</small></strong><em>{isDemo ? "演示数据" : "当前导入批次"}</em></div><div><span>综合客户</span><b>{comprehensiveCount}</b></div><div><span>特渠客户</span><b>{specialCount}</b></div><div><span>已填写电话</span><b>{phoneCount}</b></div><div><span>未填客户类型</span><b>{blankTypeCount}</b></div><p>当前暂不参与抽奖候选计算。</p></div>
+      </div>
+      {warnings.length > 0 && <div className="warning-box attendance-warning"><b>导入提示</b>{warnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}
+      <div className="data-section-title"><div><b>到场客户名单</b><span>{isDemo ? "演示数据 · 后续可上传真实 Excel 替换" : `${fileName} · 当前导入结果`}</span></div><span className="attendance-not-linked">暂未接入抽奖候选池</span></div>
+      <AttendanceTable rows={rows} onEdit={onEdit} />
+    </div>
+  );
+}
+
 type ProductRowsSetter = (value: ProductImportRow[] | ((current: ProductImportRow[]) => ProductImportRow[])) => void;
 type WhitelistRowsSetter = (value: WhitelistRow[] | ((current: WhitelistRow[]) => WhitelistRow[])) => void;
 
-function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActivityStatusChange, productRows, onProductRowsChange, productImportCompleted, onProductImportCompleted, whitelistRows, onWhitelistRowsChange, whitelistImportCompleted, onWhitelistImportCompleted }: { lotteryRounds: LotteryRound[]; onLotteryChange: (rounds: LotteryRound[]) => void; activityClosed: boolean; onActivityStatusChange: (closed: boolean) => void; productRows: ProductImportRow[]; onProductRowsChange: ProductRowsSetter; productImportCompleted: boolean; onProductImportCompleted: (completed: boolean) => void; whitelistRows: WhitelistRow[]; onWhitelistRowsChange: WhitelistRowsSetter; whitelistImportCompleted: boolean; onWhitelistImportCompleted: (completed: boolean) => void }) {
+function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActivityStatusChange, productRows, onProductRowsChange, productImportCompleted, onProductImportCompleted, onProductImportCommitted, productImportHasRun, whitelistRows, onWhitelistRowsChange, whitelistImportCompleted, onWhitelistImportCompleted, onWhitelistImportCommitted, whitelistImportHasRun }: { lotteryRounds: LotteryRound[]; onLotteryChange: (rounds: LotteryRound[]) => void; activityClosed: boolean; onActivityStatusChange: (closed: boolean) => void; productRows: ProductImportRow[]; onProductRowsChange: ProductRowsSetter; productImportCompleted: boolean; onProductImportCompleted: (completed: boolean) => void; onProductImportCommitted: () => void; productImportHasRun: boolean; whitelistRows: WhitelistRow[]; onWhitelistRowsChange: WhitelistRowsSetter; whitelistImportCompleted: boolean; onWhitelistImportCompleted: (completed: boolean) => void; onWhitelistImportCommitted: () => void; whitelistImportHasRun: boolean }) {
   const [tab, setTab] = useState("活动概览");
   const setProductRows = onProductRowsChange;
   const setWhitelistRows = onWhitelistRowsChange;
@@ -1409,57 +2186,246 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
   const [productImportWarnings, setProductImportWarnings] = useState<string[]>([]);
   const [productImportError, setProductImportError] = useState("");
   const [productSheetCounts, setProductSheetCounts] = useState<Array<{ name: string; count: number }>>([]);
+  const [productImportInputCount, setProductImportInputCount] = useState(0);
+  const [productImportStats, setProductImportStats] = useState<ProductImportStats>(emptyProductImportStats);
+  const [pendingProductBaseRows, setPendingProductBaseRows] = useState<ProductImportRow[] | null>(null);
+  const [pendingProductRollbackRows, setPendingProductRollbackRows] = useState<ProductImportRow[] | null>(null);
+  const [productImageAssets, setProductImageAssets] = useState<ProductImageAsset[]>([]);
+  const [productImageFileName, setProductImageFileName] = useState("");
+  const [productImageStats, setProductImageStats] = useState<ProductImageStats>({ totalImages: 0, matchedProducts: 0, pendingProducts: 0, unmatchedProducts: 0 });
+  const [productImageError, setProductImageError] = useState("");
   const [whitelistFileName, setWhitelistFileName] = useState("");
   const [whitelistImportWarnings, setWhitelistImportWarnings] = useState<string[]>([]);
   const [whitelistImportError, setWhitelistImportError] = useState("");
   const [whitelistSheetCounts, setWhitelistSheetCounts] = useState<Array<{ name: string; count: number }>>([]);
-  const [crossSheetPhoneCount, setCrossSheetPhoneCount] = useState(0);
-  const nav = ["活动概览", "商品导入", "白名单", "订单管理", "抽奖规则"];
-  const parsedProductCount = productFileName ? productRows.length : 0;
-  const productValidCount = productRows.filter((row) => row.status === "有效").length;
-  const productPendingCount = productRows.filter((row) => row.status === "待完善").length;
-  const branchRestrictedCount = productRows.filter((row) => row.branchScope.trim()).length;
-  const parsedWhitelistCount = whitelistFileName ? whitelistRows.length : 0;
-  const whitelistValidCount = whitelistRows.filter((row) => row.status === "有效").length;
-  const whitelistPendingCount = whitelistRows.filter((row) => row.status === "待处理").length;
+  const [whitelistImportInputCount, setWhitelistImportInputCount] = useState(0);
+  const [whitelistImportStats, setWhitelistImportStats] = useState<WhitelistImportStats>(emptyWhitelistImportStats);
+  const [pendingWhitelistBaseRows, setPendingWhitelistBaseRows] = useState<WhitelistRow[] | null>(null);
+  const [pendingWhitelistRollbackRows, setPendingWhitelistRollbackRows] = useState<WhitelistRow[] | null>(null);
+  const [attendanceRows, setAttendanceRows] = useState<AttendanceRow[]>(() => cloneAttendanceRows(initialAttendanceRows));
+  const [attendanceFileName, setAttendanceFileName] = useState("现场到场客户名单-演示.xlsx");
+  const [attendanceIsDemo, setAttendanceIsDemo] = useState(true);
+  const [attendanceWarnings, setAttendanceWarnings] = useState<string[]>([]);
+  const [attendanceSheetCounts, setAttendanceSheetCounts] = useState<Array<{ name: string; count: number }>>([]);
+  const [attendanceImportError, setAttendanceImportError] = useState("");
+  const [attendanceFormOpen, setAttendanceFormOpen] = useState(false);
+  const [editingAttendanceRow, setEditingAttendanceRow] = useState<AttendanceRow | null>(null);
+  const nav = ["活动概览", "商品导入", "白名单", "现场到场", "订单管理", "抽奖规则"];
+  const parsedProductCount = productFileName ? productImportInputCount : 0;
+  const parsedWhitelistCount = whitelistFileName ? whitelistImportInputCount : 0;
+  const crossSheetPhoneCount = useMemo(() => getCrossSheetPhoneCount(whitelistRows), [whitelistRows]);
+  const beginProductImport = () => {
+    setProductImportCompleted(false);
+    setProductFileName("");
+    setProductSheetCounts([]);
+    setProductImportWarnings([]);
+    setProductImportError("");
+    setProductImportInputCount(0);
+    setProductImportStats(emptyProductImportStats);
+    setPendingProductBaseRows(null);
+    setPendingProductRollbackRows(null);
+  };
+  const cancelProductImport = () => {
+    if (pendingProductRollbackRows) setProductRows(cloneProductRows(pendingProductRollbackRows));
+    setPendingProductBaseRows(null);
+    setPendingProductRollbackRows(null);
+    setProductFileName("");
+    setProductSheetCounts([]);
+    setProductImportWarnings([]);
+    setProductImportError("");
+    setProductImportInputCount(0);
+    setProductImportStats(emptyProductImportStats);
+    setProductImportCompleted(false);
+    setActionNotice("已取消本次商品追加，当前商品目录保持不变。" );
+  };
+  const confirmProductImport = () => {
+    const cleanRows = productRows.map(clearProductImportAction);
+    setProductRows(cleanRows);
+    setPendingProductBaseRows(null);
+    setPendingProductRollbackRows(null);
+    setProductImportCompleted(true);
+    onProductImportCommitted();
+    setActionNotice(`商品追加导入完成：新增 ${productImportStats.added} 条、更新 ${productImportStats.updated} 条、未变更 ${productImportStats.unchanged} 条；当前原型不会写入后端。`);
+  };
   const handleProductFile = async (file: File) => {
     setProductImportError("");
     try {
       const result = await parseProductWorkbook(file);
-      setProductRows(result.rows);
+      const imageResult = matchProductImages(result.rows, productImageAssets);
+      const currentCatalogRows = productImportHasRun ? productRows : productRows.filter((row) => row.source === "manual");
+      const baseRows = pendingProductBaseRows ? cloneProductRows(pendingProductBaseRows) : cloneProductRows(currentCatalogRows);
+      const mergeResult = mergeProductImportRows(baseRows, imageResult.rows);
+      setPendingProductBaseRows(pendingProductBaseRows ? pendingProductBaseRows : cloneProductRows(currentCatalogRows));
+      setPendingProductRollbackRows(pendingProductRollbackRows ? pendingProductRollbackRows : cloneProductRows(productRows));
+      setProductRows(mergeResult.rows);
       setProductFileName(file.name);
       setProductSheetCounts(result.sheetCounts);
-      setProductImportWarnings(result.warnings);
+      setProductImportInputCount(result.rows.length);
+      setProductImportStats(mergeResult.stats);
+      setProductImportWarnings([...result.warnings, ...mergeResult.warnings]);
+      setProductImageStats(imageResult.stats);
       setProductImportCompleted(false);
-      setActionNotice(`已解析 ${result.rows.length} 条商品，请检查后确认导入。`);
+      setActionNotice(`已解析 ${result.rows.length} 条商品：新增 ${mergeResult.stats.added} 条、更新 ${mergeResult.stats.updated} 条，请检查后确认追加。`);
     } catch (error) {
-      setProductRows([]);
       setProductFileName(file.name);
       setProductSheetCounts([]);
+      setProductImportInputCount(0);
+      setProductImportStats(emptyProductImportStats);
       setProductImportWarnings([]);
       setProductImportError(error instanceof Error ? error.message : "文件解析失败，请检查 Excel 格式。");
       setProductImportCompleted(false);
     }
   };
+  const handleProductImageFile = async (file: File) => {
+    setProductImageError("");
+    try {
+      const assets = await parseProductImageZip(file);
+      const imageResult = matchProductImages(productRows, assets);
+      revokeProductImageAssets(productImageAssets);
+      setProductImageAssets(assets);
+      setProductImageFileName(file.name);
+      setProductRows(imageResult.rows);
+      setProductImageStats(imageResult.stats);
+      setActionNotice(`已读取 ${assets.length} 张商品图片，已匹配 ${imageResult.stats.matchedProducts} 条商品。`);
+    } catch (error) {
+      setProductImageError(error instanceof Error ? error.message : "图片 ZIP 解析失败，请检查文件。");
+    }
+  };
+  const removeProductImages = () => {
+    revokeProductImageAssets(productImageAssets);
+    setProductImageAssets([]);
+    setProductImageFileName("");
+    setProductImageStats({ totalImages: 0, matchedProducts: 0, pendingProducts: 0, unmatchedProducts: 0 });
+    setProductImageError("");
+    setProductRows((current) => current.map((row) => {
+      const manualImages = row.images?.filter((image) => image.source === "manual") ?? [];
+      return manualImages.length > 0 ? { ...row, images: manualImages, imageStatus: "手动维护" } : { ...row, images: undefined, imageStatus: "未上传" };
+    }));
+    setActionNotice("已移除 ZIP 商品图片，手动维护图片已保留；商品信息和订单数据不受影响。");
+  };
+  const saveProductRow = (row: ProductImportRow) => {
+    const hasManualImages = row.images?.some((image) => image.source === "manual") || row.imageStatus === "手动维护";
+    const nextRow = hasManualImages ? { ...row, imageStatus: "手动维护" as const } : productImageAssets.length > 0 ? matchProductImages([row], productImageAssets).rows[0] : row;
+    if (editingProductRow) {
+      setProductRows((current) => current.map((item) => item.id === nextRow.id ? nextRow : item));
+      setActionNotice(`已保存商品修改：${nextRow.materialName}`);
+    } else {
+      setProductRows((current) => [...current, nextRow]);
+      setActionNotice(`已自动编号 ${nextRow.sequence}，并添加商品：${nextRow.materialName}`);
+    }
+  };
+  const beginWhitelistImport = () => {
+    setWhitelistImportCompleted(false);
+    setWhitelistFileName("");
+    setWhitelistSheetCounts([]);
+    setWhitelistImportWarnings([]);
+    setWhitelistImportError("");
+    setWhitelistImportInputCount(0);
+    setWhitelistImportStats(emptyWhitelistImportStats);
+    setPendingWhitelistBaseRows(null);
+    setPendingWhitelistRollbackRows(null);
+  };
+  const cancelWhitelistImport = () => {
+    const rollbackRows = pendingWhitelistRollbackRows ? cloneWhitelistRows(pendingWhitelistRollbackRows) : whitelistRows;
+    if (pendingWhitelistRollbackRows) setWhitelistRows(rollbackRows);
+    setPendingWhitelistBaseRows(null);
+    setPendingWhitelistRollbackRows(null);
+    setWhitelistFileName("");
+    setWhitelistSheetCounts([]);
+    setWhitelistImportWarnings([]);
+    setWhitelistImportError("");
+    setWhitelistImportInputCount(0);
+    setWhitelistImportStats(emptyWhitelistImportStats);
+    setWhitelistImportCompleted(false);
+    setActionNotice("已取消本次白名单追加，当前白名单保持不变。" );
+  };
+  const confirmWhitelistImport = () => {
+    const cleanRows = whitelistRows.map(clearWhitelistImportAction);
+    setWhitelistRows(cleanRows);
+    setPendingWhitelistBaseRows(null);
+    setPendingWhitelistRollbackRows(null);
+    setWhitelistImportCompleted(true);
+    onWhitelistImportCommitted();
+    setActionNotice(`白名单追加导入完成：新增 ${whitelistImportStats.added} 名、电话更新 ${whitelistImportStats.phoneUpdated} 名、未变更 ${whitelistImportStats.unchanged} 名；当前原型不会写入后端。`);
+  };
   const handleWhitelistFile = async (file: File) => {
     setWhitelistImportError("");
     try {
       const result = await parseWhitelistWorkbook(file);
-      setWhitelistRows(result.rows);
+      const currentCatalogRows = whitelistImportHasRun ? whitelistRows : whitelistRows.filter((row) => row.source === "manual");
+      const baseRows = pendingWhitelistBaseRows ? cloneWhitelistRows(pendingWhitelistBaseRows) : cloneWhitelistRows(currentCatalogRows);
+      const mergeResult = mergeWhitelistImportRows(baseRows, result.rows);
+      setPendingWhitelistBaseRows(pendingWhitelistBaseRows ? pendingWhitelistBaseRows : cloneWhitelistRows(currentCatalogRows));
+      setPendingWhitelistRollbackRows(pendingWhitelistRollbackRows ? pendingWhitelistRollbackRows : cloneWhitelistRows(whitelistRows));
+      setWhitelistRows(mergeResult.rows);
       setWhitelistFileName(file.name);
       setWhitelistSheetCounts(result.sheetCounts);
-      setWhitelistImportWarnings(result.warnings);
-      setCrossSheetPhoneCount(result.crossSheetPhoneCount);
+      setWhitelistImportInputCount(result.rows.length);
+      setWhitelistImportStats(mergeResult.stats);
+      setWhitelistImportWarnings([...result.warnings, ...mergeResult.warnings]);
       setWhitelistImportCompleted(false);
-      setActionNotice(`已解析 ${result.rows.length} 名白名单客户，请检查后确认导入。`);
+      setActionNotice(`已解析 ${result.rows.length} 名白名单客户：新增 ${mergeResult.stats.added} 名、电话更新 ${mergeResult.stats.phoneUpdated} 名，请检查后确认追加。`);
     } catch (error) {
-      setWhitelistRows([]);
       setWhitelistFileName(file.name);
       setWhitelistSheetCounts([]);
+      setWhitelistImportInputCount(0);
+      setWhitelistImportStats(emptyWhitelistImportStats);
       setWhitelistImportWarnings([]);
-      setCrossSheetPhoneCount(0);
       setWhitelistImportError(error instanceof Error ? error.message : "文件解析失败，请检查 Excel 格式。");
       setWhitelistImportCompleted(false);
+    }
+  };
+  const handleAttendanceFile = async (file: File) => {
+    setAttendanceImportError("");
+    try {
+      const result = await parseAttendanceWorkbook(file);
+      setAttendanceRows(result.rows);
+      setAttendanceFileName(file.name);
+      setAttendanceIsDemo(false);
+      setAttendanceWarnings(result.warnings);
+      setAttendanceSheetCounts(result.sheetCounts);
+      setActionNotice(`已解析 ${result.rows.length} 名现场到场客户，当前仅用于页面展示。`);
+    } catch (error) {
+      setAttendanceRows([]);
+      setAttendanceFileName(file.name);
+      setAttendanceIsDemo(false);
+      setAttendanceWarnings([]);
+      setAttendanceSheetCounts([]);
+      setAttendanceImportError(error instanceof Error ? error.message : "文件解析失败，请检查 Excel 内容。" );
+    }
+  };
+  const restoreAttendanceDemo = () => {
+    setAttendanceRows(cloneAttendanceRows(initialAttendanceRows));
+    setAttendanceFileName("现场到场客户名单-演示.xlsx");
+    setAttendanceIsDemo(true);
+    setAttendanceWarnings([]);
+    setAttendanceSheetCounts([]);
+    setAttendanceImportError("");
+    setActionNotice("已恢复现场到场客户演示数据。" );
+  };
+  const saveWhitelistRow = (row: WhitelistRow) => {
+    const nextRow = { ...row, identityKey: whitelistIdentityKey(row), importAction: undefined };
+    if (editingWhitelistRow) {
+      setWhitelistRows((current) => {
+        const nextRows = current.map((item) => item.id === nextRow.id ? nextRow : item);
+        return nextRows;
+      });
+      setActionNotice(`已保存白名单修改：${nextRow.dealerShort}`);
+    } else {
+      setWhitelistRows((current) => {
+        const nextRows = [...current, nextRow];
+        return nextRows;
+      });
+      setActionNotice(`已自动编号 ${nextRow.sequence}，并添加白名单：${nextRow.dealerShort}`);
+    }
+  };
+  const saveAttendanceRow = (row: AttendanceRow) => {
+    if (editingAttendanceRow) {
+      setAttendanceRows((current) => current.map((item) => item.id === row.id ? row : item));
+      setActionNotice(`已保存到场客户修改：${row.dealerCompany || row.dealerName || "未命名客户"}`);
+    } else {
+      setAttendanceRows((current) => [...current, row]);
+      setActionNotice(`已添加到场客户：${row.dealerCompany || row.dealerName || "未命名客户"}`);
     }
   };
   const deleteProductRows = (ids: string[]) => {
@@ -1468,7 +2434,10 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
     setActionNotice(`${productImportCompleted ? "已删除" : "已从待导入结果移除"} ${ids.length} 条商品，已有订单明细和金额不受影响。`);
   };
   const deleteWhitelistRows = (ids: string[]) => {
-    setWhitelistRows((current) => current.filter((row) => !ids.includes(row.id)));
+    setWhitelistRows((current) => {
+      const nextRows = current.filter((row) => !ids.includes(row.id));
+      return nextRows;
+    });
     setEditingWhitelistRow((current) => current && ids.includes(current.id) ? null : current);
     setActionNotice(`${whitelistImportCompleted ? "已删除" : "已从待导入结果移除"} ${ids.length} 名白名单客户，已有订单不会被删除。`);
   };
@@ -1494,41 +2463,44 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
         )}
         {tab === "商品导入" && (
           <div className="admin-panel">
-            <div className="panel-title"><div><h2>{productImportCompleted ? "当前活动商品" : "活动商品导入"}</h2><p>{productImportCompleted ? "商品已进入当前活动，可继续替换 Excel 或手动添加" : "上传一个统一商品 Excel，浏览器解析后确认进入当前活动"}</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setProductFormOpen(true)}>＋ 手动添加商品</button>{productImportCompleted && <button className="admin-primary" onClick={() => { setProductImportCompleted(false); setProductRows([]); setProductFileName(""); setProductSheetCounts([]); setProductImportWarnings([]); setProductImportError(""); }}>继续导入 Excel</button>}</div></div>
-            {!productImportCompleted && <div className="import-rule-hint"><b>本次导入规则</b><span>只上传一个文件；确认导入后整体替换当前商品目录。商品按 Sheet 自动识别客户类型和返利状态，是否礼盒只读取“是否为标品礼盒”，分公司定制品用于下单权限限制。</span></div>}
-            {!productImportCompleted && <div className="single-upload-grid">
+            <div className="panel-title"><div><h2>{productImportCompleted ? "当前活动商品" : "活动商品导入"}</h2><p>{productImportCompleted ? "商品已进入当前活动，可继续追加 Excel、图片或手动添加" : "上传商品 Excel，浏览器解析后追加到当前商品目录"}</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setProductFormOpen(true)}>＋ 手动添加商品</button>{productImportCompleted && <button className="admin-primary" onClick={beginProductImport}>追加导入 Excel</button>}</div></div>
+            {!productImportCompleted && <div className="import-rule-hint"><b>追加导入规则</b><span>商品 Excel 确认后追加到当前商品目录：物料代码优先识别；没有物料代码时按客户类型、返利状态、物料名称、规格和箱规匹配。匹配到已有商品则更新，不重复新增；商品图片 ZIP 按物料名称匹配并写入商品字段。</span></div>}
+            {!productImportCompleted && <div className="dual-upload-grid product-import-upload-grid">
               <article className={`file-upload-card ${productFileName && !productImportError ? "ready" : ""}`}>
                 <div className="file-card-heading"><span>XL</span><div><b>商品信息 Excel</b><small>统一文件 · 读取 4 个商品 Sheet</small></div><em>{productFileName ? (productImportError ? "解析失败" : "解析完成") : "待上传"}</em></div>
                 {productFileName ? <p title={productFileName}>{productFileName}</p> : <p>请选择：调味产品信息表.xlsx</p>}
                 <div className="sheet-tags">{productSheetConfig.map((item) => <span key={item.name}>{item.name}</span>)}</div>
-                <footer><small>{productFileName && !productImportError ? `识别 ${parsedProductCount} 条商品` : "必须包含上述 4 个 Sheet"}</small><div>{productFileName && <button type="button" onClick={() => { setProductRows([]); setProductFileName(""); setProductSheetCounts([]); setProductImportWarnings([]); setProductImportError(""); }}>移除</button>}<label><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleProductFile(file); event.currentTarget.value = ""; }} />{productFileName ? "替换文件" : "选择文件"}</label></div></footer>
+                <footer><small>{productFileName && !productImportError ? `识别 ${parsedProductCount} 条商品` : "必须包含上述 4 个 Sheet"}</small><div>{productFileName && <button type="button" onClick={cancelProductImport}>移除</button>}<label><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleProductFile(file); event.currentTarget.value = ""; }} />{productFileName ? "替换文件" : "选择文件"}</label></div></footer>
               </article>
+              <ProductImageUploadCard fileName={productImageFileName} stats={productImageStats} error={productImageError} disabled={!productFileName && !productImportCompleted} onFile={handleProductImageFile} onRemove={removeProductImages} />
             </div>}
-            {!productImportCompleted && productFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{productImportError ? "文件解析失败" : "1 个文件解析完成 · 等待确认"}</b><small>{productImportError ? "请修正文件后重新选择" : "客户类型和返利状态由 Sheet 自动确定，解析结果可先编辑或删除"}</small></p><strong>{parsedProductCount} 条商品</strong></div>{productImportError && <div className="warning-box"><b>文件无法导入</b><span>{productImportError}</span></div>}{!productImportError && productImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{productImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!productImportError && <><div className="sheet-counts">{productSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} allowDelete onDelete={deleteProductRows} /><button className="admin-primary wide" disabled={!productRows.length} onClick={() => { setProductImportCompleted(true); setActionNotice(`商品导入完成：已整体替换为 ${productRows.length} 条商品；当前原型不会写入后端。`); }}>确认导入 {parsedProductCount} 条商品</button></>}</div>}
-            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品导入完成</b><small>当前商品目录已由本次 Excel 整体替换；订单明细仍保留，刷新页面后恢复原型初始数据。</small></p><div><strong>{parsedProductCount}</strong><small>本次导入</small></div><div><strong>{productValidCount}</strong><small>有效</small></div><div><strong>{productPendingCount}</strong><small>待完善</small></div><div><strong>{branchRestrictedCount}</strong><small>分公司限制</small></div></div><div className="data-section-title"><div><b>当前活动商品</b><span>{productFileName} · 共 {productRows.length} 条 · 可编辑或勾选删除</span></div><button onClick={() => setProductImportCompleted(false)}>查看本次导入结果</button></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} allowDelete onDelete={deleteProductRows} /></>}
+            {!productImportCompleted && productFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{productImportError ? "文件解析失败" : "Excel 解析完成 · 等待确认追加"}</b><small>{productImportError ? "请修正文件后重新选择" : `物料代码优先匹配；本次新增 ${productImportStats.added} 条、更新 ${productImportStats.updated} 条、疑似重复 ${productImportStats.suspected + productImportStats.pending} 条`}</small></p><strong>{parsedProductCount} 条商品</strong></div>{productImportError && <div className="warning-box"><b>文件无法导入</b><span>{productImportError}</span></div>}{!productImportError && productImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{productImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!productImportError && <><div className="sheet-counts">{productSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><div className="product-import-stats">{[["新增", productImportStats.added], ["更新", productImportStats.updated], ["未变更", productImportStats.unchanged], ["疑似重复", productImportStats.suspected], ["待确认", productImportStats.pending]].map(([label, count]) => <span key={label as string}><b>{count}</b><small>{label}</small></span>)}</div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} allowDelete onDelete={deleteProductRows} /><button className="admin-primary wide" disabled={!parsedProductCount} onClick={confirmProductImport}>确认追加导入 {parsedProductCount} 条商品</button></>}</div>}
+            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品追加完成</b><small>本次 Excel 已追加到当前商品目录；匹配到已有商品的记录已更新，订单明细仍保留，刷新页面后恢复原型初始数据。</small></p><div><strong>{parsedProductCount}</strong><small>本次解析</small></div><div><strong>{productImportStats.added}</strong><small>新增</small></div><div><strong>{productImportStats.updated}</strong><small>更新</small></div><div><strong>{productRows.length}</strong><small>当前商品</small></div></div><ProductImageUploadCard fileName={productImageFileName} stats={productImageStats} error={productImageError} disabled={!productFileName && !productImportCompleted} onFile={handleProductImageFile} onRemove={removeProductImages} /><div className="data-section-title"><div><b>当前活动商品</b><span>{productFileName} · 共 {productRows.length} 条 · 可编辑、单条/批量删除</span></div><button onClick={() => setProductImportCompleted(false)}>查看本次导入结果</button></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} allowDelete allowDeleteAll onDelete={deleteProductRows} /></>}
           </div>
         )}
         {tab === "白名单" && (
           <div className="admin-panel">
-            <div className="panel-title"><div><h2>{whitelistImportCompleted ? "当前客户白名单" : "客户白名单导入"}</h2><p>{whitelistImportCompleted ? "白名单已进入当前活动，可继续替换 Excel 或手动添加" : "上传一个统一白名单 Excel，浏览器解析后确认进入当前活动"}</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setWhitelistFormOpen(true)}>＋ 手动添加白名单</button>{whitelistImportCompleted && <button className="admin-primary" onClick={() => { setWhitelistImportCompleted(false); setWhitelistRows([]); setWhitelistFileName(""); setWhitelistSheetCounts([]); setWhitelistImportWarnings([]); setWhitelistImportError(""); setCrossSheetPhoneCount(0); }}>继续导入 Excel</button>}</div></div>
-            {!whitelistImportCompleted && <div className="import-rule-hint"><b>本次导入规则</b><span>只上传一个文件；确认导入后整体替换当前白名单。Sheet 决定客户类型；综合和特渠可以存在同一个手机号，但同一 Sheet 内手机号重复会提示异常。</span></div>}
+            <div className="panel-title"><div><h2>{whitelistImportCompleted ? "当前客户白名单" : "客户白名单导入"}</h2><p>{whitelistImportCompleted ? "白名单已进入当前活动，可继续追加 Excel 或手动添加" : "上传统一白名单 Excel，浏览器解析后追加到当前白名单"}</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setWhitelistFormOpen(true)}>＋ 手动添加白名单</button>{whitelistImportCompleted && <button className="admin-primary" onClick={beginWhitelistImport}>追加导入 Excel</button>}</div></div>
+            {!whitelistImportCompleted && <div className="import-rule-hint"><b>追加导入规则</b><span>首次真实导入会替换演示数据；之后按“客户类型 + 经销商名称全称”匹配并追加，电话变化更新原客户。综合和特渠可以存在同一个手机号；同一客户类型下名称重复或电话异常会标记待处理。</span></div>}
             {!whitelistImportCompleted && <div className="single-upload-grid">
               <article className={"file-upload-card " + (whitelistFileName && !whitelistImportError ? "ready" : "")}>
                 <div className="file-card-heading"><span>XL</span><div><b>客户白名单 Excel</b><small>统一文件 · 读取 2 个白名单 Sheet</small></div><em>{whitelistFileName ? (whitelistImportError ? "解析失败" : "解析完成") : "待上传"}</em></div>
                 {whitelistFileName ? <p title={whitelistFileName}>{whitelistFileName}</p> : <p>请选择：【白名单】26年中秋订货会经销商白名单7.2.xlsx</p>}
                 <div className="sheet-tags">{whitelistSheetConfig.map((item) => <span key={item.name}>{item.name}</span>)}</div>
-                <footer><small>{whitelistFileName && !whitelistImportError ? "识别 " + parsedWhitelistCount + " 名客户" : "必须包含上述 2 个 Sheet"}</small><div>{whitelistFileName && <button type="button" onClick={() => { setWhitelistRows([]); setWhitelistFileName(""); setWhitelistSheetCounts([]); setWhitelistImportWarnings([]); setWhitelistImportError(""); setCrossSheetPhoneCount(0); }}>移除</button>}<label><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleWhitelistFile(file); event.currentTarget.value = ""; }} />{whitelistFileName ? "替换文件" : "选择文件"}</label></div></footer>
+                <footer><small>{whitelistFileName && !whitelistImportError ? "识别 " + parsedWhitelistCount + " 名客户" : "必须包含上述 2 个 Sheet"}</small><div>{whitelistFileName && <button type="button" onClick={cancelWhitelistImport}>移除</button>}<label><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleWhitelistFile(file); event.currentTarget.value = ""; }} />{whitelistFileName ? "替换文件" : "选择文件"}</label></div></footer>
               </article>
             </div>}
-            {!whitelistImportCompleted && whitelistFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{whitelistImportError ? "文件解析失败" : "1 个文件解析完成 · 等待确认"}</b><small>{whitelistImportError ? "请修正文件后重新选择" : "客户类型由 Sheet 确定；解析结果可先编辑或删除"}</small></p><strong>{parsedWhitelistCount} 名客户</strong></div>{whitelistImportError && <div className="warning-box"><b>文件无法导入</b><span>{whitelistImportError}</span></div>}{!whitelistImportError && whitelistImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{whitelistImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!whitelistImportError && <><div className="sheet-counts">{whitelistSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} allowDelete onDelete={deleteWhitelistRows} /><button className="admin-primary wide" disabled={!whitelistRows.length} onClick={() => { setWhitelistImportCompleted(true); setActionNotice("白名单导入完成：已整体替换为 " + whitelistRows.length + " 名客户；当前原型不会写入后端。"); }}>确认导入 {parsedWhitelistCount} 名客户</button></>}</div>}
-            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单导入完成</b><small>当前白名单已由本次 Excel 整体替换；同一手机号在综合和特渠中按客户类型分别识别。</small></p><div><strong>{parsedWhitelistCount}</strong><small>本次导入</small></div><div><strong>{whitelistValidCount}</strong><small>有效</small></div><div><strong>{whitelistPendingCount}</strong><small>待处理</small></div><div><strong>{crossSheetPhoneCount}</strong><small>跨通道同号</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>{whitelistFileName} · 综合客户和特渠客户共 {whitelistRows.length} 名 · 可编辑或勾选删除</span></div><button onClick={() => setWhitelistImportCompleted(false)}>查看本次导入结果</button></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} allowDelete onDelete={deleteWhitelistRows} /></>}
+            {!whitelistImportCompleted && whitelistFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{whitelistImportError ? "文件解析失败" : "Excel 解析完成 · 等待确认追加"}</b><small>{whitelistImportError ? "请修正文件后重新选择" : `按客户类型 + 名称全称匹配；本次新增 ${whitelistImportStats.added} 名、电话更新 ${whitelistImportStats.phoneUpdated} 名、信息更新 ${whitelistImportStats.updated} 名、名称异常 ${whitelistImportStats.duplicateName + whitelistImportStats.pendingName} 名`}</small></p><strong>{parsedWhitelistCount} 名客户</strong></div>{whitelistImportError && <div className="warning-box"><b>文件无法导入</b><span>{whitelistImportError}</span></div>}{!whitelistImportError && whitelistImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{whitelistImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!whitelistImportError && <><div className="sheet-counts">{whitelistSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><div className="product-import-stats">{[["新增", whitelistImportStats.added], ["电话更新", whitelistImportStats.phoneUpdated], ["信息更新", whitelistImportStats.updated], ["未变更", whitelistImportStats.unchanged], ["名称异常", whitelistImportStats.duplicateName + whitelistImportStats.pendingName], ["电话待处理", whitelistImportStats.pendingPhone]].map(([label, count]) => <span key={label as string}><b>{count}</b><small>{label}</small></span>)}</div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} allowDelete onDelete={deleteWhitelistRows} /><button className="admin-primary wide" disabled={!parsedWhitelistCount} onClick={confirmWhitelistImport}>确认追加导入 {parsedWhitelistCount} 名客户</button></>}</div>}
+            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单追加完成</b><small>本次 Excel 已按客户类型和名称全称追加；电话变化已更新原客户，同一手机号在综合和特渠中仍按两个通道识别。</small></p><div><strong>{parsedWhitelistCount}</strong><small>本次解析</small></div><div><strong>{whitelistImportStats.added}</strong><small>新增</small></div><div><strong>{whitelistImportStats.phoneUpdated + whitelistImportStats.updated}</strong><small>更新</small></div><div><strong>{crossSheetPhoneCount}</strong><small>跨通道同号</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>{whitelistFileName} · 综合客户和特渠客户共 {whitelistRows.length} 名 · 可编辑、单条/批量删除</span></div><button onClick={() => setWhitelistImportCompleted(false)}>查看本次导入结果</button></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} allowDelete allowDeleteAll onDelete={deleteWhitelistRows} /></>}
           </div>
         )}
+        {tab === "现场到场" && <AttendancePage rows={attendanceRows} fileName={attendanceFileName} isDemo={attendanceIsDemo} warnings={attendanceWarnings} sheetCounts={attendanceSheetCounts} error={attendanceImportError} onFile={handleAttendanceFile} onRestoreDemo={restoreAttendanceDemo} onAdd={() => setAttendanceFormOpen(true)} onEdit={setEditingAttendanceRow} />}
         {tab === "订单管理" && <OrderManagement activityClosed={activityClosed} />}
         {tab === "抽奖规则" && <LotterySettings rounds={lotteryRounds} onChange={onLotteryChange} />}
       </main>
-      {(productFormOpen || editingProductRow) && <ProductFormDrawer rows={productRows} initialRow={editingProductRow ?? undefined} onClose={() => { setProductFormOpen(false); setEditingProductRow(null); }} onSave={(row) => { if (editingProductRow) { setProductRows((current) => current.map((item) => item.id === row.id ? row : item)); setActionNotice(`已保存商品修改：${row.materialName}`); } else { setProductRows((current) => [...current, row]); setActionNotice(`已自动编号 ${row.sequence}，并添加商品：${row.materialName}`); } }} />}
-      {(whitelistFormOpen || editingWhitelistRow) && <WhitelistFormDrawer rows={whitelistRows} initialRow={editingWhitelistRow ?? undefined} onClose={() => { setWhitelistFormOpen(false); setEditingWhitelistRow(null); }} onSave={(row) => { if (editingWhitelistRow) { setWhitelistRows((current) => current.map((item) => item.id === row.id ? row : item)); setActionNotice(`已保存白名单修改：${row.dealerShort}`); } else { setWhitelistRows((current) => [...current, row]); setActionNotice(`已自动编号 ${row.sequence}，并添加白名单：${row.dealerShort}`); } }} />}
+      {(productFormOpen || editingProductRow) && <ProductFormDrawer key={editingProductRow?.id ?? "new-product"} rows={productRows} initialRow={editingProductRow ?? undefined} onClose={() => { setProductFormOpen(false); setEditingProductRow(null); }} onSave={saveProductRow} />}
+      {(whitelistFormOpen || editingWhitelistRow) && <WhitelistFormDrawer key={editingWhitelistRow?.id ?? "new-whitelist"} rows={whitelistRows} initialRow={editingWhitelistRow ?? undefined} onClose={() => { setWhitelistFormOpen(false); setEditingWhitelistRow(null); }} onSave={saveWhitelistRow} />}
+      {(attendanceFormOpen || editingAttendanceRow) && <AttendanceFormDrawer key={editingAttendanceRow?.id ?? "new-attendance"} rows={attendanceRows} initialRow={editingAttendanceRow ?? undefined} onClose={() => { setAttendanceFormOpen(false); setEditingAttendanceRow(null); }} onSave={saveAttendanceRow} />}
       {actionNotice && <div className="admin-toast" role="status"><span>✓</span>{actionNotice}<button aria-label="关闭提示" onClick={() => setActionNotice("")}>×</button></div>}
     </section>
   );
@@ -1540,8 +2512,10 @@ export function Prototype() {
   const [activityClosed, setActivityClosed] = useState(false);
   const [productRows, setProductRows] = useState<ProductImportRow[]>(initialProductImportRows);
   const [productImportCompleted, setProductImportCompleted] = useState(false);
+  const [productImportHasRun, setProductImportHasRun] = useState(false);
   const [whitelistRows, setWhitelistRows] = useState<WhitelistRow[]>(initialWhitelistRows);
   const [whitelistImportCompleted, setWhitelistImportCompleted] = useState(false);
+  const [whitelistImportHasRun, setWhitelistImportHasRun] = useState(false);
   const surfaces: { key: Surface; label: string; sub: string }[] = [
     { key: "h5", label: "订货 H5", sub: "手机端" },
     { key: "ranking", label: "订货排行", sub: "大屏 A" },
@@ -1561,7 +2535,7 @@ export function Prototype() {
         {surface === "ranking" && <RankingBoard />}
         {surface === "report" && <ReportBoard />}
         {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed" } : item))} />}
-        {surface === "admin" && <AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityClosed={activityClosed} onActivityStatusChange={setActivityClosed} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} />}
+        {surface === "admin" && <AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityClosed={activityClosed} onActivityStatusChange={setActivityClosed} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={() => setProductImportHasRun(true)} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={() => setWhitelistImportHasRun(true)} whitelistImportHasRun={whitelistImportHasRun} />}
       </div>
     </main>
   );
