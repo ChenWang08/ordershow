@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import * as XLSX from "xlsx";
 
 type Surface = "h5" | "ranking" | "report" | "lottery" | "admin";
 type H5Step = "channel" | "region" | "verify" | "order" | "confirm" | "success" | "submitted";
 type H5OrderStatus = "none" | "submitted" | "withdrawn";
 type H5Channel = "综合客户" | "特渠专业客户" | "";
-type MockWhitelistIdentity = { phone: string; channel: Exclude<H5Channel, "">; region: string };
+type MockWhitelistIdentity = { phone: string; channel: Exclude<H5Channel, "">; region: string; branch: string };
 type CandidateScope = "all" | "attended" | "ordered";
 type LotteryRoundStatus = "draft" | "published" | "completed";
 type LotteryRound = {
@@ -23,7 +24,7 @@ type LotteryRound = {
   candidateCount: number;
 };
 type Product = {
-  id: number;
+  id: string;
   name: string;
   line: string;
   spec: string;
@@ -31,29 +32,249 @@ type Product = {
   rebate: boolean;
   gift: boolean;
   atlas: number;
+  customerType: "综合" | "特渠" | "全部";
+  branchScope: string[];
+  status: "有效" | "待完善" | "停用";
+  materialCode?: string;
+  casePack?: string;
 };
 
 const mockWhitelistIdentities: MockWhitelistIdentity[] = [
-  { phone: "13800138000", channel: "特渠专业客户", region: "" },
-  { phone: "13812348000", channel: "特渠专业客户", region: "" },
-  { phone: "14712341979", channel: "综合客户", region: "南区" },
-  { phone: "18612345036", channel: "综合客户", region: "北区" },
+  { phone: "13800138000", channel: "特渠专业客户", region: "", branch: "武汉分" },
+  { phone: "13812348000", channel: "特渠专业客户", region: "", branch: "北京分" },
+  { phone: "14712341979", channel: "综合客户", region: "南区", branch: "长沙分" },
+  { phone: "18612345036", channel: "综合客户", region: "北区", branch: "成都分" },
 ];
 
 function normalizePhone(value: string) {
   return value.replace(/\D/g, "");
 }
 
+function normalizeSearchText(value: string) {
+  return value.trim().toLocaleLowerCase("zh-CN").replace(/\s+/g, "");
+}
+
+function normalizeMaterialCode(value: string) {
+  return normalizeSearchText(value).replace(/[-_]/g, "");
+}
+
 const products: Product[] = [
-  { id: 1, name: "金芝御礼芝麻油礼盒", line: "调味油", spec: "225mL×4 / 5盒", price: 172.5, rebate: true, gift: true, atlas: 3 },
-  { id: 2, name: "福运添香芝麻油", line: "调味油", spec: "225mL×20瓶", price: 144, rebate: true, gift: false, atlas: 0 },
-  { id: 3, name: "小磨芝麻香油", line: "调味油", spec: "221mL×20瓶", price: 210, rebate: true, gift: false, atlas: 0 },
-  { id: 4, name: "金标生抽酱油", line: "酱油", spec: "500mL×12瓶", price: 66, rebate: true, gift: false, atlas: 1 },
-  { id: 5, name: "零添加特级味极鲜", line: "酱油", spec: "500mL×12瓶", price: 78, rebate: true, gift: false, atlas: 1 },
-  { id: 6, name: "纯粮香醋", line: "食醋", spec: "500mL×12瓶", price: 82.8, rebate: false, gift: false, atlas: 2 },
-  { id: 7, name: "鲜香花椒油", line: "调味油", spec: "225mL×20瓶", price: 236, rebate: false, gift: false, atlas: 0 },
-  { id: 8, name: "经典调味礼盒", line: "酱油", spec: "4瓶×6盒", price: 420, rebate: false, gift: true, atlas: 3 },
- ];
+  { id: "1", name: "金芝御礼芝麻油礼盒", line: "调味油", spec: "225mL×4 / 5盒", price: 172.5, rebate: true, gift: true, atlas: 3, customerType: "全部", branchScope: [], status: "有效" },
+  { id: "2", name: "福运添香芝麻油", line: "调味油", spec: "225mL×20瓶", price: 144, rebate: true, gift: false, atlas: 0, customerType: "全部", branchScope: [], status: "有效" },
+  { id: "3", name: "小磨芝麻香油", line: "调味油", spec: "221mL×20瓶", price: 210, rebate: true, gift: false, atlas: 0, customerType: "全部", branchScope: [], status: "有效" },
+  { id: "4", name: "金标生抽酱油", line: "酱油", spec: "500mL×12瓶", price: 66, rebate: true, gift: false, atlas: 1, customerType: "全部", branchScope: [], status: "有效" },
+  { id: "5", name: "零添加特级味极鲜", line: "酱油", spec: "500mL×12瓶", price: 78, rebate: true, gift: false, atlas: 1, customerType: "全部", branchScope: [], status: "有效" },
+  { id: "6", name: "纯粮香醋", line: "食醋", spec: "500mL×12瓶", price: 82.8, rebate: false, gift: false, atlas: 2, customerType: "全部", branchScope: [], status: "有效" },
+  { id: "7", name: "鲜香花椒油", line: "调味油", spec: "225mL×20瓶", price: 236, rebate: false, gift: false, atlas: 0, customerType: "全部", branchScope: [], status: "有效" },
+  { id: "8", name: "经典调味礼盒", line: "酱油", spec: "4瓶×6盒", price: 420, rebate: false, gift: true, atlas: 3, customerType: "全部", branchScope: [], status: "有效" },
+];
+
+function splitBranchScope(value: string) {
+  return value.split(/[，,、]/).map((item) => item.trim()).filter(Boolean);
+}
+
+function productRowToProduct(row: ProductImportRow): Product {
+  const lineAtlas = row.line === "酱油" ? 1 : row.line === "食醋" ? 2 : row.gift === "是" ? 3 : 0;
+  return {
+    id: row.id,
+    name: row.materialName,
+    line: row.line,
+    spec: row.spec,
+    price: Number(row.casePrice) || 0,
+    rebate: row.rebate === "参与",
+    gift: row.gift === "是",
+    atlas: lineAtlas,
+    customerType: row.customerType,
+    branchScope: splitBranchScope(row.branchScope),
+    status: row.status,
+    materialCode: row.materialCode,
+    casePack: row.casePack,
+  };
+}
+
+const productSheetConfig = [
+  { name: "综合参与返利", customerType: "综合" as const, rebate: "参与" as const },
+  { name: "综合不参与返利", customerType: "综合" as const, rebate: "不参与" as const },
+  { name: "特渠参与返利", customerType: "特渠" as const, rebate: "参与" as const },
+  { name: "特渠不参与返利", customerType: "特渠" as const, rebate: "不参与" as const },
+];
+
+const whitelistSheetConfig = [
+  { name: "综合客户白名单", customerType: "综合客户" as const },
+  { name: "特渠客户白名单", customerType: "特渠专业客户" as const },
+];
+
+type ProductImportParseResult = {
+  rows: ProductImportRow[];
+  warnings: string[];
+  sheetCounts: Array<{ name: string; count: number }>;
+};
+
+function textCell(value: unknown) {
+  return String(value ?? "").replace(/\u00a0/g, " ").trim();
+}
+
+async function parseProductWorkbook(file: File): Promise<ProductImportParseResult> {
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", raw: false });
+  const warnings: string[] = [];
+  const rows: ProductImportRow[] = [];
+  const sheetCounts: Array<{ name: string; count: number }> = [];
+  const expectedHeaders = ["产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品"];
+  const unknownSheets = workbook.SheetNames.filter((name) => !productSheetConfig.some((item) => item.name === name));
+  if (unknownSheets.length > 0) warnings.push(`已忽略未识别的 Sheet：${unknownSheets.join("、")}`);
+
+  for (const config of productSheetConfig) {
+    const sheet = workbook.Sheets[config.name];
+    if (!sheet) throw new Error(`缺少必要的 Sheet：${config.name}`);
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false });
+    const header = (matrix[0] ?? []).map(textCell);
+    const missingHeaders = expectedHeaders.filter((name) => !header.includes(name));
+    if (missingHeaders.length > 0) throw new Error(`${config.name} 缺少字段：${missingHeaders.join("、")}`);
+    const indexes = Object.fromEntries(expectedHeaders.map((name) => [name, header.indexOf(name)]));
+    let sequence = 0;
+    let blankCodeCount = 0;
+    const codeRows = new Map<string, number[]>();
+    for (let index = 1; index < matrix.length; index += 1) {
+      const values = matrix[index] ?? [];
+      if (values.every((value) => textCell(value) === "")) continue;
+      const get = (name: string) => textCell(values[indexes[name]]);
+      const materialCode = get("物料代码");
+      const conversion = get("吨箱转换系数");
+      const casePrice = get("元/箱");
+      sequence += 1;
+      if (!materialCode) blankCodeCount += 1;
+      if (materialCode) {
+        const key = materialCode.replace(/\s+/g, "").toUpperCase();
+        codeRows.set(key, [...(codeRows.get(key) ?? []), index + 1]);
+      }
+      rows.push({
+        id: createImportRowId("product"),
+        sequence,
+        customerType: config.customerType,
+        rebate: config.rebate,
+        category: get("产品大类"),
+        line: get("产品线"),
+        materialCode,
+        materialName: get("物料名称"),
+        brand: get("品牌"),
+        variety: get("品种"),
+        spec: get("规格"),
+        casePack: get("箱规"),
+        unitPrice: get("元/瓶"),
+        casePrice,
+        conversion,
+        gift: get("是否为标品礼盒") === "是" ? "是" : "否",
+        branchScope: get("分公司定制品"),
+        source: "excel",
+        sourceSheet: config.name,
+        status: !materialCode || !casePrice || !conversion ? "待完善" : "有效",
+      });
+    }
+    const duplicateGroups = [...codeRows.values()].filter((rowNumbers) => rowNumbers.length > 1);
+    if (duplicateGroups.length > 0) warnings.push(`${config.name} 有 ${duplicateGroups.length} 组重复物料代码，请在确认导入前检查。`);
+    if (blankCodeCount > 0) warnings.push(`${config.name} 有 ${blankCodeCount} 条商品没有物料代码，已标记为待完善。`);
+    sheetCounts.push({ name: config.name, count: sequence });
+  }
+  return { rows, warnings, sheetCounts };
+}
+
+type WhitelistImportParseResult = {
+  rows: WhitelistRow[];
+  warnings: string[];
+  sheetCounts: Array<{ name: string; count: number }>;
+  crossSheetPhoneCount: number;
+};
+
+function normalizedHeader(value: unknown) {
+  return textCell(value).replace(/\s+/g, "");
+}
+
+function findHeaderIndex(header: string[], aliases: readonly string[]) {
+  const normalized = header.map(normalizedHeader);
+  return aliases.map(normalizedHeader).map((alias) => normalized.findIndex((item) => item === alias || item.includes(alias))).find((index) => index >= 0) ?? -1;
+}
+
+async function parseWhitelistWorkbook(file: File): Promise<WhitelistImportParseResult> {
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", raw: false });
+  const warnings: string[] = [];
+  const rows: WhitelistRow[] = [];
+  const sheetCounts: Array<{ name: string; count: number }> = [];
+  const unknownSheets = workbook.SheetNames.filter((name) => !whitelistSheetConfig.some((item) => item.name === name));
+  if (unknownSheets.length > 0) warnings.push(`已忽略未识别的 Sheet：${unknownSheets.join("、")}`);
+
+  const requiredColumns = [
+    ["序号", ["序号"]],
+    ["大区", ["大区"]],
+    ["分公司名称", ["分公司名称", "分公司"]],
+    ["经销商名称（简）", ["经销商名称（简）", "经销商简称"]],
+    ["经销商名称（全）", ["经销商名称（全）", "经销商全称"]],
+    ["经销商类型", ["经销商类型", "综合经销商特渠专业经销商"]],
+    ["经销商姓名", ["经销商姓名"]],
+    ["经销商电话", ["经销商电话"]],
+    ["分公司确认人姓名", ["分公司确认人姓名"]],
+    ["分公司确认人电话", ["分公司确认人电话"]],
+  ] as const;
+
+  for (const config of whitelistSheetConfig) {
+    const sheet = workbook.Sheets[config.name];
+    if (!sheet) throw new Error(`缺少必要的 Sheet：${config.name}`);
+    const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "", raw: false });
+    const headerIndex = matrix.findIndex((row) => row.some((value) => normalizedHeader(value).includes("经销商电话")));
+    if (headerIndex < 0) throw new Error(`${config.name} 未找到包含“经销商电话”的表头行`);
+    const header = (matrix[headerIndex] ?? []).map(textCell);
+    const indexes = Object.fromEntries(requiredColumns.map(([label, aliases]) => [label, findHeaderIndex(header, aliases)]));
+    const missingHeaders = requiredColumns.filter(([label]) => indexes[label] < 0).map(([label]) => label);
+    if (missingHeaders.length > 0) throw new Error(`${config.name} 缺少字段：${missingHeaders.join("、")}`);
+    const get = (values: unknown[], label: string) => textCell(values[indexes[label]]);
+    const sourceRows = matrix.slice(headerIndex + 1).filter((values) => values.some((value) => textCell(value) !== ""));
+    const phoneRows = new Map<string, number[]>();
+    const parsedRows = sourceRows.map((values, offset) => {
+      const dealerPhone = normalizePhone(get(values, "经销商电话"));
+      const rowNumber = headerIndex + offset + 2;
+      if (dealerPhone) phoneRows.set(dealerPhone, [...(phoneRows.get(dealerPhone) ?? []), rowNumber]);
+      return { values, dealerPhone, rowNumber };
+    });
+    const duplicatePhones = new Set([...phoneRows.entries()].filter(([, rowNumbers]) => rowNumbers.length > 1).map(([phone]) => phone));
+    if (duplicatePhones.size > 0) warnings.push(`${config.name} 有 ${duplicatePhones.size} 个手机号重复，已标记为待处理。`);
+
+    for (const { values, dealerPhone } of parsedRows) {
+      const phoneValid = /^1\d{10}$/.test(dealerPhone);
+      const status: WhitelistRow["status"] = phoneValid && !duplicatePhones.has(dealerPhone) ? "有效" : "待处理";
+      rows.push({
+        id: createImportRowId("whitelist"),
+        sequence: Number(get(values, "序号")) || rows.length + 1,
+        customerType: config.customerType,
+        region: get(values, "大区"),
+        branch: get(values, "分公司名称"),
+        dealerShort: get(values, "经销商名称（简）"),
+        dealerFull: get(values, "经销商名称（全）"),
+        dealerType: get(values, "经销商类型"),
+        dealerName: get(values, "经销商姓名"),
+        dealerPhone,
+        confirmerName: get(values, "分公司确认人姓名"),
+        confirmerPhone: normalizePhone(get(values, "分公司确认人电话")),
+        status,
+        source: "excel",
+        sourceSheet: config.name,
+        identityKey: `${config.customerType}:${dealerPhone}`,
+      });
+    }
+    const blankOrInvalidCount = parsedRows.filter(({ dealerPhone }) => !/^1\d{10}$/.test(dealerPhone)).length;
+    if (blankOrInvalidCount > 0) warnings.push(`${config.name} 有 ${blankOrInvalidCount} 条手机号为空或格式异常，已标记为待处理。`);
+    sheetCounts.push({ name: config.name, count: sourceRows.length });
+  }
+
+  const phonesByType = new Map<string, Set<string>>();
+  for (const row of rows) {
+    if (row.status !== "有效" || !row.dealerPhone) continue;
+    const phones = phonesByType.get(row.dealerPhone) ?? new Set<string>();
+    phones.add(row.customerType);
+    phonesByType.set(row.dealerPhone, phones);
+  }
+  const crossSheetPhoneCount = [...phonesByType.values()].filter((types) => types.size > 1).length;
+  if (crossSheetPhoneCount > 0) warnings.push(`检测到 ${crossSheetPhoneCount} 个手机号同时存在于综合和特渠白名单，已按客户类型分别保留。`);
+  return { rows, warnings, sheetCounts, crossSheetPhoneCount };
+}
 
 const dealerNames = [
   "上海爱尚真", "江苏徐工电子公司", "江苏四合商贸发展", "北京智享云采经贸", "北京惠通达行商贸",
@@ -108,10 +329,16 @@ function ProductArt({ atlas }: { atlas: number }) {
   return <span className={`product-art atlas-${atlas}`} role="img" aria-label="临时商品图" />;
 }
 
-function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
+type SubmittedOrderItem = { product: Product; quantity: number };
+
+function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { activityClosed: boolean; importedRows: ProductImportRow[] | null; importedWhitelistRows: WhitelistRow[] | null }) {
+  const catalog = useMemo(() => importedRows ? importedRows.map(productRowToProduct) : products, [importedRows]);
   const [step, setStep] = useState<H5Step>("channel");
   const [channel, setChannel] = useState<H5Channel>("");
   const [region, setRegion] = useState("");
+  const [verifiedBranch, setVerifiedBranch] = useState("");
+  const [verifiedIdentity, setVerifiedIdentity] = useState<WhitelistRow | null>(null);
+  const [submittedIdentity, setSubmittedIdentity] = useState<WhitelistRow | null>(null);
   const [phone, setPhone] = useState("13800138000");
   const [verifyError, setVerifyError] = useState("");
   const [rebate, setRebate] = useState(true);
@@ -125,22 +352,34 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
   const [orderWithdrawnAt, setOrderWithdrawnAt] = useState("");
   const [orderEvents, setOrderEvents] = useState<Array<{ time: string; title: string; detail: string }>>([]);
   const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
-  const [submittedQuantities, setSubmittedQuantities] = useState<Record<number, number>>({});
-  const [quantities, setQuantities] = useState<Record<number, number>>({ 1: 2, 3: 1 });
-  const visibleProducts = products.filter(
-    (p) => p.rebate === rebate && (line === "全部" || p.line === line) && p.name.includes(search),
+  const [submittedQuantities, setSubmittedQuantities] = useState<Record<string, number>>({});
+  const [submittedItems, setSubmittedItems] = useState<SubmittedOrderItem[]>([]);
+  const [quantities, setQuantities] = useState<Record<string, number>>({ "1": 2, "3": 1 });
+  const lineOptions = useMemo(() => ["全部", ...Array.from(new Set(catalog.map((product) => product.line).filter(Boolean)))], [catalog]);
+  const effectiveLine = lineOptions.includes(line) ? line : "全部";
+  const h5CustomerType = channel === "综合客户" ? "综合" : "特渠";
+  const visibleProducts = catalog.filter(
+    (p) => p.status === "有效"
+      && (p.customerType === "全部" || p.customerType === h5CustomerType)
+      && p.rebate === rebate
+      && (p.branchScope.length === 0 || p.branchScope.includes(verifiedBranch))
+      && (effectiveLine === "全部" || p.line === effectiveLine)
+      && p.name.includes(search),
   );
-  const selected = products.filter((p) => (quantities[p.id] || 0) > 0);
+  const selected = catalog.filter((p) => (quantities[p.id] || 0) > 0);
   const totalBoxes = selected.reduce((sum, p) => sum + quantities[p.id], 0);
   const totalAmount = selected.reduce((sum, p) => sum + quantities[p.id] * p.price, 0);
-  const orderViewQuantities = orderStatus === "withdrawn" ? submittedQuantities : quantities;
-  const orderViewSelected = products.filter((p) => (orderViewQuantities[p.id] || 0) > 0);
+  const orderViewQuantities = submittedQuantities;
+  const orderViewSelected = submittedItems.map((item) => item.product);
   const orderViewBoxes = orderViewSelected.reduce((sum, p) => sum + orderViewQuantities[p.id], 0);
   const orderViewAmount = orderViewSelected.reduce((sum, p) => sum + orderViewQuantities[p.id] * p.price, 0);
-  const identityLabel = channel === "综合客户" ? `综合客户 · ${region}` : "特渠专业客户";
-  const dealerName = channel === "综合客户" ? "上海爱尚真贸易有限公司" : "北京智享云采经贸有限公司";
+  const importedIdentity = verifiedIdentity ?? submittedIdentity;
+  const identityRegion = importedIdentity?.region || region;
+  const identityBranch = importedIdentity?.branch || verifiedBranch;
+  const identityLabel = importedIdentity ? `${importedIdentity.customerType}${identityRegion ? ` · ${identityRegion}` : ""}` : channel === "综合客户" ? `综合客户 · ${region}` : "特渠专业客户";
+  const dealerName = importedIdentity?.dealerFull || (channel === "综合客户" ? "上海爱尚真贸易有限公司" : "北京智享云采经贸有限公司");
 
-  const changeQty = (id: number, delta: number) => {
+  const changeQty = (id: string, delta: number) => {
     setQuantities((old) => ({ ...old, [id]: Math.max(0, (old[id] || 0) + delta) }));
   };
 
@@ -152,6 +391,24 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
   const verifyIdentity = () => {
     if (activityClosed && orderStatus === "none") return;
     const normalizedPhone = normalizePhone(phone);
+    if (importedWhitelistRows) {
+      const expectedType: WhitelistRow["customerType"] = channel === "综合客户" ? "综合客户" : "特渠专业客户";
+      const identity = importedWhitelistRows.find((item) => item.status === "有效" && item.customerType === expectedType && normalizePhone(item.dealerPhone) === normalizedPhone);
+      if (!identity) {
+        const otherChannelIdentity = importedWhitelistRows.find((item) => item.status === "有效" && normalizePhone(item.dealerPhone) === normalizedPhone);
+        setVerifyError(otherChannelIdentity ? `该手机号登记在${otherChannelIdentity.customerType}白名单中，请返回选择对应订货通道。` : "该手机号不在本次活动白名单中，请核对后重新输入。");
+        return;
+      }
+      if (expectedType === "综合客户" && identity.region !== region) {
+        setVerifyError(`该手机号登记为综合客户 · ${identity.region}，请重新选择订货大区。`);
+        return;
+      }
+      setVerifyError("");
+      setVerifiedIdentity(identity);
+      setVerifiedBranch(identity.branch);
+      setStep(orderStatus === "none" ? "order" : "submitted");
+      return;
+    }
     const identity = mockWhitelistIdentities.find((item) => item.phone === normalizedPhone);
     if (!identity) {
       setVerifyError("该手机号不在本次活动白名单中，请核对后重新输入。");
@@ -162,6 +419,8 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
       return;
     }
     setVerifyError("");
+    setVerifiedIdentity(null);
+    setVerifiedBranch(identity.branch);
     setStep(orderStatus === "none" ? "order" : "submitted");
   };
 
@@ -187,12 +446,12 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
                 <h2>选择您的订货通道</h2>
                 <p>请选择白名单中登记的客户类型，进入对应订货专区。</p>
                 <div className="channel-options">
-                  <button onClick={() => { setChannel("综合客户"); setRegion(""); setStep("region"); }}>
+                  <button onClick={() => { setChannel("综合客户"); setRegion(""); setVerifiedBranch(""); setVerifiedIdentity(null); setStep("region"); }}>
                     <i className="channel-icon">综</i>
                     <span><b>综合客户订货</b><small>综合经销商 · 进入后选择所属大区</small></span>
                     <em>›</em>
                   </button>
-                  <button onClick={() => { setChannel("特渠专业客户"); setRegion(""); setStep("verify"); }}>
+                  <button onClick={() => { setChannel("特渠专业客户"); setRegion(""); setVerifiedBranch(""); setVerifiedIdentity(null); setStep("verify"); }}>
                     <i className="channel-icon special">特</i>
                     <span><b>特渠专业客户订货</b><small>专业渠道经销商 · 手机号验证身份</small></span>
                     <em>›</em>
@@ -217,7 +476,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
                 <h2>请选择所属大区</h2>
                 <p>验证手机号时，系统会再次核对客户类型和经营区域。</p>
                 <div className="region-options">
-                  {[
+                {[
                     ["东区", "华东区域综合经销商"],
                     ["南区", "华南区域综合经销商"],
                     ["北1区", "华北一部综合经销商"],
@@ -266,7 +525,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
               <div className="dealer-card">
                 <span>已识别经销商</span>
                 <b>{dealerName}</b>
-                <small>{identityLabel} · 联系人王女士 · 138****8000</small>
+                <small>{identityLabel} · {identityBranch || "未标注分公司"} · {importedIdentity?.dealerName || "联系人王女士"} · {importedIdentity ? `手机 ${maskPhone(importedIdentity.dealerPhone)}` : "138****8000"}</small>
               </div>
               <div className="policy-note"><b>订货提示</b><span>{activityClosed ? "活动已截止，当前订单仅可查看。" : "所有商品按箱订购，提交后可在截止时间前修改或取消本次订货。"}</span></div>
               <div className="product-toolbar">
@@ -277,7 +536,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
                 <label className="search-box">⌕<input placeholder="搜索商品" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
               </div>
               <div className="line-tabs">
-                {["全部", "调味油", "酱油", "食醋"].map((item) => (
+                {lineOptions.map((item) => (
                   <button key={item} className={line === item ? "active" : ""} onClick={() => setLine(item)}>{item}</button>
                 ))}
               </div>
@@ -286,7 +545,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
                   <article className="product-card" key={product.id}>
                     <div className="product-image"><ProductArt atlas={product.atlas} />{product.gift && <span className="gift-badge">礼盒</span>}</div>
                     <div className="product-info">
-                      <span className="material-code">物料 {String(7245000000 + product.id)}</span>
+                      <span className="material-code">物料 {product.materialCode || `原型-${product.id}`}</span>
                       <h3>{product.name}</h3>
                       <p>{product.spec}</p>
                       <div className="product-action">
@@ -345,7 +604,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
           {step === "confirm" && (
             <section className="h5-page confirm-page">
               <header className="simple-header"><button onClick={() => setStep("order")}>‹</button><b>确认订单</b><span /></header>
-              <div className="confirm-hero"><span>请核对订货信息</span><h2>{dealerName}</h2><small>{identityLabel}{channel === "特渠专业客户" ? " · 北京分" : ""}</small></div>
+              <div className="confirm-hero"><span>请核对订货信息</span><h2>{dealerName}</h2><small>{identityLabel}{identityBranch ? ` · ${identityBranch}` : ""}</small></div>
               <div className="confirm-list">
                 {selected.map((product) => (
                   <div key={product.id}>
@@ -367,6 +626,8 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
                 setOrderVersion(nextVersion);
                 setOrderStatus("submitted");
                 setSubmittedQuantities({ ...quantities });
+                setSubmittedItems(selected.map((product) => ({ product: { ...product, branchScope: [...product.branchScope] }, quantity: quantities[product.id] })));
+                setSubmittedIdentity(verifiedIdentity ? { ...verifiedIdentity } : null);
                 setOrderWithdrawnAt("");
                 setOrderUpdatedAt(actionTime);
                 setOrderEvents((events) => [{ time: actionTime, title: isFirstSubmit ? "已提交订单" : "重新提交订单", detail: isFirstSubmit ? "经销商手机端提交 · 当前版本 V1" : `经销商修改后重新提交 · 当前版本 V${nextVersion} · 订单号不变` }, ...events]);
@@ -422,7 +683,7 @@ function H5Prototype({ activityClosed }: { activityClosed: boolean }) {
               <div className="success-amount"><span>订单总金额</span><b>¥{money(totalAmount)}</b><small>{totalBoxes} 箱 · {selected.length} 种商品</small></div>
               <div className="success-note">订单号保持不变，截止前您可以再次进入并修改或取消本次订货。看板将在数秒内同步最新数据。</div>
               <button className="primary-btn" onClick={() => setStep("submitted")}>查看订单</button>
-              <button className="ghost-btn" onClick={() => { setChannel(""); setRegion(""); setStep("channel"); }}>返回活动首页</button>
+              <button className="ghost-btn" onClick={() => { setChannel(""); setRegion(""); setVerifiedBranch(""); setVerifiedIdentity(null); setStep("channel"); }}>返回活动首页</button>
             </section>
           )}
           {cancelConfirmOpen && (
@@ -757,8 +1018,11 @@ type ProductImportRow = {
   casePrice: string;
   conversion: string;
   gift: "是" | "否";
+  branchScope: string;
   status: "有效" | "待完善" | "停用";
   manuallyEdited?: boolean;
+  source?: "excel" | "manual";
+  sourceSheet?: string;
 };
 
 type WhitelistRow = {
@@ -774,6 +1038,10 @@ type WhitelistRow = {
   dealerPhone: string;
   confirmerName: string;
   confirmerPhone: string;
+  status: "有效" | "待处理";
+  identityKey?: string;
+  source?: "excel" | "manual";
+  sourceSheet?: string;
   manuallyEdited?: boolean;
 };
 
@@ -784,17 +1052,17 @@ const createImportRowId = (prefix: string) => {
 };
 
 const initialProductImportRows: ProductImportRow[] = [
-  { id: "product-1", sequence: 1, customerType: "特渠", rebate: "参与", category: "特渠定制产品", line: "调味油", materialCode: "7245-0002307", materialName: "金芝御礼225ML×4礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "225mL×5", casePack: "5盒/箱", unitPrice: "34.50", casePrice: "172.50", conversion: "0.00092", gift: "是", status: "有效" },
-  { id: "product-2", sequence: 1, customerType: "特渠", rebate: "不参与", category: "特渠定制品", line: "酱油", materialCode: "7217-0001957", materialName: "四海祯享礼盒", brand: "金龙鱼", variety: "礼盒", spec: "500mL×2+500mL+530g", casePack: "6盒/箱", unitPrice: "19.30", casePrice: "117.00", conversion: "", gift: "是", status: "待完善" },
-  { id: "product-3", sequence: 1, customerType: "综合", rebate: "参与", category: "全渠道适用通品", line: "调味油", materialCode: "7455-02F003", materialName: "金龙鱼芝麻香油礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "145mL×4", casePack: "15盒/箱", unitPrice: "28.00", casePrice: "420.00", conversion: "0.00125", gift: "是", status: "有效" },
-  { id: "product-4", sequence: 1, customerType: "综合", rebate: "不参与", category: "通用品调味油", line: "调味油", materialCode: "7455-01P702", materialName: "香满园芝麻油245mL×12", brand: "香满园", variety: "芝麻油", spec: "245mL", casePack: "12瓶/箱", unitPrice: "6.90", casePrice: "82.80", conversion: "0.00270", gift: "否", status: "有效" },
+  { id: "product-1", sequence: 1, customerType: "特渠", rebate: "参与", category: "特渠定制产品", line: "调味油", materialCode: "7245-0002307", materialName: "金芝御礼225ML×4礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "225mL×5", casePack: "5盒/箱", unitPrice: "34.50", casePrice: "172.50", conversion: "0.00092", gift: "是", branchScope: "", status: "有效", source: "excel", sourceSheet: "特渠参与返利" },
+  { id: "product-2", sequence: 1, customerType: "特渠", rebate: "不参与", category: "特渠定制品", line: "酱油", materialCode: "7217-0001957", materialName: "四海祯享礼盒", brand: "金龙鱼", variety: "礼盒", spec: "500mL×2+500mL+530g", casePack: "6盒/箱", unitPrice: "19.30", casePrice: "117.00", conversion: "", gift: "是", branchScope: "", status: "待完善", source: "excel", sourceSheet: "特渠不参与返利" },
+  { id: "product-3", sequence: 1, customerType: "综合", rebate: "参与", category: "全渠道适用通品", line: "调味油", materialCode: "7455-02F003", materialName: "金龙鱼芝麻香油礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "145mL×4", casePack: "15盒/箱", unitPrice: "28.00", casePrice: "420.00", conversion: "0.00125", gift: "是", branchScope: "", status: "有效", source: "excel", sourceSheet: "综合参与返利" },
+  { id: "product-4", sequence: 1, customerType: "综合", rebate: "不参与", category: "通用品调味油", line: "调味油", materialCode: "7455-01P702", materialName: "香满园芝麻油245mL×12", brand: "香满园", variety: "芝麻油", spec: "245mL", casePack: "12瓶/箱", unitPrice: "6.90", casePrice: "82.80", conversion: "0.00270", gift: "否", branchScope: "", status: "有效", source: "excel", sourceSheet: "综合不参与返利" },
 ];
 
 const initialWhitelistRows: WhitelistRow[] = [
-  { id: "whitelist-1", sequence: 1, customerType: "综合客户", region: "南区", branch: "长沙分", dealerShort: "长沙久茂", dealerFull: "长沙久茂食品有限公司", dealerType: "综合经销商", dealerName: "王惠", dealerPhone: "147****1979", confirmerName: "张学文", confirmerPhone: "139****6386" },
-  { id: "whitelist-2", sequence: 2, customerType: "综合客户", region: "南区", branch: "长沙分", dealerShort: "湘潭餐乐", dealerFull: "湘潭餐乐商贸有限公司", dealerType: "综合经销商", dealerName: "刘宇剑", dealerPhone: "137****0822", confirmerName: "张学文", confirmerPhone: "139****6386" },
-  { id: "whitelist-3", sequence: 1, customerType: "特渠专业客户", region: "南区", branch: "长沙分", dealerShort: "深圳市智臻云采", dealerFull: "深圳市智臻云采科技有限公司", dealerType: "特渠专业经销商", dealerName: "王凡", dealerPhone: "188****4733", confirmerName: "官国梁", confirmerPhone: "159****6519" },
-  { id: "whitelist-4", sequence: 2, customerType: "特渠专业客户", region: "南区", branch: "厦门分", dealerShort: "泉州乐食光", dealerFull: "泉州乐食光商贸有限公司", dealerType: "特渠专业经销商", dealerName: "郑总", dealerPhone: "152****7241", confirmerName: "窦任重", confirmerPhone: "186****2331" },
+  { id: "whitelist-1", sequence: 1, customerType: "综合客户", region: "南区", branch: "长沙分", dealerShort: "长沙久茂", dealerFull: "长沙久茂食品有限公司", dealerType: "综合经销商", dealerName: "王惠", dealerPhone: "14712341979", confirmerName: "张学文", confirmerPhone: "13912346386", status: "有效", source: "excel" },
+  { id: "whitelist-2", sequence: 2, customerType: "综合客户", region: "南区", branch: "长沙分", dealerShort: "湘潭餐乐", dealerFull: "湘潭餐乐商贸有限公司", dealerType: "综合经销商", dealerName: "刘宇剑", dealerPhone: "13712340822", confirmerName: "张学文", confirmerPhone: "13912346386", status: "有效", source: "excel" },
+  { id: "whitelist-3", sequence: 1, customerType: "特渠专业客户", region: "南区", branch: "长沙分", dealerShort: "深圳市智臻云采", dealerFull: "深圳市智臻云采科技有限公司", dealerType: "特渠专业经销商", dealerName: "王凡", dealerPhone: "18812344733", confirmerName: "官国梁", confirmerPhone: "15912346519", status: "有效", source: "excel" },
+  { id: "whitelist-4", sequence: 2, customerType: "特渠专业客户", region: "南区", branch: "厦门分", dealerShort: "泉州乐食光", dealerFull: "泉州乐食光商贸有限公司", dealerType: "特渠专业经销商", dealerName: "郑总", dealerPhone: "15212347241", confirmerName: "窦任重", confirmerPhone: "18612342331", status: "有效", source: "excel" },
 ];
 
 type DeleteTarget = {
@@ -802,6 +1070,23 @@ type DeleteTarget = {
   labels: string[];
   kind: "商品" | "白名单客户";
 };
+
+const productSheetOrder = new Map(productSheetConfig.map((item, index) => [item.name, index]));
+const whitelistSheetOrder = new Map(whitelistSheetConfig.map((item, index) => [item.name, index]));
+
+function compareProductRows(a: ProductImportRow, b: ProductImportRow) {
+  return (productSheetOrder.get(a.sourceSheet ?? "") ?? 99) - (productSheetOrder.get(b.sourceSheet ?? "") ?? 99)
+    || a.sequence - b.sequence
+    || a.customerType.localeCompare(b.customerType, "zh-CN")
+    || a.rebate.localeCompare(b.rebate, "zh-CN")
+    || a.id.localeCompare(b.id);
+}
+
+function compareWhitelistRows(a: WhitelistRow, b: WhitelistRow) {
+  return (whitelistSheetOrder.get(a.sourceSheet ?? "") ?? 99) - (whitelistSheetOrder.get(b.sourceSheet ?? "") ?? 99)
+    || a.sequence - b.sequence
+    || a.id.localeCompare(b.id);
+}
 
 function DeleteConfirmDialog({ target, onCancel, onConfirm }: { target: DeleteTarget; onCancel: () => void; onConfirm: () => void }) {
   const labelPreview = target.labels.slice(0, 3).join("、");
@@ -829,21 +1114,39 @@ function DeleteConfirmDialog({ target, onCancel, onConfirm }: { target: DeleteTa
 function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false }: { rows: ProductImportRow[]; onEdit: (row: ProductImportRow) => void; onDelete?: (ids: string[]) => void; allowDelete?: boolean }) {
   const [customerType, setCustomerType] = useState("全部");
   const [rebate, setRebate] = useState("全部");
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否礼盒", "状态", "操作"];
-  const visibleRows = useMemo(() => rows.filter((row) => (customerType === "全部" || row.customerType === customerType) && (rebate === "全部" || row.rebate === rebate)), [rows, customerType, rebate]);
-  const visibleIds = useMemo(() => visibleRows.map((row) => row.id), [visibleRows]);
-  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否礼盒", "分公司限制", "状态", "操作"];
+  const filteredRows = useMemo(() => {
+    const normalizedKeyword = normalizeSearchText(searchKeyword);
+    const normalizedCodeKeyword = normalizeMaterialCode(searchKeyword);
+    return rows.filter((row) => {
+      const matchesFilters = (customerType === "全部" || row.customerType === customerType) && (rebate === "全部" || row.rebate === rebate);
+      const matchesSearch = !normalizedKeyword
+        || normalizeSearchText(row.materialName).includes(normalizedKeyword)
+        || normalizeMaterialCode(row.materialCode).includes(normalizedCodeKeyword);
+      return matchesFilters && matchesSearch;
+    });
+  }, [rows, customerType, rebate, searchKeyword]);
+  const sortedRows = useMemo(() => [...filteredRows].sort(compareProductRows), [filteredRows]);
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageRows = sortedRows.slice(pageStart, pageStart + pageSize);
+  const pageIds = useMemo(() => pageRows.map((row) => row.id), [pageRows]);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
   const openDelete = (ids: string[]) => {
     const targetRows = rows.filter((row) => ids.includes(row.id));
     setDeleteTarget({ ids, labels: targetRows.map((row) => row.materialName || row.materialCode), kind: "商品" });
   };
-  const toggleVisibleRows = () => {
+  const togglePageRows = () => {
     setSelectedIds((current) => {
       const next = new Set(current);
-      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
-      else visibleIds.forEach((id) => next.add(id));
+      if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
       return [...next];
     });
   };
@@ -856,21 +1159,23 @@ function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false }: { r
   return (
     <>
       <div className="data-filters">
-        <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setSelectedIds([]); }}><option>全部</option><option>特渠</option><option>综合</option></select></label>
-        <label><span>是否参与返利</span><select value={rebate} onChange={(e) => { setRebate(e.target.value); setSelectedIds([]); }}><option>全部</option><option>参与</option><option>不参与</option></select></label>
-        <small>当前显示 {visibleRows.length} 条商品{allowDelete ? "，可勾选删除" : "，导入确认前可编辑"}</small>
+        <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>特渠</option><option>综合</option></select></label>
+        <label><span>是否参与返利</span><select value={rebate} onChange={(e) => { setRebate(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>参与</option><option>不参与</option></select></label>
+        <label className="data-filter-search"><span>搜索商品</span><input type="search" value={searchKeyword} onChange={(e) => { setSearchKeyword(e.target.value); setPage(1); setSelectedIds([]); }} placeholder="物料代码 / 物料名称" aria-label="搜索物料代码或物料名称" /></label>
+        <small>当前显示 {sortedRows.length} 条商品 · 第 {currentPage}/{totalPages} 页{allowDelete ? "，可勾选删除" : "，导入确认前可编辑"}</small>
       </div>
       {allowDelete && selectedIds.length > 0 && <div className="selection-toolbar"><span>已选择 <b>{selectedIds.length}</b> 条商品</span><div><button type="button" className="selection-clear" onClick={() => setSelectedIds([])}>取消选择</button><button type="button" className="selection-delete" onClick={() => openDelete(selectedIds)}>删除所选</button></div></div>}
       <div className="table-scroll">
         <div className={`data-table product-import-table ${allowDelete ? "with-selection" : ""}`}>
-          <div className="table-row table-head">{allowDelete && <b className="select-cell"><input type="checkbox" aria-label="全选当前商品" checked={allVisibleSelected} onChange={toggleVisibleRows} /></b>}{heads.map((x) => <b key={x}>{x}</b>)}</div>
-          {visibleRows.map((row) => {
-            const values = [row.sequence, row.customerType, row.rebate, row.category, row.line, row.materialCode, row.materialName, row.brand, row.variety, row.spec, row.casePack, row.unitPrice, row.casePrice, row.conversion, row.gift, row.status];
-            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择商品 ${row.materialName}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index} className={index === 15 ? `status-cell ${row.status === "待完善" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
+          <div className="table-row table-head">{allowDelete && <b className="select-cell"><input type="checkbox" aria-label="全选当前页商品" checked={allPageSelected} onChange={togglePageRows} /></b>}{heads.map((x) => <b key={x}>{x}</b>)}</div>
+          {pageRows.map((row, index) => {
+            const values = [pageStart + index + 1, row.customerType, row.rebate, row.category, row.line, row.materialCode, row.materialName, row.brand, row.variety, row.spec, row.casePack, row.unitPrice, row.casePrice, row.conversion, row.gift, row.branchScope || "全部分公司", row.status];
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择商品 ${row.materialName}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index} className={index === 16 ? `status-cell ${row.status === "待完善" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
-          {visibleRows.length === 0 && <div className="table-empty">当前筛选条件下没有商品</div>}
+          {sortedRows.length === 0 && <div className="table-empty">{searchKeyword.trim() ? "当前搜索和筛选条件下没有商品" : "当前筛选条件下没有商品"}</div>}
         </div>
       </div>
+      <div className="table-pagination"><span>共 {sortedRows.length} 条</span><div><label>每页<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option></select>条</label><button type="button" disabled={currentPage <= 1} onClick={() => setPage(1)}>首页</button><button type="button" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button><b>{currentPage} / {totalPages}</b><button type="button" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button><button type="button" disabled={currentPage >= totalPages} onClick={() => setPage(totalPages)}>末页</button></div></div>
       {deleteTarget && <DeleteConfirmDialog target={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={confirmDelete} />}
     </>
   );
@@ -878,21 +1183,39 @@ function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false }: { r
 
 function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = false }: { rows: WhitelistRow[]; onEdit: (row: WhitelistRow) => void; onDelete?: (ids: string[]) => void; allowDelete?: boolean }) {
   const [customerType, setCustomerType] = useState("全部");
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-  const heads = ["序号", "客户类型", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商类型", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话", "操作"];
-  const visibleRows = useMemo(() => rows.filter((row) => customerType === "全部" || row.customerType === customerType), [rows, customerType]);
-  const visibleIds = useMemo(() => visibleRows.map((row) => row.id), [visibleRows]);
-  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
+  const heads = ["序号", "客户类型", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商类型", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话", "状态", "操作"];
+  const filteredRows = useMemo(() => {
+    const normalizedKeyword = normalizeSearchText(searchKeyword);
+    const phoneKeyword = normalizePhone(searchKeyword);
+    return rows.filter((row) => {
+      const matchesType = customerType === "全部" || row.customerType === customerType;
+      const matchesSearch = !normalizedKeyword
+        || [row.dealerShort, row.dealerFull, row.dealerName].some((value) => normalizeSearchText(value).includes(normalizedKeyword))
+        || (phoneKeyword.length > 0 && normalizePhone(row.dealerPhone).includes(phoneKeyword));
+      return matchesType && matchesSearch;
+    });
+  }, [rows, customerType, searchKeyword]);
+  const sortedRows = useMemo(() => [...filteredRows].sort(compareWhitelistRows), [filteredRows]);
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const pageStart = (currentPage - 1) * pageSize;
+  const pageRows = sortedRows.slice(pageStart, pageStart + pageSize);
+  const pageIds = useMemo(() => pageRows.map((row) => row.id), [pageRows]);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.includes(id));
   const openDelete = (ids: string[]) => {
     const targetRows = rows.filter((row) => ids.includes(row.id));
     setDeleteTarget({ ids, labels: targetRows.map((row) => row.dealerShort || row.dealerFull), kind: "白名单客户" });
   };
-  const toggleVisibleRows = () => {
+  const togglePageRows = () => {
     setSelectedIds((current) => {
       const next = new Set(current);
-      if (allVisibleSelected) visibleIds.forEach((id) => next.delete(id));
-      else visibleIds.forEach((id) => next.add(id));
+      if (allPageSelected) pageIds.forEach((id) => next.delete(id));
+      else pageIds.forEach((id) => next.add(id));
       return [...next];
     });
   };
@@ -905,20 +1228,22 @@ function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = false }:
   return (
     <>
       <div className="data-filters">
-        <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setSelectedIds([]); }}><option>全部</option><option>综合客户</option><option>特渠专业客户</option></select></label>
-        <small>当前显示 {visibleRows.length} 名客户{allowDelete ? "，可勾选删除" : "，导入确认前可编辑"}</small>
+        <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>综合客户</option><option>特渠专业客户</option></select></label>
+        <label className="data-filter-search"><span>搜索白名单</span><input type="search" value={searchKeyword} onChange={(e) => { setSearchKeyword(e.target.value); setPage(1); setSelectedIds([]); }} placeholder="经销商名称 / 姓名 / 电话" aria-label="搜索经销商名称、经销商姓名或电话" /></label>
+        <small>当前显示 {sortedRows.length} 名客户 · 第 {currentPage}/{totalPages} 页{allowDelete ? "，可勾选删除" : "，导入确认前可编辑"}</small>
       </div>
       {allowDelete && selectedIds.length > 0 && <div className="selection-toolbar"><span>已选择 <b>{selectedIds.length}</b> 名客户</span><div><button type="button" className="selection-clear" onClick={() => setSelectedIds([])}>取消选择</button><button type="button" className="selection-delete" onClick={() => openDelete(selectedIds)}>删除所选</button></div></div>}
       <div className="table-scroll">
         <div className={`data-table whitelist-table ${allowDelete ? "with-selection" : ""}`}>
-          <div className="table-row table-head">{allowDelete && <b className="select-cell"><input type="checkbox" aria-label="全选当前白名单" checked={allVisibleSelected} onChange={toggleVisibleRows} /></b>}{heads.map((x) => <b key={x}>{x}</b>)}</div>
-          {visibleRows.map((row) => {
-            const values = [row.sequence, row.customerType, row.region, row.branch, row.dealerShort, row.dealerFull, row.dealerType, row.dealerName, row.dealerPhone, row.confirmerName, row.confirmerPhone];
-            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择白名单客户 ${row.dealerShort}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index}>{value}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
+          <div className="table-row table-head">{allowDelete && <b className="select-cell"><input type="checkbox" aria-label="全选当前页白名单" checked={allPageSelected} onChange={togglePageRows} /></b>}{heads.map((x) => <b key={x}>{x}</b>)}</div>
+          {pageRows.map((row, index) => {
+            const values = [pageStart + index + 1, row.customerType, row.region, row.branch, row.dealerShort, row.dealerFull, row.dealerType, row.dealerName, row.dealerPhone, row.confirmerName, row.confirmerPhone, row.status];
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择白名单客户 ${row.dealerShort}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index} className={index === 11 ? `status-cell ${row.status === "待处理" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
-          {visibleRows.length === 0 && <div className="table-empty">当前筛选条件下没有白名单客户</div>}
+          {sortedRows.length === 0 && <div className="table-empty">{searchKeyword.trim() ? "当前搜索和筛选条件下没有白名单客户" : "当前筛选条件下没有白名单客户"}</div>}
         </div>
       </div>
+      <div className="table-pagination"><span>共 {sortedRows.length} 名</span><div><label>每页<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option value={20}>20</option><option value={50}>50</option><option value={100}>100</option></select>名</label><button type="button" disabled={currentPage <= 1} onClick={() => setPage(1)}>首页</button><button type="button" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button><b>{currentPage} / {totalPages}</b><button type="button" disabled={currentPage >= totalPages} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button><button type="button" disabled={currentPage >= totalPages} onClick={() => setPage(totalPages)}>末页</button></div></div>
       {deleteTarget && <DeleteConfirmDialog target={deleteTarget} onCancel={() => setDeleteTarget(null)} onConfirm={confirmDelete} />}
     </>
   );
@@ -926,13 +1251,13 @@ function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = false }:
 
 function ProductFormDrawer({ rows, initialRow, onClose, onSave }: { rows: ProductImportRow[]; initialRow?: ProductImportRow; onClose: () => void; onSave: (row: ProductImportRow) => void }) {
   const isEditing = Boolean(initialRow);
-  const [form, setForm] = useState<ProductImportRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("product"), sequence: 0, customerType: "特渠", rebate: "参与", category: "", line: "", materialCode: "", materialName: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", conversion: "", gift: "否", status: "有效" });
+  const [form, setForm] = useState<ProductImportRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("product"), sequence: 0, customerType: "特渠", rebate: "参与", category: "", line: "", materialCode: "", materialName: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", conversion: "", gift: "否", branchScope: "", status: "有效", source: "manual" });
   useEffect(() => {
     if (initialRow) setForm({ ...initialRow });
   }, [initialRow]);
   const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
-  const duplicateMaterialCode = form.materialCode.trim() !== "" && rows.some((row) => row.id !== form.id && row.materialCode.trim().toLowerCase() === form.materialCode.trim().toLowerCase());
+  const duplicateMaterialCode = form.materialCode.trim() !== "" && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && row.rebate === form.rebate && row.materialCode.trim().toLowerCase() === form.materialCode.trim().toLowerCase());
   const canSave = form.materialCode.trim() !== "" && form.materialName.trim() !== "" && form.casePrice.trim() !== "" && !duplicateMaterialCode;
   return (
     <div className="order-drawer-backdrop" onClick={onClose}>
@@ -944,7 +1269,7 @@ function ProductFormDrawer({ rows, initialRow, onClose, onSave }: { rows: Produc
           <label><span>是否参与返利</span><select value={form.rebate} onChange={(e) => update("rebate", e.target.value)}><option>参与</option><option>不参与</option></select></label>
           <label><span>产品大类</span><input value={form.category} onChange={(e) => update("category", e.target.value)} placeholder="例如：特渠定制产品" /></label>
           <label><span>产品线</span><input value={form.line} onChange={(e) => update("line", e.target.value)} placeholder="例如：调味油" /></label>
-          <label><span>物料代码 *</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /><small className={duplicateMaterialCode ? "field-error" : ""}>{duplicateMaterialCode ? "物料代码已存在，请检查解析结果" : "用于匹配同一商品"}</small></label>
+          <label><span>物料代码 *</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /><small className={duplicateMaterialCode ? "field-error" : ""}>{duplicateMaterialCode ? "同客户类型、同返利分组内已存在，请检查解析结果" : "跨 Sheet 可重复；用于识别同一商品"}</small></label>
           <label className="wide-field"><span>物料名称 *</span><input value={form.materialName} onChange={(e) => update("materialName", e.target.value)} /></label>
           <label><span>品牌</span><input value={form.brand} onChange={(e) => update("brand", e.target.value)} /></label>
           <label><span>品种</span><input value={form.variety} onChange={(e) => update("variety", e.target.value)} /></label>
@@ -954,6 +1279,7 @@ function ProductFormDrawer({ rows, initialRow, onClose, onSave }: { rows: Produc
           <label><span>元/箱 *</span><input inputMode="decimal" value={form.casePrice} onChange={(e) => update("casePrice", e.target.value)} /></label>
           <label><span>吨箱转换系数</span><input inputMode="decimal" value={form.conversion} onChange={(e) => update("conversion", e.target.value)} /></label>
           <label><span>是否礼盒</span><select value={form.gift} onChange={(e) => update("gift", e.target.value)}><option>否</option><option>是</option></select></label>
+          <label><span>分公司限制</span><input value={form.branchScope} onChange={(e) => update("branchScope", e.target.value)} placeholder="留空表示全部分公司" /><small>多个分公司用顿号或逗号分隔</small></label>
           <label><span>状态</span><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>有效</option><option>待完善</option><option>停用</option></select></label>
         </div>
         <p className="drawer-form-note">带 * 的字段为必填项；{isEditing ? "保存后会覆盖当前解析行，并标记为人工修正。" : "此处为前端原型，保存结果仅在当前页面有效。"}</p></div>
@@ -965,14 +1291,14 @@ function ProductFormDrawer({ rows, initialRow, onClose, onSave }: { rows: Produc
 
 function WhitelistFormDrawer({ rows, initialRow, onClose, onSave }: { rows: WhitelistRow[]; initialRow?: WhitelistRow; onClose: () => void; onSave: (row: WhitelistRow) => void }) {
   const isEditing = Boolean(initialRow);
-  const [form, setForm] = useState<WhitelistRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("whitelist"), sequence: 0, customerType: "综合客户", region: "", branch: "", dealerShort: "", dealerFull: "", dealerType: "综合经销商", dealerName: "", dealerPhone: "", confirmerName: "", confirmerPhone: "" });
+  const [form, setForm] = useState<WhitelistRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("whitelist"), sequence: 0, customerType: "综合客户", region: "", branch: "", dealerShort: "", dealerFull: "", dealerType: "综合经销商", dealerName: "", dealerPhone: "", confirmerName: "", confirmerPhone: "", status: "有效", source: "manual" });
   useEffect(() => {
     if (initialRow) setForm({ ...initialRow });
   }, [initialRow]);
   const update = (field: keyof WhitelistRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType).map((row) => row.sequence)) + 1;
   const phoneValid = /^1\d{10}$/.test(form.dealerPhone) || /^\d{3}\*{4}\d{4}$/.test(form.dealerPhone);
-  const duplicateDealerPhone = form.dealerPhone.trim() !== "" && rows.some((row) => row.id !== form.id && row.dealerPhone === form.dealerPhone);
+  const duplicateDealerPhone = form.dealerPhone.trim() !== "" && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && normalizePhone(row.dealerPhone) === normalizePhone(form.dealerPhone));
   const canSave = form.region.trim() !== "" && form.branch.trim() !== "" && form.dealerShort.trim() !== "" && form.dealerFull.trim() !== "" && phoneValid && !duplicateDealerPhone;
   return (
     <div className="order-drawer-backdrop" onClick={onClose}>
@@ -987,12 +1313,12 @@ function WhitelistFormDrawer({ rows, initialRow, onClose, onSave }: { rows: Whit
           <label className="wide-field"><span>经销商名称（全）*</span><input value={form.dealerFull} onChange={(e) => update("dealerFull", e.target.value)} /></label>
           <label><span>经销商类型</span><input value={form.dealerType} onChange={(e) => update("dealerType", e.target.value)} /></label>
           <label><span>经销商姓名</span><input value={form.dealerName} onChange={(e) => update("dealerName", e.target.value)} /></label>
-          <label><span>经销商电话 *</span><input inputMode="tel" maxLength={11} value={form.dealerPhone} onChange={(e) => update("dealerPhone", e.target.value.replace(/\D/g, ""))} placeholder="11 位手机号" /><small className={duplicateDealerPhone || (form.dealerPhone !== "" && !phoneValid) ? "field-error" : ""}>{duplicateDealerPhone ? "手机号已存在，请检查解析结果" : form.dealerPhone && !phoneValid ? "请输入正确的 11 位手机号" : "用于 H5 身份验证；已脱敏号码可直接覆盖"}</small></label>
+          <label><span>经销商电话 *</span><input inputMode="tel" maxLength={11} value={form.dealerPhone} onChange={(e) => update("dealerPhone", e.target.value.replace(/\D/g, ""))} placeholder="11 位手机号" /><small className={duplicateDealerPhone || (form.dealerPhone !== "" && !phoneValid) ? "field-error" : ""}>{duplicateDealerPhone ? "同客户类型内手机号已存在；综合和特渠可以同号" : form.dealerPhone && !phoneValid ? "请输入正确的 11 位手机号" : "用于 H5 身份验证；请输入完整的 11 位手机号"}</small></label>
           <label><span>分公司确认人姓名</span><input value={form.confirmerName} onChange={(e) => update("confirmerName", e.target.value)} /></label>
           <label><span>分公司确认人电话</span><input inputMode="tel" maxLength={11} value={form.confirmerPhone} onChange={(e) => update("confirmerPhone", e.target.value.replace(/\D/g, ""))} /></label>
         </div>
         <p className="drawer-form-note">客户类型在 Excel 导入时由 Sheet 自动确定；{isEditing ? "保存后会覆盖当前解析行，并标记为人工修正。" : "手动添加时由管理员选择。"}</p></div>
-        <footer><button onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave} onClick={() => { onSave({ ...form, sequence: nextSequence, manuallyEdited: isEditing || form.manuallyEdited }); onClose(); }}>{isEditing ? "保存修改" : "保存白名单"}</button></footer>
+        <footer><button onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave} onClick={() => { onSave({ ...form, sequence: nextSequence, status: "有效", source: "manual", identityKey: `${form.customerType}:${normalizePhone(form.dealerPhone)}`, manuallyEdited: isEditing || form.manuallyEdited }); onClose(); }}>{isEditing ? "保存修改" : "保存白名单"}</button></footer>
       </aside>
     </div>
   );
@@ -1065,37 +1391,86 @@ function LotterySettings({ rounds, onChange }: { rounds: LotteryRound[]; onChang
   );
 }
 
-function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActivityStatusChange }: { lotteryRounds: LotteryRound[]; onLotteryChange: (rounds: LotteryRound[]) => void; activityClosed: boolean; onActivityStatusChange: (closed: boolean) => void }) {
+type ProductRowsSetter = (value: ProductImportRow[] | ((current: ProductImportRow[]) => ProductImportRow[])) => void;
+type WhitelistRowsSetter = (value: WhitelistRow[] | ((current: WhitelistRow[]) => WhitelistRow[])) => void;
+
+function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActivityStatusChange, productRows, onProductRowsChange, productImportCompleted, onProductImportCompleted, whitelistRows, onWhitelistRowsChange, whitelistImportCompleted, onWhitelistImportCompleted }: { lotteryRounds: LotteryRound[]; onLotteryChange: (rounds: LotteryRound[]) => void; activityClosed: boolean; onActivityStatusChange: (closed: boolean) => void; productRows: ProductImportRow[]; onProductRowsChange: ProductRowsSetter; productImportCompleted: boolean; onProductImportCompleted: (completed: boolean) => void; whitelistRows: WhitelistRow[]; onWhitelistRowsChange: WhitelistRowsSetter; whitelistImportCompleted: boolean; onWhitelistImportCompleted: (completed: boolean) => void }) {
   const [tab, setTab] = useState("活动概览");
-  const [productRows, setProductRows] = useState<ProductImportRow[]>(initialProductImportRows);
-  const [whitelistRows, setWhitelistRows] = useState<WhitelistRow[]>(initialWhitelistRows);
-  const [productImportCompleted, setProductImportCompleted] = useState(false);
-  const [whitelistImportCompleted, setWhitelistImportCompleted] = useState(false);
+  const setProductRows = onProductRowsChange;
+  const setWhitelistRows = onWhitelistRowsChange;
+  const setProductImportCompleted = onProductImportCompleted;
+  const setWhitelistImportCompleted = onWhitelistImportCompleted;
   const [productFormOpen, setProductFormOpen] = useState(false);
   const [whitelistFormOpen, setWhitelistFormOpen] = useState(false);
   const [editingProductRow, setEditingProductRow] = useState<ProductImportRow | null>(null);
   const [editingWhitelistRow, setEditingWhitelistRow] = useState<WhitelistRow | null>(null);
   const [actionNotice, setActionNotice] = useState("");
-  const [productFiles, setProductFiles] = useState({
-    special: "【特渠】商品明细表（示例）.xlsx",
-    general: "【分公司综合经销商】商品明细表（示例）.xlsx",
-  });
-  const [whitelistFile, setWhitelistFile] = useState("【白名单】经销商白名单（示例）.xlsx");
+  const [productFileName, setProductFileName] = useState("");
+  const [productImportWarnings, setProductImportWarnings] = useState<string[]>([]);
+  const [productImportError, setProductImportError] = useState("");
+  const [productSheetCounts, setProductSheetCounts] = useState<Array<{ name: string; count: number }>>([]);
+  const [whitelistFileName, setWhitelistFileName] = useState("");
+  const [whitelistImportWarnings, setWhitelistImportWarnings] = useState<string[]>([]);
+  const [whitelistImportError, setWhitelistImportError] = useState("");
+  const [whitelistSheetCounts, setWhitelistSheetCounts] = useState<Array<{ name: string; count: number }>>([]);
+  const [crossSheetPhoneCount, setCrossSheetPhoneCount] = useState(0);
   const nav = ["活动概览", "商品导入", "白名单", "订单管理", "抽奖规则"];
-  const parsedProductCount = (productFiles.special ? 50 : 0) + (productFiles.general ? 192 : 0);
-  const parsedProductFileCount = (productFiles.special ? 1 : 0) + (productFiles.general ? 1 : 0);
-  const productUpdatedCount = Math.min(4, parsedProductCount);
-  const productNewCount = Math.max(0, parsedProductCount - productUpdatedCount);
-  const productRetiredCount = parsedProductCount > 0 ? (parsedProductCount === 242 ? 42 : Math.max(1, Math.round(parsedProductCount * 0.1))) : 0;
+  const parsedProductCount = productFileName ? productRows.length : 0;
+  const productValidCount = productRows.filter((row) => row.status === "有效").length;
+  const productPendingCount = productRows.filter((row) => row.status === "待完善").length;
+  const branchRestrictedCount = productRows.filter((row) => row.branchScope.trim()).length;
+  const parsedWhitelistCount = whitelistFileName ? whitelistRows.length : 0;
+  const whitelistValidCount = whitelistRows.filter((row) => row.status === "有效").length;
+  const whitelistPendingCount = whitelistRows.filter((row) => row.status === "待处理").length;
+  const handleProductFile = async (file: File) => {
+    setProductImportError("");
+    try {
+      const result = await parseProductWorkbook(file);
+      setProductRows(result.rows);
+      setProductFileName(file.name);
+      setProductSheetCounts(result.sheetCounts);
+      setProductImportWarnings(result.warnings);
+      setProductImportCompleted(false);
+      setActionNotice(`已解析 ${result.rows.length} 条商品，请检查后确认导入。`);
+    } catch (error) {
+      setProductRows([]);
+      setProductFileName(file.name);
+      setProductSheetCounts([]);
+      setProductImportWarnings([]);
+      setProductImportError(error instanceof Error ? error.message : "文件解析失败，请检查 Excel 格式。");
+      setProductImportCompleted(false);
+    }
+  };
+  const handleWhitelistFile = async (file: File) => {
+    setWhitelistImportError("");
+    try {
+      const result = await parseWhitelistWorkbook(file);
+      setWhitelistRows(result.rows);
+      setWhitelistFileName(file.name);
+      setWhitelistSheetCounts(result.sheetCounts);
+      setWhitelistImportWarnings(result.warnings);
+      setCrossSheetPhoneCount(result.crossSheetPhoneCount);
+      setWhitelistImportCompleted(false);
+      setActionNotice(`已解析 ${result.rows.length} 名白名单客户，请检查后确认导入。`);
+    } catch (error) {
+      setWhitelistRows([]);
+      setWhitelistFileName(file.name);
+      setWhitelistSheetCounts([]);
+      setWhitelistImportWarnings([]);
+      setCrossSheetPhoneCount(0);
+      setWhitelistImportError(error instanceof Error ? error.message : "文件解析失败，请检查 Excel 格式。");
+      setWhitelistImportCompleted(false);
+    }
+  };
   const deleteProductRows = (ids: string[]) => {
     setProductRows((current) => current.filter((row) => !ids.includes(row.id)));
     setEditingProductRow((current) => current && ids.includes(current.id) ? null : current);
-    setActionNotice(`已删除 ${ids.length} 条商品，已有订单明细和金额不受影响。`);
+    setActionNotice(`${productImportCompleted ? "已删除" : "已从待导入结果移除"} ${ids.length} 条商品，已有订单明细和金额不受影响。`);
   };
   const deleteWhitelistRows = (ids: string[]) => {
     setWhitelistRows((current) => current.filter((row) => !ids.includes(row.id)));
     setEditingWhitelistRow((current) => current && ids.includes(current.id) ? null : current);
-    setActionNotice(`已删除 ${ids.length} 名白名单客户，已有订单不会被删除。`);
+    setActionNotice(`${whitelistImportCompleted ? "已删除" : "已从待导入结果移除"} ${ids.length} 名白名单客户，已有订单不会被删除。`);
   };
   return (
     <section className="admin-app">
@@ -1119,32 +1494,34 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityClosed, onActi
         )}
         {tab === "商品导入" && (
           <div className="admin-panel">
-            <div className="panel-title"><div><h2>{productImportCompleted ? "当前活动商品" : "活动商品导入"}</h2><p>{productImportCompleted ? "商品已进入当前活动，可继续导入文件或手动添加" : "解析特渠、综合客户商品文件，确认后进入当前活动商品"}</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setProductFormOpen(true)}>＋ 手动添加商品</button>{productImportCompleted && <button className="admin-primary" onClick={() => { setProductImportCompleted(false); setProductFiles({ special: "", general: "" }); }}>继续导入 Excel</button>}</div></div>
-            {!productImportCompleted && <div className="import-rule-hint"><b>Excel 覆盖规则</b><span>本次上传文件会覆盖对应客户类型的上一次 Excel 导入结果；相同商品自动更新，旧 Excel 中不再存在的商品将停用，手动添加的数据保留。</span></div>}
-            {!productImportCompleted && <div className="dual-upload-grid">
-              {([
-                ["special", "特渠商品文件", "特渠", "50", productFiles.special],
-                ["general", "综合商品文件", "综合", "192", productFiles.general],
-              ] as const).map(([key, title, type, count, fileName]) => (
-                <article className={`file-upload-card ${fileName ? "ready" : ""}`} key={key}>
-                  <div className="file-card-heading"><span>XL</span><div><b>{title}</b><small>文件客户类型：{type}</small></div><em>{fileName ? "解析完成" : "待上传"}</em></div>
-                  {fileName ? <p title={fileName}>{fileName}</p> : <p>请选择对应的商品明细 Excel</p>}
-                  <div className="sheet-tags"><span>参与订货会返利产品</span><span>不参与订货会返利产品</span></div>
-                  <footer><small>{fileName ? `识别 ${count} 条商品` : "仅识别上述两个 Sheet"}</small><div>{fileName && <button onClick={() => setProductFiles((current) => ({ ...current, [key]: "" }))}>移除</button>}<label><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) { setProductFiles((current) => ({ ...current, [key]: file.name })); setProductImportCompleted(false); } }} />{fileName ? "替换文件" : "选择文件"}</label></div></footer>
-                </article>
-              ))}
+            <div className="panel-title"><div><h2>{productImportCompleted ? "当前活动商品" : "活动商品导入"}</h2><p>{productImportCompleted ? "商品已进入当前活动，可继续替换 Excel 或手动添加" : "上传一个统一商品 Excel，浏览器解析后确认进入当前活动"}</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setProductFormOpen(true)}>＋ 手动添加商品</button>{productImportCompleted && <button className="admin-primary" onClick={() => { setProductImportCompleted(false); setProductRows([]); setProductFileName(""); setProductSheetCounts([]); setProductImportWarnings([]); setProductImportError(""); }}>继续导入 Excel</button>}</div></div>
+            {!productImportCompleted && <div className="import-rule-hint"><b>本次导入规则</b><span>只上传一个文件；确认导入后整体替换当前商品目录。商品按 Sheet 自动识别客户类型和返利状态，是否礼盒只读取“是否为标品礼盒”，分公司定制品用于下单权限限制。</span></div>}
+            {!productImportCompleted && <div className="single-upload-grid">
+              <article className={`file-upload-card ${productFileName && !productImportError ? "ready" : ""}`}>
+                <div className="file-card-heading"><span>XL</span><div><b>商品信息 Excel</b><small>统一文件 · 读取 4 个商品 Sheet</small></div><em>{productFileName ? (productImportError ? "解析失败" : "解析完成") : "待上传"}</em></div>
+                {productFileName ? <p title={productFileName}>{productFileName}</p> : <p>请选择：调味产品信息表.xlsx</p>}
+                <div className="sheet-tags">{productSheetConfig.map((item) => <span key={item.name}>{item.name}</span>)}</div>
+                <footer><small>{productFileName && !productImportError ? `识别 ${parsedProductCount} 条商品` : "必须包含上述 4 个 Sheet"}</small><div>{productFileName && <button type="button" onClick={() => { setProductRows([]); setProductFileName(""); setProductSheetCounts([]); setProductImportWarnings([]); setProductImportError(""); }}>移除</button>}<label><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleProductFile(file); event.currentTarget.value = ""; }} />{productFileName ? "替换文件" : "选择文件"}</label></div></footer>
+              </article>
             </div>}
-            {!productImportCompleted && (productFiles.special || productFiles.general) && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{parsedProductFileCount} 个文件解析完成 · 等待确认</b><small>客户类型由文件确定，返利状态由 Sheet 自动确定</small></p><strong>{parsedProductCount} 条商品</strong></div><div className="warning-box"><b>确认后将覆盖对应客户类型的上次 Excel 导入结果</b><span>预计新增 {productNewCount} 条、更新 {productUpdatedCount} 条、停用旧数据 {productRetiredCount} 条；手动添加的数据保留。缺少吨箱转换系数等信息的商品标记为“待完善”。表格中的解析结果可先编辑修正。</span></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} /><button className="admin-primary wide" onClick={() => { setProductImportCompleted(true); setActionNotice("商品导入完成，已覆盖对应 Excel 数据；手动添加的数据已保留。当前原型不会写入后端。"); }}>确认导入 {parsedProductCount} 条商品</button></div>}
-            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品导入完成</b><small>对应客户类型的上次 Excel 数据已覆盖；手动添加的数据保留，7 条信息不完整的商品待完善。</small></p><div><strong>{parsedProductCount}</strong><small>本次导入</small></div><div><strong>{productNewCount}</strong><small>新增</small></div><div><strong>{productUpdatedCount}</strong><small>更新</small></div><div><strong>{productRetiredCount}</strong><small>停用旧数据</small></div></div><div className="data-section-title"><div><b>当前活动商品</b><span>最近导入：特渠 50 条 · 综合 192 条 · 手动添加数据已保留</span></div><button onClick={() => setProductImportCompleted(false)}>查看本次导入结果</button></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} allowDelete={productImportCompleted} onDelete={deleteProductRows} /></>}
+            {!productImportCompleted && productFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{productImportError ? "文件解析失败" : "1 个文件解析完成 · 等待确认"}</b><small>{productImportError ? "请修正文件后重新选择" : "客户类型和返利状态由 Sheet 自动确定，解析结果可先编辑或删除"}</small></p><strong>{parsedProductCount} 条商品</strong></div>{productImportError && <div className="warning-box"><b>文件无法导入</b><span>{productImportError}</span></div>}{!productImportError && productImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{productImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!productImportError && <><div className="sheet-counts">{productSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} allowDelete onDelete={deleteProductRows} /><button className="admin-primary wide" disabled={!productRows.length} onClick={() => { setProductImportCompleted(true); setActionNotice(`商品导入完成：已整体替换为 ${productRows.length} 条商品；当前原型不会写入后端。`); }}>确认导入 {parsedProductCount} 条商品</button></>}</div>}
+            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品导入完成</b><small>当前商品目录已由本次 Excel 整体替换；订单明细仍保留，刷新页面后恢复原型初始数据。</small></p><div><strong>{parsedProductCount}</strong><small>本次导入</small></div><div><strong>{productValidCount}</strong><small>有效</small></div><div><strong>{productPendingCount}</strong><small>待完善</small></div><div><strong>{branchRestrictedCount}</strong><small>分公司限制</small></div></div><div className="data-section-title"><div><b>当前活动商品</b><span>{productFileName} · 共 {productRows.length} 条 · 可编辑或勾选删除</span></div><button onClick={() => setProductImportCompleted(false)}>查看本次导入结果</button></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} allowDelete onDelete={deleteProductRows} /></>}
           </div>
         )}
         {tab === "白名单" && (
           <div className="admin-panel">
-            <div className="panel-title"><div><h2>{whitelistImportCompleted ? "当前客户白名单" : "客户白名单导入"}</h2><p>共 1,680 名有效客户 · 手机号用于 H5 身份验证</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setWhitelistFormOpen(true)}>＋ 手动添加白名单</button>{whitelistImportCompleted ? <button className="admin-primary" onClick={() => { setWhitelistImportCompleted(false); setWhitelistFile(""); }}>继续导入 Excel</button> : <label className="admin-primary file-button"><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) { setWhitelistFile(file.name); setWhitelistImportCompleted(false); } }} />导入白名单</label>}</div></div>
-            {!whitelistImportCompleted && <div className="import-rule-hint"><b>Excel 覆盖规则</b><span>本次上传会覆盖综合客户白名单和特渠客户白名单的上一次 Excel 导入结果；相同手机号自动更新，旧名单中不再存在的客户将停用，手动添加的数据保留。</span></div>}
-            {!whitelistImportCompleted && whitelistFile && <><div className="whitelist-file-summary"><span className="success-icon">✓</span><p><b>{whitelistFile}</b><small>只读取“综合客户白名单”和“特渠客户白名单”，其他 Sheet 自动忽略</small></p><div className="sheet-tags"><span>综合客户白名单</span><span>特渠客户白名单</span></div></div><div className="warning-box"><b>确认后将覆盖上次 Excel 白名单</b><span>预计新增 1,676 条、更新 4 条、停用旧数据 9 条；手动添加的数据保留。另有 9 个手机号格式异常，请在活动发布前处理。表格中的解析结果可先编辑修正。</span></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} /><button className="admin-primary wide" onClick={() => { setWhitelistImportCompleted(true); setActionNotice("白名单导入完成，已覆盖 Excel 数据；手动添加的数据已保留。当前原型不会写入后端。"); }}>确认导入 1,689 条白名单</button></>}
-            {!whitelistImportCompleted && !whitelistFile && <div className="upload-zone compact-upload"><span>XL</span><h3>选择白名单 Excel</h3><p>仅解析“综合客户白名单”和“特渠客户白名单”两个 Sheet</p><label className="secondary-button file-button"><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) setWhitelistFile(file.name); }} />选择 Excel 文件</label></div>}
-            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单导入完成</b><small>两个白名单 Sheet 已覆盖上次 Excel 数据；手动添加的数据保留，9 条手机号异常数据待处理。</small></p><div><strong>1,689</strong><small>本次导入</small></div><div><strong>1,676</strong><small>新增</small></div><div><strong>4</strong><small>更新</small></div><div><strong>9</strong><small>停用/待处理</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>综合客户 1,073 名 · 特渠专业客户 607 名 · 手动添加数据已保留</span></div><button onClick={() => setWhitelistImportCompleted(false)}>查看本次导入结果</button></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} allowDelete={whitelistImportCompleted} onDelete={deleteWhitelistRows} /></>}
+            <div className="panel-title"><div><h2>{whitelistImportCompleted ? "当前客户白名单" : "客户白名单导入"}</h2><p>{whitelistImportCompleted ? "白名单已进入当前活动，可继续替换 Excel 或手动添加" : "上传一个统一白名单 Excel，浏览器解析后确认进入当前活动"}</p></div><div className="panel-actions"><button className="secondary-button" onClick={() => setWhitelistFormOpen(true)}>＋ 手动添加白名单</button>{whitelistImportCompleted && <button className="admin-primary" onClick={() => { setWhitelistImportCompleted(false); setWhitelistRows([]); setWhitelistFileName(""); setWhitelistSheetCounts([]); setWhitelistImportWarnings([]); setWhitelistImportError(""); setCrossSheetPhoneCount(0); }}>继续导入 Excel</button>}</div></div>
+            {!whitelistImportCompleted && <div className="import-rule-hint"><b>本次导入规则</b><span>只上传一个文件；确认导入后整体替换当前白名单。Sheet 决定客户类型；综合和特渠可以存在同一个手机号，但同一 Sheet 内手机号重复会提示异常。</span></div>}
+            {!whitelistImportCompleted && <div className="single-upload-grid">
+              <article className={"file-upload-card " + (whitelistFileName && !whitelistImportError ? "ready" : "")}>
+                <div className="file-card-heading"><span>XL</span><div><b>客户白名单 Excel</b><small>统一文件 · 读取 2 个白名单 Sheet</small></div><em>{whitelistFileName ? (whitelistImportError ? "解析失败" : "解析完成") : "待上传"}</em></div>
+                {whitelistFileName ? <p title={whitelistFileName}>{whitelistFileName}</p> : <p>请选择：【白名单】26年中秋订货会经销商白名单7.2.xlsx</p>}
+                <div className="sheet-tags">{whitelistSheetConfig.map((item) => <span key={item.name}>{item.name}</span>)}</div>
+                <footer><small>{whitelistFileName && !whitelistImportError ? "识别 " + parsedWhitelistCount + " 名客户" : "必须包含上述 2 个 Sheet"}</small><div>{whitelistFileName && <button type="button" onClick={() => { setWhitelistRows([]); setWhitelistFileName(""); setWhitelistSheetCounts([]); setWhitelistImportWarnings([]); setWhitelistImportError(""); setCrossSheetPhoneCount(0); }}>移除</button>}<label><input type="file" accept=".xlsx,.xls" onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleWhitelistFile(file); event.currentTarget.value = ""; }} />{whitelistFileName ? "替换文件" : "选择文件"}</label></div></footer>
+              </article>
+            </div>}
+            {!whitelistImportCompleted && whitelistFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{whitelistImportError ? "文件解析失败" : "1 个文件解析完成 · 等待确认"}</b><small>{whitelistImportError ? "请修正文件后重新选择" : "客户类型由 Sheet 确定；解析结果可先编辑或删除"}</small></p><strong>{parsedWhitelistCount} 名客户</strong></div>{whitelistImportError && <div className="warning-box"><b>文件无法导入</b><span>{whitelistImportError}</span></div>}{!whitelistImportError && whitelistImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{whitelistImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!whitelistImportError && <><div className="sheet-counts">{whitelistSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} allowDelete onDelete={deleteWhitelistRows} /><button className="admin-primary wide" disabled={!whitelistRows.length} onClick={() => { setWhitelistImportCompleted(true); setActionNotice("白名单导入完成：已整体替换为 " + whitelistRows.length + " 名客户；当前原型不会写入后端。"); }}>确认导入 {parsedWhitelistCount} 名客户</button></>}</div>}
+            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单导入完成</b><small>当前白名单已由本次 Excel 整体替换；同一手机号在综合和特渠中按客户类型分别识别。</small></p><div><strong>{parsedWhitelistCount}</strong><small>本次导入</small></div><div><strong>{whitelistValidCount}</strong><small>有效</small></div><div><strong>{whitelistPendingCount}</strong><small>待处理</small></div><div><strong>{crossSheetPhoneCount}</strong><small>跨通道同号</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>{whitelistFileName} · 综合客户和特渠客户共 {whitelistRows.length} 名 · 可编辑或勾选删除</span></div><button onClick={() => setWhitelistImportCompleted(false)}>查看本次导入结果</button></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} allowDelete onDelete={deleteWhitelistRows} /></>}
           </div>
         )}
         {tab === "订单管理" && <OrderManagement activityClosed={activityClosed} />}
@@ -1161,6 +1538,10 @@ export function Prototype() {
   const [surface, setSurface] = useState<Surface>("h5");
   const [lotteryRounds, setLotteryRounds] = useState<LotteryRound[]>(initialLotteryRounds);
   const [activityClosed, setActivityClosed] = useState(false);
+  const [productRows, setProductRows] = useState<ProductImportRow[]>(initialProductImportRows);
+  const [productImportCompleted, setProductImportCompleted] = useState(false);
+  const [whitelistRows, setWhitelistRows] = useState<WhitelistRow[]>(initialWhitelistRows);
+  const [whitelistImportCompleted, setWhitelistImportCompleted] = useState(false);
   const surfaces: { key: Surface; label: string; sub: string }[] = [
     { key: "h5", label: "订货 H5", sub: "手机端" },
     { key: "ranking", label: "订货排行", sub: "大屏 A" },
@@ -1176,11 +1557,11 @@ export function Prototype() {
         <div className="prototype-status"><i /> 原型预览</div>
       </nav>
       <div className="prototype-canvas">
-        <div className={surface === "h5" ? "surface-slot" : "surface-slot surface-hidden"}><H5Prototype activityClosed={activityClosed} /></div>
+        <div className={surface === "h5" ? "surface-slot" : "surface-slot surface-hidden"}><H5Prototype activityClosed={activityClosed} importedRows={productImportCompleted ? productRows : null} importedWhitelistRows={whitelistImportCompleted ? whitelistRows : null} /></div>
         {surface === "ranking" && <RankingBoard />}
         {surface === "report" && <ReportBoard />}
         {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed" } : item))} />}
-        {surface === "admin" && <AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityClosed={activityClosed} onActivityStatusChange={setActivityClosed} />}
+        {surface === "admin" && <AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityClosed={activityClosed} onActivityStatusChange={setActivityClosed} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} />}
       </div>
     </main>
   );
