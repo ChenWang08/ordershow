@@ -2282,7 +2282,7 @@ type WhitelistRowsSetter = (value: WhitelistRow[] | ((current: WhitelistRow[]) =
 type AttendanceRowsSetter = (value: AttendanceRow[] | ((current: AttendanceRow[]) => AttendanceRow[])) => void;
 type OperationLogEntry = { id: string; action: string; target: string; detail: string; operator: string; time: string };
 
-function AdminPrototype({ lotteryRounds, onLotteryChange, activityStatus, onActivityStatusChange, activityStartAt, onActivityStartAtChange, activityEndAt, onActivityEndAtChange, productRows, onProductRowsChange, productImportCompleted, onProductImportCompleted, onProductImportCommitted, productImportHasRun, whitelistRows, onWhitelistRowsChange, whitelistImportCompleted, onWhitelistImportCompleted, onWhitelistImportCommitted, whitelistImportHasRun, attendanceRows, onAttendanceRowsChange, attendanceFileName, onAttendanceFileNameChange, attendanceIsDemo, onAttendanceIsDemoChange, attendanceWarnings, onAttendanceWarningsChange, attendanceSheetCounts, onAttendanceSheetCountsChange, attendanceImportError, onAttendanceImportErrorChange }: { lotteryRounds: LotteryRound[]; onLotteryChange: (rounds: LotteryRound[]) => void; activityStatus: ActivityStatus; onActivityStatusChange: (status: ActivityStatus) => void; activityStartAt: string; onActivityStartAtChange: (value: string) => void; activityEndAt: string; onActivityEndAtChange: (value: string) => void; productRows: ProductImportRow[]; onProductRowsChange: ProductRowsSetter; productImportCompleted: boolean; onProductImportCompleted: (completed: boolean) => void; onProductImportCommitted: () => void; productImportHasRun: boolean; whitelistRows: WhitelistRow[]; onWhitelistRowsChange: WhitelistRowsSetter; whitelistImportCompleted: boolean; onWhitelistImportCompleted: (completed: boolean) => void; onWhitelistImportCommitted: () => void; whitelistImportHasRun: boolean; attendanceRows: AttendanceRow[]; onAttendanceRowsChange: AttendanceRowsSetter; attendanceFileName: string; onAttendanceFileNameChange: (value: string) => void; attendanceIsDemo: boolean; onAttendanceIsDemoChange: (value: boolean) => void; attendanceWarnings: string[]; onAttendanceWarningsChange: (value: string[]) => void; attendanceSheetCounts: Array<{ name: string; count: number }>; onAttendanceSheetCountsChange: (value: Array<{ name: string; count: number }>) => void; attendanceImportError: string; onAttendanceImportErrorChange: (value: string) => void }) {
+function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivityNameChange, activityId, activityStatus, onActivityStatusChange, activityStartAt, onActivityStartAtChange, activityEndAt, onActivityEndAtChange, productRows, onProductRowsChange, productImportCompleted, onProductImportCompleted, onProductImportCommitted, productImportHasRun, whitelistRows, onWhitelistRowsChange, whitelistImportCompleted, onWhitelistImportCompleted, onWhitelistImportCommitted, whitelistImportHasRun, attendanceRows, onAttendanceRowsChange, attendanceFileName, onAttendanceFileNameChange, attendanceIsDemo, onAttendanceIsDemoChange, attendanceWarnings, onAttendanceWarningsChange, attendanceSheetCounts, onAttendanceSheetCountsChange, attendanceImportError, onAttendanceImportErrorChange }: { lotteryRounds: LotteryRound[]; onLotteryChange: (rounds: LotteryRound[]) => void; activityName: string; onActivityNameChange: (value: string) => void; activityId: string; activityStatus: ActivityStatus; onActivityStatusChange: (status: ActivityStatus) => void; activityStartAt: string; onActivityStartAtChange: (value: string) => void; activityEndAt: string; onActivityEndAtChange: (value: string) => void; productRows: ProductImportRow[]; onProductRowsChange: ProductRowsSetter; productImportCompleted: boolean; onProductImportCompleted: (completed: boolean) => void; onProductImportCommitted: () => void; productImportHasRun: boolean; whitelistRows: WhitelistRow[]; onWhitelistRowsChange: WhitelistRowsSetter; whitelistImportCompleted: boolean; onWhitelistImportCompleted: (completed: boolean) => void; onWhitelistImportCommitted: () => void; whitelistImportHasRun: boolean; attendanceRows: AttendanceRow[]; onAttendanceRowsChange: AttendanceRowsSetter; attendanceFileName: string; onAttendanceFileNameChange: (value: string) => void; attendanceIsDemo: boolean; onAttendanceIsDemoChange: (value: boolean) => void; attendanceWarnings: string[]; onAttendanceWarningsChange: (value: string[]) => void; attendanceSheetCounts: Array<{ name: string; count: number }>; onAttendanceSheetCountsChange: (value: Array<{ name: string; count: number }>) => void; attendanceImportError: string; onAttendanceImportErrorChange: (value: string) => void }) {
   const activityStarted = activityStatus === "running" || activityStatus === "ended";
   const activityClosed = activityStatus === "ended";
   const [tab, setTab] = useState("活动概览");
@@ -2299,6 +2299,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityStatus, onActi
   const [operationLogOpen, setOperationLogOpen] = useState(false);
   const [activityStartDraft, setActivityStartDraft] = useState(activityStartAt);
   const [activityEndDraft, setActivityEndDraft] = useState(activityEndAt);
+  const [activityNameDraft, setActivityNameDraft] = useState(activityName);
   const [productFileName, setProductFileName] = useState("");
   const [productImportWarnings, setProductImportWarnings] = useState<string[]>([]);
   const [productImportError, setProductImportError] = useState("");
@@ -2351,6 +2352,10 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityStatus, onActi
     onActivityStatusChange(nextStatus);
   };
   const saveActivityConfig = () => {
+    if (!activityNameDraft.trim()) {
+      setActionNotice("请填写活动名称。" );
+      return;
+    }
     if (!activityStartDraft || !activityEndDraft) {
       setActionNotice("请填写活动开始时间和截止时间。" );
       return;
@@ -2359,10 +2364,11 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityStatus, onActi
       setActionNotice("活动开始时间必须早于截止时间。" );
       return;
     }
+    onActivityNameChange(activityNameDraft.trim());
     onActivityStartAtChange(activityStartDraft);
     onActivityEndAtChange(activityEndDraft);
-    recordOperation("保存活动配置", "活动时间", `开始：${activityStartDraft.replace("T", " ")}；截止：${activityEndDraft.replace("T", " ")}。`);
-    setActionNotice("活动时间配置已保存。" );
+    recordOperation("保存活动配置", activityId, `活动名称：${activityNameDraft.trim()}；活动编号：${activityId}；开始：${activityStartDraft.replace("T", " ")}；截止：${activityEndDraft.replace("T", " ")}。`);
+    setActionNotice("活动名称、编号和时间配置已保存。" );
   };
   const beginProductImport = () => {
     if (activityStarted) {
@@ -2756,7 +2762,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityStatus, onActi
         <div className="admin-user"><span>陈</span><p><b>运营管理员</b><small>调味品事业部</small></p></div>
       </aside>
       <main className="admin-main">
-        <header><div><span>通用订货会</span><b>{tab}</b></div><div className="admin-actions"><button onClick={() => setOperationLogOpen((value) => !value)}>操作日志{operationLogs.length > 0 ? ` · ${operationLogs.length}` : ""}</button><span className={activityClosed ? "closed" : activityStarted ? "" : "pending"}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "进行中" : "已截止"}</span>{activityStarted && <span className="locked">数据已锁定</span>}{operationLogOpen && <div className="operation-log-popover"><div><b>操作日志</b><button type="button" onClick={() => setOperationLogOpen(false)}>×</button></div>{operationLogs.length === 0 ? <p>暂无操作记录</p> : operationLogs.slice(0, 8).map((entry) => <article key={entry.id}><b>{entry.action}</b><span>{entry.target}</span><small>{entry.detail}</small><em>{entry.operator} · {entry.time}</em></article>)}</div>}</div></header>
+        <header><div><span>{activityName}</span><b>{tab}</b></div><div className="admin-actions"><button onClick={() => setOperationLogOpen((value) => !value)}>操作日志{operationLogs.length > 0 ? ` · ${operationLogs.length}` : ""}</button><span className={activityClosed ? "closed" : activityStarted ? "" : "pending"}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "进行中" : "已截止"}</span>{activityStarted && <span className="locked">数据已锁定</span>}{operationLogOpen && <div className="operation-log-popover"><div><b>操作日志</b><button type="button" onClick={() => setOperationLogOpen(false)}>×</button></div>{operationLogs.length === 0 ? <p>暂无操作记录</p> : operationLogs.slice(0, 8).map((entry) => <article key={entry.id}><b>{entry.action}</b><span>{entry.target}</span><small>{entry.detail}</small><em>{entry.operator} · {entry.time}</em></article>)}</div>}</div></header>
         {tab === "活动概览" && (
           <>
             <div className="admin-stats">
@@ -2764,7 +2770,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityStatus, onActi
             </div>
             <div className="admin-grid">
               <article className="progress-card"><h2>客户提交进度</h2>{[["综合客户", 1073, 826], ["特渠专业客户", 607, 320]].map((x) => <div key={x[0] as string}><p><b>{x[0]}</b><span>{x[2]} / {x[1]}</span></p><i><em style={{ width: `${Number(x[2]) / Number(x[1]) * 100}%` }} /></i></div>)}</article>
-              <article className="activity-card"><h2>活动设置</h2><div className="activity-config-grid"><label><span>订货开始时间</span><input type="datetime-local" value={activityStartDraft} onChange={(event) => setActivityStartDraft(event.target.value)} /></label><label><span>订货截止时间</span><input type="datetime-local" value={activityEndDraft} onChange={(event) => setActivityEndDraft(event.target.value)} /></label><label><span>活动状态</span><select value={activityStatus} onChange={(event) => changeActivityStatus(event.target.value as ActivityStatus)}><option value="draft">草稿</option><option value="scheduled">待开始</option><option value="running">进行中</option><option value="ended">已截止</option></select></label></div><p><span>当前状态</span><b className={activityClosed ? "closed-text" : activityStarted ? "green" : "pending-text"}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "进行中" : "已截止"}</b></p><p><span>基础数据</span><b className={activityStarted ? "closed-text" : "green"}>{activityStarted ? "已锁定" : "可导入"}</b></p><p><span>运行规则</span><small>{activityClosed ? "全部数据只读" : activityStarted ? "仅可单条手动调整" : "可批量导入和替换"}</small></p><div className="activity-card-actions"><button className="admin-primary" onClick={saveActivityConfig}>保存活动设置</button><button onClick={() => changeActivityStatus(activityStarted ? "scheduled" : "running")}>{activityStarted ? "恢复为待开始" : "立即开始并锁定导入"}</button></div></article>
+              <article className="activity-card"><h2>活动设置</h2><div className="activity-config-grid"><label><span>活动名称 *</span><input value={activityNameDraft} onChange={(event) => setActivityNameDraft(event.target.value)} placeholder="例如：2026 年中秋订货会" /></label><label><span>活动编号</span><input value={activityId} readOnly aria-label="活动编号，只读" /></label><label><span>订货开始时间</span><input type="datetime-local" value={activityStartDraft} onChange={(event) => setActivityStartDraft(event.target.value)} /></label><label><span>订货截止时间</span><input type="datetime-local" value={activityEndDraft} onChange={(event) => setActivityEndDraft(event.target.value)} /></label><label><span>活动状态</span><select value={activityStatus} onChange={(event) => changeActivityStatus(event.target.value as ActivityStatus)}><option value="draft">草稿</option><option value="scheduled">待开始</option><option value="running">进行中</option><option value="ended">已截止</option></select></label></div><p><span>当前状态</span><b className={activityClosed ? "closed-text" : activityStarted ? "green" : "pending-text"}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "进行中" : "已截止"}</b></p><p><span>基础数据</span><b className={activityStarted ? "closed-text" : "green"}>{activityStarted ? "已锁定" : "可导入"}</b></p><p><span>运行规则</span><small>{activityClosed ? "全部数据只读" : activityStarted ? "仅可单条手动调整" : "可批量导入和替换"}</small></p><div className="activity-card-actions"><button className="admin-primary" onClick={saveActivityConfig}>保存活动设置</button><button onClick={() => changeActivityStatus(activityStarted ? "scheduled" : "running")}>{activityStarted ? "恢复为待开始" : "立即开始并锁定导入"}</button></div></article>
             </div>
           </>
         )}
@@ -2816,6 +2822,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityStatus, onActi
 export function Prototype() {
   const [surface, setSurface] = useState<Surface>("h5");
   const [lotteryRounds, setLotteryRounds] = useState<LotteryRound[]>(initialLotteryRounds);
+  const [activityName, setActivityName] = useState("2026年中秋订货会");
+  const [activityId] = useState("HD202608200001");
   const [activityStatus, setActivityStatus] = useState<ActivityStatus>("scheduled");
   const [activityStartAt, setActivityStartAt] = useState("2030-07-28T14:30");
   const [activityEndAt, setActivityEndAt] = useState("2030-07-30T18:30");
@@ -2842,7 +2850,7 @@ export function Prototype() {
   return (
     <main className={`prototype-root surface-${surface}`}>
       <nav className="prototype-nav">
-        <div className="prototype-title"><span>金</span><p><b>通用订货会</b><small>交互原型 · Mock Data</small></p></div>
+        <div className="prototype-title"><span>金</span><p><b>{activityName}</b><small>交互原型 · Mock Data</small></p></div>
         <div className="surface-tabs">{surfaces.map((item) => <button key={item.key} className={surface === item.key ? "active" : ""} onClick={() => setSurface(item.key)}><b>{item.label}</b><small>{item.sub}</small></button>)}</div>
         <div className="prototype-status"><i /> 原型预览</div>
       </nav>
@@ -2851,7 +2859,7 @@ export function Prototype() {
         {surface === "ranking" && <RankingBoard />}
         {surface === "report" && <ReportBoard />}
         {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} attendanceRows={attendanceRows} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed" } : item))} />}
-        {surface === "admin" && <AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityStatus={activityStatus} onActivityStatusChange={setActivityStatus} activityStartAt={activityStartAt} onActivityStartAtChange={setActivityStartAt} activityEndAt={activityEndAt} onActivityEndAtChange={setActivityEndAt} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={() => setProductImportHasRun(true)} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={() => setWhitelistImportHasRun(true)} whitelistImportHasRun={whitelistImportHasRun} attendanceRows={attendanceRows} onAttendanceRowsChange={setAttendanceRows} attendanceFileName={attendanceFileName} onAttendanceFileNameChange={setAttendanceFileName} attendanceIsDemo={attendanceIsDemo} onAttendanceIsDemoChange={setAttendanceIsDemo} attendanceWarnings={attendanceWarnings} onAttendanceWarningsChange={setAttendanceWarnings} attendanceSheetCounts={attendanceSheetCounts} onAttendanceSheetCountsChange={setAttendanceSheetCounts} attendanceImportError={attendanceImportError} onAttendanceImportErrorChange={setAttendanceImportError} />}
+        {surface === "admin" && <AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityName={activityName} onActivityNameChange={setActivityName} activityId={activityId} activityStatus={activityStatus} onActivityStatusChange={setActivityStatus} activityStartAt={activityStartAt} onActivityStartAtChange={setActivityStartAt} activityEndAt={activityEndAt} onActivityEndAtChange={setActivityEndAt} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={() => setProductImportHasRun(true)} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={() => setWhitelistImportHasRun(true)} whitelistImportHasRun={whitelistImportHasRun} attendanceRows={attendanceRows} onAttendanceRowsChange={setAttendanceRows} attendanceFileName={attendanceFileName} onAttendanceFileNameChange={setAttendanceFileName} attendanceIsDemo={attendanceIsDemo} onAttendanceIsDemoChange={setAttendanceIsDemo} attendanceWarnings={attendanceWarnings} onAttendanceWarningsChange={setAttendanceWarnings} attendanceSheetCounts={attendanceSheetCounts} onAttendanceSheetCountsChange={setAttendanceSheetCounts} attendanceImportError={attendanceImportError} onAttendanceImportErrorChange={setAttendanceImportError} />}
       </div>
     </main>
   );
