@@ -147,6 +147,7 @@ async function parseProductWorkbook(file: File): Promise<ProductImportParseResul
       const get = (name: string) => textCell(values[indexes[name]]);
       const materialCode = get("物料代码");
       const conversion = get("吨箱转换系数");
+      const conversionNumber = Number(conversion);
       const casePrice = get("元/箱");
       sequence += 1;
       if (!materialCode) blankCodeCount += 1;
@@ -174,7 +175,7 @@ async function parseProductWorkbook(file: File): Promise<ProductImportParseResul
         branchScope: get("分公司定制品"),
         source: "excel",
         sourceSheet: config.name,
-        status: !materialCode || !casePrice || !conversion ? "待完善" : "有效",
+        status: !materialCode || !casePrice || !conversion || !Number.isFinite(conversionNumber) || conversionNumber <= 0 ? "待完善" : "有效",
       });
     }
     const duplicateGroups = [...codeRows.values()].filter((rowNumbers) => rowNumbers.length > 1);
@@ -961,6 +962,21 @@ function LotteryBoard({ rounds, attendanceRows, onComplete }: { rounds: LotteryR
 
 type AdminOrderStatus = "已提交" | "已撤回";
 type AdminOrderVersionItem = {
+  line: string;
+  materialCode: string;
+  materialName: string;
+  spec: string;
+  casePack: string;
+  casePrice: string;
+  quantity: number;
+  subtotal: string;
+  productId: string;
+  customerType: "特渠" | "综合";
+  rebate: "参与" | "不参与";
+  boxesPerTon: string;
+  tons: string;
+};
+type AdminOrderVersionItemSeed = {
   materialCode: string;
   name: string;
   spec: string;
@@ -996,11 +1012,49 @@ type AdminOrderRecord = {
   status: AdminOrderStatus;
 };
 
-const orderRecords: AdminOrderRecord[] = [
+type AdminOrderVersionSeed = Omit<AdminOrderVersion, "items"> & { items: AdminOrderVersionItemSeed[] };
+type AdminOrderRecordSeed = Omit<AdminOrderRecord, "versions"> & { versions: AdminOrderVersionSeed[] };
+
+const orderProductSnapshots: Record<string, Omit<AdminOrderVersionItem, "customerType" | "casePrice" | "quantity" | "subtotal" | "tons">> = {
+  "7245-0002307": { productId: "P-7245-0002307", rebate: "参与", line: "芝麻油", materialCode: "7245-0002307", materialName: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", casePack: "5盒/箱", boxesPerTon: "50" },
+  "7245-0000003": { productId: "P-7245-0000003", rebate: "参与", line: "芝麻油", materialCode: "7245-0000003", materialName: "小磨芝麻香油", spec: "221mL×20瓶", casePack: "20瓶/箱", boxesPerTon: "48" },
+  "7245-0000005": { productId: "P-7245-0000005", rebate: "不参与", line: "酱油", materialCode: "7245-0000005", materialName: "零添加特级味极鲜", spec: "500mL×12瓶", casePack: "12瓶/箱", boxesPerTon: "52" },
+  "7455-02F003": { productId: "P-7455-02F003", rebate: "参与", line: "芝麻油", materialCode: "7455-02F003", materialName: "金龙鱼芝麻香油礼盒", spec: "145mL×4", casePack: "4盒/箱", boxesPerTon: "45" },
+  "7217-0001957": { productId: "P-7217-0001957", rebate: "参与", line: "礼盒", materialCode: "7217-0001957", materialName: "四海祯享礼盒", spec: "500mL×2+500mL+530g", casePack: "1盒/箱", boxesPerTon: "40" },
+  "7455-01P702": { productId: "P-7455-01P702", rebate: "不参与", line: "芝麻油", materialCode: "7455-01P702", materialName: "香满园芝麻油", spec: "245mL×12", casePack: "12瓶/箱", boxesPerTon: "45" },
+};
+
+const normalizeOrderItem = (item: AdminOrderVersionItemSeed, customerType: "特渠" | "综合"): AdminOrderVersionItem => {
+  const fallback = { productId: `P-${item.materialCode}`, rebate: "不参与" as const, line: "未分类", materialCode: item.materialCode, materialName: item.name, spec: item.spec, casePack: "—", boxesPerTon: "0" };
+  const snapshot = orderProductSnapshots[item.materialCode] ?? fallback;
+  const boxesPerTon = Number(snapshot.boxesPerTon);
+  return {
+    ...snapshot,
+    customerType,
+    materialName: item.name,
+    spec: item.spec || snapshot.spec,
+    casePrice: item.unitPrice,
+    quantity: item.quantity,
+    subtotal: item.subtotal,
+    tons: Number.isFinite(boxesPerTon) && boxesPerTon > 0 ? (item.quantity / boxesPerTon).toFixed(3) : "—",
+  };
+};
+
+const orderRecordSeeds: AdminOrderRecordSeed[] = [
   { no: "ZYORDER280018", dealer: "上海爱尚真", dealerPhone: "13812348000", company: "上海分公司", type: "特渠", amount: "¥2,281.50", boxes: 13, tons: "0.012", createdAt: "07-28 14:36", submittedAt: "07-28 14:52", updatedAt: "07-28 14:52", withdrawnAt: "—", withdrawReason: "—", permission: "可修改", status: "已提交", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:52", amount: "¥2,281.50", detail: "5 箱礼盒、6 箱芝麻香油、2 箱味极鲜", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 5, unitPrice: "172.50", subtotal: "862.50" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 6, unitPrice: "210.00", subtotal: "1,260.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 2, unitPrice: "78.00", subtotal: "156.00" }] }] },
   { no: "ZYORDER280017", dealer: "长沙久茂", dealerPhone: "14712341979", company: "长沙分公司", type: "综合", amount: "¥82,017.00", boxes: 286, tons: "0.244", createdAt: "07-28 14:31", submittedAt: "07-28 14:47", updatedAt: "07-28 15:02", withdrawnAt: "07-28 15:06", withdrawReason: "经销商主动撤回", permission: "可重新提交", status: "已撤回", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:47", amount: "¥80,860.00", detail: "当前订单初次提交", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 120, unitPrice: "250.00", subtotal: "30,000.00" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 96, unitPrice: "300.00", subtotal: "28,800.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 70, unitPrice: "315.14", subtotal: "22,060.00" }] }, { version: "V2", action: "修改后提交", at: "07-28 15:02", amount: "¥82,017.00", detail: "调整商品数量后重新提交", operator: "经销商手机端", items: [{ materialCode: "7245-0002307", name: "金芝御礼芝麻油礼盒", spec: "225mL×4 / 5盒", quantity: 120, unitPrice: "250.00", subtotal: "30,000.00" }, { materialCode: "7245-0000003", name: "小磨芝麻香油", spec: "221mL×20瓶", quantity: 100, unitPrice: "315.00", subtotal: "31,500.00" }, { materialCode: "7245-0000005", name: "零添加特级味极鲜", spec: "500mL×12瓶", quantity: 66, unitPrice: "310.86", subtotal: "20,517.00" }] }] },
   { no: "ZYORDER280016", dealer: "青岛大优供应链", dealerPhone: "18612345036", company: "青岛分公司", type: "综合", amount: "¥65,424.00", boxes: 194, tons: "0.176", createdAt: "07-28 14:29", submittedAt: "07-28 14:43", updatedAt: "07-28 14:58", withdrawnAt: "—", withdrawReason: "—", permission: "已截止", status: "已提交", versions: [{ version: "V1", action: "首次提交", at: "07-28 14:43", amount: "¥64,850.00", detail: "当前订单初次提交", operator: "经销商手机端", items: [{ materialCode: "7455-02F003", name: "金龙鱼芝麻香油礼盒", spec: "145mL×4", quantity: 80, unitPrice: "420.00", subtotal: "33,600.00" }, { materialCode: "7217-0001957", name: "四海祯享礼盒", spec: "500mL×2+500mL+530g", quantity: 54, unitPrice: "320.00", subtotal: "17,280.00" }, { materialCode: "7455-01P702", name: "香满园芝麻油", spec: "245mL×12", quantity: 60, unitPrice: "232.83", subtotal: "13,970.00" }] }, { version: "V2", action: "修改后提交", at: "07-28 14:58", amount: "¥65,424.00", detail: "调整 2 个商品的订货箱数", operator: "经销商手机端", items: [{ materialCode: "7455-02F003", name: "金龙鱼芝麻香油礼盒", spec: "145mL×4", quantity: 80, unitPrice: "420.00", subtotal: "33,600.00" }, { materialCode: "7217-0001957", name: "四海祯享礼盒", spec: "500mL×2+500mL+530g", quantity: 56, unitPrice: "320.00", subtotal: "17,920.00" }, { materialCode: "7455-01P702", name: "香满园芝麻油", spec: "245mL×12", quantity: 58, unitPrice: "239.72", subtotal: "13,904.00" }] }] },
 ];
+
+const orderRecords: AdminOrderRecord[] = orderRecordSeeds.map((order) => {
+  const versions = order.versions.map((version) => ({
+    ...version,
+    items: version.items.map((item) => normalizeOrderItem(item, order.type === "特渠" ? "特渠" : "综合")),
+  }));
+  const currentItems = versions[versions.length - 1]?.items ?? [];
+  const tons = currentItems.reduce((total, item) => total + (Number(item.tons) || 0), 0).toFixed(3);
+  return { ...order, tons, versions };
+});
 
 const maskPhone = (phone: string) => phone.replace(/^(\d{3})\d{4}(\d{4})$/, "$1****$2");
 
@@ -1016,6 +1070,7 @@ function OrderManagement({ activityClosed }: { activityClosed: boolean }) {
   const selected = orders.find((order) => order.no === selectedNo) ?? null;
   const selectedPermission = selected && activityClosed ? "已截止" : selected?.permission;
   const currentVersionId = selected?.versions[selected.versions.length - 1]?.version;
+  const currentVersion = selected?.versions[selected.versions.length - 1] ?? null;
   const modifiedVersion = selected?.versions.find((version) => version.action.includes("修改"));
   const operationRecords = selected ? [
     ...(selected.status === "已撤回" ? [{ time: selected.withdrawnAt, title: "撤回订单", detail: `${selected.withdrawReason} · 商品明细保留` }] : []),
@@ -1068,14 +1123,15 @@ function OrderManagement({ activityClosed }: { activityClosed: boolean }) {
               {selected.status === "已撤回" && <p><span>撤回时间</span><b>{selected.withdrawnAt}</b><small>{selected.withdrawReason} · 明细和订单号保留</small></p>}
             </div>
             <section className="drawer-section">
-              <h3>商品明细</h3>
-              <div className="drawer-items">
-                <div><span>7245-0002307</span><b>金芝御礼芝麻油礼盒</b><em>¥172.50 × 5 箱</em><strong>¥862.50</strong></div>
-                <div><span>7245-0000003</span><b>小磨芝麻香油</b><em>¥210.00 × 6 箱</em><strong>¥1,260.00</strong></div>
-                <div><span>7245-0000005</span><b>零添加特级味极鲜</b><em>¥78.00 × 2 箱</em><strong>¥156.00</strong></div>
+              <h3>商品明细 <small>{currentVersion?.version} 商品快照</small></h3>
+              <div className="drawer-items order-snapshot-items">
+                {currentVersion?.items.map((item) => <article key={`${selected.no}-${item.materialCode}`}>
+                  <div className="order-item-primary"><span><small>产品线</small>{item.line}</span><span><small>物料代码</small>{item.materialCode}</span><b><small>物料名称</small>{item.materialName}</b><span><small>规格</small>{item.spec}</span><span><small>箱规</small>{item.casePack}</span><em><small>元/箱</small>¥{item.casePrice}</em><span><small>订货箱数</small>{item.quantity} 箱</span><strong><small>金额</small>¥{item.subtotal}</strong></div>
+                </article>)}
               </div>
+              <p className="order-snapshot-note">商品明细为 {currentVersion?.version} 提交时的快照；商品 ID、客户类型、返利和每吨箱数等统计字段保存在快照中，不在明细中展开。</p>
             </section>
-            <section className="drawer-section"><h3>版本记录 <small>共 {selected.versions.length} 个版本</small></h3><div className="order-version-list">{selected.versions.map((version) => { const isCurrentVersion = version.version === currentVersionId; return <div className="order-version-record" key={`${selected.no}-${version.version}`}><div className="order-version-summary"><span>{version.version}</span><div><b>{version.action}{isCurrentVersion && <em className="version-current-badge">当前版本</em>}</b><small>{version.at} · {version.operator}</small><p>{version.detail}</p></div><strong>{version.amount}</strong>{isCurrentVersion ? <span className="version-current-note">商品明细见上方</span> : <button type="button" onClick={() => setExpandedVersion(expandedVersion === version.version ? null : version.version)}>{expandedVersion === version.version ? "收起明细" : "查看商品明细"}</button>}</div>{expandedVersion === version.version && !isCurrentVersion && <div className="order-version-detail"><div className="order-version-detail-head"><b>{version.version} 商品快照</b><span>{version.items.length} 种商品 · {version.amount}</span></div><div className="order-version-items"><div className="order-version-item-head"><span>物料代码</span><b>商品名称</b><span>规格</span><span>数量</span><span>元/箱</span><strong>小计</strong></div>{version.items.map((item) => <div key={`${version.version}-${item.materialCode}`}><span>{item.materialCode}</span><b>{item.name}</b><span>{item.spec}</span><span>{item.quantity} 箱</span><span>¥{item.unitPrice}</span><strong>¥{item.subtotal}</strong></div>)}</div></div>}</div>; })}</div></section>
+            <section className="drawer-section"><h3>版本记录 <small>共 {selected.versions.length} 个版本</small></h3><div className="order-version-list">{selected.versions.map((version) => { const isCurrentVersion = version.version === currentVersionId; return <div className="order-version-record" key={`${selected.no}-${version.version}`}><div className="order-version-summary"><span>{version.version}</span><div><b>{version.action}{isCurrentVersion && <em className="version-current-badge">当前版本</em>}</b><small>{version.at} · {version.operator}</small><p>{version.detail}</p></div><strong>{version.amount}</strong>{isCurrentVersion ? <span className="version-current-note">商品明细见上方</span> : <button type="button" onClick={() => setExpandedVersion(expandedVersion === version.version ? null : version.version)}>{expandedVersion === version.version ? "收起明细" : "查看商品明细"}</button>}</div>{expandedVersion === version.version && !isCurrentVersion && <div className="order-version-detail"><div className="order-version-detail-head"><b>{version.version} 商品快照</b><span>{version.items.length} 种商品 · {version.amount}</span></div><div className="order-version-items"><div className="order-version-item-head"><span>产品线</span><span>物料代码</span><b>物料名称</b><span>规格</span><span>箱规</span><span>元/箱</span><span>订货箱数</span><strong>金额</strong></div>{version.items.map((item) => <div className="order-version-item" key={`${version.version}-${item.materialCode}`}><div className="order-version-item-main"><span>{item.line}</span><span>{item.materialCode}</span><b>{item.materialName}</b><span>{item.spec}</span><span>{item.casePack}</span><span>¥{item.casePrice}</span><span>{item.quantity} 箱</span><strong>¥{item.subtotal}</strong></div></div>)}</div><p className="order-snapshot-note">商品 ID、客户类型、返利和每吨箱数等统计字段保存在该版本快照中。</p></div>}</div>; })}</div></section>
             <section className="drawer-section"><h3>操作记录</h3><div className="order-timeline">{operationRecords.map((record, index) => <p key={`${record.time}-${record.title}-${index}`}><b>{record.time} {record.title}</b><span>{record.detail}</span></p>)}</div></section>
             <footer>
               {selected.status === "已提交" && selected.permission === "可修改" && !activityClosed && <button className="admin-danger-outline" onClick={() => { setAdminWithdrawReason(""); setAdminWithdrawConfirm(true); }}>撤回订单</button>}
@@ -1435,10 +1491,10 @@ const initialAttendanceRows: AttendanceRow[] = [
 ];
 
 const initialProductImportRows: ProductImportRow[] = [
-  { id: "product-1", sequence: 1, customerType: "特渠", rebate: "参与", category: "特渠定制产品", line: "调味油", materialCode: "7245-0002307", materialName: "金芝御礼225ML×4礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "225mL×5", casePack: "5盒/箱", unitPrice: "34.50", casePrice: "172.50", conversion: "0.00092", gift: "是", branchScope: "", status: "有效", source: "excel", sourceSheet: "特渠参与返利" },
+  { id: "product-1", sequence: 1, customerType: "特渠", rebate: "参与", category: "特渠定制产品", line: "调味油", materialCode: "7245-0002307", materialName: "金芝御礼225ML×4礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "225mL×5", casePack: "5盒/箱", unitPrice: "34.50", casePrice: "172.50", conversion: "50", gift: "是", branchScope: "", status: "有效", source: "excel", sourceSheet: "特渠参与返利" },
   { id: "product-2", sequence: 1, customerType: "特渠", rebate: "不参与", category: "特渠定制品", line: "酱油", materialCode: "7217-0001957", materialName: "四海祯享礼盒", brand: "金龙鱼", variety: "礼盒", spec: "500mL×2+500mL+530g", casePack: "6盒/箱", unitPrice: "19.30", casePrice: "117.00", conversion: "", gift: "是", branchScope: "", status: "待完善", source: "excel", sourceSheet: "特渠不参与返利" },
-  { id: "product-3", sequence: 1, customerType: "综合", rebate: "参与", category: "全渠道适用通品", line: "调味油", materialCode: "7455-02F003", materialName: "金龙鱼芝麻香油礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "145mL×4", casePack: "15盒/箱", unitPrice: "28.00", casePrice: "420.00", conversion: "0.00125", gift: "是", branchScope: "", status: "有效", source: "excel", sourceSheet: "综合参与返利" },
-  { id: "product-4", sequence: 1, customerType: "综合", rebate: "不参与", category: "通用品调味油", line: "调味油", materialCode: "7455-01P702", materialName: "香满园芝麻油245mL×12", brand: "香满园", variety: "芝麻油", spec: "245mL", casePack: "12瓶/箱", unitPrice: "6.90", casePrice: "82.80", conversion: "0.00270", gift: "否", branchScope: "", status: "有效", source: "excel", sourceSheet: "综合不参与返利" },
+  { id: "product-3", sequence: 1, customerType: "综合", rebate: "参与", category: "全渠道适用通品", line: "调味油", materialCode: "7455-02F003", materialName: "金龙鱼芝麻香油礼盒", brand: "金龙鱼", variety: "芝麻油", spec: "145mL×4", casePack: "15盒/箱", unitPrice: "28.00", casePrice: "420.00", conversion: "45", gift: "是", branchScope: "", status: "有效", source: "excel", sourceSheet: "综合参与返利" },
+  { id: "product-4", sequence: 1, customerType: "综合", rebate: "不参与", category: "通用品调味油", line: "调味油", materialCode: "7455-01P702", materialName: "香满园芝麻油245mL×12", brand: "香满园", variety: "芝麻油", spec: "245mL", casePack: "12瓶/箱", unitPrice: "6.90", casePrice: "82.80", conversion: "45", gift: "否", branchScope: "", status: "有效", source: "excel", sourceSheet: "综合不参与返利" },
 ];
 
 const initialWhitelistRows: WhitelistRow[] = [
@@ -1792,7 +1848,7 @@ function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false, allow
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [imagePreview, setImagePreview] = useState<{ productName: string; images: ProductImageAsset[]; status: ProductImageStatus } | null>(null);
-  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "商品图片", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否礼盒", "分公司限制", "状态", "操作"];
+  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "商品图片", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "每吨箱数（箱/吨）", "是否礼盒", "分公司限制", "状态", "操作"];
   const filteredRows = useMemo(() => {
     const normalizedKeyword = normalizeSearchText(searchKeyword);
     const normalizedCodeKeyword = normalizeMaterialCode(searchKeyword);
@@ -1988,7 +2044,9 @@ function ProductFormDrawer({ rows, initialRow, activityStarted = false, onClose,
   const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
   const duplicateMaterialCode = form.materialCode.trim() !== "" && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && row.rebate === form.rebate && row.materialCode.trim().toLowerCase() === form.materialCode.trim().toLowerCase());
-  const canSave = form.materialCode.trim() !== "" && form.materialName.trim() !== "" && form.casePrice.trim() !== "" && !duplicateMaterialCode && (!activityStarted || editReason.trim() !== "");
+  const conversionValue = Number(form.conversion);
+  const conversionValid = form.conversion.trim() !== "" && Number.isFinite(conversionValue) && conversionValue > 0;
+  const canSave = form.materialCode.trim() !== "" && form.materialName.trim() !== "" && form.casePrice.trim() !== "" && (conversionValid || form.status === "待完善") && !duplicateMaterialCode && (!activityStarted || editReason.trim() !== "");
   return (
     <div className="order-drawer-backdrop" onClick={onClose}>
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
@@ -2008,7 +2066,7 @@ function ProductFormDrawer({ rows, initialRow, activityStarted = false, onClose,
           <label><span>箱规</span><input value={form.casePack} onChange={(e) => update("casePack", e.target.value)} /></label>
           <label><span>元/瓶</span><input inputMode="decimal" value={form.unitPrice} onChange={(e) => update("unitPrice", e.target.value)} /></label>
           <label><span>元/箱 *</span><input inputMode="decimal" value={form.casePrice} onChange={(e) => update("casePrice", e.target.value)} /></label>
-          <label><span>吨箱转换系数</span><input inputMode="decimal" value={form.conversion} onChange={(e) => update("conversion", e.target.value)} /></label>
+          <label><span>每吨箱数（箱/吨） *</span><input inputMode="decimal" value={form.conversion} onChange={(e) => update("conversion", e.target.value)} /><small className={!conversionValid && form.status !== "待完善" ? "field-error" : ""}>Excel 原列名：吨箱转换系数；统计时按订货箱数 ÷ 每吨箱数计算吨数</small></label>
           <label><span>是否礼盒</span><select value={form.gift} onChange={(e) => update("gift", e.target.value)}><option>否</option><option>是</option></select></label>
           <label><span>分公司限制</span><input value={form.branchScope} onChange={(e) => update("branchScope", e.target.value)} placeholder="留空表示全部分公司" /><small>多个分公司用顿号或逗号分隔</small></label>
           <label><span>状态</span><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>有效</option><option>待完善</option><option>停用</option></select></label>
