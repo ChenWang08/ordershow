@@ -1,0 +1,30 @@
+flowchart TB
+  H5[客户订货 H5]
+  ADMIN[管理后台]
+  SCREEN[排行 / 战报 / 抽奖大屏]
+  NGINX[Nginx / HTTPS]
+  API[Spring Boot 模块化单体]
+  MYSQL[(MySQL 业务主数据)]
+  REDIS[(Redis 缓存 / 限流 / 幂等 / 锁)]
+  OBJECT[(MinIO / S3 对象存储)]
+
+  H5 -->|REST| NGINX
+  ADMIN -->|REST| NGINX
+  SCREEN -->|REST + SSE| NGINX
+  NGINX --> API
+  API --> MYSQL
+  API --> REDIS
+  API --> OBJECT
+
+  subgraph BackendModules[后端领域模块]
+    ACT[活动]
+    CAT[商品与导入]
+    CUS[客户与验证]
+    ORD[订单与版本]
+    DASH[看板统计]
+    LOT[抽奖]
+    AUTH[管理员与审计]
+  end
+
+  API --- BackendModules
+

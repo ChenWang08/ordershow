@@ -1,0 +1,2323 @@
+openapi: 3.1.0
+info:
+  title: 订购会系统 API
+  version: 1.0.0
+  description: 多活动订购会系统的 H5、管理后台、现场大屏与抽奖接口契约。
+servers:
+  - url: http://localhost:8080/api/v1
+    description: 本地开发
+  - url: https://api.example.com/api/v1
+    description: 正式环境占位域名
+tags:
+  - name: Public
+  - name: H5
+  - name: AdminAuth
+  - name: Activities
+  - name: Imports
+  - name: Catalog
+  - name: Customers
+  - name: Orders
+  - name: Dashboard
+  - name: Lottery
+  - name: Exports
+  - name: Audit
+paths:
+  /public/activities/{activityCode}:
+    get:
+      operationId: getPublicActivity
+      tags: [Public]
+      summary: 查询活动公开信息
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      responses:
+        '200':
+          description: 活动公开信息
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicActivityResponse'
+        '404':
+          $ref: '#/components/responses/Problem'
+  /public/activities/{activityCode}/verify-phone:
+    post:
+      operationId: verifyActivityPhone
+      tags: [Public]
+      summary: 按活动、客户类型和手机号验证 H5 身份
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PhoneVerificationRequest'
+      responses:
+        '200':
+          description: 验证成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneVerificationResponse'
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '429':
+          $ref: '#/components/responses/Problem'
+  /h5/activities/{activityCode}/products:
+    get:
+      operationId: listH5OrderableProducts
+      tags: [H5]
+      summary: 查询当前客户可订商品
+      security:
+        - h5Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - name: rebateStatus
+          in: query
+          schema:
+            $ref: '#/components/schemas/RebateStatus'
+        - name: keyword
+          in: query
+          schema:
+            type: string
+            maxLength: 100
+      responses:
+        '200':
+          description: 商品列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, traceId]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrderableProduct'
+                  traceId:
+                    type: string
+        '401':
+          $ref: '#/components/responses/Problem'
+  /h5/activities/{activityCode}/order:
+    get:
+      operationId: getH5CurrentOrder
+      tags: [H5]
+      summary: 查询本人当前订单
+      security:
+        - h5Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      responses:
+        '200':
+          description: 当前订单；未提交时 data 为 null
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentOrderResponse'
+    put:
+      operationId: submitH5Order
+      tags: [H5]
+      summary: 首次提交、修改或撤回后重新提交订单
+      security:
+        - h5Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitOrderRequest'
+      responses:
+        '200':
+          description: 修改或重新提交成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentOrderResponse'
+        '201':
+          description: 首次提交成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentOrderResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+  /h5/activities/{activityCode}/order/withdraw:
+    post:
+      operationId: withdrawH5Order
+      tags: [H5]
+      summary: 客户取消本次订货
+      security:
+        - h5Bearer: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion]
+              properties:
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: 撤回成功，明细和订单号保留
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentOrderResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/auth/login:
+    post:
+      operationId: loginAdmin
+      tags: [AdminAuth]
+      summary: 管理员登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                  maxLength: 64
+                password:
+                  type: string
+                  format: password
+                  maxLength: 200
+      responses:
+        '200':
+          description: 登录成功并设置 HttpOnly Cookie
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMeResponse'
+        '401':
+          $ref: '#/components/responses/Problem'
+  /admin/auth/logout:
+    post:
+      operationId: logoutAdmin
+      tags: [AdminAuth]
+      summary: 撤销当前管理员会话
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: 已退出
+  /admin/me:
+    get:
+      operationId: getCurrentAdmin
+      tags: [AdminAuth]
+      summary: 查询当前管理员
+      security:
+        - adminCookie: []
+      responses:
+        '200':
+          description: 当前管理员
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminMeResponse'
+  /admin/auth/change-password:
+    post:
+      operationId: changeAdminPassword
+      tags: [AdminAuth]
+      summary: 修改当前管理员密码并撤销其他会话
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword:
+                  type: string
+                  format: password
+                newPassword:
+                  type: string
+                  format: password
+                  minLength: 12
+                  maxLength: 200
+      responses:
+        '204':
+          description: 修改成功
+        '400':
+          $ref: '#/components/responses/Problem'
+  /admin/users:
+    get:
+      operationId: listAdminUsers
+      tags: [AdminAuth]
+      summary: 管理员账号列表
+      security:
+        - adminCookie: []
+      responses:
+        '200':
+          description: 管理员账号
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericListResponse'
+    post:
+      operationId: createAdminUser
+      tags: [AdminAuth]
+      summary: 创建同角色管理员账号
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUserWriteRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/users/{adminUserId}:
+    patch:
+      operationId: updateAdminUser
+      tags: [AdminAuth]
+      summary: 修改、禁用或重置管理员密码
+      security:
+        - adminCookie: []
+      parameters:
+        - name: adminUserId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, changes]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                changes:
+                  type: object
+                  properties:
+                    displayName:
+                      type: string
+                    status:
+                      type: string
+                      enum: [ACTIVE, DISABLED]
+                    resetPassword:
+                      type: boolean
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities:
+    get:
+      operationId: listActivities
+      tags: [Activities]
+      summary: 活动列表
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/ActivityStatus'
+        - name: keyword
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 分页活动
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityPageResponse'
+    post:
+      operationId: createActivity
+      tags: [Activities]
+      summary: 创建活动
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityWriteRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+  /admin/activities/{activityId}:
+    get:
+      operationId: getActivity
+      tags: [Activities]
+      summary: 活动详情
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 活动详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+    patch:
+      operationId: updateActivity
+      tags: [Activities]
+      summary: 修改活动配置
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityWriteRequest'
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/transition:
+    post:
+      operationId: transitionActivity
+      tags: [Activities]
+      summary: 迁移活动状态
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetStatus, reason]
+              properties:
+                targetStatus:
+                  $ref: '#/components/schemas/ActivityStatus'
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '200':
+          description: 状态迁移成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/imports:
+    get:
+      operationId: listImportTasks
+      tags: [Imports]
+      summary: 导入任务列表
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 导入任务列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportTaskPageResponse'
+    post:
+      operationId: createImportTask
+      tags: [Imports]
+      summary: 上传并解析导入文件
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [importType, file]
+              properties:
+                importType:
+                  $ref: '#/components/schemas/ImportType'
+                file:
+                  type: string
+                  format: binary
+                auxiliaryFile:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: 已创建解析任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportTaskResponse'
+  /admin/activities/{activityId}/imports/{taskId}:
+    get:
+      operationId: getImportTask
+      tags: [Imports]
+      summary: 导入任务详情和统计
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 导入任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportTaskResponse'
+  /admin/activities/{activityId}/imports/{taskId}/rows:
+    get:
+      operationId: listImportPreviewRows
+      tags: [Imports]
+      summary: 导入预览行
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: validationStatus
+          in: query
+          schema:
+            type: string
+            enum: [VALID, WARNING, BLOCKED]
+      responses:
+        '200':
+          description: 预览行分页
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericPageResponse'
+  /admin/activities/{activityId}/imports/{taskId}/rows/{rowId}:
+    patch:
+      operationId: updateImportPreviewRow
+      tags: [Imports]
+      summary: 编辑导入预览行
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+        - name: rowId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: 重新校验后的预览行
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+    delete:
+      operationId: deleteImportPreviewRow
+      tags: [Imports]
+      summary: 从本次预览中删除异常行
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+        - name: rowId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: 已从预览移除
+  /admin/activities/{activityId}/imports/{taskId}/errors:
+    get:
+      operationId: listImportErrors
+      tags: [Imports]
+      summary: 导入错误和警告明细
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 错误明细
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericPageResponse'
+  /admin/activities/{activityId}/imports/{taskId}/cancel:
+    post:
+      operationId: cancelImportTask
+      tags: [Imports]
+      summary: 取消尚未确认的导入任务
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已取消
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportTaskResponse'
+  /admin/activities/{activityId}/imports/{taskId}/confirm:
+    post:
+      operationId: confirmImportTask
+      tags: [Imports]
+      summary: 确认导入并全量替换当前数据
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '202':
+          description: 已进入确认任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportTaskResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/products:
+    get:
+      operationId: listActivityProducts
+      tags: [Catalog]
+      summary: 活动商品列表
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: customerType
+          in: query
+          schema:
+            $ref: '#/components/schemas/CustomerType'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ACTIVE, INCOMPLETE, INACTIVE]
+        - name: keyword
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 商品分页
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericPageResponse'
+  /admin/activities/{activityId}/products/{productId}:
+    patch:
+      operationId: updateActivityProduct
+      tags: [Catalog]
+      summary: 紧急修改单条商品
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: productId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, changes]
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+                changes:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: 修改后的商品
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/products/{productId}/images:
+    post:
+      operationId: addProductImage
+      tags: [Catalog]
+      summary: 活动开始后追加单条商品图片
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: productId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, reason]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                reason:
+                  type: string
+                  maxLength: 500
+                primary:
+                  type: boolean
+      responses:
+        '201':
+          description: 图片已保存
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/products/{productId}/images/{imageId}:
+    patch:
+      operationId: updateProductImage
+      tags: [Catalog]
+      summary: 设置主图或排序
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: productId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - name: imageId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                primary:
+                  type: boolean
+                sortNo:
+                  type: integer
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: 图片已更新
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+    delete:
+      operationId: deleteProductImage
+      tags: [Catalog]
+      summary: 逻辑删除商品图片关联
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: productId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - name: imageId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - name: reason
+          in: query
+          required: true
+          schema:
+            type: string
+            maxLength: 500
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: 关联已删除，受引用文件按生命周期策略保留
+  /admin/activities/{activityId}/customers:
+    get:
+      operationId: listActivityCustomers
+      tags: [Customers]
+      summary: 活动白名单列表
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: customerType
+          in: query
+          schema:
+            $ref: '#/components/schemas/CustomerType'
+        - name: regionCode
+          in: query
+          schema:
+            $ref: '#/components/schemas/RegionCode'
+        - name: keyword
+          in: query
+          description: 经销商名称模糊查询或完整手机号精确查询
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 白名单分页
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericPageResponse'
+  /admin/activities/{activityId}/customers/{customerId}:
+    patch:
+      operationId: updateActivityCustomer
+      tags: [Customers]
+      summary: 紧急修改或停用单条活动客户
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason, changes]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+                changes:
+                  type: object
+                  additionalProperties: true
+      responses:
+        '200':
+          description: 修改后的活动客户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/attendance:
+    get:
+      operationId: listActivityAttendance
+      tags: [Customers]
+      summary: 到场名单列表
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: 到场名单分页
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericPageResponse'
+    post:
+      operationId: createAttendanceEntry
+      tags: [Customers]
+      summary: 手工新增到场记录
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttendanceWriteRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/attendance/{attendeeId}:
+    patch:
+      operationId: updateAttendanceEntry
+      tags: [Customers]
+      summary: 修改到场记录
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: attendeeId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttendanceWriteRequest'
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+    delete:
+      operationId: deactivateAttendanceEntry
+      tags: [Customers]
+      summary: 停用到场记录
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: attendeeId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: 已停用
+  /admin/activities/{activityId}/orders:
+    get:
+      operationId: listActivityOrders
+      tags: [Orders]
+      summary: 订单列表
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+        - name: customerType
+          in: query
+          schema:
+            $ref: '#/components/schemas/CustomerType'
+        - name: regionCode
+          in: query
+          schema:
+            $ref: '#/components/schemas/RegionCode'
+        - name: branchName
+          in: query
+          schema:
+            type: string
+        - name: keyword
+          in: query
+          description: 经销商名称模糊查询或完整手机号精确查询，不支持订单号搜索
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 订单分页
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderPageResponse'
+  /admin/activities/{activityId}/orders/{orderId}:
+    get:
+      operationId: getActivityOrder
+      tags: [Orders]
+      summary: 订单详情、当前明细和操作记录
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: 订单详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentOrderResponse'
+  /admin/activities/{activityId}/orders/{orderId}/versions:
+    get:
+      operationId: listOrderVersions
+      tags: [Orders]
+      summary: 订单历史版本
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: 版本摘要列表
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, traceId]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/OrderVersionSummary'
+                  traceId:
+                    type: string
+  /admin/activities/{activityId}/orders/{orderId}/versions/{versionNo}:
+    get:
+      operationId: getOrderVersion
+      tags: [Orders]
+      summary: 查询指定不可变订单版本及明细快照
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/OrderId'
+        - name: versionNo
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: 指定版本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/orders/{orderId}/withdraw:
+    post:
+      operationId: withdrawOrderAsAdmin
+      tags: [Orders]
+      summary: 管理员撤回订单
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, reason]
+              properties:
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '200':
+          description: 撤回后的订单
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentOrderResponse'
+  /admin/activities/{activityId}/lottery/rules:
+    get:
+      operationId: listLotteryRules
+      tags: [Lottery]
+      summary: 抽奖规则和轮次列表
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 抽奖规则
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericListResponse'
+    post:
+      operationId: createLotteryRule
+      tags: [Lottery]
+      summary: 创建抽奖规则组
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 200
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/lottery/rules/{ruleId}:
+    patch:
+      operationId: updateLotteryRule
+      tags: [Lottery]
+      summary: 修改未归档抽奖规则组
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 200
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/lottery/rules/{ruleId}/rounds:
+    post:
+      operationId: createLotteryRound
+      tags: [Lottery]
+      summary: 新增抽奖轮次
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LotteryRoundWriteRequest'
+      responses:
+        '201':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LotteryRoundResponse'
+  /admin/activities/{activityId}/lottery/rules/{ruleId}/publish:
+    post:
+      operationId: publishLotteryRule
+      tags: [Lottery]
+      summary: 发布规则并将合法轮次置为就绪
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 发布成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/lottery/rounds/{roundId}:
+    patch:
+      operationId: updateLotteryRound
+      tags: [Lottery]
+      summary: 修改尚未产生有效结果的轮次
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/RoundId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LotteryRoundWriteRequest'
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LotteryRoundResponse'
+    delete:
+      operationId: deleteLotteryRound
+      tags: [Lottery]
+      summary: 删除未执行的草稿轮次
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/RoundId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '204':
+          description: 已删除草稿轮次
+  /admin/activities/{activityId}/lottery/rounds/{roundId}/draw:
+    post:
+      operationId: drawLotteryRound
+      tags: [Lottery]
+      summary: 固定候选快照并产生中奖结果
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/RoundId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已持久化的结果；现场页可开始动画后揭晓
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LotteryRoundResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/lottery/rounds/{roundId}/complete:
+    post:
+      operationId: completeLotteryRound
+      tags: [Lottery]
+      summary: 标记本轮展示完成
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/RoundId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 轮次完成
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LotteryRoundResponse'
+  /admin/activities/{activityId}/lottery/rounds/{roundId}/reset:
+    post:
+      operationId: resetLotteryRound
+      tags: [Lottery]
+      summary: 作废本轮旧结果并重置
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/RoundId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '200':
+          description: 已重置且旧结果仍保留为失效记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LotteryRoundResponse'
+  /admin/activities/{activityId}/exports:
+    post:
+      operationId: createExportTask
+      tags: [Exports]
+      summary: 创建异步导出任务
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateExportRequest'
+      responses:
+        '202':
+          description: 已创建任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportTaskResponse'
+  /admin/activities/{activityId}/exports/{taskId}:
+    get:
+      operationId: getExportTask
+      tags: [Exports]
+      summary: 查询导出任务和下载地址
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 导出任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportTaskResponse'
+  /admin/audit-logs:
+    get:
+      operationId: listAuditLogs
+      tags: [Audit]
+      summary: 审计日志列表
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: activityId
+          in: query
+          schema:
+            $ref: '#/components/schemas/Id'
+        - name: actionCode
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: 审计日志分页
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericPageResponse'
+  /screen/activities/{activityCode}/ranking:
+    get:
+      operationId: getRankingDashboard
+      tags: [Dashboard]
+      summary: 排行榜快照
+      security:
+        - screenToken: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - name: channel
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [SPECIAL, GENERAL_EAST, GENERAL_SOUTH, GENERAL_NORTH_1, GENERAL_NORTH_2]
+      responses:
+        '200':
+          description: 排行榜
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResponse'
+  /screen/activities/{activityCode}/reports/{reportCode}:
+    get:
+      operationId: getTopicReport
+      tags: [Dashboard]
+      summary: 专题战报快照
+      security:
+        - screenToken: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - name: reportCode
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [SPECIAL_TOP5, GENERAL_TOP5, OVERALL, CHANNEL_TOTALS, GENERAL_REGION_TOTALS, GIFT_BOX_TOTALS, GENERAL_PRODUCT_LINES, ALL_PRODUCT_LINES, GENERAL_REGION_AND_LINES]
+      responses:
+        '200':
+          description: 战报通用表格/指标快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResponse'
+  /screen/activities/{activityCode}/lottery:
+    get:
+      operationId: getLotteryScreenState
+      tags: [Lottery]
+      summary: 现场抽奖只读状态和已保存结果
+      security:
+        - screenToken: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      responses:
+        '200':
+          description: 抽奖状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericListResponse'
+  /screen/activities/{activityCode}/events:
+    get:
+      operationId: subscribeScreenEvents
+      tags: [Dashboard]
+      summary: 活动大屏 SSE 事件流
+      security:
+        - screenToken: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - name: Last-Event-ID
+          in: header
+          schema:
+            type: string
+      responses:
+        '200':
+          description: SSE 流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+components:
+  securitySchemes:
+    h5Bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT-or-opaque
+    adminCookie:
+      type: apiKey
+      in: cookie
+      name: ORDER_SHOW_ADMIN_SESSION
+    screenToken:
+      type: apiKey
+      in: query
+      name: screenToken
+  parameters:
+    ActivityCode:
+      name: activityCode
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]{2,63}$'
+    ActivityId:
+      name: activityId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    TaskId:
+      name: taskId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    RoundId:
+      name: roundId
+      in: path
+      required: true
+      schema:
+        $ref: '#/components/schemas/Id'
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+    PageSize:
+      name: pageSize
+      in: query
+      schema:
+        type: integer
+        enum: [20, 50, 100]
+        default: 50
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 128
+    IfMatch:
+      name: If-Match
+      in: header
+      required: true
+      schema:
+        type: string
+        examples: ['"3"']
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema:
+        type: string
+  responses:
+    Problem:
+      description: 统一错误
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  schemas:
+    Id:
+      type: string
+      pattern: '^[1-9][0-9]*$'
+      examples: ['123']
+    Decimal:
+      type: string
+      pattern: '^-?[0-9]+(?:\.[0-9]+)?$'
+      examples: ['19457005.28']
+    CustomerType:
+      type: string
+      enum: [GENERAL, SPECIAL]
+    RegionCode:
+      type: string
+      enum: [EAST, SOUTH, NORTH_1, NORTH_2]
+    RebateStatus:
+      type: string
+      enum: [PARTICIPATING, NOT_PARTICIPATING]
+    ActivityStatus:
+      type: string
+      enum: [DRAFT, SCHEDULED, ACTIVE, CLOSED, ARCHIVED]
+    OrderStatus:
+      type: string
+      enum: [SUBMITTED, WITHDRAWN]
+    ImportType:
+      type: string
+      enum: [PRODUCT, WHITELIST, ATTENDANCE, PRODUCT_IMAGE]
+    ImportStatus:
+      type: string
+      enum: [UPLOADED, PARSING, PREVIEW_READY, CONFIRMING, COMPLETED, FAILED, CANCELLED]
+    Problem:
+      type: object
+      required: [type, title, status, code, traceId]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string
+        traceId:
+          type: string
+        fieldErrors:
+          type: array
+          items:
+            type: object
+            required: [field, code, message]
+            properties:
+              field:
+                type: string
+              code:
+                type: string
+              message:
+                type: string
+    PageMeta:
+      type: object
+      required: [number, size, totalElements, totalPages]
+      properties:
+        number:
+          type: integer
+        size:
+          type: integer
+        totalElements:
+          type: integer
+          format: int64
+        totalPages:
+          type: integer
+    GenericPageResponse:
+      type: object
+      required: [data, page, traceId]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        page:
+          $ref: '#/components/schemas/PageMeta'
+        traceId:
+          type: string
+    GenericListResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        traceId:
+          type: string
+    SingleObjectResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+        traceId:
+          type: string
+    PublicActivity:
+      type: object
+      required: [activityCode, name, status, startsAt, endsAt, timezone, customerScope]
+      properties:
+        activityCode:
+          type: string
+        name:
+          type: string
+        description:
+          type: [string, 'null']
+        status:
+          $ref: '#/components/schemas/ActivityStatus'
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        timezone:
+          type: string
+        customerScope:
+          type: string
+          enum: [ALL, GENERAL, SPECIAL]
+        orderWritable:
+          type: boolean
+    PublicActivityResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          $ref: '#/components/schemas/PublicActivity'
+        traceId:
+          type: string
+    PhoneVerificationRequest:
+      type: object
+      required: [customerType, phone]
+      properties:
+        customerType:
+          $ref: '#/components/schemas/CustomerType'
+        regionCode:
+          oneOf:
+            - $ref: '#/components/schemas/RegionCode'
+            - type: 'null'
+        phone:
+          type: string
+          minLength: 1
+          maxLength: 32
+    PhoneVerificationResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          type: object
+          required: [accessToken, expiresAt, customer, activity]
+          properties:
+            accessToken:
+              type: string
+            expiresAt:
+              type: string
+              format: date-time
+            customer:
+              $ref: '#/components/schemas/ActivityCustomerSummary'
+            activity:
+              $ref: '#/components/schemas/PublicActivity'
+        traceId:
+          type: string
+    ActivityCustomerSummary:
+      type: object
+      required: [id, customerType, dealerFullName, phoneMasked]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        customerType:
+          $ref: '#/components/schemas/CustomerType'
+        regionCode:
+          oneOf:
+            - $ref: '#/components/schemas/RegionCode'
+            - type: 'null'
+        branchName:
+          type: [string, 'null']
+        dealerShortName:
+          type: [string, 'null']
+        dealerFullName:
+          type: string
+        contactName:
+          type: [string, 'null']
+        phoneMasked:
+          type: string
+    ProductImage:
+      type: object
+      required: [url, primary, sortNo]
+      properties:
+        url:
+          type: string
+          format: uri
+        primary:
+          type: boolean
+        sortNo:
+          type: integer
+    OrderableProduct:
+      type: object
+      required: [id, materialName, customerType, rebateStatus, casePrice, tonCaseFactor, sortNo, images]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        materialCode:
+          type: [string, 'null']
+        materialName:
+          type: string
+        categoryName:
+          type: [string, 'null']
+        productLine:
+          type: [string, 'null']
+        brandName:
+          type: [string, 'null']
+        varietyName:
+          type: [string, 'null']
+        specification:
+          type: [string, 'null']
+        casePack:
+          type: [string, 'null']
+        customerType:
+          $ref: '#/components/schemas/CustomerType'
+        rebateStatus:
+          $ref: '#/components/schemas/RebateStatus'
+        giftBox:
+          type: boolean
+        casePrice:
+          $ref: '#/components/schemas/Decimal'
+        tonCaseFactor:
+          $ref: '#/components/schemas/Decimal'
+        sortNo:
+          type: integer
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductImage'
+    SubmitOrderItem:
+      type: object
+      required: [productId, quantity]
+      properties:
+        productId:
+          $ref: '#/components/schemas/Id'
+        quantity:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 999999
+    SubmitOrderRequest:
+      type: object
+      required: [expectedVersion, items]
+      properties:
+        expectedVersion:
+          description: 未创建订单时传 0
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/SubmitOrderItem'
+    OrderItem:
+      type: object
+      required: [lineNo, productId, materialName, quantity, casePrice, lineAmount, tonCaseFactor, lineTons]
+      properties:
+        lineNo:
+          type: integer
+        productId:
+          $ref: '#/components/schemas/Id'
+        materialCode:
+          type: [string, 'null']
+        materialName:
+          type: string
+        specification:
+          type: [string, 'null']
+        quantity:
+          type: integer
+          format: int64
+        casePrice:
+          $ref: '#/components/schemas/Decimal'
+        lineAmount:
+          $ref: '#/components/schemas/Decimal'
+        tonCaseFactor:
+          $ref: '#/components/schemas/Decimal'
+        lineTons:
+          $ref: '#/components/schemas/Decimal'
+    CurrentOrder:
+      type: object
+      required: [id, orderNo, status, currentVersion, totalQuantity, totalTons, totalAmount, customer, items, firstSubmittedAt, lastSubmittedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        orderNo:
+          type: string
+        status:
+          $ref: '#/components/schemas/OrderStatus'
+        currentVersion:
+          type: integer
+        writable:
+          type: boolean
+        totalQuantity:
+          type: integer
+          format: int64
+        totalTons:
+          $ref: '#/components/schemas/Decimal'
+        totalAmount:
+          $ref: '#/components/schemas/Decimal'
+        customer:
+          $ref: '#/components/schemas/ActivityCustomerSummary'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderItem'
+        firstSubmittedAt:
+          type: string
+          format: date-time
+        lastSubmittedAt:
+          type: string
+          format: date-time
+        withdrawnAt:
+          type: [string, 'null']
+          format: date-time
+        withdrawnReason:
+          type: [string, 'null']
+    CurrentOrderResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/CurrentOrder'
+            - type: 'null'
+        traceId:
+          type: string
+    OrderVersionSummary:
+      type: object
+      required: [version, totalQuantity, totalTons, totalAmount, submittedAt, submittedSource]
+      properties:
+        version:
+          type: integer
+        totalQuantity:
+          type: integer
+          format: int64
+        totalTons:
+          $ref: '#/components/schemas/Decimal'
+        totalAmount:
+          $ref: '#/components/schemas/Decimal'
+        submittedAt:
+          type: string
+          format: date-time
+        submittedSource:
+          type: string
+          enum: [H5, ADMIN]
+    AdminMeResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          type: object
+          required: [id, username, displayName, roleCode, mustChangePassword, csrfToken]
+          properties:
+            id:
+              $ref: '#/components/schemas/Id'
+            username:
+              type: string
+            displayName:
+              type: string
+            roleCode:
+              type: string
+              enum: [ADMIN]
+            mustChangePassword:
+              type: boolean
+            csrfToken:
+              type: string
+        traceId:
+          type: string
+    AdminUserWriteRequest:
+      type: object
+      required: [username, displayName, initialPassword]
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 100
+        initialPassword:
+          type: string
+          format: password
+          minLength: 12
+          maxLength: 200
+    AttendanceWriteRequest:
+      type: object
+      required: [dealerName]
+      properties:
+        activityCustomerId:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        participantName:
+          type: [string, 'null']
+          maxLength: 100
+        gender:
+          type: [string, 'null']
+          maxLength: 16
+        participantType:
+          type: [string, 'null']
+          maxLength: 100
+        dealerName:
+          type: string
+          maxLength: 255
+        branchName:
+          type: [string, 'null']
+          maxLength: 200
+        phone:
+          type: [string, 'null']
+          maxLength: 32
+    LotteryRoundWriteRequest:
+      type: object
+      required: [roundNo, name, winnerCount, candidateScope, customerType, excludePreviousWinners]
+      properties:
+        roundNo:
+          type: integer
+          minimum: 1
+        name:
+          type: string
+          maxLength: 200
+        prizeName:
+          type: [string, 'null']
+          maxLength: 200
+        winnerCount:
+          type: integer
+          minimum: 1
+        candidateScope:
+          type: string
+          enum: [ALL_CUSTOMERS, ATTENDEES, VALID_ORDERS]
+        customerType:
+          type: string
+          enum: [ALL, GENERAL, SPECIAL]
+        minimumOrderAmount:
+          $ref: '#/components/schemas/Decimal'
+        qualificationCutoffAt:
+          type: [string, 'null']
+          format: date-time
+        excludePreviousWinners:
+          type: boolean
+        displayNameType:
+          type: string
+          enum: [SHORT_NAME, FULL_NAME]
+          default: SHORT_NAME
+    Activity:
+      allOf:
+        - $ref: '#/components/schemas/PublicActivity'
+        - type: object
+          required: [id, version, companyRankingTopN, branchRankingTopN, tonDisplayScale, createdAt, updatedAt]
+          properties:
+            id:
+              $ref: '#/components/schemas/Id'
+            version:
+              type: integer
+            companyRankingTopN:
+              type: integer
+            branchRankingTopN:
+              type: integer
+            tonDisplayScale:
+              type: integer
+            createdAt:
+              type: string
+              format: date-time
+            updatedAt:
+              type: string
+              format: date-time
+    ActivityWriteRequest:
+      type: object
+      required: [activityCode, name, startsAt, endsAt, timezone, customerScope]
+      properties:
+        activityCode:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{2,63}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: [string, 'null']
+          maxLength: 5000
+        startsAt:
+          type: string
+          format: date-time
+        endsAt:
+          type: string
+          format: date-time
+        timezone:
+          type: string
+          default: Asia/Shanghai
+        customerScope:
+          type: string
+          enum: [ALL, GENERAL, SPECIAL]
+        companyRankingTopN:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 90
+        branchRankingTopN:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 30
+        tonDisplayScale:
+          type: integer
+          minimum: 0
+          maximum: 6
+          default: 4
+    ActivityResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          $ref: '#/components/schemas/Activity'
+        traceId:
+          type: string
+    ActivityPageResponse:
+      type: object
+      required: [data, page, traceId]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Activity'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+        traceId:
+          type: string
+    ImportTask:
+      type: object
+      required: [id, activityId, importType, status, inputCount, addedCount, updatedCount, deactivatedCount, warningCount, errorCount, createdAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        activityId:
+          $ref: '#/components/schemas/Id'
+        importType:
+          $ref: '#/components/schemas/ImportType'
+        status:
+          $ref: '#/components/schemas/ImportStatus'
+        sourceFilename:
+          type: string
+        inputCount:
+          type: integer
+        addedCount:
+          type: integer
+        updatedCount:
+          type: integer
+        unchangedCount:
+          type: integer
+        deactivatedCount:
+          type: integer
+        warningCount:
+          type: integer
+        errorCount:
+          type: integer
+        failureCode:
+          type: [string, 'null']
+        failureMessage:
+          type: [string, 'null']
+        createdAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: [string, 'null']
+          format: date-time
+    ImportTaskResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          $ref: '#/components/schemas/ImportTask'
+        traceId:
+          type: string
+    ImportTaskPageResponse:
+      type: object
+      required: [data, page, traceId]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImportTask'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+        traceId:
+          type: string
+    OrderPageResponse:
+      type: object
+      required: [data, page, traceId]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CurrentOrder'
+        page:
+          $ref: '#/components/schemas/PageMeta'
+        traceId:
+          type: string
+    LotteryRoundResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          type: object
+          required: [id, status, winnerCount, candidateCount, winners]
+          properties:
+            id:
+              $ref: '#/components/schemas/Id'
+            status:
+              type: string
+              enum: [DRAFT, READY, DRAWING, DRAWN, COMPLETED, RESET]
+            winnerCount:
+              type: integer
+            candidateCount:
+              type: integer
+            resultHash:
+              type: [string, 'null']
+            winners:
+              type: array
+              items:
+                type: object
+                required: [position, dealerDisplayName]
+                properties:
+                  position:
+                    type: integer
+                  dealerDisplayName:
+                    type: string
+        traceId:
+          type: string
+    CreateExportRequest:
+      type: object
+      required: [exportType]
+      properties:
+        exportType:
+          type: string
+          enum: [ORDER_SUMMARY, ORDER_ITEMS, ORDER_VERSIONS, VISIT_FUNNEL, LOTTERY_WINNERS, IMPORT_ERRORS]
+        filters:
+          type: object
+          additionalProperties: true
+    ExportTaskResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          type: object
+          required: [id, exportType, status, createdAt]
+          properties:
+            id:
+              $ref: '#/components/schemas/Id'
+            exportType:
+              type: string
+            status:
+              type: string
+              enum: [PENDING, RUNNING, COMPLETED, FAILED, EXPIRED]
+            rowCount:
+              type: [integer, 'null']
+            downloadUrl:
+              type: [string, 'null']
+              format: uri
+            expiresAt:
+              type: [string, 'null']
+              format: date-time
+            createdAt:
+              type: string
+              format: date-time
+        traceId:
+          type: string
+    DashboardResponse:
+      type: object
+      required: [data, version, generatedAt, traceId]
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+        version:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        traceId:
+          type: string
