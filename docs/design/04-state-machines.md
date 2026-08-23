@@ -77,7 +77,7 @@ stateDiagram-v2
 stateDiagram-v2
   [*] --> SUBMITTED: 首次非空提交，生成订单号和 V1
   SUBMITTED --> SUBMITTED: 修改并提交，生成 Vn+1
-  SUBMITTED --> WITHDRAWN: 客户取消或管理员撤回，不生成空版本
+  SUBMITTED --> WITHDRAWN: 客户在 H5 取消，不生成空版本
   WITHDRAWN --> SUBMITTED: 截止前重新提交，沿用订单号并生成 Vn+1
 ```
 
@@ -115,9 +115,9 @@ stateDiagram-v2
 ### 3.3 撤回
 
 - 只允许当前 `SUBMITTED` 订单；
-- 客户撤回可使用固定业务说明，管理员撤回必须填写原因；
+- 仅允许订单所属客户通过 H5 撤回；管理后台没有撤回权限；
 - 状态改为 `WITHDRAWN`，写撤回时间和原因；
-- 当前明细、总金额、总吨数、订单号和最近非空版本全部保留；
+- 当前明细、总金额、可空的总吨数、订单号和最近非空版本全部保留；
 - 不生成空版本；
 - 写 `WITHDRAW` 并立即从看板和抽奖有效订单候选中排除。
 
@@ -139,8 +139,12 @@ stateDiagram-v2
   PARSING --> FAILED: 文件或解析失败
   PREVIEW_READY --> CONFIRMING: 管理员确认且无阻断错误
   PREVIEW_READY --> CANCELLED: 管理员取消
-  CONFIRMING --> COMPLETED: 事务提交成功
-  CONFIRMING --> FAILED: 事务整体回滚
+  CONFIRMING --> MATERIALIZING: Worker 准备发布版本
+  MATERIALIZING --> READY_TO_PUBLISH: 新版本校验完成
+  MATERIALIZING --> FAILED: 准备失败
+  READY_TO_PUBLISH --> PUBLISHING: Worker 取得发布权
+  PUBLISHING --> COMPLETED: 短事务切换当前版本指针
+  PUBLISHING --> FAILED: 发布事务失败且当前版本不变
   FAILED --> [*]
   CANCELLED --> [*]
   COMPLETED --> [*]
@@ -153,7 +157,10 @@ stateDiagram-v2
 | `UPLOADED` | 查询、等待解析、取消 |
 | `PARSING` | 只读查询进度 |
 | `PREVIEW_READY` | 查询差异/错误、编辑或删除预览行、确认、取消 |
-| `CONFIRMING` | 只读，防止重复确认 |
+| `CONFIRMING` | 只读，防止重复确认；等待 Worker 领取 |
+| `MATERIALIZING` | 只读；在非当前数据集内准备不可变发布版本 |
+| `READY_TO_PUBLISH` | 只读；等待短事务原子发布 |
+| `PUBLISHING` | 只读，防止重复发布 |
 | `COMPLETED` | 查看结果和原始文件；不得修改该批次 |
 | `FAILED` | 查看错误；重新上传创建新任务 |
 | `CANCELLED` | 查看；重新上传创建新任务 |
@@ -164,7 +171,7 @@ stateDiagram-v2
 - 必填 Sheet 缺失；
 - 必填字段无法识别；
 - 同一业务键出现无法自动判定的多条记录；
-- 价格、数量或转换系数格式非法；
+- 订单数量等不可降级处理的字段格式非法；商品元/箱或转换系数为空/非法时按空值和数据质量提示处理，不阻断整批导入；
 - 活动已开始后尝试全量导入；
 - 确认时基础数据已被另一个导入批次改变。
 
@@ -173,10 +180,11 @@ stateDiagram-v2
 ### 4.3 失败恢复
 
 - 解析失败不改变当前有效商品/白名单；
-- 确认失败整个数据库事务回滚；
+- staging 到发布版本的准备失败不改变当前有效商品/白名单；最终发布只切换当前版本指针，失败时当前版本保持不变；
 - 对象存储中的原文件保留用于定位；
 - 失败重试创建新执行尝试或新任务，不能直接把 `FAILED` 改成 `COMPLETED`；
-- 服务重启时扫描长时间停留在 `PARSING/CONFIRMING` 的任务，根据事务事实恢复或标记失败。
+- `PUBLISHING` 超时或连接中断后，必须先读取 MySQL 的任务状态和当前版本指针，再决定恢复为 `COMPLETED`、重新发布或标记失败，不能盲目重复切换；
+- 服务重启时扫描长时间停留在 `PARSING/CONFIRMING/MATERIALIZING/READY_TO_PUBLISH/PUBLISHING` 的任务，根据租约和事务事实恢复、重新领取或标记失败。
 
 ## 5. 抽奖规则和轮次状态机
 
@@ -257,6 +265,9 @@ stateDiagram-v2
 
 ## 7. 自动调度与幂等
 
+- API 只在 MySQL 中创建任务记录；Worker 通过租约领取 `PENDING` 或可重试任务，使用状态条件更新或 `SELECT ... FOR UPDATE SKIP LOCKED` 避免多个 Worker 同时执行；
+- 任务记录保存 `attempt_count`、`locked_until`、`next_attempt_at`、`worker_id` 和最后错误摘要。租约过期可重新领取，超过重试上限进入 `FAILED` 并告警；
+- Redis 可用于唤醒 Worker 或加速查询，但不作为任务队列事实来源。Worker 处理器必须依据 MySQL 业务状态和唯一约束实现幂等；
 - 每分钟扫描应该开始/截止的活动，使用条件更新避免多实例重复迁移；
 - 扫描卡住的导入和 outbox 事件；
 - 清理过期会话、幂等响应和导出文件；

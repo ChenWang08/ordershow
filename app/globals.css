@@ -143,7 +143,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .gift-badge { position: absolute; top: 5px; left: 5px; padding: 2px 5px; color: #fff; border-radius: 5px; background: #b82422; font-size: 8px; }
 .product-info { display: flex; min-width: 0; flex-direction: column; }
 .material-code { color: #b39f92; font-size: 8px; }
-.product-info h3 { margin: 4px 0 2px; overflow: hidden; font-size: 12px; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
+.product-info h3 { margin: 0 0 2px; overflow: hidden; font-size: 12px; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
 .product-info p { margin: 0; color: #8f7d72; font-size: 9px; }
 .product-action { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; margin-top: auto; }
 .product-action strong { color: #c02724; font-size: 14px; white-space: nowrap; }

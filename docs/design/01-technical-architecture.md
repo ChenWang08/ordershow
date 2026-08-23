@@ -12,11 +12,11 @@
 - 看板在订单变化后 3 秒内更新；
 - 同一抽奖轮次只能生成一份有效结果；
 - 本地、测试、预发布和正式环境使用同一套代码，通过配置切换基础设施；
-- 第一期保持简单可运维，不提前引入微服务和消息队列。
+- 第一期保持简单可运维，不提前引入微服务和外部消息队列；耗时任务使用 MySQL DB Task Queue 和独立 Background Worker。
 
 ## 2. 总体选择
 
-采用“多个 SPA 前端 + Spring Boot 模块化单体 + MySQL + Redis + S3 兼容对象存储 + SSE”的架构。
+采用“多个 SPA 前端 + Spring Boot 模块化单体（API 与 Background Worker 两种运行角色）+ MySQL + Redis + S3 兼容对象存储 + SSE”的架构。
 
 | 层次 | 推荐技术 | 职责 |
 | --- | --- | --- |
@@ -24,12 +24,13 @@
 | 管理后台 | React、TypeScript、Vite、Ant Design | 活动、导入、订单、抽奖和审计管理 |
 | 现场大屏 | React、TypeScript、Vite、ECharts | 排行、专题战报、抽奖动画 |
 | API | Java 21、Spring Boot 3.5 稳定线 | 业务规则、认证、事务、统计和文件协调 |
+| 后台任务 | Spring Boot Background Worker + MySQL DB Task Queue | Excel 解析/发布、导出、outbox 发布、调度和清理 |
 | 数据访问 | MyBatis/MyBatis Plus、Flyway | SQL、迁移、事务和乐观锁 |
 | 主数据库 | MySQL 8.4 LTS / InnoDB | 唯一业务事实来源 |
-| 辅助数据 | Redis | 限流、短期凭证、缓存、幂等结果和分布式锁 |
+| 辅助数据 | Redis | 限流、短期凭证缓存、查询缓存、幂等结果缓存和分布式锁；不作为事实来源 |
 | 文件 | MinIO（本地）/ S3 兼容对象存储（正式） | Excel、ZIP、商品图片和导出文件 |
 | 实时更新 | SSE | 看板和抽奖状态单向推送 |
-| 入口 | Nginx | HTTPS、静态文件、反向代理和基础限流 |
+| 正式入口 | 托管 LB/WAF/CDN | TLS、健康检查、流量分发、基础防护和静态资源分发 |
 
 不采用 SSR：所有页面均是活动业务应用，没有 SEO 需求；静态 SPA 更容易独立部署和缓存。
 
@@ -100,10 +101,22 @@ com.fengyi.ordershow
 ### 4.1 一致性边界
 
 - 提交订单：订单主表、当前明细、版本、版本明细、操作记录在一个 MySQL 事务内完成。
-- 撤回订单：状态变化和操作记录在同一事务内完成，不创建空版本。
-- 确认导入：导入批次和目标活动数据切换在同一事务内完成；原始文件已先上传对象存储。
+- 客户在 H5 撤回订单：状态变化和操作记录在同一事务内完成，不创建空版本；管理后台不提供订单写操作。
+- 确认导入：解析和预览先写 staging；发布版本准备完成后，在一个短 MySQL 事务内切换活动 + 数据类型的当前版本指针；原始文件已先上传对象存储。
 - 执行抽奖：轮次锁定、候选快照、中奖结果和审计引用在同一事务内完成。
 - SSE 推送不参与主事务；事务提交后发布“数据已变化”事件，失败时由短周期补偿刷新兜底。
+
+### 4.2 Background Worker 与 DB Task Queue
+
+API、Background Worker 和数据库迁移是三个不同的运行职责。API 负责鉴权、创建任务和查询任务状态；Worker 负责领取并执行耗时任务；Flyway 由独立部署步骤执行，API 和 Worker 启动时不执行数据库升级。API 与 Worker 可以复用同一个 Spring Boot 制品，但必须通过不同 profile/启动命令部署，不能让 API 实例意外启动任务消费者。
+
+第一期不引入 Kafka/RabbitMQ。`import_task`、`export_task` 及其他任务记录组成 MySQL DB Task Queue：
+
+- API 在短事务内创建 `PENDING/UPLOADED` 任务并返回 `202 + taskId`；即使 API 在创建任务后立即重启，Worker 仍可从 MySQL 扫描到任务；
+- Worker 使用短事务领取任务，采用状态条件更新或 `SELECT ... FOR UPDATE SKIP LOCKED`，并写入 `worker_id`、`locked_until`、`attempt_count` 和 `next_attempt_at` 等租约字段；
+- 任务处理器必须幂等。租约过期后可以重新领取，失败按退避策略重试，超过上限进入 `FAILED`/人工处理状态；重启时不能把未知结果盲目重做；
+- Excel 解析、导出、outbox 发布、活动状态调度和清理由 Worker 执行。订单提交和抽奖结果保存仍由 API 的短事务完成；Excel 确认的最终发布也由 Worker 执行，但只在最后阶段进行短事务原子切换；
+- Redis 可以用于唤醒提示、缓存和分布式锁，但不能作为任务唯一队列。队列积压、租约超时、失败任务和 Worker 健康状态必须有监控告警。
 
 ## 5. 数据架构
 
@@ -123,7 +136,7 @@ com.fengyi.ordershow
 - 抽奖轮次分布式互斥锁；
 - SSE 实例间通知（多实例部署时）。
 
-Redis 不保存唯一订单副本和唯一中奖副本。分布式锁之外仍使用数据库唯一约束作为最后防线。
+Redis 不保存唯一订单副本、唯一中奖副本或关键幂等事实。Redis 只用于加速重复请求、缓存查询结果和提供互斥锁；缓存丢失后必须回到 MySQL。分布式锁之外仍使用数据库唯一约束、幂等记录和乐观锁作为最后防线。
 
 ### 5.3 对象存储
 
@@ -153,9 +166,11 @@ activities/{activityId}/exports/{exportTaskId}.xlsx
 
 - 用户先选择活动入口和客户类型，再提交手机号；
 - 后端按 `activity_id + customer_type + normalized_phone` 精确匹配有效白名单；
-- 验证成功签发只允许访问当前活动和当前活动客户的短期凭证；
+- 验证成功设置只允许访问当前活动和当前活动客户的短期不透明会话 Cookie；
 - 凭证过期时间不晚于活动结束时间；
-- 浏览器使用 `sessionStorage` 保存访问凭证，关闭会话后重新验证；
+- Cookie 使用 `Secure; HttpOnly; SameSite=Lax`，并限制到 H5 API 路径；H5 写操作同时校验 CSRF Token 和 Origin。浏览器不在 `localStorage`、`sessionStorage` 或 URL 中保存凭证；
+- 服务端每次访问仍检查活动客户是否有效，客户停用、活动提前截止或显式撤销时立即失效；
+- 只有在 H5 与 API 无法通过同站点入口部署时，才使用 Bearer Token 作为跨站例外，并重新评估 CORS、Token 存储和撤销策略；
 - 不做短信验证码和业务性失败锁定，但保留宽松限流、访问事件和异常告警。
 
 手机号证明的是“知道白名单手机号”，不证明实际持有手机。该业务风险已在 ADR-004 中接受。
@@ -168,7 +183,7 @@ activities/{activityId}/exports/{exportTaskId}.xlsx
 - 看板和抽奖页面使用 SSE 接收活动级变更事件；
 - SSE 只推送版本号或失效事件，不在事件中发送完整敏感业务数据；
 - 客户端收到事件后重新调用有权限的统计或抽奖查询接口；
-- Nginx 对 SSE 路由关闭响应缓冲并设置足够长的读取超时。
+- 入口代理对 SSE 路由关闭响应缓冲并设置足够长的读取超时；托管 LB 必须支持心跳、断线重连和连接优雅摘除。
 
 第一期不需要 WebSocket。抽奖的“开始、揭晓、完成”由 REST 命令触发，SSE 负责把最新状态推送到现场页面。
 
@@ -194,7 +209,7 @@ activities/{activityId}/exports/{exportTaskId}.xlsx
 - 看板读取预聚合缓存，缓存失效时从 MySQL 重建；公司金额排行默认 TOP90、分公司金额排行默认 TOP30；
 - 列表全部服务端分页；
 - 导入和导出使用任务模式，避免长 HTTP 请求占用连接；
-- 正式环境至少两个 API 实例，抽奖和幂等依靠 Redis + 数据库约束协调。
+- 正式环境至少两个 API 实例，抽奖使用 Redis 锁 + MySQL 条件更新，关键幂等使用 MySQL 持久记录，Redis 只做加速。
 
 ## 9. 本地和正式部署
 
@@ -222,14 +237,17 @@ Docker Compose: MySQL + Redis + MinIO
 
 ### 9.3 正式拓扑最低建议
 
-- Nginx 或云负载均衡：至少 1 个高可用入口；
-- 静态前端：对象存储/CDN 或 Nginx；
+- 托管 LB/WAF/CDN：由云厂商提供入口高可用、TLS、健康检查和流量分发；不把单台 Nginx 描述为 HA 入口；
+- 静态前端：对象存储/CDN；Nginx 只可作为本地开发入口或 API 实例内的反向代理；
 - API：2 个容器实例；
+- Background Worker：至少 1 个独立任务实例，按任务积压和现场容错要求扩展；
 - MySQL：托管高可用或主备，并启用自动备份；
 - Redis：可用性按现场容错要求配置；
 - 对象存储：版本控制或生命周期策略；
 - 监控：健康检查、JVM、HTTP、数据库连接池、订单失败率、SSE 在线数；
 - 日志：结构化日志集中检索，敏感字段脱敏。
+
+正式发布顺序固定为：备份/检查 → 独立 Migration Job 执行 Flyway → 校验成功 → 发布 API 和 Worker。API/Worker 使用无 DDL 权限的运行账号，启动时只做 schema 校验或不做迁移；迁移失败时停止发布，不允许两个 API 实例各自执行升级。
 
 第一期不使用 Kubernetes；只有组织已有成熟 Kubernetes 平台时才部署到现有集群。
 

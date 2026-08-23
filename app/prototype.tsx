@@ -600,11 +600,9 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { 
               <div className="product-list">
                 {visibleProducts.map((product) => (
                   <article className="product-card" key={product.id}>
-                    <button type="button" className="product-image product-image-button" disabled={!product.imageUrls?.length} aria-label={`查看${product.name}商品图片`} onClick={() => product.imageUrls?.length && setPreviewProduct(product)}><ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />{product.gift && <span className="gift-badge">礼盒</span>}</button>
+                    <button type="button" className="product-image product-image-button" disabled={!product.imageUrls?.length} aria-label={`查看${product.name}商品图片`} onClick={() => product.imageUrls?.length && setPreviewProduct(product)}><ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} /></button>
                     <div className="product-info">
-                      <span className="material-code">物料 {product.materialCode || `原型-${product.id}`}</span>
                       <h3>{product.name}</h3>
-                      <p>{product.spec}</p>
                       <div className="product-action">
                         <strong>¥{money(product.price)}<small>/箱</small></strong>
                         <div className="stepper">
@@ -638,7 +636,7 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { 
                       <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
                       <div className="cart-item-info">
                         <b>{product.name}</b>
-                        <span>{product.spec} · ¥{money(product.price)}/箱</span>
+                        <span>¥{money(product.price)}/箱</span>
                         <strong>小计 ¥{money(product.price * quantities[product.id])}</strong>
                       </div>
                       <div className="cart-item-actions">
@@ -666,7 +664,7 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { 
                 {selected.map((product) => (
                   <div key={product.id}>
                     <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
-                    <p><b>{product.name}</b><span>{product.spec} · ¥{money(product.price)}/箱</span></p>
+                    <p><b>{product.name}</b><span>¥{money(product.price)}/箱</span></p>
                     <strong>× {quantities[product.id]}</strong>
                   </div>
                 ))}
@@ -713,7 +711,7 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows }: { 
                 {orderViewSelected.map((product) => (
                   <div key={product.id}>
                     <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
-                    <p><b>{product.name}</b><span>{product.spec} · ¥{money(product.price)}/箱</span></p>
+                    <p><b>{product.name}</b><span>¥{money(product.price)}/箱</span></p>
                     <strong>× {orderViewQuantities[product.id]}</strong>
                   </div>
                 ))}

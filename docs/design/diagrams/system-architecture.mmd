@@ -2,19 +2,25 @@ flowchart TB
   H5[客户订货 H5]
   ADMIN[管理后台]
   SCREEN[排行 / 战报 / 抽奖大屏]
-  NGINX[Nginx / HTTPS]
-  API[Spring Boot 模块化单体]
+  LB[托管 LB / WAF / CDN]
+  API[Spring Boot API 运行角色]
+  WORKER[Spring Boot Background Worker]
+  MIGRATE[独立 Migration Job / Flyway]
   MYSQL[(MySQL 业务主数据)]
-  REDIS[(Redis 缓存 / 限流 / 幂等 / 锁)]
+  REDIS[(Redis 缓存 / 限流 / 锁；非事实来源)]
   OBJECT[(MinIO / S3 对象存储)]
 
-  H5 -->|REST| NGINX
-  ADMIN -->|REST| NGINX
-  SCREEN -->|REST + SSE| NGINX
-  NGINX --> API
+  H5 -->|REST| LB
+  ADMIN -->|REST| LB
+  SCREEN -->|REST + SSE| LB
+  LB --> API
   API --> MYSQL
   API --> REDIS
   API --> OBJECT
+  WORKER --> MYSQL
+  WORKER --> REDIS
+  WORKER --> OBJECT
+  MIGRATE -. 发布步骤 .-> MYSQL
 
   subgraph BackendModules[后端领域模块]
     ACT[活动]
@@ -27,4 +33,4 @@ flowchart TB
   end
 
   API --- BackendModules
-
+  WORKER --- BackendModules

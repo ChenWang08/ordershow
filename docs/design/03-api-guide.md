@@ -15,11 +15,11 @@
 | 前缀 | 调用方 | 认证方式 |
 | --- | --- | --- |
 | `/api/v1/public` | 未验证 H5、公开大屏 | 无；只返回非敏感信息并限流 |
-| `/api/v1/h5` | 已验证活动客户 | `Authorization: Bearer <h5Token>` |
+| `/api/v1/h5` | 已验证活动客户 | Secure、HttpOnly、SameSite Cookie + CSRF Token；跨站部署才使用 Bearer Token |
 | `/api/v1/admin` | 管理后台和抽奖操作员 | Secure HttpOnly Cookie + CSRF Token |
 | `/api/v1/screen` | 现场只读页面 | 活动编码 + 可撤销 screen token（正式环境） |
 
-H5 令牌声明至少包含：`activityId`、`activityCustomerId`、`customerType`、`exp`、`jti`。服务端不接受客户端另外指定其他客户 ID。
+H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时间和会话 ID。默认使用不透明 HttpOnly Cookie，服务端不接受客户端另外指定其他客户 ID；若因跨站部署使用 Bearer Token，仍必须具备同样的活动和客户绑定。
 
 ## 3. 统一响应
 
@@ -86,8 +86,10 @@ H5 令牌声明至少包含：`activityId`、`activityCustomerId`、`customerTyp
 1. `GET /public/activities/{activityCode}` 获取活动公开信息；
 2. 用户选择客户类型并调用 `POST /public/activities/{activityCode}/verify-phone`；
 3. 后端标准化手机号并计算 HMAC，与有效活动白名单精确匹配；
-4. 验证成功返回 H5 Token、客户展示信息和截止时间；
-5. Token 最晚在活动结束时过期，且只能访问该活动客户的商品和订单。
+4. 验证成功设置 H5 HttpOnly Cookie，返回 CSRF Token、客户展示信息和截止时间；
+5. Cookie 最晚在活动结束时过期，且服务端每次访问检查该活动客户状态，只能访问该活动客户的商品和订单。
+
+H5 与 API 默认通过同站点托管入口提供。H5 的写请求必须携带 CSRF Header，并校验 `Origin`；Cookie 不放入 URL、`localStorage` 或 `sessionStorage`。若部署为跨站 API，才启用 Bearer 方案，并显式配置 CORS 和凭证撤销。
 
 相同手机号可在综合和特渠分别匹配；通道不一致返回 `CUSTOMER_CHANNEL_MISMATCH`，不自动切换身份。
 
@@ -107,7 +109,6 @@ H5 令牌声明至少包含：`activityId`、`activityCustomerId`、`customerTyp
 
 - H5 提交/修改订单；
 - H5 撤回订单；
-- 管理员撤回订单；
 - 确认导入；
 - 开始抽奖、完成轮次和重置轮次；
 - 创建导出任务。
@@ -120,6 +121,8 @@ H5 令牌声明至少包含：`activityId`、`activityCustomerId`、`customerTyp
 - `PROCESSING` 状态重复请求返回 409/202 并携带可重试提示；
 - 订单和抽奖的幂等记录至少保留到活动归档后 30 天。
 
+关键幂等记录、请求指纹、任务 ID 和可重放响应摘要最终保存于 MySQL 的 `api_idempotency`。Redis 可以在命中时加速重复请求和互斥，但缓存丢失、过期或重启后必须回到 MySQL，不得因此重新执行订单版本、导入发布或抽奖结果。
+
 ### 6.2 乐观锁
 
 - 订单提交请求包含 `expectedVersion`；
@@ -131,16 +134,17 @@ H5 令牌声明至少包含：`activityId`、`activityCustomerId`、`customerTyp
 
 ```text
 POST 上传文件 → 202 + taskId
-GET 任务 → PARSING / PREVIEW_READY / FAILED
+GET 任务 → UPLOADED / PARSING / PREVIEW_READY / MATERIALIZING / READY_TO_PUBLISH / FAILED
 GET 预览行和错误 → 管理员编辑/删除预览行
-POST 确认 → CONFIRMING → COMPLETED
+POST 确认 → CONFIRMING → MATERIALIZING → READY_TO_PUBLISH → PUBLISHING → COMPLETED
 ```
 
 - 上传限制由配置控制，默认 Excel 50MB、图片 ZIP 1GB、单图片 10MB；
 - 服务端校验扩展名、MIME、文件签名和 SHA-256；
 - 相同活动、类型和文件哈希的重复上传给出提示，但不擅自覆盖；
 - 阻断错误未解决时不能确认；
-- 确认使用数据库事务，失败整批回滚；
+- 解析和预览只写 staging；Worker 在非当前数据集内准备发布版本，最后由短事务切换活动 + 数据类型的当前版本指针；
+- 发布事务失败时当前目录保持不变，旧版本可以审计或回滚；
 - 活动开始后默认禁止 Excel 全量导入和图片 ZIP 批量导入。
 
 ## 8. 订单 API 规则
@@ -160,11 +164,11 @@ H5 只提交商品 ID 和箱数：
 
 - 活动进行中且未截止；
 - 活动客户有效；
-- 商品属于活动、客户类型匹配、状态有效；
+- 商品属于活动、客户类型匹配、当前可见且 `isOrderable=true`；缺少物料代码或吨箱转换系数不影响可订，缺少有效元/箱时必须拒绝加入订单；
 - 分公司定制范围匹配；
 - 数量为正整数且不超过配置上限；
 - 至少有一条有效商品；
-- 金额和吨数全部由后端计算。
+- 金额全部由后端计算；吨数在转换系数完整时由后端计算，任一明细无法换算时订单总吨数返回 `null`，不能返回部分合计。
 
 撤回不会删除当前明细或创建空版本。重新提交沿用原订单号，并生成下一个版本号。
 
@@ -231,7 +235,7 @@ data: {"activityId":"12","version":"452"}
 ### 12.1 公开/H5
 
 - 查询活动公开信息、验证手机号；
-- 查询本人可订商品；
+- 查询本人可见商品目录；响应明确 `isOrderable`，价格缺失的商品可见但不可加入订单；
 - 查询本人当前订单及版本；
 - 提交、修改、撤回和重新提交订单。
 
@@ -241,7 +245,7 @@ data: {"activityId":"12","version":"452"}
 - 活动列表、创建、编辑、状态迁移和二维码；
 - 商品、白名单、到场名单列表与单条紧急编辑；
 - 导入上传、预览、错误、确认和取消；
-- 订单列表、详情、版本、操作记录、撤回和导出；
+- 订单列表、详情、版本、操作记录、搜索、筛选和导出；管理员不能提交、修改或撤回订单；
 - 抽奖规则、轮次、发布、执行、完成、重置和中奖导出；
 - 审计日志和导出任务。
 
@@ -253,4 +257,3 @@ data: {"activityId":"12","version":"452"}
 - 活动级 SSE 事件流。
 
 完整路径、参数和核心 Schema 见 OpenAPI 文件。
-

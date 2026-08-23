@@ -1,9 +1,11 @@
 flowchart LR
   USER[浏览器 / 微信内置浏览器]
-  LB[Nginx / 负载均衡]
+  LB[托管 LB / WAF / CDN]
   STATIC[静态前端 / CDN]
   API1[API 实例 1]
   API2[API 实例 2]
+  WORKER[Background Worker 1..N]
+  MIGRATE[独立 Migration Job / Flyway]
   MYSQL[(MySQL 高可用)]
   REDIS[(Redis)]
   OSS[(对象存储)]
@@ -15,10 +17,13 @@ flowchart LR
   LB --> API2
   API1 --> MYSQL
   API2 --> MYSQL
+  WORKER --> MYSQL
+  MIGRATE -. 发布步骤 .-> MYSQL
   API1 --> REDIS
   API2 --> REDIS
+  WORKER --> REDIS
   API1 --> OSS
   API2 --> OSS
+  WORKER --> OSS
   API1 --> OBS
   API2 --> OBS
-

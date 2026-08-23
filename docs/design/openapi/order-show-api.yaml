@@ -54,6 +54,11 @@ paths:
       responses:
         '200':
           description: 验证成功
+          headers:
+            Set-Cookie:
+              description: 服务端设置的 Secure、HttpOnly、SameSite H5 会话 Cookie
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -70,7 +75,7 @@ paths:
       tags: [H5]
       summary: 查询当前客户可订商品
       security:
-        - h5Bearer: []
+        - h5Cookie: []
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
         - name: rebateStatus
@@ -105,7 +110,7 @@ paths:
       tags: [H5]
       summary: 查询本人当前订单
       security:
-        - h5Bearer: []
+        - h5Cookie: []
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
       responses:
@@ -120,10 +125,11 @@ paths:
       tags: [H5]
       summary: 首次提交、修改或撤回后重新提交订单
       security:
-        - h5Bearer: []
+        - h5Cookie: []
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
       requestBody:
         required: true
         content:
@@ -153,10 +159,11 @@ paths:
       tags: [H5]
       summary: 客户取消本次订货
       security:
-        - h5Bearer: []
+        - h5Cookie: []
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
         - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
       requestBody:
         required: true
         content:
@@ -1541,10 +1548,11 @@ paths:
                 type: string
 components:
   securitySchemes:
-    h5Bearer:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT-or-opaque
+    h5Cookie:
+      type: apiKey
+      in: cookie
+      name: ORDER_SHOW_H5_SESSION
+      description: 默认同站点 H5 会话 Cookie；写请求还必须携带 X-CSRF-Token
     adminCookie:
       type: apiKey
       in: cookie
@@ -1785,9 +1793,9 @@ components:
       properties:
         data:
           type: object
-          required: [accessToken, expiresAt, customer, activity]
+          required: [csrfToken, expiresAt, customer, activity]
           properties:
-            accessToken:
+            csrfToken:
               type: string
             expiresAt:
               type: string
