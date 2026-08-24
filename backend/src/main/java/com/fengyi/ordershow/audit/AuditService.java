@@ -22,6 +22,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class AuditService {
+  public static final String REASON_REQUEST_ATTRIBUTE = "orderShowAuditReason";
   private static final Logger log = LoggerFactory.getLogger(AuditService.class);
   private static final Pattern ACTIVITY_ID = Pattern.compile("/activities/(\\d+)");
   private static final Pattern LAST_ID = Pattern.compile("/(\\d+)(?:/[^/]*)?$");
@@ -41,13 +42,14 @@ public class AuditService {
       String action = action(request.getMethod(), request.getRequestURI());
       String objectType = objectType(request.getRequestURI());
       String objectId = lastId(request.getRequestURI());
+      String reason = request.getAttribute(REASON_REQUEST_ATTRIBUTE) instanceof String value ? value : null;
       boolean success = exception == null && response.getStatus() < 400;
       String ip = remoteIp(request);
       jdbc.update("""
-          INSERT INTO audit_log(activity_id, actor_type, admin_user_id, action_code, object_type, object_id,
+          INSERT INTO audit_log(activity_id, actor_type, admin_user_id, action_code, object_type, object_id, reason,
             result, error_code, trace_id, ip_address, user_agent, occurred_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, INET6_ATON(?), ?, UTC_TIMESTAMP(3))
-          """, activityId, actorType, admin == null ? null : admin.id(), action, objectType, objectId,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, INET6_ATON(?), ?, UTC_TIMESTAMP(3))
+          """, activityId, actorType, admin == null ? null : admin.id(), action, objectType, objectId, truncate(reason, 500),
           success ? "SUCCESS" : "FAILURE", success ? null : "HTTP_" + response.getStatus(), TraceFilter.id(request), ip,
           truncate(request.getHeader("User-Agent"), 500));
     } catch (Exception auditFailure) {

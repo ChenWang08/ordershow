@@ -28,8 +28,15 @@ docker compose ps
 访问地址：
 
 - 前端：http://localhost:3000
+- H5 下单：http://localhost:3000/h5/2026-mid-autumn
+- 管理后台：http://localhost:3000/admin/login
+- 排行大屏：http://localhost:3000/screen/2026-mid-autumn/ranking
+- 专题战报：http://localhost:3000/screen/2026-mid-autumn/report
+- 抽奖大屏：http://localhost:3000/screen/2026-mid-autumn/lottery
 - 后端健康检查：http://localhost:8080/api/v1/actuator/health
 - MinIO 控制台：http://localhost:9001
+
+H5 和现场大屏的活动编号来自 URL；管理后台当前默认进入 `.env` 中配置的活动。以上入口仍由同一个前端服务提供，并共用同一个后端和数据库。
 
 首次启动的后台账号由 `.env` 中 `BOOTSTRAP_ADMIN_USERNAME` 和 `BOOTSTRAP_ADMIN_PASSWORD` 决定，默认是 `admin / ChangeMe123!`。首次登录必须修改密码；正式部署前必须替换所有默认密码和密钥。
 

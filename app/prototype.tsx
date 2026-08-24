@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import readXlsxFile, { readSheetNames } from "read-excel-file";
 import {
-  ACTIVITY_CODE,
+  getActiveActivityCode,
   ApiError,
   apiAssetUrl,
   apiBase,
@@ -203,7 +203,7 @@ function runtimeProductToProduct(row: RuntimeProduct): Product {
     gift: row.giftBox,
     atlas: row.productLine === "酱油" ? 1 : row.productLine === "食醋" ? 2 : row.giftBox ? 3 : 0,
     customerType: row.customerType === "GENERAL" ? "综合" : "特渠",
-    branchScope: [],
+    branchScope: row.branchScope ?? [],
     status: row.dataStatus === "INCOMPLETE" ? "待完善" : "有效",
     isOrderable: row.orderable,
     materialCode: row.materialCode,
@@ -960,7 +960,7 @@ function RankingBoard({ activity }: { activity: RuntimeActivity | null }) {
     };
     void refresh();
     const timer = window.setInterval(refresh, 15000);
-    const events = new EventSource(`${apiBase()}/screen/activities/${ACTIVITY_CODE}/events`);
+      const events = new EventSource(`${apiBase()}/screen/activities/${encodeURIComponent(getActiveActivityCode())}/events`);
     events.addEventListener("invalidate", () => void refresh());
     return () => { active = false; window.clearInterval(timer); events.close(); };
   }, [effectiveChannel]);
@@ -1040,7 +1040,7 @@ function ReportBoard({ activity }: { activity: RuntimeActivity | null }) {
     };
     void refresh();
     const timer = window.setInterval(refresh, 15000);
-    const events = new EventSource(`${apiBase()}/screen/activities/${ACTIVITY_CODE}/events`);
+      const events = new EventSource(`${apiBase()}/screen/activities/${encodeURIComponent(getActiveActivityCode())}/events`);
     events.addEventListener("invalidate", () => void refresh());
     return () => { active = false; window.clearInterval(timer); events.close(); };
   }, [report]);
@@ -1922,7 +1922,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
           brand: product.brandName || "", variety: product.varietyName || "", spec: product.specification || "",
           casePack: product.casePack || "", unitPrice: product.bottlePrice == null ? "" : String(product.bottlePrice),
           casePrice: product.casePrice == null ? "" : String(product.casePrice), conversion: product.tonCaseFactor == null ? "" : String(product.tonCaseFactor),
-          gift: product.giftBox ? "是" : "否", branchScope: "", status: product.dataStatus === "INCOMPLETE" ? "待完善" : "有效",
+          gift: product.giftBox ? "是" : "否", branchScope: (product.branchScope ?? []).join("，"), status: product.dataStatus === "INCOMPLETE" ? "待完善" : "有效",
           source: "excel", imageStatus: product.images.length ? "已匹配" : "未上传",
           images: product.images.map((image, index) => ({ id: String(image.id), fileName: `${product.materialName}-${index + 1}`, url: apiAssetUrl(image.url),
             normalizedName: normalizeProductImageName(product.materialName), source: "manual" as const })),
@@ -2193,7 +2193,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
       materialName: nextRow.materialName, brandName: nextRow.brand, varietyName: nextRow.variety,
       specification: nextRow.spec, casePack: nextRow.casePack, bottlePrice: numeric(nextRow.unitPrice),
       casePrice: numeric(nextRow.casePrice), tonCaseFactor: numeric(nextRow.conversion), giftBox: nextRow.gift === "是",
-      visible: true, orderable: Number(nextRow.casePrice) > 0, reason,
+      visible: true, orderable: Number(nextRow.casePrice) > 0, branchScope: nextRow.branchScope, reason,
     };
     if (editingProductRow) {
       if (!productImportCompleted && editingProductRow.serverRowId && serverImportTasks.PRODUCT) {
@@ -2717,8 +2717,13 @@ function AdminGateway({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-export function Prototype() {
-  const [surface, setSurface] = useState<Surface>("h5");
+type PrototypeProps = {
+  initialSurface?: Surface;
+  showSurfaceTabs?: boolean;
+};
+
+export function Prototype({ initialSurface = "h5", showSurfaceTabs = true }: PrototypeProps = {}) {
+  const [surface, setSurface] = useState<Surface>(initialSurface);
   const [lotteryRounds, setLotteryRounds] = useState<LotteryRound[]>(initialLotteryRounds);
   const [activityName, setActivityName] = useState("2026年中秋订货会");
   const [activityId, setActivityId] = useState("1");
@@ -2761,15 +2766,23 @@ export function Prototype() {
     <main className={`prototype-root surface-${surface}`}>
       <nav className="prototype-nav">
         <div className="prototype-title"><span>金</span><p><b>{activityName}</b><small>{runtimeConnected ? "业务系统 · 实时数据" : "业务服务连接中"}</small></p></div>
-        <div className="surface-tabs">{surfaces.map((item) => <button key={item.key} className={surface === item.key ? "active" : ""} onClick={() => setSurface(item.key)}><b>{item.label}</b><small>{item.sub}</small></button>)}</div>
+        {showSurfaceTabs && <div className="surface-tabs">{surfaces.map((item) => <button key={item.key} className={surface === item.key ? "active" : ""} onClick={() => setSurface(item.key)}><b>{item.label}</b><small>{item.sub}</small></button>)}</div>}
         <div className="prototype-status"><i /> {runtimeConnected ? "服务已连接" : "服务未连接"}</div>
       </nav>
       <div className="prototype-canvas">
-        <div className={surface === "h5" ? "surface-slot" : "surface-slot surface-hidden"}><H5Prototype activityClosed={activityClosed} importedRows={productImportCompleted ? productRows : null} importedWhitelistRows={whitelistImportCompleted ? whitelistRows : null} runtimeActivity={runtimeActivity} /></div>
-        {surface === "ranking" && <RankingBoard activity={runtimeActivity} />}
-        {surface === "report" && <ReportBoard activity={runtimeActivity} />}
-        {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed", serverStatus: "COMPLETED" } : item))} />}
-        {surface === "admin" && <AdminGateway><AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityName={activityName} onActivityNameChange={setActivityName} activityId={runtimeActivity ? String(runtimeActivity.id) : activityId} activityStatus={activityStatus} onActivityStatusChange={setActivityStatus} activityStartAt={activityStartAt} onActivityStartAtChange={setActivityStartAt} activityEndAt={activityEndAt} onActivityEndAtChange={setActivityEndAt} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={markProductImportCommitted} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={markWhitelistImportCommitted} whitelistImportHasRun={whitelistImportHasRun} attendanceRows={attendanceRows} onAttendanceRowsChange={setAttendanceRows} attendanceFileName={attendanceFileName} onAttendanceFileNameChange={setAttendanceFileName} attendanceWarnings={attendanceWarnings} onAttendanceWarningsChange={setAttendanceWarnings} attendanceSheetCounts={attendanceSheetCounts} onAttendanceSheetCountsChange={setAttendanceSheetCounts} attendanceImportError={attendanceImportError} onAttendanceImportErrorChange={setAttendanceImportError} /></AdminGateway>}
+        {showSurfaceTabs ? <>
+          <div className={surface === "h5" ? "surface-slot" : "surface-slot surface-hidden"}><H5Prototype activityClosed={activityClosed} importedRows={productImportCompleted ? productRows : null} importedWhitelistRows={whitelistImportCompleted ? whitelistRows : null} runtimeActivity={runtimeActivity} /></div>
+          {surface === "ranking" && <RankingBoard activity={runtimeActivity} />}
+          {surface === "report" && <ReportBoard activity={runtimeActivity} />}
+          {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed", serverStatus: "COMPLETED" } : item))} />}
+          {surface === "admin" && <AdminGateway><AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityName={activityName} onActivityNameChange={setActivityName} activityId={runtimeActivity ? String(runtimeActivity.id) : activityId} activityStatus={activityStatus} onActivityStatusChange={setActivityStatus} activityStartAt={activityStartAt} onActivityStartAtChange={setActivityStartAt} activityEndAt={activityEndAt} onActivityEndAtChange={setActivityEndAt} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={markProductImportCommitted} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={markWhitelistImportCommitted} whitelistImportHasRun={whitelistImportHasRun} attendanceRows={attendanceRows} onAttendanceRowsChange={setAttendanceRows} attendanceFileName={attendanceFileName} onAttendanceFileNameChange={setAttendanceFileName} attendanceWarnings={attendanceWarnings} onAttendanceWarningsChange={setAttendanceWarnings} attendanceSheetCounts={attendanceSheetCounts} onAttendanceSheetCountsChange={setAttendanceSheetCounts} attendanceImportError={attendanceImportError} onAttendanceImportErrorChange={setAttendanceImportError} /></AdminGateway>}
+        </> : <>
+          {surface === "h5" && <H5Prototype activityClosed={activityClosed} importedRows={productImportCompleted ? productRows : null} importedWhitelistRows={whitelistImportCompleted ? whitelistRows : null} runtimeActivity={runtimeActivity} />}
+          {surface === "ranking" && <RankingBoard activity={runtimeActivity} />}
+          {surface === "report" && <ReportBoard activity={runtimeActivity} />}
+          {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed", serverStatus: "COMPLETED" } : item))} />}
+          {surface === "admin" && <AdminGateway><AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityName={activityName} onActivityNameChange={setActivityName} activityId={runtimeActivity ? String(runtimeActivity.id) : activityId} activityStatus={activityStatus} onActivityStatusChange={setActivityStatus} activityStartAt={activityStartAt} onActivityStartAtChange={setActivityStartAt} activityEndAt={activityEndAt} onActivityEndAtChange={setActivityEndAt} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={markProductImportCommitted} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={markWhitelistImportCommitted} whitelistImportHasRun={whitelistImportHasRun} attendanceRows={attendanceRows} onAttendanceRowsChange={setAttendanceRows} attendanceFileName={attendanceFileName} onAttendanceFileNameChange={setAttendanceFileName} attendanceWarnings={attendanceWarnings} onAttendanceWarningsChange={setAttendanceWarnings} attendanceSheetCounts={attendanceSheetCounts} onAttendanceSheetCountsChange={setAttendanceSheetCounts} attendanceImportError={attendanceImportError} onAttendanceImportErrorChange={setAttendanceImportError} /></AdminGateway>}
+        </>}
       </div>
     </main>
   );

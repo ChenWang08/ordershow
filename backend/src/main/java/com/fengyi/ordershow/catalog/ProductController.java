@@ -2,6 +2,7 @@ package com.fengyi.ordershow.catalog;
 
 import com.fengyi.ordershow.common.ApiResponse;
 import com.fengyi.ordershow.common.TraceFilter;
+import com.fengyi.ordershow.audit.AuditService;
 import com.fengyi.ordershow.security.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
@@ -40,12 +41,15 @@ public class ProductController {
   ApiResponse<ProductService.ProductView> create(@PathVariable long activityId,
       @RequestBody ProductService.ProductCreate body, HttpServletRequest request) {
     auth.requireAdmin(request);
+    request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason());
     return ApiResponse.of(service.create(activityId, body), TraceFilter.id(request));
   }
 
   @PatchMapping("/admin/activities/{activityId}/products/{productId}")
   ApiResponse<ProductService.ProductView> update(@PathVariable long activityId, @PathVariable long productId,
       @RequestHeader("If-Match") String ifMatch, @RequestBody ProductService.ProductPatch body, HttpServletRequest request) {
+    auth.requireAdmin(request);
+    request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason());
     return ApiResponse.of(service.update(activityId, productId, Integer.parseInt(ifMatch.replace("\"", "")), body), TraceFilter.id(request));
   }
 

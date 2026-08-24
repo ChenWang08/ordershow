@@ -733,6 +733,17 @@ paths:
           application/json:
             schema:
               type: object
+              required: [materialName]
+              properties:
+                materialName:
+                  type: string
+                branchScope:
+                  type: string
+                  description: 分公司限制，多个分公司用顿号或逗号分隔；留空表示全部分公司可订
+                reason:
+                  type: string
+                  maxLength: 500
+                  description: 活动开始后修改商品时必填
               additionalProperties: true
       responses:
         '200':
@@ -770,6 +781,10 @@ paths:
                   maxLength: 500
                 changes:
                   type: object
+                  properties:
+                    branchScope:
+                      type: string
+                      description: 分公司限制，多个分公司用顿号或逗号分隔；留空表示全部分公司可订
                   additionalProperties: true
       responses:
         '200':
@@ -1925,7 +1940,7 @@ components:
           type: integer
     OrderableProduct:
       type: object
-      required: [id, materialName, customerType, rebateStatus, giftBox, visible, orderable, sortNo, images]
+      required: [id, materialName, customerType, rebateStatus, giftBox, visible, orderable, sortNo, images, branchScope]
       properties:
         id:
           $ref: '#/components/schemas/Id'
@@ -1964,6 +1979,11 @@ components:
         orderable:
           type: boolean
           description: 仅价格有效且商品可见时为 true；为 false 的商品仍可在 H5 展示“价格待完善”。
+        branchScope:
+          type: array
+          description: 分公司定制品允许下单的分公司；空数组表示全部分公司可订。
+          items:
+            type: string
         sortNo:
           type: integer
         images:

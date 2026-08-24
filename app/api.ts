@@ -1,5 +1,30 @@
 export const ACTIVITY_CODE = process.env.NEXT_PUBLIC_ACTIVITY_CODE || "2026-mid-autumn";
 
+let activeActivityCode = ACTIVITY_CODE;
+const activeActivityListeners = new Set<() => void>();
+
+/** Set by routed pages before their client data loading begins. */
+export function setActiveActivityCode(activityCode: string) {
+  const normalized = activityCode.trim();
+  if (!normalized || normalized === activeActivityCode) return;
+  activeActivityCode = normalized;
+  activeActivityListeners.forEach((listener) => listener());
+}
+
+export function getActiveActivityCode() {
+  return activeActivityCode;
+}
+
+/** Subscribe to activity changes for components that must wait before loading data. */
+export function subscribeActiveActivityCode(listener: () => void) {
+  activeActivityListeners.add(listener);
+  return () => activeActivityListeners.delete(listener);
+}
+
+function activeActivityPath() {
+  return encodeURIComponent(activeActivityCode);
+}
+
 export function apiBase() {
   if (process.env.NEXT_PUBLIC_API_BASE) return process.env.NEXT_PUBLIC_API_BASE.replace(/\/$/, "");
   if (typeof window !== "undefined") return `${window.location.protocol}//${window.location.hostname}:8080/api/v1`;
@@ -54,7 +79,7 @@ export type RuntimeProduct = {
   id: number; materialCode?: string; materialName: string; categoryName?: string; productLine?: string; brandName?: string;
   varietyName?: string; specification?: string; casePack?: string; bottlePrice?: number; casePrice?: number;
   tonCaseFactor?: number; customerType: "GENERAL" | "SPECIAL"; rebateStatus: "PARTICIPATING" | "NOT_PARTICIPATING";
-  giftBox: boolean; visible: boolean; orderable: boolean; dataStatus: string; sortNo: number; version: number;
+  giftBox: boolean; visible: boolean; orderable: boolean; dataStatus: string; sortNo: number; version: number; branchScope: string[];
   images: Array<{ id: number; fileId: number; url: string; primary: boolean; sortNo: number }>;
 };
 
@@ -136,31 +161,31 @@ export type AdminAttendee = {
 export type AuditLogApi = { id: number; actorType: string; actorName?: string; actionCode: string; objectType: string;
   objectId?: string; reason?: string; result: string; errorCode?: string; traceId: string; occurredAt: string };
 
-export async function loadActivity() { return (await api<Envelope<RuntimeActivity>>(`/public/activities/${ACTIVITY_CODE}`)).data; }
+export async function loadActivity() { return (await api<Envelope<RuntimeActivity>>(`/public/activities/${activeActivityPath()}`)).data; }
 
 export async function verifyPhone(customerType: "GENERAL" | "SPECIAL", regionCode: string, phone: string) {
-  return (await api<Envelope<{ customer: RuntimeIdentity; csrfToken: string }>>(`/public/activities/${ACTIVITY_CODE}/verify-phone`, {
+  return (await api<Envelope<{ customer: RuntimeIdentity; csrfToken: string }>>(`/public/activities/${activeActivityPath()}/verify-phone`, {
     method: "POST", body: JSON.stringify({ customerType, regionCode: regionCode || null, phone }),
   })).data.customer;
 }
 
 export async function loadH5Products() {
-  return (await api<Envelope<RuntimeProduct[]>>(`/h5/activities/${ACTIVITY_CODE}/products`)).data;
+  return (await api<Envelope<RuntimeProduct[]>>(`/h5/activities/${activeActivityPath()}/products`)).data;
 }
 
 export async function loadH5Order() {
-  try { return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${ACTIVITY_CODE}/order`)).data; }
+  try { return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order`)).data; }
   catch (error) { if (error instanceof ApiError && error.status === 404) return null; throw error; }
 }
 
 export async function saveH5Order(expectedVersion: number, items: Array<{ productId: number; quantity: number }>) {
-  return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${ACTIVITY_CODE}/order`, {
+  return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order`, {
     method: "PUT", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ expectedVersion, items }),
   }, "h5")).data;
 }
 
 export async function withdrawH5Order(expectedVersion: number) {
-  return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${ACTIVITY_CODE}/order/withdraw`, {
+  return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order/withdraw`, {
     method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ expectedVersion }),
   }, "h5")).data;
 }
@@ -263,12 +288,12 @@ export async function loadDashboard(filters: { customerType?: string; regionCode
   const query = new URLSearchParams();
   if (filters.customerType) query.set("customerType", filters.customerType);
   if (filters.regionCode) query.set("regionCode", filters.regionCode);
-  return (await api<Envelope<DashboardData>>(`/screen/activities/${ACTIVITY_CODE}/ranking?${query.toString()}`)).data;
+  return (await api<Envelope<DashboardData>>(`/screen/activities/${activeActivityPath()}/ranking?${query.toString()}`)).data;
 }
-export async function loadDashboardReport(reportCode: string) { return (await api<Envelope<DashboardReport>>(`/screen/activities/${ACTIVITY_CODE}/reports/${encodeURIComponent(reportCode)}`)).data; }
+export async function loadDashboardReport(reportCode: string) { return (await api<Envelope<DashboardReport>>(`/screen/activities/${activeActivityPath()}/reports/${encodeURIComponent(reportCode)}`)).data; }
 
 export async function loadLotteryRules(activityId: number) { return (await api<Envelope<LotteryRuleApi[]>>(`/admin/activities/${activityId}/lottery/rules`)).data; }
-export async function loadPublicLottery() { return (await api<Envelope<{ rules: LotteryRuleApi[]; winners: LotteryWinnerApi[] }>>(`/public/activities/${ACTIVITY_CODE}/lottery`)).data; }
+export async function loadPublicLottery() { return (await api<Envelope<{ rules: LotteryRuleApi[]; winners: LotteryWinnerApi[] }>>(`/public/activities/${activeActivityPath()}/lottery`)).data; }
 export async function createLotteryRule(activityId: number, body: { name: string; rounds: Array<Record<string, unknown>> }) {
   return (await api<Envelope<LotteryRuleApi>>(`/admin/activities/${activityId}/lottery/rules`, { method: "POST", body: JSON.stringify(body) }, "admin")).data;
 }
