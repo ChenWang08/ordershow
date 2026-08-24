@@ -1,0 +1,387 @@
+package com.fengyi.ordershow.imports;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fengyi.ordershow.common.DomainException;
+import com.fengyi.ordershow.customer.AttendanceMatchingService;
+import com.fengyi.ordershow.security.CryptoService;
+import com.fengyi.ordershow.storage.StorageService;
+import java.math.BigDecimal;
+import java.sql.Statement;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
+import org.springframework.web.multipart.MultipartFile;
+
+@Service
+public class ImportService {
+  private final JdbcTemplate jdbc;
+  private final StorageService storage;
+  private final CryptoService crypto;
+  private final ObjectMapper json;
+  private final TransactionTemplate transactions;
+  private final ImportWorkbookProcessor workbookProcessor;
+  private final AttendanceMatchingService attendanceMatching;
+
+  public ImportService(JdbcTemplate jdbc, StorageService storage, CryptoService crypto,
+                       ObjectMapper json, TransactionTemplate transactions, ImportWorkbookProcessor workbookProcessor,
+                       AttendanceMatchingService attendanceMatching) {
+    this.jdbc = jdbc;
+    this.storage = storage;
+    this.crypto = crypto;
+    this.json = json;
+    this.transactions = transactions;
+    this.workbookProcessor = workbookProcessor;
+    this.attendanceMatching = attendanceMatching;
+  }
+
+  public ImportTask upload(long activityId, String importType, MultipartFile file, long adminId) {
+    if (!Set.of("PRODUCT", "WHITELIST", "ATTENDANCE").contains(importType)) {
+      throw DomainException.badRequest("IMPORT_TYPE_INVALID", "不支持的导入类型");
+    }
+    String filename = Objects.requireNonNullElse(file.getOriginalFilename(), "import.xlsx");
+    if (!filename.toLowerCase(Locale.ROOT).endsWith(".xlsx") && !filename.toLowerCase(Locale.ROOT).endsWith(".xls")) {
+      throw DomainException.badRequest("IMPORT_FILE_INVALID", "请选择 Excel 文件");
+    }
+    StorageService.StoredFile stored = storage.save(activityId, file, "IMPORT_SOURCE", adminId);
+    long taskId = insertTask(activityId, importType, stored, adminId);
+    try {
+      jdbc.update("UPDATE import_task SET status = 'PARSING', started_at = UTC_TIMESTAMP(3) WHERE id = ?", taskId);
+      byte[] bytes = storage.read(stored.id());
+      ImportWorkbookProcessor.ParseSummary summary = transactions.execute(status -> workbookProcessor.parse(taskId, importType, bytes));
+      jdbc.update("""
+          UPDATE import_task SET status = 'PREVIEW_READY', input_count = ?, added_count = ?, warning_count = ?, error_count = ?,
+            preview_ready_at = UTC_TIMESTAMP(3) WHERE id = ?
+          """, summary.inputCount(), summary.addedCount(), summary.warnings(), summary.blocking(), taskId);
+      return task(taskId);
+    } catch (Exception exception) {
+      jdbc.update("UPDATE import_task SET status = 'FAILED', failed_at = UTC_TIMESTAMP(3), failure_code = 'PARSE_FAILED', failure_message = ? WHERE id = ?",
+          truncate(exception.getMessage(), 900), taskId);
+      if (exception instanceof DomainException domain) throw domain;
+      throw DomainException.unprocessable("IMPORT_PARSE_FAILED", "Excel 解析失败：" + Objects.requireNonNullElse(exception.getMessage(), "文件格式不正确"));
+    }
+  }
+
+  public List<ImportTask> tasks(long activityId) {
+    return jdbc.query("""
+        SELECT t.*, f.original_filename FROM import_task t JOIN stored_file f ON f.id = t.source_file_id
+        WHERE t.activity_id = ? ORDER BY t.created_at DESC
+        """, this::mapTask, activityId);
+  }
+
+  public ImportTask task(long taskId) {
+    List<ImportTask> rows = jdbc.query("""
+        SELECT t.*, f.original_filename FROM import_task t JOIN stored_file f ON f.id = t.source_file_id WHERE t.id = ?
+        """, this::mapTask, taskId);
+    if (rows.size() != 1) throw DomainException.notFound("IMPORT_TASK_NOT_FOUND", "导入任务不存在");
+    return rows.getFirst();
+  }
+
+  public List<StagingRow> rows(long taskId, String validationStatus) {
+    String sql = "SELECT id, sheet_name, source_row_number, diff_type, validation_status, normalized_data_json, edited_data_json, is_deleted FROM import_staging_row WHERE import_task_id = ?" +
+        (validationStatus == null || validationStatus.isBlank() ? "" : " AND validation_status = ?") + " ORDER BY id";
+    Object[] args = validationStatus == null || validationStatus.isBlank() ? new Object[]{taskId} : new Object[]{taskId, validationStatus};
+    return jdbc.query(sql, (rs, rowNum) -> new StagingRow(rs.getLong("id"), rs.getString("sheet_name"),
+        rs.getInt("source_row_number"), rs.getString("diff_type"), rs.getString("validation_status"),
+        readMap(rs.getString("normalized_data_json")), readMap(rs.getString("edited_data_json")), rs.getBoolean("is_deleted")), args);
+  }
+
+  public List<ImportIssue> issues(long taskId) {
+    return jdbc.query("""
+        SELECT id, severity, error_code, sheet_name, source_row_number, field_name, raw_value_masked, message, resolved_at
+        FROM import_error WHERE import_task_id = ? AND resolved_at IS NULL ORDER BY severity, source_row_number, id
+        """, (rs, rowNum) -> new ImportIssue(rs.getLong("id"), rs.getString("severity"), rs.getString("error_code"),
+        rs.getString("sheet_name"), rs.getObject("source_row_number") == null ? null : rs.getInt("source_row_number"), rs.getString("field_name"),
+        rs.getString("raw_value_masked"), rs.getString("message"), rs.getTimestamp("resolved_at") == null ? null : rs.getTimestamp("resolved_at").toInstant()), taskId);
+  }
+
+  public void updateRow(long taskId, long rowId, Map<String, Object> changes, boolean deleted, long adminId) {
+    ImportTask task = task(taskId);
+    if (!"PREVIEW_READY".equals(task.status())) throw DomainException.conflict("IMPORT_NOT_EDITABLE", "当前导入任务不能编辑");
+    transactions.executeWithoutResult(status -> {
+      List<MaterializeRow> currentRows = jdbc.query("""
+          SELECT id, normalized_data_json, edited_data_json, sensitive_data_ciphertext, edited_sensitive_data_ciphertext
+          FROM import_staging_row WHERE id = ? AND import_task_id = ? FOR UPDATE
+          """, (rs, rowNum) -> new MaterializeRow(rs.getLong("id"), readMap(rs.getString("normalized_data_json")),
+          readMap(rs.getString("edited_data_json")), rs.getBytes("sensitive_data_ciphertext"),
+          rs.getBytes("edited_sensitive_data_ciphertext")), rowId, taskId);
+      if (currentRows.size() != 1) throw DomainException.notFound("IMPORT_ROW_NOT_FOUND", "导入预览行不存在");
+
+      MaterializeRow current = currentRows.getFirst();
+      Map<String, Object> merged = current.effective();
+      Map<String, Object> mergedSensitive = new LinkedHashMap<>(current.sensitive(crypto, json));
+      Map<String, Object> safeChanges = new LinkedHashMap<>(changes == null ? Map.of() : changes);
+      for (String field : List.of("dealerPhone", "confirmerPhone", "contactPhone")) {
+        if (safeChanges.containsKey(field)) {
+          String phone = CryptoService.normalizePhone(text(safeChanges.remove(field)));
+          mergedSensitive.put(field, phone);
+          if ("dealerPhone".equals(field)) merged.put("phoneMasked", CryptoService.maskPhone(phone));
+          if ("confirmerPhone".equals(field)) merged.put("confirmerPhoneMasked", phone.isBlank() ? "" : CryptoService.maskPhone(phone));
+          if ("contactPhone".equals(field)) merged.put("phoneMasked", phone.isBlank() ? "" : CryptoService.maskPhone(phone));
+        }
+      }
+      merged.putAll(safeChanges);
+      byte[] editedSensitive = mergedSensitive.isEmpty() ? null : crypto.encrypt(writeJson(mergedSensitive));
+      jdbc.update("""
+          UPDATE import_staging_row SET edited_data_json = ?, edited_sensitive_data_ciphertext = ?, is_deleted = ?,
+            edited_by = ?, edited_at = UTC_TIMESTAMP(3) WHERE id = ? AND import_task_id = ?
+          """, writeJson(merged), editedSensitive, deleted, adminId, rowId, taskId);
+      workbookProcessor.revalidateTask(taskId, task.importType());
+    });
+  }
+
+  public ImportTask confirm(long taskId, long adminId) {
+    ImportTask task = task(taskId);
+    if (!"PREVIEW_READY".equals(task.status())) throw DomainException.conflict("IMPORT_NOT_CONFIRMABLE", "当前任务不能确认发布");
+    workbookProcessor.revalidateTask(taskId, task.importType());
+    Integer blocking = jdbc.queryForObject("""
+        SELECT COUNT(*) FROM import_staging_row WHERE import_task_id = ? AND validation_status = 'BLOCKED' AND is_deleted = FALSE
+        """, Integer.class, taskId);
+    if (blocking != null && blocking > 0) throw DomainException.unprocessable("IMPORT_HAS_BLOCKING_ERRORS", "请先修正或删除阻塞行再确认导入");
+    int changed = jdbc.update("""
+        UPDATE import_task SET status = 'CONFIRMING', confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(3), next_attempt_at = UTC_TIMESTAMP(3)
+        WHERE id = ? AND status = 'PREVIEW_READY'
+        """, adminId, taskId);
+    if (changed != 1) throw DomainException.conflict("IMPORT_STATE_CHANGED", "导入任务状态已变化，请刷新后重试");
+    return task(taskId);
+  }
+
+
+ public void cancel(long taskId) {
+    int changed = jdbc.update("UPDATE import_task SET status = 'CANCELLED' WHERE id = ? AND status IN ('UPLOADED','PARSING','PREVIEW_READY')", taskId);
+    if (changed != 1) throw DomainException.conflict("IMPORT_NOT_CANCELLABLE", "当前任务不能取消");
+  }
+
+  @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 1_000)
+  public void processConfirmed() {
+    List<Long> ids = jdbc.queryForList("""
+        SELECT id FROM import_task WHERE status = 'CONFIRMING' AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP(3))
+        ORDER BY confirmed_at LIMIT 1
+        """, Long.class);
+    if (ids.isEmpty()) return;
+    long taskId = ids.getFirst();
+    int claimed = jdbc.update("UPDATE import_task SET status = 'MATERIALIZING', attempt_count = attempt_count + 1, lease_owner = ?, lease_expires_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 5 MINUTE) WHERE id = ? AND status = 'CONFIRMING'",
+        "worker-" + ProcessHandle.current().pid(), taskId);
+    if (claimed != 1) return;
+    try {
+      transactions.executeWithoutResult(status -> publish(taskId));
+    } catch (Exception exception) {
+      jdbc.update("UPDATE import_task SET status = 'FAILED', failed_at = UTC_TIMESTAMP(3), failure_code = 'PUBLISH_FAILED', failure_message = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?",
+          truncate(exception.getMessage(), 900), taskId);
+    }
+  }
+
+
+ private void publish(long taskId) {
+    ImportTask task = task(taskId);
+    long activityId = task.activityId();
+    long adminId = task.confirmedBy();
+    jdbc.update("UPDATE import_task SET status = 'MATERIALIZING' WHERE id = ?", taskId);
+    int versionNo = jdbc.queryForObject("SELECT COALESCE(MAX(version_no), 0) + 1 FROM import_publish_version WHERE activity_id = ? AND data_type = ?", Integer.class, activityId, task.importType());
+    GeneratedKeyHolder keys = new GeneratedKeyHolder();
+    jdbc.update(connection -> {
+      var ps = connection.prepareStatement("""
+          INSERT INTO import_publish_version(activity_id, data_type, version_no, source_import_task_id, status, created_by)
+          VALUES (?, ?, ?, ?, 'BUILDING', ?)
+          """, Statement.RETURN_GENERATED_KEYS);
+      ps.setLong(1, activityId); ps.setString(2, task.importType()); ps.setInt(3, versionNo); ps.setLong(4, taskId); ps.setLong(5, adminId);
+      return ps;
+    }, keys);
+    long versionId = keys.getKey().longValue();
+    List<MaterializeRow> rows = jdbc.query("""
+        SELECT id, normalized_data_json, edited_data_json, sensitive_data_ciphertext, edited_sensitive_data_ciphertext
+        FROM import_staging_row WHERE import_task_id = ? AND is_deleted = FALSE AND validation_status <> 'BLOCKED' ORDER BY id
+        """, (rs, rowNum) -> new MaterializeRow(rs.getLong("id"), readMap(rs.getString("normalized_data_json")),
+        readMap(rs.getString("edited_data_json")), rs.getBytes("sensitive_data_ciphertext"), rs.getBytes("edited_sensitive_data_ciphertext")), taskId);
+    switch (task.importType()) {
+      case "PRODUCT" -> materializeProducts(activityId, taskId, versionId, rows);
+      case "WHITELIST" -> materializeWhitelist(activityId, taskId, versionId, rows);
+      case "ATTENDANCE" -> materializeAttendance(activityId, taskId, versionId, rows, adminId);
+      default -> throw new IllegalStateException("Unsupported import type " + task.importType());
+    }
+    jdbc.update("UPDATE import_publish_version SET status = 'READY', row_count = ?, ready_at = UTC_TIMESTAMP(3) WHERE id = ?", rows.size(), versionId);
+    jdbc.update("UPDATE import_task SET status = 'READY_TO_PUBLISH' WHERE id = ?", taskId);
+    Long previous = jdbc.query("SELECT current_version_id FROM activity_data_binding WHERE activity_id = ? AND data_type = ? FOR UPDATE",
+        rs -> rs.next() ? rs.getLong(1) : null, activityId, task.importType());
+    jdbc.update("UPDATE import_task SET status = 'PUBLISHING' WHERE id = ?", taskId);
+    jdbc.update("""
+        INSERT INTO activity_data_binding(activity_id, data_type, current_version_id, lock_version, updated_by)
+        VALUES (?, ?, ?, 0, ?)
+        ON DUPLICATE KEY UPDATE current_version_id = VALUES(current_version_id), lock_version = lock_version + 1, updated_by = VALUES(updated_by)
+        """, activityId, task.importType(), versionId, adminId);
+    if ("WHITELIST".equals(task.importType())) attendanceMatching.reassociateCurrentAttendance(activityId, versionId);
+    if (previous != null && previous > 0) jdbc.update("UPDATE import_publish_version SET status = 'RETIRED', retired_at = UTC_TIMESTAMP(3) WHERE id = ?", previous);
+    jdbc.update("UPDATE import_publish_version SET status = 'PUBLISHED', published_at = UTC_TIMESTAMP(3) WHERE id = ?", versionId);
+    jdbc.update("UPDATE import_task SET status = 'COMPLETED', published_version_id = ?, completed_at = UTC_TIMESTAMP(3), lease_owner = NULL, lease_expires_at = NULL WHERE id = ?", versionId, taskId);
+  }
+
+  private void materializeProducts(long activityId, long taskId, long versionId, List<MaterializeRow> rows) {
+    int sort = 0;
+    for (MaterializeRow row : rows) {
+      Map<String, Object> data = row.effective();
+      String name = text(data.get("materialName"));
+      BigDecimal casePrice = decimal(data.get("casePrice"));
+      BigDecimal factor = decimal(data.get("tonCaseFactor"));
+      boolean visible = !name.isBlank();
+      boolean orderable = visible && casePrice != null && casePrice.signum() > 0;
+      String status = optionalProductMissing(data) ? "INCOMPLETE" : "ACTIVE";
+      String businessKey = productKey(data);
+      jdbc.update("""
+          INSERT INTO activity_product(activity_id, customer_type, rebate_status, business_key, material_code, material_name,
+            category_name, product_line, brand_name, variety_name, specification, case_pack, bottle_price, case_price,
+            ton_case_factor, is_gift_box, is_branch_customized, is_visible, is_orderable, sort_no, data_status,
+            source_import_task_id, data_version_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          """, activityId, text(data.get("customerType")), text(data.get("rebateStatus")), businessKey,
+          nullableText(data.get("materialCode")), name, nullableText(data.get("categoryName")), nullableText(data.get("productLine")),
+          nullableText(data.get("brandName")), nullableText(data.get("varietyName")), nullableText(data.get("specification")),
+          nullableText(data.get("casePack")), decimal(data.get("bottlePrice")), casePrice, factor, bool(data.get("giftBox")),
+          !text(data.get("branchScope")).isBlank(), visible, orderable, ++sort, status, taskId, versionId);
+      Long productId = jdbc.queryForObject("SELECT id FROM activity_product WHERE activity_id = ? AND data_version_id = ? AND business_key = ?", Long.class, activityId, versionId, businessKey);
+      if (productId != null) for (String branch : text(data.get("branchScope")).split("[，,、]")) {
+        if (!branch.isBlank()) jdbc.update("INSERT INTO activity_product_branch_scope(activity_product_id, branch_name, normalized_branch_name) VALUES (?, ?, ?)", productId, branch.trim(), normalize(branch));
+      }
+    }
+  }
+
+  private void materializeWhitelist(long activityId, long taskId, long versionId, List<MaterializeRow> rows) {
+    for (MaterializeRow row : rows) {
+      Map<String, Object> data = row.effective();
+      Map<String, Object> sensitive = row.sensitive(crypto, json);
+      String customerType = text(data.get("customerType"));
+      String fullName = text(data.get("dealerFullName"));
+      String normalizedName = normalize(fullName);
+      jdbc.update("""
+          INSERT INTO customer(customer_type, dealer_full_name, normalized_dealer_full_name) VALUES (?, ?, ?)
+          ON DUPLICATE KEY UPDATE dealer_full_name = VALUES(dealer_full_name), updated_at = UTC_TIMESTAMP(3)
+          """, customerType, fullName, normalizedName);
+      Long customerId = jdbc.queryForObject("SELECT id FROM customer WHERE customer_type = ? AND normalized_dealer_full_name = ?", Long.class, customerType, normalizedName);
+      String phone = text(sensitive.get("dealerPhone"));
+      String confirmerPhone = text(sensitive.get("confirmerPhone"));
+      jdbc.update("""
+          INSERT INTO activity_customer(activity_id, customer_id, customer_type, region_code, branch_name, normalized_branch_name,
+            dealer_short_name, dealer_full_name, dealer_category, contact_name, phone_ciphertext, phone_lookup_hash, phone_masked,
+            confirmer_name, confirmer_phone_ciphertext, confirmer_phone_masked, excel_sequence, is_active,
+            source_import_task_id, data_version_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?)
+          """, activityId, customerId, customerType, regionCode(activityId, text(data.get("regionName"))), nullableText(data.get("branchName")),
+          normalize(text(data.get("branchName"))), nullableText(data.get("dealerShortName")), fullName, nullableText(data.get("dealerCategory")),
+          nullableText(data.get("contactName")), crypto.encrypt(phone), crypto.lookupHash(phone), CryptoService.maskPhone(phone),
+          nullableText(data.get("confirmerName")), confirmerPhone.isBlank() ? null : crypto.encrypt(confirmerPhone),
+          confirmerPhone.isBlank() ? null : CryptoService.maskPhone(confirmerPhone), intValue(data.get("sequence"), 0), taskId, versionId);
+    }
+  }
+
+  private void materializeAttendance(long activityId, long taskId, long versionId, List<MaterializeRow> rows, long adminId) {
+    Long whitelistVersion = attendanceMatching.currentWhitelistVersion(activityId);
+    for (MaterializeRow row : rows) {
+      Map<String, Object> data = row.effective();
+      String phone = text(row.sensitive(crypto, json).get("contactPhone"));
+      AttendanceMatchingService.MatchResult match = attendanceMatching.match(activityId, whitelistVersion,
+          text(data.get("participantType")), text(data.get("branchName")), text(data.get("dealerFullName")), phone);
+      jdbc.update("""
+          INSERT INTO activity_attendee(activity_id, activity_customer_id, match_status, match_method, match_reason_code,
+            participant_name, gender, participant_type,
+            dealer_name_snapshot, branch_name_snapshot, phone_ciphertext, phone_lookup_hash, phone_masked,
+            source_import_task_id, data_version_id, is_active, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
+          """, activityId, match.customerId(), match.status(), match.method(), match.reasonCode(),
+          nullableText(data.get("participantName")), nullableText(data.get("gender")),
+          nullableText(data.get("participantType")), text(data.get("dealerFullName")), nullableText(data.get("branchName")),
+          phone.isBlank() ? null : crypto.encrypt(phone), phone.matches("1\\d{10}") ? crypto.lookupHash(phone) : null,
+          phone.isBlank() ? null : CryptoService.maskPhone(phone), taskId, versionId, adminId);
+    }
+  }
+
+  private long insertTask(long activityId, String type, StorageService.StoredFile file, long adminId) {
+    GeneratedKeyHolder keys = new GeneratedKeyHolder();
+    jdbc.update(connection -> {
+      var ps = connection.prepareStatement("""
+          INSERT INTO import_task(activity_id, import_type, strategy, status, source_file_id, file_sha256, created_by)
+          VALUES (?, ?, 'FULL_REPLACE', 'UPLOADED', ?, ?, ?)
+          """, Statement.RETURN_GENERATED_KEYS);
+      ps.setLong(1, activityId); ps.setString(2, type); ps.setLong(3, file.id()); ps.setBytes(4, file.sha256()); ps.setLong(5, adminId);
+      return ps;
+    }, keys);
+    return keys.getKey().longValue();
+  }
+
+
+ private String regionCode(long activityId, String name) {
+    if (name == null || name.isBlank()) return null;
+    List<String> codes = jdbc.queryForList("SELECT region_code FROM activity_region WHERE activity_id = ? AND region_name = ?", String.class, activityId, name.trim());
+    if (!codes.isEmpty()) return codes.getFirst();
+    String code = "R_" + java.util.HexFormat.of().formatHex(crypto.sha256(name)).substring(0, 12).toUpperCase(Locale.ROOT);
+    jdbc.update("INSERT INTO activity_region(activity_id, region_code, region_name, sort_no, is_active) VALUES (?, ?, ?, 999, TRUE)", activityId, code, name.trim());
+    return code;
+  }
+
+  private static boolean optionalProductMissing(Map<String, Object> data) {
+    return List.of("materialCode", "productLine", "specification", "casePack", "casePrice", "tonCaseFactor")
+        .stream().anyMatch(key -> text(data.get(key)).isBlank());
+  }
+
+  private static String productKey(Map<String, Object> data) {
+    String prefix = text(data.get("customerType")) + ":" + text(data.get("rebateStatus")) + ":";
+    String code = normalize(text(data.get("materialCode")));
+    return prefix + (!code.isBlank() ? code : normalize(text(data.get("materialName"))));
+  }
+
+  private static BigDecimal decimal(Object value) {
+    try { String text = text(value); return text.isBlank() ? null : new BigDecimal(text.replace(",", "")); }
+    catch (Exception ignored) { return null; }
+  }
+
+  private static int intValue(Object value, int fallback) {
+    try { return Integer.parseInt(text(value)); } catch (Exception ignored) { return fallback; }
+  }
+  private static boolean bool(Object value) { return value instanceof Boolean b ? b : Boolean.parseBoolean(text(value)); }
+  private static String nullableText(Object value) { String text = text(value); return text.isBlank() ? null : text; }
+  private static String text(Object value) { return value == null ? "" : value.toString().trim(); }
+  private static String normalize(String value) { return text(value).toLowerCase(Locale.CHINA).replaceAll("[\\s　_-]+", ""); }
+  private static String truncate(String value, int max) { String safe = Objects.requireNonNullElse(value, ""); return safe.length() <= max ? safe : safe.substring(0, max); }
+
+  private String writeJson(Object value) {
+    try { return json.writeValueAsString(value); } catch (Exception exception) { throw new IllegalStateException(exception); }
+  }
+  private Map<String, Object> readMap(String value) {
+    if (value == null || value.isBlank()) return new LinkedHashMap<>();
+    try { return json.readValue(value, new TypeReference<>() {}); } catch (Exception exception) { throw new IllegalStateException(exception); }
+  }
+
+  private ImportTask mapTask(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
+    return new ImportTask(rs.getLong("id"), rs.getLong("activity_id"), rs.getString("import_type"), rs.getString("status"),
+        rs.getString("original_filename"), rs.getInt("input_count"), rs.getInt("added_count"), rs.getInt("updated_count"),
+        rs.getInt("unchanged_count"), rs.getInt("deactivated_count"), rs.getInt("warning_count"), rs.getInt("error_count"),
+        rs.getString("failure_code"), rs.getString("failure_message"), rs.getLong("created_by"),
+        rs.getObject("confirmed_by") == null ? 0 : rs.getLong("confirmed_by"), rs.getTimestamp("created_at").toInstant(),
+        rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant());
+  }
+
+  private record MaterializeRow(long id, Map<String, Object> normalized, Map<String, Object> edited,
+                                byte[] sensitiveBytes, byte[] editedSensitiveBytes) {
+    Map<String, Object> effective() { Map<String, Object> result = new LinkedHashMap<>(normalized); if (edited != null) result.putAll(edited); return result; }
+    Map<String, Object> sensitive(CryptoService crypto, ObjectMapper json) {
+      byte[] bytes = editedSensitiveBytes != null ? editedSensitiveBytes : sensitiveBytes;
+      if (bytes == null) return Map.of();
+      try { return json.readValue(crypto.decrypt(bytes), new TypeReference<>() {}); } catch (Exception exception) { throw new IllegalStateException(exception); }
+    }
+  }
+
+  public record ImportTask(long id, long activityId, String importType, String status, String sourceFilename,
+                           int inputCount, int addedCount, int updatedCount, int unchangedCount, int deactivatedCount,
+                           int warningCount, int errorCount, String failureCode, String failureMessage,
+                           long createdBy, long confirmedBy, Instant createdAt, Instant completedAt) {}
+  public record StagingRow(long id, String sheetName, int sourceRowNumber, String diffType, String validationStatus,
+                           Map<String, Object> normalizedData, Map<String, Object> editedData, boolean deleted) {}
+  public record ImportIssue(long id, String severity, String code, String sheetName, Integer sourceRowNumber,
+                            String fieldName, String rawValueMasked, String message, Instant resolvedAt) {}
+}

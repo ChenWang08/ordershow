@@ -12,19 +12,18 @@
 - 看板在订单变化后 3 秒内更新；
 - 同一抽奖轮次只能生成一份有效结果；
 - 本地、测试、预发布和正式环境使用同一套代码，通过配置切换基础设施；
-- 第一期保持简单可运维，不提前引入微服务和外部消息队列；耗时任务使用 MySQL DB Task Queue 和独立 Background Worker。
+- 第一期保持简单可运维，不提前引入微服务和外部消息队列；当前本地版由 Spring Boot 应用内执行任务，生产环境目标再拆分 MySQL DB Task Queue 和独立 Background Worker。
 
 ## 2. 总体选择
 
-采用“多个 SPA 前端 + Spring Boot 模块化单体（API 与 Background Worker 两种运行角色）+ MySQL + Redis + S3 兼容对象存储 + SSE”的架构。
+当前实现采用“统一 React 业务前端 + Spring Boot 模块化单体 + MySQL + Redis + S3 兼容对象存储 + SSE”的架构；后续正式集群可将耗时任务拆成独立 Worker 运行角色。
 
-| 层次 | 推荐技术 | 职责 |
+| 层次 | 当前实现或生产目标 | 职责 |
 | --- | --- | --- |
-| H5 | React、TypeScript、Vite、React Router、TanStack Query | 身份验证、商品浏览、订单提交和修改 |
-| 管理后台 | React、TypeScript、Vite、Ant Design | 活动、导入、订单、抽奖和审计管理 |
-| 现场大屏 | React、TypeScript、Vite、ECharts | 排行、专题战报、抽奖动画 |
+| 统一业务前端 | React、TypeScript、Vinext、Vite、现有自定义 UI | 同一工程提供 H5、管理后台、排行、专题战报和抽奖；不引入 Ant Design |
 | API | Java 21、Spring Boot 3.5 稳定线 | 业务规则、认证、事务、统计和文件协调 |
-| 后台任务 | Spring Boot Background Worker + MySQL DB Task Queue | Excel 解析/发布、导出、outbox 发布、调度和清理 |
+| 本地后台任务 | Spring Boot 应用内执行器 + MySQL 任务记录 | Excel 解析、预览和发布 |
+| 生产后台任务目标 | 独立 Spring Boot Worker + MySQL DB Task Queue | 导入、导出、outbox、调度和清理的独立运行角色 |
 | 数据访问 | MyBatis/MyBatis Plus、Flyway | SQL、迁移、事务和乐观锁 |
 | 主数据库 | MySQL 8.4 LTS / InnoDB | 唯一业务事实来源 |
 | 辅助数据 | Redis | 限流、短期凭证缓存、查询缓存、幂等结果缓存和分布式锁；不作为事实来源 |
@@ -32,11 +31,11 @@
 | 实时更新 | SSE | 看板和抽奖状态单向推送 |
 | 正式入口 | 托管 LB/WAF/CDN | TLS、健康检查、流量分发、基础防护和静态资源分发 |
 
-不采用 SSR：所有页面均是活动业务应用，没有 SEO 需求；静态 SPA 更容易独立部署和缓存。
+当前 Vinext 构建会生成服务端页面外壳，核心业务交互在客户端执行；系统没有 SEO 依赖。生产环境可继续运行当前前端服务，也可在完成路由和缓存验证后演进为静态资源/CDN 部署。
 
 ## 3. 前端应用划分
 
-推荐使用 pnpm workspace：
+当前 H5、管理后台和现场大屏共用一个 React 工程、主题和 API 层。下面是团队扩大后的可选演进结构，不是当前目录结构：
 
 ```text
 frontend/
@@ -52,7 +51,7 @@ frontend/
 └── pnpm-workspace.yaml
 ```
 
-当前 `app/prototype.tsx` 只作为视觉和交互验收依据。正式开发应拆分路由、页面、领域组件和接口层，不能继续以一个文件承载全部业务。
+当前已在保留 `app/prototype.tsx` 视觉和交互的基础上，将正式接口集中到 `app/api.ts`，所有关键业务数据以后端为准。后续维护可按 H5、后台、看板和抽奖逐步拆分页面组件，不改变现有业务契约。
 
 ### 3.1 推荐路由
 
@@ -66,7 +65,7 @@ frontend/
 /admin/activities/:activityId/overview
 /admin/activities/:activityId/products
 /admin/activities/:activityId/customers
-/admin/activities/:activityId/attendance
+/admin/activities/:activityId/attendees
 /admin/activities/:activityId/orders
 /admin/activities/:activityId/lottery
 /admin/activities/:activityId/imports
@@ -108,9 +107,11 @@ com.fengyi.ordershow
 
 ### 4.2 Background Worker 与 DB Task Queue
 
-API、Background Worker 和数据库迁移是三个不同的运行职责。API 负责鉴权、创建任务和查询任务状态；Worker 负责领取并执行耗时任务；Flyway 由独立部署步骤执行，API 和 Worker 启动时不执行数据库升级。API 与 Worker 可以复用同一个 Spring Boot 制品，但必须通过不同 profile/启动命令部署，不能让 API 实例意外启动任务消费者。
+当前本地版本只有一个 Spring Boot 运行进程：API 创建 MySQL 导入任务，应用内执行器完成解析和发布；Flyway 在后端启动时执行。该方式满足本地开发和首版联调，但不能描述为已经完成独立 Worker 或独立 Migration Job。
 
-第一期不引入 Kafka/RabbitMQ。`import_task`、`export_task` 及其他任务记录组成 MySQL DB Task Queue：
+生产部署目标是把 API、Background Worker 和数据库迁移拆成三个运行职责：API 负责鉴权、创建任务和查询状态；Worker 领取并执行耗时任务；Flyway 由独立发布步骤执行。API 与 Worker 可以复用同一个 Spring Boot 制品，但通过不同 profile/启动命令运行。
+
+生产拆分时仍不引入 Kafka/RabbitMQ，`import_task`、`export_task` 及其他任务记录组成 MySQL DB Task Queue：
 
 - API 在短事务内创建 `PENDING/UPLOADED` 任务并返回 `202 + taskId`；即使 API 在创建任务后立即重启，Worker 仍可从 MySQL 扫描到任务；
 - Worker 使用短事务领取任务，采用状态条件更新或 `SELECT ... FOR UPDATE SKIP LOCKED`，并写入 `worker_id`、`locked_until`、`attempt_count` 和 `next_attempt_at` 等租约字段；
@@ -169,7 +170,7 @@ activities/{activityId}/exports/{exportTaskId}.xlsx
 - 验证成功设置只允许访问当前活动和当前活动客户的短期不透明会话 Cookie；
 - 凭证过期时间不晚于活动结束时间；
 - Cookie 使用 `Secure; HttpOnly; SameSite=Lax`，并限制到 H5 API 路径；H5 写操作同时校验 CSRF Token 和 Origin。浏览器不在 `localStorage`、`sessionStorage` 或 URL 中保存凭证；
-- 服务端每次访问仍检查活动客户是否有效，客户停用、活动提前截止或显式撤销时立即失效；
+- 服务端每次访问仍检查客户是否属于当前白名单，客户被删除、活动提前截止或显式撤销时立即失效；
 - 只有在 H5 与 API 无法通过同站点入口部署时，才使用 Bearer Token 作为跨站例外，并重新评估 CORS、Token 存储和撤销策略；
 - 不做短信验证码和业务性失败锁定，但保留宽松限流、访问事件和异常告警。
 
@@ -218,8 +219,7 @@ activities/{activityId}/exports/{exportTaskId}.xlsx
 本地即可完成全部功能，不要求现在确定云厂商：
 
 ```text
-Docker Compose: MySQL + Redis + MinIO
-本机进程: Spring Boot API + 三个 Vite 前端
+Docker Compose: 统一 React 前端 + Spring Boot 后端 + MySQL + Redis + MinIO
 ```
 
 通过 `.env` 或 Spring Profile 提供数据库、Redis、对象存储和域名配置。代码中禁止判断具体云厂商。
@@ -247,7 +247,7 @@ Docker Compose: MySQL + Redis + MinIO
 - 监控：健康检查、JVM、HTTP、数据库连接池、订单失败率、SSE 在线数；
 - 日志：结构化日志集中检索，敏感字段脱敏。
 
-正式发布顺序固定为：备份/检查 → 独立 Migration Job 执行 Flyway → 校验成功 → 发布 API 和 Worker。API/Worker 使用无 DDL 权限的运行账号，启动时只做 schema 校验或不做迁移；迁移失败时停止发布，不允许两个 API 实例各自执行升级。
+当前本地环境由 Spring Boot 启动时执行 Flyway。正式发布目标顺序为：备份/检查 → 独立 Migration Job 执行 Flyway → 校验成功 → 发布 API 和 Worker。API/Worker 使用无 DDL 权限的运行账号，启动时只做 schema 校验或不做迁移；迁移失败时停止发布，不允许两个 API 实例各自执行升级。
 
 第一期不使用 Kubernetes；只有组织已有成熟 Kubernetes 平台时才部署到现有集群。
 

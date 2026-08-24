@@ -27,6 +27,7 @@ CREATE TABLE admin_session (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   admin_user_id BIGINT UNSIGNED NOT NULL,
   token_hash BINARY(32) NOT NULL,
+  csrf_token_hash BINARY(32) NOT NULL,
   expires_at DATETIME(3) NOT NULL,
   last_seen_at DATETIME(3) NOT NULL,
   revoked_at DATETIME(3) NULL,
@@ -70,6 +71,22 @@ CREATE TABLE activity (
   CONSTRAINT ck_activity_company_ranking_top CHECK (company_ranking_top_n BETWEEN 1 AND 500),
   CONSTRAINT ck_activity_branch_ranking_top CHECK (branch_ranking_top_n BETWEEN 1 AND 500),
   CONSTRAINT ck_activity_ton_scale CHECK (ton_display_scale BETWEEN 0 AND 6)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE activity_region (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  activity_id BIGINT UNSIGNED NOT NULL,
+  region_code VARCHAR(64) NOT NULL,
+  region_name VARCHAR(100) NOT NULL,
+  sort_no INT NOT NULL DEFAULT 0,
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_activity_region_code (activity_id, region_code),
+  UNIQUE KEY uk_activity_region_name (activity_id, region_name),
+  KEY idx_activity_region_sort (activity_id, is_active, sort_no, id),
+  CONSTRAINT fk_activity_region_activity FOREIGN KEY (activity_id) REFERENCES activity (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE stored_file (
@@ -119,6 +136,12 @@ CREATE TABLE import_task (
   failed_at DATETIME(3) NULL,
   failure_code VARCHAR(64) NULL,
   failure_message VARCHAR(1000) NULL,
+  lease_owner VARCHAR(128) NULL,
+  lease_expires_at DATETIME(3) NULL,
+  attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+  next_attempt_at DATETIME(3) NULL,
+  base_publish_version_id BIGINT UNSIGNED NULL,
+  published_version_id BIGINT UNSIGNED NULL,
   created_by BIGINT UNSIGNED NOT NULL,
   confirmed_by BIGINT UNSIGNED NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -133,7 +156,7 @@ CREATE TABLE import_task (
   CONSTRAINT fk_import_task_confirmed_by FOREIGN KEY (confirmed_by) REFERENCES admin_user (id),
   CONSTRAINT ck_import_task_type CHECK (import_type IN ('PRODUCT', 'WHITELIST', 'ATTENDANCE', 'PRODUCT_IMAGE')),
   CONSTRAINT ck_import_task_strategy CHECK (strategy IN ('FULL_REPLACE', 'IMAGE_ATTACH')),
-  CONSTRAINT ck_import_task_status CHECK (status IN ('UPLOADED', 'PARSING', 'PREVIEW_READY', 'CONFIRMING', 'COMPLETED', 'FAILED', 'CANCELLED'))
+  CONSTRAINT ck_import_task_status CHECK (status IN ('UPLOADED', 'PARSING', 'PREVIEW_READY', 'CONFIRMING', 'MATERIALIZING', 'READY_TO_PUBLISH', 'PUBLISHING', 'COMPLETED', 'FAILED', 'CANCELLED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE import_staging_row (
@@ -185,6 +208,46 @@ CREATE TABLE import_error (
   CONSTRAINT ck_import_error_severity CHECK (severity IN ('WARNING', 'BLOCKING'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE import_publish_version (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  activity_id BIGINT UNSIGNED NOT NULL,
+  data_type VARCHAR(32) NOT NULL,
+  version_no INT UNSIGNED NOT NULL,
+  source_import_task_id BIGINT UNSIGNED NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'BUILDING',
+  row_count INT UNSIGNED NOT NULL DEFAULT 0,
+  content_sha256 BINARY(32) NULL,
+  created_by BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  ready_at DATETIME(3) NULL,
+  published_at DATETIME(3) NULL,
+  retired_at DATETIME(3) NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_publish_version_no (activity_id, data_type, version_no),
+  UNIQUE KEY uk_publish_version_task (source_import_task_id),
+  KEY idx_publish_version_status (activity_id, data_type, status, version_no),
+  CONSTRAINT fk_publish_version_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
+  CONSTRAINT fk_publish_version_task FOREIGN KEY (source_import_task_id) REFERENCES import_task (id),
+  CONSTRAINT fk_publish_version_created_by FOREIGN KEY (created_by) REFERENCES admin_user (id),
+  CONSTRAINT ck_publish_version_type CHECK (data_type IN ('PRODUCT', 'WHITELIST', 'ATTENDANCE')),
+  CONSTRAINT ck_publish_version_status CHECK (status IN ('BUILDING', 'READY', 'PUBLISHED', 'RETIRED', 'FAILED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE activity_data_binding (
+  activity_id BIGINT UNSIGNED NOT NULL,
+  data_type VARCHAR(32) NOT NULL,
+  current_version_id BIGINT UNSIGNED NOT NULL,
+  lock_version INT UNSIGNED NOT NULL DEFAULT 0,
+  updated_by BIGINT UNSIGNED NOT NULL,
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (activity_id, data_type),
+  UNIQUE KEY uk_data_binding_current_version (current_version_id),
+  CONSTRAINT fk_data_binding_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
+  CONSTRAINT fk_data_binding_version FOREIGN KEY (current_version_id) REFERENCES import_publish_version (id),
+  CONSTRAINT fk_data_binding_updated_by FOREIGN KEY (updated_by) REFERENCES admin_user (id),
+  CONSTRAINT ck_data_binding_type CHECK (data_type IN ('PRODUCT', 'WHITELIST', 'ATTENDANCE'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE customer (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   customer_type VARCHAR(16) NOT NULL,
@@ -202,7 +265,7 @@ CREATE TABLE activity_customer (
   activity_id BIGINT UNSIGNED NOT NULL,
   customer_id BIGINT UNSIGNED NOT NULL,
   customer_type VARCHAR(16) NOT NULL,
-  region_code VARCHAR(16) NULL,
+  region_code VARCHAR(64) NULL,
   branch_name VARCHAR(200) NULL,
   normalized_branch_name VARCHAR(200) NULL,
   dealer_short_name VARCHAR(200) NULL,
@@ -220,25 +283,48 @@ CREATE TABLE activity_customer (
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   deactivated_at DATETIME(3) NULL,
   source_import_task_id BIGINT UNSIGNED NOT NULL,
+  data_version_id BIGINT UNSIGNED NULL,
   lock_version INT UNSIGNED NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
-  UNIQUE KEY uk_activity_customer_identity (activity_id, customer_id),
-  UNIQUE KEY uk_activity_customer_phone (activity_id, customer_type, phone_lookup_hash),
+  UNIQUE KEY uk_activity_customer_identity (activity_id, data_version_id, customer_id),
+  UNIQUE KEY uk_activity_customer_phone (activity_id, data_version_id, customer_type, phone_lookup_hash),
   KEY idx_activity_customer_filter (activity_id, customer_type, is_active, region_code, branch_name),
   KEY idx_activity_customer_dealer_name (activity_id, dealer_full_name),
   CONSTRAINT fk_activity_customer_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_activity_customer_customer FOREIGN KEY (customer_id) REFERENCES customer (id),
   CONSTRAINT fk_activity_customer_import FOREIGN KEY (source_import_task_id) REFERENCES import_task (id),
-  CONSTRAINT ck_activity_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
-  CONSTRAINT ck_activity_customer_region CHECK (region_code IS NULL OR region_code IN ('EAST', 'SOUTH', 'NORTH_1', 'NORTH_2'))
+  CONSTRAINT fk_activity_customer_version FOREIGN KEY (data_version_id) REFERENCES import_publish_version (id),
+  CONSTRAINT ck_activity_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE h5_session (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  activity_id BIGINT UNSIGNED NOT NULL,
+  activity_customer_id BIGINT UNSIGNED NOT NULL,
+  token_hash BINARY(32) NOT NULL,
+  csrf_token_hash BINARY(32) NOT NULL,
+  expires_at DATETIME(3) NOT NULL,
+  last_seen_at DATETIME(3) NOT NULL,
+  revoked_at DATETIME(3) NULL,
+  ip_address VARBINARY(16) NULL,
+  user_agent VARCHAR(512) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_h5_session_token_hash (token_hash),
+  KEY idx_h5_session_customer_expires (activity_customer_id, expires_at),
+  CONSTRAINT fk_h5_session_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
+  CONSTRAINT fk_h5_session_customer FOREIGN KEY (activity_customer_id) REFERENCES activity_customer (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE activity_attendee (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   activity_id BIGINT UNSIGNED NOT NULL,
   activity_customer_id BIGINT UNSIGNED NULL,
+  match_status VARCHAR(32) NOT NULL DEFAULT 'UNMATCHED',
+  match_method VARCHAR(32) NULL,
+  match_reason_code VARCHAR(64) NULL,
   participant_name VARCHAR(100) NULL,
   gender VARCHAR(16) NULL,
   participant_type VARCHAR(100) NULL,
@@ -248,6 +334,7 @@ CREATE TABLE activity_attendee (
   phone_lookup_hash BINARY(32) NULL,
   phone_masked VARCHAR(32) NULL,
   source_import_task_id BIGINT UNSIGNED NULL,
+  data_version_id BIGINT UNSIGNED NULL,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_by BIGINT UNSIGNED NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -255,17 +342,21 @@ CREATE TABLE activity_attendee (
   PRIMARY KEY (id),
   KEY idx_attendee_activity_customer (activity_id, activity_customer_id, is_active),
   KEY idx_attendee_activity_phone (activity_id, phone_lookup_hash),
+  KEY idx_attendee_activity_match (activity_id, data_version_id, match_status, is_active),
   CONSTRAINT fk_attendee_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_attendee_customer FOREIGN KEY (activity_customer_id) REFERENCES activity_customer (id),
   CONSTRAINT fk_attendee_import FOREIGN KEY (source_import_task_id) REFERENCES import_task (id),
-  CONSTRAINT fk_attendee_created_by FOREIGN KEY (created_by) REFERENCES admin_user (id)
+  CONSTRAINT fk_attendee_version FOREIGN KEY (data_version_id) REFERENCES import_publish_version (id),
+  CONSTRAINT fk_attendee_created_by FOREIGN KEY (created_by) REFERENCES admin_user (id),
+  CONSTRAINT ck_attendee_match_status CHECK (match_status IN ('MATCHED', 'PENDING_CONFIRMATION', 'UNMATCHED')),
+  CONSTRAINT ck_attendee_match_method CHECK (match_method IS NULL OR match_method IN ('PHONE', 'FULL_NAME', 'SHORT_NAME', 'MANUAL'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE activity_product (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   activity_id BIGINT UNSIGNED NOT NULL,
   customer_type VARCHAR(16) NOT NULL,
-  rebate_status VARCHAR(16) NOT NULL,
+  rebate_status VARCHAR(20) NOT NULL,
   business_key VARCHAR(320) NOT NULL,
   material_code VARCHAR(100) NULL,
   material_name VARCHAR(255) NOT NULL,
@@ -276,27 +367,32 @@ CREATE TABLE activity_product (
   specification VARCHAR(200) NULL,
   case_pack VARCHAR(100) NULL,
   bottle_price DECIMAL(18,4) NULL,
-  case_price DECIMAL(18,4) NOT NULL,
-  ton_case_factor DECIMAL(18,8) NOT NULL,
+  case_price DECIMAL(18,4) NULL,
+  ton_case_factor DECIMAL(18,8) NULL,
   is_gift_box BOOLEAN NOT NULL DEFAULT FALSE,
   is_branch_customized BOOLEAN NOT NULL DEFAULT FALSE,
+  is_visible BOOLEAN NOT NULL DEFAULT TRUE,
+  is_orderable BOOLEAN NOT NULL DEFAULT TRUE,
   sort_no INT NOT NULL DEFAULT 0,
   data_status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
   source_import_task_id BIGINT UNSIGNED NOT NULL,
+  data_version_id BIGINT UNSIGNED NULL,
   lock_version INT UNSIGNED NOT NULL DEFAULT 0,
   deactivated_at DATETIME(3) NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
-  UNIQUE KEY uk_activity_product_business (activity_id, business_key),
-  KEY idx_product_catalog (activity_id, customer_type, data_status, rebate_status, sort_no, id),
+  UNIQUE KEY uk_activity_product_business (activity_id, data_version_id, business_key),
+  KEY idx_product_catalog (activity_id, data_version_id, customer_type, is_visible, is_orderable, rebate_status, sort_no, id),
   KEY idx_product_material_code (activity_id, material_code),
   CONSTRAINT fk_product_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_product_import FOREIGN KEY (source_import_task_id) REFERENCES import_task (id),
+  CONSTRAINT fk_product_version FOREIGN KEY (data_version_id) REFERENCES import_publish_version (id),
   CONSTRAINT ck_product_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
   CONSTRAINT ck_product_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING')),
   CONSTRAINT ck_product_status CHECK (data_status IN ('ACTIVE', 'INCOMPLETE', 'INACTIVE')),
-  CONSTRAINT ck_product_price CHECK (case_price >= 0 AND ton_case_factor >= 0)
+  CONSTRAINT ck_product_price CHECK ((case_price IS NULL OR case_price >= 0) AND (ton_case_factor IS NULL OR ton_case_factor > 0)),
+  CONSTRAINT ck_product_orderable CHECK (is_orderable = FALSE OR (is_visible = TRUE AND case_price IS NOT NULL AND case_price > 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE activity_product_branch_scope (
@@ -338,21 +434,20 @@ CREATE TABLE customer_order (
   order_no VARCHAR(64) NOT NULL,
   status VARCHAR(20) NOT NULL,
   customer_type VARCHAR(16) NOT NULL,
-  region_code VARCHAR(16) NULL,
+  region_code VARCHAR(64) NULL,
   branch_name_snapshot VARCHAR(200) NULL,
   dealer_short_name_snapshot VARCHAR(200) NULL,
   dealer_full_name_snapshot VARCHAR(255) NOT NULL,
   current_version_no INT UNSIGNED NOT NULL,
   total_quantity BIGINT UNSIGNED NOT NULL,
-  total_tons DECIMAL(18,6) NOT NULL,
+  total_tons DECIMAL(18,6) NULL,
   total_amount DECIMAL(18,2) NOT NULL,
   first_submitted_at DATETIME(3) NOT NULL,
   last_submitted_at DATETIME(3) NOT NULL,
   last_modified_at DATETIME(3) NOT NULL,
   withdrawn_at DATETIME(3) NULL,
   withdrawn_reason VARCHAR(500) NULL,
-  last_modified_source VARCHAR(20) NOT NULL,
-  last_modified_admin_id BIGINT UNSIGNED NULL,
+  last_modified_source VARCHAR(20) NOT NULL DEFAULT 'H5',
   lock_version INT UNSIGNED NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -363,11 +458,10 @@ CREATE TABLE customer_order (
   KEY idx_order_activity_customer_filter (activity_id, customer_type, region_code, branch_name_snapshot),
   CONSTRAINT fk_order_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_order_customer FOREIGN KEY (activity_customer_id) REFERENCES activity_customer (id),
-  CONSTRAINT fk_order_admin FOREIGN KEY (last_modified_admin_id) REFERENCES admin_user (id),
   CONSTRAINT ck_order_status CHECK (status IN ('SUBMITTED', 'WITHDRAWN')),
   CONSTRAINT ck_order_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
-  CONSTRAINT ck_order_source CHECK (last_modified_source IN ('H5', 'ADMIN', 'SYSTEM')),
-  CONSTRAINT ck_order_totals CHECK (total_quantity > 0 AND total_tons >= 0 AND total_amount >= 0)
+  CONSTRAINT ck_order_source CHECK (last_modified_source IN ('H5', 'SYSTEM')),
+  CONSTRAINT ck_order_totals CHECK (total_quantity > 0 AND (total_tons IS NULL OR total_tons >= 0) AND total_amount >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE order_item (
@@ -383,14 +477,14 @@ CREATE TABLE order_item (
   variety_name VARCHAR(100) NULL,
   specification VARCHAR(200) NULL,
   case_pack VARCHAR(100) NULL,
-  rebate_status VARCHAR(16) NOT NULL,
+  rebate_status VARCHAR(20) NOT NULL,
   is_gift_box BOOLEAN NOT NULL,
   primary_image_object_key VARCHAR(512) NULL,
   quantity BIGINT UNSIGNED NOT NULL,
   case_price DECIMAL(18,4) NOT NULL,
   line_amount DECIMAL(18,2) NOT NULL,
-  ton_case_factor DECIMAL(18,8) NOT NULL,
-  line_tons DECIMAL(18,6) NOT NULL,
+  ton_case_factor DECIMAL(18,8) NULL,
+  line_tons DECIMAL(18,6) NULL,
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   UNIQUE KEY uk_order_item_product (order_id, activity_product_id),
@@ -398,7 +492,7 @@ CREATE TABLE order_item (
   CONSTRAINT fk_order_item_order FOREIGN KEY (order_id) REFERENCES customer_order (id),
   CONSTRAINT fk_order_item_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
   CONSTRAINT ck_order_item_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING')),
-  CONSTRAINT ck_order_item_values CHECK (quantity > 0 AND case_price >= 0 AND line_amount >= 0 AND ton_case_factor >= 0 AND line_tons >= 0)
+  CONSTRAINT ck_order_item_values CHECK (quantity > 0 AND case_price > 0 AND line_amount >= 0 AND (ton_case_factor IS NULL OR ton_case_factor > 0) AND (line_tons IS NULL OR line_tons >= 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE order_version (
@@ -407,15 +501,14 @@ CREATE TABLE order_version (
   order_id BIGINT UNSIGNED NOT NULL,
   version_no INT UNSIGNED NOT NULL,
   customer_type VARCHAR(16) NOT NULL,
-  region_code VARCHAR(16) NULL,
+  region_code VARCHAR(64) NULL,
   branch_name_snapshot VARCHAR(200) NULL,
   dealer_short_name_snapshot VARCHAR(200) NULL,
   dealer_full_name_snapshot VARCHAR(255) NOT NULL,
   total_quantity BIGINT UNSIGNED NOT NULL,
-  total_tons DECIMAL(18,6) NOT NULL,
+  total_tons DECIMAL(18,6) NULL,
   total_amount DECIMAL(18,2) NOT NULL,
   submitted_source VARCHAR(20) NOT NULL,
-  submitted_by_admin_id BIGINT UNSIGNED NULL,
   submitted_at DATETIME(3) NOT NULL,
   request_idempotency_key VARCHAR(128) NOT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -425,11 +518,9 @@ CREATE TABLE order_version (
   KEY idx_order_version_activity_time (activity_id, submitted_at),
   CONSTRAINT fk_order_version_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_order_version_order FOREIGN KEY (order_id) REFERENCES customer_order (id),
-  CONSTRAINT fk_order_version_admin FOREIGN KEY (submitted_by_admin_id) REFERENCES admin_user (id),
   CONSTRAINT ck_order_version_customer CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
-  CONSTRAINT ck_order_version_region CHECK (region_code IS NULL OR region_code IN ('EAST', 'SOUTH', 'NORTH_1', 'NORTH_2')),
-  CONSTRAINT ck_order_version_source CHECK (submitted_source IN ('H5', 'ADMIN')),
-  CONSTRAINT ck_order_version_totals CHECK (total_quantity > 0 AND total_tons >= 0 AND total_amount >= 0)
+  CONSTRAINT ck_order_version_source CHECK (submitted_source IN ('H5')),
+  CONSTRAINT ck_order_version_totals CHECK (total_quantity > 0 AND (total_tons IS NULL OR total_tons >= 0) AND total_amount >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE order_version_item (
@@ -446,14 +537,14 @@ CREATE TABLE order_version_item (
   specification VARCHAR(200) NULL,
   case_pack VARCHAR(100) NULL,
   customer_type VARCHAR(16) NOT NULL,
-  rebate_status VARCHAR(16) NOT NULL,
+  rebate_status VARCHAR(20) NOT NULL,
   is_gift_box BOOLEAN NOT NULL,
   primary_image_object_key VARCHAR(512) NULL,
   quantity BIGINT UNSIGNED NOT NULL,
   case_price DECIMAL(18,4) NOT NULL,
   line_amount DECIMAL(18,2) NOT NULL,
-  ton_case_factor DECIMAL(18,8) NOT NULL,
-  line_tons DECIMAL(18,6) NOT NULL,
+  ton_case_factor DECIMAL(18,8) NULL,
+  line_tons DECIMAL(18,6) NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   UNIQUE KEY uk_order_version_item_line (order_version_id, line_no),
@@ -462,7 +553,7 @@ CREATE TABLE order_version_item (
   CONSTRAINT fk_version_item_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
   CONSTRAINT ck_version_item_customer CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
   CONSTRAINT ck_version_item_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING')),
-  CONSTRAINT ck_version_item_values CHECK (quantity > 0 AND case_price >= 0 AND line_amount >= 0 AND ton_case_factor >= 0 AND line_tons >= 0)
+  CONSTRAINT ck_version_item_values CHECK (quantity > 0 AND case_price > 0 AND line_amount >= 0 AND (ton_case_factor IS NULL OR ton_case_factor > 0) AND (line_tons IS NULL OR line_tons >= 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE order_operation (
@@ -471,7 +562,6 @@ CREATE TABLE order_operation (
   order_id BIGINT UNSIGNED NOT NULL,
   operation_type VARCHAR(24) NOT NULL,
   source VARCHAR(20) NOT NULL,
-  admin_user_id BIGINT UNSIGNED NULL,
   order_version_no INT UNSIGNED NULL,
   reason VARCHAR(500) NULL,
   trace_id VARCHAR(64) NULL,
@@ -482,9 +572,8 @@ CREATE TABLE order_operation (
   KEY idx_order_operation_activity_time (activity_id, occurred_at),
   CONSTRAINT fk_order_operation_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_order_operation_order FOREIGN KEY (order_id) REFERENCES customer_order (id),
-  CONSTRAINT fk_order_operation_admin FOREIGN KEY (admin_user_id) REFERENCES admin_user (id),
   CONSTRAINT ck_order_operation_type CHECK (operation_type IN ('FIRST_SUBMIT', 'MODIFY_SUBMIT', 'WITHDRAW', 'RESUBMIT')),
-  CONSTRAINT ck_order_operation_source CHECK (source IN ('H5', 'ADMIN', 'SYSTEM'))
+  CONSTRAINT ck_order_operation_source CHECK (source IN ('H5', 'SYSTEM'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE api_idempotency (
@@ -626,7 +715,7 @@ CREATE TABLE lottery_candidate_snapshot (
   dealer_short_name_snapshot VARCHAR(200) NULL,
   dealer_full_name_snapshot VARCHAR(255) NOT NULL,
   customer_type VARCHAR(16) NOT NULL,
-  region_code VARCHAR(16) NULL,
+  region_code VARCHAR(64) NULL,
   branch_name_snapshot VARCHAR(200) NULL,
   phone_masked_snapshot VARCHAR(32) NULL,
   qualification_source VARCHAR(20) NOT NULL,

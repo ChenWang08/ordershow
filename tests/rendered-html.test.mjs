@@ -23,14 +23,14 @@ async function render() {
   );
 }
 
-test("server-renders the ordering prototype shell", async () => {
+test("server-renders the ordering system shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>订货会 · 交互原型<\/title>/);
-  assert.match(html, /客户订货 H5、实时数据大屏、幸运抽奖和管理后台交互原型/);
+  assert.match(html, /<title>订货会管理系统<\/title>/);
+  assert.match(html, /客户订货 H5、实时数据大屏、专题战报、幸运抽奖和管理后台/);
   assert.match(html, /订货 H5/);
   assert.match(html, /订货排行/);
   assert.match(html, /专题战报/);
@@ -65,4 +65,36 @@ test("keeps production assets and source wired", async () => {
   await access(new URL("../public/product-atlas.png", import.meta.url));
   await access(new URL("../public/og.png", import.meta.url));
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
+});
+
+test("keeps orders admin-read-only and wires the formal runtime APIs", async () => {
+  const [api, prototype, orderController, openapi] = await Promise.all([
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/order/OrderController.java", import.meta.url), "utf8"),
+    readFile(new URL("../docs/design/openapi/order-show-api.yaml", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(api, /saveH5Order/);
+  assert.match(api, /withdrawH5Order/);
+  assert.match(api, /loadAdminOrders/);
+  assert.match(api, /drawLotteryRound/);
+  assert.match(prototype, /await drawLotteryRound\(activityId, currentRound\.id\)/);
+  assert.match(orderController, /\/h5\/activities\/\{activityCode\}\/order\/withdraw/);
+  assert.doesNotMatch(orderController, /\/admin\/.*withdraw/);
+  assert.doesNotMatch(openapi, /\/admin\/activities\/\{activityId\}\/orders\/\{orderId\}\/withdraw/);
+});
+
+test("uses live overview data, full admin phones, Chinese regions, and linked attendance candidates", async () => {
+  const [prototype, customerService] = await Promise.all([
+    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/customer/CustomerService.java", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(prototype, /19,457,005\.28|38,620|1,316\.0/);
+  assert.match(prototype, /loadDashboard\(\{ customerType: "GENERAL" \}\)/);
+  assert.match(prototype, /regionOptions\.find\(\(item\) => item\.value === identityRegionCode\)\?\.name/);
+  assert.match(prototype, /row\.activityCustomerId !== null/);
+  assert.match(customerService, /decrypt\(rs\.getBytes\(9\)\)/);
+  assert.match(customerService, /String phone, String phoneMasked/);
 });

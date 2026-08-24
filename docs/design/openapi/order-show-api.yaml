@@ -706,7 +706,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [ACTIVE, INCOMPLETE, INACTIVE]
+            enum: [ACTIVE, INCOMPLETE]
         - name: keyword
           in: query
           schema:
@@ -718,6 +718,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericPageResponse'
+    post:
+      operationId: createActivityProduct
+      tags: [Catalog]
+      summary: 在当前已发布商品版本中手动新增单条商品
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 新增后的商品
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
   /admin/activities/{activityId}/products/{productId}:
     patch:
       operationId: updateActivityProduct
@@ -755,6 +778,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
+    delete:
+      operationId: deleteActivityProduct
+      tags: [Catalog]
+      summary: 从当前活动商品目录删除单条商品
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: productId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已从当前商品目录删除；历史订单不受影响
   /admin/activities/{activityId}/products/{productId}/images:
     post:
       operationId: addProductImage
@@ -868,6 +909,7 @@ paths:
       operationId: listActivityCustomers
       tags: [Customers]
       summary: 活动白名单列表
+      description: 仅限已登录管理员；响应可包含完整 phone 和 confirmerPhone，订单、H5、排行和大屏接口不得复用这些明文字段。
       security:
         - adminCookie: []
       parameters:
@@ -894,11 +936,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericPageResponse'
+    post:
+      operationId: createActivityCustomer
+      tags: [Customers]
+      summary: 在当前已发布白名单版本中手动新增客户
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: 新增后的活动客户
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
   /admin/activities/{activityId}/customers/{customerId}:
-    patch:
+    put:
       operationId: updateActivityCustomer
       tags: [Customers]
-      summary: 紧急修改或停用单条活动客户
+      summary: 修改单条活动客户
       security:
         - adminCookie: []
       parameters:
@@ -932,17 +997,41 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
-  /admin/activities/{activityId}/attendance:
+    delete:
+      operationId: deleteActivityCustomer
+      tags: [Customers]
+      summary: 从当前活动白名单删除客户
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: customerId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已从当前白名单删除；历史订单不受影响
+  /admin/activities/{activityId}/attendees:
     get:
       operationId: listActivityAttendance
       tags: [Customers]
       summary: 到场名单列表
+      description: 仅限已登录管理员；响应可包含完整 phone。未成功关联当前活动白名单的记录保留供处理，但不进入现场到场抽奖候选池。
       security:
         - adminCookie: []
       parameters:
         - $ref: '#/components/parameters/ActivityId'
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
+        - name: matchStatus
+          in: query
+          schema:
+            type: string
+            enum: [MATCHED, PENDING_CONFIRMATION, UNMATCHED]
       responses:
         '200':
           description: 到场名单分页
@@ -972,8 +1061,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
-  /admin/activities/{activityId}/attendance/{attendeeId}:
-    patch:
+  /admin/activities/{activityId}/attendees/{attendeeId}:
+    put:
       operationId: updateAttendanceEntry
       tags: [Customers]
       summary: 修改到场记录
@@ -1001,9 +1090,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
     delete:
-      operationId: deactivateAttendanceEntry
+      operationId: deleteAttendanceEntry
       tags: [Customers]
-      summary: 停用到场记录
+      summary: 从当前到场名单删除记录
       security:
         - adminCookie: []
       parameters:
@@ -1015,8 +1104,8 @@ paths:
             $ref: '#/components/schemas/Id'
         - $ref: '#/components/parameters/CsrfToken'
       responses:
-        '204':
-          description: 已停用
+        '200':
+          description: 已从当前到场名单删除
   /admin/activities/{activityId}/orders:
     get:
       operationId: listActivityOrders
@@ -1056,6 +1145,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrderPageResponse'
+  /admin/activities/{activityId}/orders/export:
+    get:
+      operationId: exportActivityOrders
+      tags: [Orders]
+      summary: 按当前筛选条件导出订单 Excel
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/OrderStatus'
+        - name: customerType
+          in: query
+          schema:
+            $ref: '#/components/schemas/CustomerType'
+        - name: keyword
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 订单 Excel 文件
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
   /admin/activities/{activityId}/orders/{orderId}:
     get:
       operationId: getActivityOrder
@@ -1098,63 +1220,23 @@ paths:
                       $ref: '#/components/schemas/OrderVersionSummary'
                   traceId:
                     type: string
-  /admin/activities/{activityId}/orders/{orderId}/versions/{versionNo}:
+  /admin/activities/{activityId}/orders/{orderId}/operations:
     get:
-      operationId: getOrderVersion
+      operationId: listOrderOperations
       tags: [Orders]
-      summary: 查询指定不可变订单版本及明细快照
+      summary: 查询客户订单操作轨迹
       security:
         - adminCookie: []
       parameters:
         - $ref: '#/components/parameters/ActivityId'
         - $ref: '#/components/parameters/OrderId'
-        - name: versionNo
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 1
       responses:
         '200':
-          description: 指定版本
+          description: 客户首次提交、修改、撤回和重新提交记录
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
-  /admin/activities/{activityId}/orders/{orderId}/withdraw:
-    post:
-      operationId: withdrawOrderAsAdmin
-      tags: [Orders]
-      summary: 管理员撤回订单
-      security:
-        - adminCookie: []
-      parameters:
-        - $ref: '#/components/parameters/ActivityId'
-        - $ref: '#/components/parameters/OrderId'
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/CsrfToken'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [expectedVersion, reason]
-              properties:
-                expectedVersion:
-                  type: integer
-                  minimum: 1
-                reason:
-                  type: string
-                  minLength: 1
-                  maxLength: 500
-      responses:
-        '200':
-          description: 撤回后的订单
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CurrentOrderResponse'
   /admin/activities/{activityId}/lottery/rules:
     get:
       operationId: listLotteryRules
@@ -1649,7 +1731,9 @@ components:
       enum: [GENERAL, SPECIAL]
     RegionCode:
       type: string
-      enum: [EAST, SOUTH, NORTH_1, NORTH_2]
+      minLength: 1
+      maxLength: 64
+      description: 活动内动态配置的大区代码，例如 EAST、SOUTH、NORTH；未来可增加 NORTH_1、NORTH_2。
     RebateStatus:
       type: string
       enum: [PARTICIPATING, NOT_PARTICIPATING]
@@ -1664,7 +1748,7 @@ components:
       enum: [PRODUCT, WHITELIST, ATTENDANCE, PRODUCT_IMAGE]
     ImportStatus:
       type: string
-      enum: [UPLOADED, PARSING, PREVIEW_READY, CONFIRMING, COMPLETED, FAILED, CANCELLED]
+      enum: [UPLOADED, PARSING, PREVIEW_READY, CONFIRMING, MATERIALIZING, READY_TO_PUBLISH, PUBLISHING, COMPLETED, FAILED, CANCELLED]
     Problem:
       type: object
       required: [type, title, status, code, traceId]
@@ -1841,7 +1925,7 @@ components:
           type: integer
     OrderableProduct:
       type: object
-      required: [id, materialName, customerType, rebateStatus, casePrice, tonCaseFactor, sortNo, images]
+      required: [id, materialName, customerType, rebateStatus, giftBox, visible, orderable, sortNo, images]
       properties:
         id:
           $ref: '#/components/schemas/Id'
@@ -1868,9 +1952,18 @@ components:
         giftBox:
           type: boolean
         casePrice:
-          $ref: '#/components/schemas/Decimal'
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
         tonCaseFactor:
-          $ref: '#/components/schemas/Decimal'
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
+        visible:
+          type: boolean
+        orderable:
+          type: boolean
+          description: 仅价格有效且商品可见时为 true；为 false 的商品仍可在 H5 展示“价格待完善”。
         sortNo:
           type: integer
         images:
@@ -1904,7 +1997,7 @@ components:
             $ref: '#/components/schemas/SubmitOrderItem'
     OrderItem:
       type: object
-      required: [lineNo, productId, materialName, quantity, casePrice, lineAmount, tonCaseFactor, lineTons]
+      required: [lineNo, productId, materialName, quantity, casePrice, lineAmount]
       properties:
         lineNo:
           type: integer
@@ -1924,12 +2017,16 @@ components:
         lineAmount:
           $ref: '#/components/schemas/Decimal'
         tonCaseFactor:
-          $ref: '#/components/schemas/Decimal'
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
         lineTons:
-          $ref: '#/components/schemas/Decimal'
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
     CurrentOrder:
       type: object
-      required: [id, orderNo, status, currentVersion, totalQuantity, totalTons, totalAmount, customer, items, firstSubmittedAt, lastSubmittedAt]
+      required: [id, orderNo, status, currentVersion, totalQuantity, totalAmount, customer, items, firstSubmittedAt, lastSubmittedAt]
       properties:
         id:
           $ref: '#/components/schemas/Id'
@@ -1945,7 +2042,9 @@ components:
           type: integer
           format: int64
         totalTons:
-          $ref: '#/components/schemas/Decimal'
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
         totalAmount:
           $ref: '#/components/schemas/Decimal'
         customer:
@@ -1977,7 +2076,7 @@ components:
           type: string
     OrderVersionSummary:
       type: object
-      required: [version, totalQuantity, totalTons, totalAmount, submittedAt, submittedSource]
+      required: [version, totalQuantity, totalAmount, submittedAt, submittedSource]
       properties:
         version:
           type: integer
@@ -1985,7 +2084,9 @@ components:
           type: integer
           format: int64
         totalTons:
-          $ref: '#/components/schemas/Decimal'
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
         totalAmount:
           $ref: '#/components/schemas/Decimal'
         submittedAt:
@@ -1993,7 +2094,7 @@ components:
           format: date-time
         submittedSource:
           type: string
-          enum: [H5, ADMIN]
+          enum: [H5]
     AdminMeResponse:
       type: object
       required: [data, traceId]
@@ -2038,10 +2139,6 @@ components:
       type: object
       required: [dealerName]
       properties:
-        activityCustomerId:
-          oneOf:
-            - $ref: '#/components/schemas/Id'
-            - type: 'null'
         participantName:
           type: [string, 'null']
           maxLength: 100
@@ -2060,6 +2157,49 @@ components:
         phone:
           type: [string, 'null']
           maxLength: 32
+    Attendance:
+      type: object
+      required: [id, dealerName, matchStatus, lotteryEligible, createdAt, updatedAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        activityCustomerId:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        participantName:
+          type: [string, 'null']
+        gender:
+          type: [string, 'null']
+        participantType:
+          type: [string, 'null']
+        dealerName:
+          type: string
+        branchName:
+          type: [string, 'null']
+        phone:
+          type: [string, 'null']
+          description: 仅已登录管理员可见的完整电话
+        phoneMasked:
+          type: [string, 'null']
+        matchStatus:
+          type: string
+          enum: [MATCHED, PENDING_CONFIRMATION, UNMATCHED]
+        matchMethod:
+          type: [string, 'null']
+          enum: [PHONE, FULL_NAME, SHORT_NAME, MANUAL, null]
+        matchReasonCode:
+          type: [string, 'null']
+        matchedDealerName:
+          type: [string, 'null']
+        lotteryEligible:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
     LotteryRoundWriteRequest:
       type: object
       required: [roundNo, name, winnerCount, candidateScope, customerType, excludePreviousWinners]

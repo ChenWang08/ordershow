@@ -1,0 +1,12 @@
+.git
+.vinext
+.wrangler
+dist
+node_modules
+backend/target
+*.xlsx
+*.xls
+*.zip
+*.docx
+_local_preview*.log
+tsconfig.tsbuildinfo

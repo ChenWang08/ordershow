@@ -139,10 +139,10 @@ stateDiagram-v2
   PARSING --> FAILED: 文件或解析失败
   PREVIEW_READY --> CONFIRMING: 管理员确认且无阻断错误
   PREVIEW_READY --> CANCELLED: 管理员取消
-  CONFIRMING --> MATERIALIZING: Worker 准备发布版本
+  CONFIRMING --> MATERIALIZING: 应用内任务执行器领取任务
   MATERIALIZING --> READY_TO_PUBLISH: 新版本校验完成
   MATERIALIZING --> FAILED: 准备失败
-  READY_TO_PUBLISH --> PUBLISHING: Worker 取得发布权
+  READY_TO_PUBLISH --> PUBLISHING: 执行器取得发布权
   PUBLISHING --> COMPLETED: 短事务切换当前版本指针
   PUBLISHING --> FAILED: 发布事务失败且当前版本不变
   FAILED --> [*]
@@ -157,13 +157,15 @@ stateDiagram-v2
 | `UPLOADED` | 查询、等待解析、取消 |
 | `PARSING` | 只读查询进度 |
 | `PREVIEW_READY` | 查询差异/错误、编辑或删除预览行、确认、取消 |
-| `CONFIRMING` | 只读，防止重复确认；等待 Worker 领取 |
+| `CONFIRMING` | 只读，防止重复确认；等待任务执行器领取 |
 | `MATERIALIZING` | 只读；在非当前数据集内准备不可变发布版本 |
 | `READY_TO_PUBLISH` | 只读；等待短事务原子发布 |
 | `PUBLISHING` | 只读，防止重复发布 |
 | `COMPLETED` | 查看结果和原始文件；不得修改该批次 |
 | `FAILED` | 查看错误；重新上传创建新任务 |
 | `CANCELLED` | 查看；重新上传创建新任务 |
+
+以上是当前 API 和数据库实际使用的状态。当前由同一 Spring Boot 进程内的任务执行器使用任务状态和租约领取确认任务；生产环境可把同一处理器拆为独立 Worker，无需改变状态契约。
 
 ### 4.2 阻断规则
 
@@ -176,6 +178,23 @@ stateDiagram-v2
 - 确认时基础数据已被另一个导入批次改变。
 
 阻断错误必须修复或删除预览行，不能只点击忽略。警告可以由管理员确认后继续。
+
+## 5. 现场到场关联状态
+
+到场关联状态属于当前发布版本的计算结果，不跨全量导入版本继承：
+
+```mermaid
+stateDiagram-v2
+  [*] --> MATCHED: 手机号/全称/简称唯一且一致
+  [*] --> PENDING_CONFIRMATION: 多候选或手机号与名称冲突
+  [*] --> UNMATCHED: 没有唯一候选
+```
+
+- 发布新的到场 Excel 时，系统针对新版本全部重新计算；上一到场版本不再参与当前业务；
+- 发布新的白名单 Excel 时，系统针对当前到场版本全部重新计算，不保留旧白名单关联；
+- `MATCHED` 只有在目标客户仍属于当前有效白名单时才具备抽奖资格；
+- `PENDING_CONFIRMATION` 和 `UNMATCHED` 仅用于当前名单核对，不进入抽奖候选池；
+- 当前业务页面不展示旧版本“失效”或“停用”状态，旧数据仅在导入版本和审计记录中保留。
 
 ### 4.3 失败恢复
 
@@ -252,6 +271,8 @@ stateDiagram-v2
 
 ## 6. 导出任务状态机
 
+以下异步导出状态机是生产增强目标；当前订单导出由后台接口直接生成文件。
+
 ```mermaid
 stateDiagram-v2
   [*] --> PENDING
@@ -264,6 +285,8 @@ stateDiagram-v2
 导出查询条件在创建任务时保存为 JSON 快照。文件过期只删除下载对象，不删除任务、审计和生成时的筛选条件。
 
 ## 7. 自动调度与幂等
+
+当前本地环境由 Spring Boot 应用内执行器处理导入和调度，任务状态和租约保存在 MySQL；以下约束在当前进程内同样适用，生产环境可把处理器拆为独立 Worker：
 
 - API 只在 MySQL 中创建任务记录；Worker 通过租约领取 `PENDING` 或可重试任务，使用状态条件更新或 `SELECT ... FOR UPDATE SKIP LOCKED` 避免多个 Worker 同时执行；
 - 任务记录保存 `attempt_count`、`locked_until`、`next_attempt_at`、`worker_id` 和最后错误摘要。租约过期可重新领取，超过重试上限进入 `FAILED` 并告警；

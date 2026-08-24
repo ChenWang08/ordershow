@@ -7,7 +7,7 @@
 - 多场活动数据永久保留，新导入不得覆盖历史活动；
 - 当前数据与历史快照分离，基础资料修改不改变历史订单；
 - 金额使用定点小数，禁止使用 FLOAT/DOUBLE；
-- 业务删除使用状态或停用时间，订单版本、中奖结果和审计日志不可物理删除；
+- 业务页面删除当前版本数据；数据库内部可使用可见标记或删除时间保护历史引用，订单版本、中奖结果和审计日志不可物理删除；
 - 数据库唯一约束是并发一致性的最后防线，不能只依赖 Redis；
 - 时间字段使用 `DATETIME(3)` 保存 UTC 时间点，展示时按活动时区转换。
 
@@ -25,11 +25,11 @@
 | 字段 | 用途 |
 | --- | --- |
 | `phone_ciphertext` | AES-GCM 等应用层加密后的原始标准化手机号，授权查看/导出时解密 |
-| `phone_lookup_hash` | `HMAC-SHA-256(environment_secret, customer_type + ':' + normalized_phone)`，用于精确匹配和唯一约束 |
-| `phone_masked` | 页面普通展示，例如 `138****1234` |
+| `phone_lookup_hash` | `HMAC-SHA-256(environment_secret, normalized_phone)`，用于精确匹配；唯一约束另组合活动、数据版本和客户类型 |
+| `phone_masked` | H5、订单、排行、战报、抽奖大屏和日志等非明文场景展示，例如 `138****1234` |
 | `phone_key_version` | 支持将来轮换加密密钥 |
 
-由于采用 HMAC 精确查询，手机号搜索默认是完整手机号精确搜索；如未来必须支持任意片段模糊查询，需要新增专用受控搜索索引，不能退化为所有场景保存明文。
+由于采用 HMAC 精确查询，手机号搜索默认是完整手机号精确搜索；如未来必须支持任意片段模糊查询，需要新增专用受控搜索索引，不能退化为所有场景保存明文。已登录管理员访问白名单和现场到场管理接口时，后端可按权限解密并返回完整 `phone`；白名单同时可返回完整 `confirmerPhone`。这些字段不得进入公开/H5/订单/大屏接口、缓存、普通日志或审计载荷。
 
 ## 4. 数据域与表
 
@@ -62,11 +62,11 @@
 | `import_error` | 定位到 Sheet、行、字段的错误 |
 | `export_task` | 后台异步导出任务 |
 
-Excel 解析、标准化、差异计算和人工编辑只写入 staging，不修改当前商品/白名单。确认后由 Worker 将 staging 物化为不可变的 `import_publish_version` 及其版本化商品/客户行；最终发布事务只锁定活动 + 数据类型，校验基础数据版本和任务状态，并切换 `activity_data_binding` 的当前版本指针，同时写审计和 outbox。读请求只能读取当前指针对应的版本，因此不会看到半批数据。
+Excel 解析、标准化、差异计算和人工编辑只写入 staging，不修改当前商品/白名单。确认后由当前 Spring Boot 应用内任务执行器将 staging 物化为不可变的 `import_publish_version` 及其版本化商品/客户行；生产环境拆分独立 Worker 后承接同一职责。最终发布事务只锁定活动 + 数据类型，校验基础数据版本和任务状态，并切换 `activity_data_binding` 的当前版本指针，同时写审计和 outbox。读请求只能读取当前指针对应的版本，因此不会看到半批数据。
 
 版本化商品/客户行可以使用独立版本表，也可以在现有领域表增加 `data_version_id`；物理实现不同不影响契约：所有当前查询必须先解析当前指针，再限定到同一个发布版本，不能混读旧版本和新版本。
 
-旧版本在保留期内不删除，可用于审计和回滚；已有订单只读取下单时快照，不受后续版本切换或停用影响。`import_task` 和 `export_task` 同时承担 DB Task Queue 记录，必须保存状态、租约、尝试次数、下次重试时间和最后错误摘要。
+旧版本在保留期内不删除，可用于审计和回滚；已有订单只读取下单时快照，不受后续版本切换或当前目录删除影响。`import_task` 和 `export_task` 同时承担 DB Task Queue 记录，必须保存状态、租约、尝试次数、下次重试时间和最后错误摘要。
 
 白名单和到场名单的预览行可能包含手机号。此类原始/编辑载荷写入 `sensitive_data_ciphertext`，普通 JSON 只保留脱敏预览；`import_error.raw_value_masked` 同样不得保存手机号明文。导入任务完成并超过排障保留期后，可以清理预览密文，但原始文件仍按受控对象存储策略保留。
 
@@ -76,14 +76,14 @@ Excel 解析、标准化、差异计算和人工编辑只写入 staging，不修
 | --- | --- | --- |
 | `customer` | 跨活动永久经销商身份 | 客户类型 + 标准化全称唯一 |
 | `activity_customer` | 当前活动白名单和资料快照 | 活动 + 客户类型 + 手机 HMAC 唯一 |
-| `activity_attendee` | 当前活动到场人员 | 可多参会人关联同一经销商 |
+| `activity_attendee` | 当前活动到场人员及本版本白名单关联结果 | `data_version_id` 限定当前全量版本；`match_status` 为已关联、待确认或未关联 |
 | `activity_product` | 当前活动商品目录 | 活动 + 业务键唯一；分别保存是否展示和是否可订 |
 | `activity_product_branch_scope` | 分公司定制品允许范围 | 商品 + 标准化分公司唯一 |
 | `product_image` | 商品图片及主图顺序 | 商品 + 文件唯一；每商品只允许一个主图由应用层维护 |
 
 空物料代码商品使用应用层计算的 `business_key` 唯一识别；数据库同时保存 `material_code` 和 `business_key`，避免 NULL 唯一约束语义导致重复。
 
-商品展示与可订分离：已启用且物料名称有效时 `is_visible=true`；仅当元/箱存在且大于等于 0 时 `is_orderable=true`。物料代码、元/瓶、规格、箱规和吨箱转换系数均可空，不影响展示；吨箱转换系数为空不影响下单。
+商品展示与可订分离：已启用且物料名称有效时 `is_visible=true`；仅当元/箱存在且大于 0 时 `is_orderable=true`。物料代码、元/瓶、规格、箱规和吨箱转换系数均可空，不影响展示；吨箱转换系数为空不影响下单。
 
 ### 4.5 订单
 
@@ -118,6 +118,10 @@ Excel 解析、标准化、差异计算和人工编辑只写入 staging，不修
 | `domain_event_outbox` | 事务提交后可靠触发缓存失效和 SSE 通知 |
 
 看板数据可以缓存在 Redis，不另设当前事实表；缓存丢失时从 `customer_order` 和 `order_item` 重建。
+
+抽奖候选的业务主体始终是 `activity_customer`。当候选范围为 `ATTENDEES` 时，只选取当前到场发布版本中 `match_status=MATCHED`、且仍指向当前有效白名单版本的活动客户，并按 `activity_customer.id` 去重；`PENDING_CONFIRMATION` 和 `UNMATCHED` 不进入候选池。
+
+`activity_attendee.match_method` 仅记录精确关联依据：`PHONE`、`FULL_NAME`、`SHORT_NAME` 或 `MANUAL`。Excel 发布不更新上一版本行，而是创建新版本并重新计算全部关联。白名单版本切换后，当前到场版本也必须在同一发布事务中重新计算，不能保留旧白名单关联。
 
 ### 4.7 审计
 
@@ -174,7 +178,7 @@ api_idempotency(activity_id, actor_type, actor_id, endpoint_code, idempotency_ke
 ## 8. 数据生命周期
 
 - 活动、订单版本、中奖结果和审计默认长期保留；
-- 商品和活动客户使用 `is_active` 与 `deactivated_at` 停用；
+- 商品和活动客户可使用 `is_visible/is_active` 与 `deactivated_at` 在底层隐藏已从当前版本删除的数据，这些字段不形成后台“停用记录”功能；
 - 原始导入文件、导入错误和导出文件保留期可按公司制度配置；
 - 导出文件到期可从对象存储删除，但导出任务元数据和审计保留；
 - 商品图片只有在无当前商品、订单快照或其他引用后才允许物理清理；
@@ -197,7 +201,7 @@ api_idempotency(activity_id, actor_type, actor_id, endpoint_code, idempotency_ke
 1. 导入任务必须为 `PREVIEW_READY`；
 2. 同活动同数据类型只允许一个 `CONFIRMING` 任务；
 3. 校验预览无阻断错误；
-4. Worker 在非当前数据集内物化并校验新的发布版本；
+4. 当前应用内任务执行器在非当前数据集内物化并校验新的发布版本；生产环境拆分后由 Worker 承接；
 5. 短事务锁定活动 + 数据类型，检查 `base_version` 未变化后切换当前版本指针；
 6. 更新任务统计和状态，写审计和 outbox；
 7. 最终发布事务失败时当前版本保持不变；发布后的旧版本可按策略回滚。

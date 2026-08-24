@@ -6,9 +6,9 @@
 - 所有正式业务计算、权限和状态检查在后端执行；
 - API 版本前缀固定为 `/api/v1`；不兼容修改发布 `/api/v2`，不得静默改变旧字段含义；
 - JSON 字段使用 `camelCase`，数据库字段使用 `snake_case`；
-- 所有 ID 在 JSON 中以字符串返回，避免 JavaScript 大整数精度丢失；
+- 当前 API 的自增 ID 在 JSON 中按 `integer/int64` 返回，前端使用 `number`；应保证对外 ID 不超过 JavaScript 安全整数，未来改用更大 ID 或 ULID 时须统一升级契约；
 - 所有时间使用 ISO 8601 UTC，例如 `2026-08-20T08:30:00.123Z`；
-- 金额、价格、吨数和转换系数使用十进制字符串，不使用 JSON 浮点数。
+- 当前 API 将金额、价格、吨数和转换系数按 JSON number 返回；权威计算始终由后端使用 `BigDecimal` 完成，前端浮点数只用于展示，不能作为订单结算依据。
 
 ## 2. API 分区
 
@@ -30,7 +30,7 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 ```json
 {
   "data": {
-    "id": "123"
+    "id": 123
   },
   "traceId": "01J5ABC..."
 }
@@ -69,7 +69,7 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 }
 ```
 
-不得把数据库异常、堆栈、对象存储地址、手机号明文或密钥返回给客户端。
+不得把数据库异常、堆栈、对象存储内部地址或密钥返回给客户端。手机号明文只允许在已鉴权的白名单、现场到场管理接口中按权限返回；公开接口、H5、订单、排行、战报、抽奖大屏和错误响应只能返回脱敏值或不返回。
 
 ## 4. 认证和会话
 
@@ -80,6 +80,12 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 3. 任何修改请求同时携带 `X-CSRF-Token`；
 4. `POST /admin/auth/logout` 撤销当前会话；
 5. 禁用管理员账号时撤销其全部会话。
+
+管理员手机号返回规则：
+
+- 白名单列表/详情可返回完整 `phone` 和 `confirmerPhone`，现场到场列表/详情可返回完整 `phone`；
+- 订单列表、订单详情及导出仍只使用脱敏手机号；
+- 完整手机号不得下发给公开/H5/screen 接口，也不得写入普通日志和错误响应。
 
 ### 4.2 H5
 
@@ -134,7 +140,7 @@ H5 与 API 默认通过同站点托管入口提供。H5 的写请求必须携带
 
 ```text
 POST 上传文件 → 202 + taskId
-GET 任务 → UPLOADED / PARSING / PREVIEW_READY / MATERIALIZING / READY_TO_PUBLISH / FAILED
+GET 任务 → UPLOADED / PARSING / PREVIEW_READY / CONFIRMING / MATERIALIZING / READY_TO_PUBLISH / PUBLISHING / COMPLETED / FAILED / CANCELLED
 GET 预览行和错误 → 管理员编辑/删除预览行
 POST 确认 → CONFIRMING → MATERIALIZING → READY_TO_PUBLISH → PUBLISHING → COMPLETED
 ```
@@ -143,9 +149,18 @@ POST 确认 → CONFIRMING → MATERIALIZING → READY_TO_PUBLISH → PUBLISHING
 - 服务端校验扩展名、MIME、文件签名和 SHA-256；
 - 相同活动、类型和文件哈希的重复上传给出提示，但不擅自覆盖；
 - 阻断错误未解决时不能确认；
-- 解析和预览只写 staging；Worker 在非当前数据集内准备发布版本，最后由短事务切换活动 + 数据类型的当前版本指针；
+- 解析和预览只写 staging；当前由 Spring Boot 应用内任务执行器准备并发布数据，生产环境可拆为独立 Worker；发布事务失败时不得留下半批有效数据；
 - 发布事务失败时当前目录保持不变，旧版本可以审计或回滚；
 - 活动开始后默认禁止 Excel 全量导入和图片 ZIP 批量导入。
+
+### 7.1 现场到场全量替换与关联
+
+- 每次发布现场到场 Excel 都创建新的完整 `ATTENDANCE` 版本，当前列表不合并或继承上一版本记录及关联；
+- 后端在参会人员类型对应的客户通道内，按手机号唯一、经销商全称唯一、同分公司经销商简称唯一依次精确匹配，不做模糊匹配；
+- 响应返回 `matchStatus`、`matchMethod`、`matchReasonCode`、`matchedDealerName` 和 `lotteryEligible`；
+- `matchStatus` 只有 `MATCHED`、`PENDING_CONFIRMATION`、`UNMATCHED`；当前列表可按状态筛选；
+- 手机号与名称指向不同客户、全称与简称冲突或存在多个候选时返回 `PENDING_CONFIRMATION`，不能静默选择第一条；
+- 白名单发布后，服务端立即重算当前到场版本的全部关联；只有 `lotteryEligible=true` 的记录进入现场到场抽奖候选池。
 
 ## 8. 订单 API 规则
 
@@ -155,7 +170,7 @@ H5 只提交商品 ID 和箱数：
 {
   "expectedVersion": 2,
   "items": [
-    { "productId": "301", "quantity": 20 }
+    { "productId": 301, "quantity": 20 }
   ]
 }
 ```
