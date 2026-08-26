@@ -82,8 +82,8 @@ public class ProductController {
 
   @PostMapping("/admin/activities/{activityId}/product-images/zip")
   ApiResponse<ProductService.ZipPreview> zip(@PathVariable long activityId, @RequestParam MultipartFile file,
-      @RequestParam(defaultValue = "false") boolean confirm, HttpServletRequest request) {
-    return ApiResponse.of(service.previewZip(activityId, file, confirm, auth.requireAdmin(request).id()), TraceFilter.id(request));
+      HttpServletRequest request) {
+    return ApiResponse.of(service.previewZip(activityId, file, false, auth.requireAdmin(request).id()), TraceFilter.id(request));
   }
 
   public record ImagePatch(Boolean primary, Integer sortNo, String reason) {}

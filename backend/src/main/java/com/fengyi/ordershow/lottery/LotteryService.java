@@ -76,13 +76,16 @@ public class LotteryService {
   public RuleView update(long activityId, long ruleId, RuleWrite request, AdminPrincipal admin) {
     validate(request);
     RuleView current = rule(activityId, ruleId);
-    if (!"DRAFT".equals(current.status())) {
-      throw DomainException.conflict("LOTTERY_RULE_READ_ONLY", "已发布规则不能修改，请新建规则");
-    }
+    if ("ARCHIVED".equals(current.status())) throw DomainException.conflict("LOTTERY_RULE_READ_ONLY", "已归档规则不能修改");
     jdbc.update("UPDATE lottery_rule SET name = ?, updated_by = ? WHERE id = ? AND activity_id = ?",
         request.name(), admin.id(), ruleId, activityId);
-    jdbc.update("DELETE FROM lottery_round WHERE lottery_rule_id = ? AND status = 'DRAFT'", ruleId);
-    replaceRounds(activityId, ruleId, request.rounds());
+    if ("DRAFT".equals(current.status())) {
+      jdbc.update("DELETE FROM lottery_round WHERE lottery_rule_id = ? AND status = 'DRAFT'", ruleId);
+      replaceRounds(activityId, ruleId, request.rounds());
+    } else {
+      revisePublishedRounds(activityId, ruleId, current.rounds(), request.rounds());
+      outbox(activityId, "LOTTERY_RULE_REVISED", String.valueOf(ruleId));
+    }
     return rule(activityId, ruleId);
   }
 
@@ -91,6 +94,13 @@ public class LotteryService {
     RuleView current = rule(activityId, ruleId);
     if (!"DRAFT".equals(current.status())) throw DomainException.conflict("LOTTERY_RULE_STATUS", "只有草稿规则可以发布");
     if (current.rounds().isEmpty()) throw DomainException.badRequest("LOTTERY_ROUNDS_EMPTY", "至少配置一个抽奖轮次");
+    Integer startedRounds = jdbc.queryForObject("""
+        SELECT COUNT(*) FROM lottery_round r JOIN lottery_rule lr ON lr.id = r.lottery_rule_id
+        WHERE lr.activity_id = ? AND lr.status = 'PUBLISHED' AND r.status NOT IN ('READY', 'DRAFT')
+        """, Integer.class, activityId);
+    if (startedRounds != null && startedRounds > 0) {
+      throw DomainException.conflict("LOTTERY_RULE_ALREADY_STARTED", "抽奖已开始，请直接修改尚未开始的后续轮次");
+    }
     jdbc.update("UPDATE lottery_rule SET status = 'ARCHIVED', updated_by = ? WHERE activity_id = ? AND status = 'PUBLISHED'", admin.id(), activityId);
     jdbc.update("UPDATE lottery_rule SET status = 'PUBLISHED', updated_by = ? WHERE id = ?", admin.id(), ruleId);
     jdbc.update("UPDATE lottery_round SET status = 'READY' WHERE lottery_rule_id = ? AND status = 'DRAFT'", ruleId);
@@ -115,13 +125,18 @@ public class LotteryService {
       if (!Set.of("READY", "RESET").contains(round.status())) {
         throw DomainException.conflict("LOTTERY_ROUND_STATUS", "该轮次当前不能抽奖");
       }
-      List<Candidate> candidates = candidates(round);
-      if (candidates.size() < round.winnerCount()) {
-        throw DomainException.unprocessable("LOTTERY_CANDIDATES_INSUFFICIENT",
-            "符合条件的客户仅 " + candidates.size() + " 家，少于中奖名额 " + round.winnerCount());
+      Integer unfinishedPrevious = jdbc.queryForObject("""
+          SELECT COUNT(*) FROM lottery_round
+          WHERE lottery_rule_id = ? AND round_no < ? AND status <> 'COMPLETED'
+          """, Integer.class, round.ruleId(), round.roundNo());
+      if (unfinishedPrevious != null && unfinishedPrevious > 0) {
+        throw DomainException.conflict("LOTTERY_ROUND_OUT_OF_ORDER", "请先完成前一轮抽奖");
       }
+      List<Candidate> candidates = candidates(round);
+      if (candidates.isEmpty()) throw DomainException.unprocessable("LOTTERY_CANDIDATES_EMPTY", "当前没有符合条件的候选客户");
       candidates = candidates.stream().map(value -> value.withRandom(randomBytes())).sorted(Comparator.comparing(Candidate::randomKey, LotteryService::compareBytes)).toList();
-      List<Candidate> winners = candidates.subList(0, round.winnerCount());
+      int actualWinnerCount = Math.min(round.winnerCount(), candidates.size());
+      List<Candidate> winners = candidates.subList(0, actualWinnerCount);
       int attemptNo = round.currentAttemptNo() + 1;
       byte[] resultHash = resultHash(round.id(), attemptNo, candidates, winners);
       long attemptId = insertAttempt(activityId, round, attemptNo, candidates.size(), resultHash, admin);
@@ -130,7 +145,7 @@ public class LotteryService {
       int position = 0;
       for (Candidate candidate : candidates) {
         long snapshotId = insertSnapshot(activityId, round, attemptId, candidate);
-        if (position < round.winnerCount()) {
+        if (position < actualWinnerCount) {
           position++;
           String display = displayName(round, candidate);
           jdbc.update("""
@@ -148,8 +163,8 @@ public class LotteryService {
             lock_version = lock_version + 1 WHERE id = ?
           """, attemptNo, candidates.size(), resultHash, admin.id(), round.id());
       outbox(activityId, "LOTTERY_DRAWN", String.valueOf(round.id()));
-      return new DrawResult(round.id(), attemptId, attemptNo, candidates.size(), resultWinners,
-          HexFormat.of().formatHex(resultHash), Instant.now());
+      return new DrawResult(round.id(), attemptId, attemptNo, candidates.size(), round.winnerCount(), actualWinnerCount,
+          round.winnerCount() - actualWinnerCount, resultWinners, HexFormat.of().formatHex(resultHash), Instant.now());
     } catch (DuplicateKeyException exception) {
       throw DomainException.conflict("LOTTERY_DRAW_CONFLICT", "该轮抽奖已被执行，请刷新查看结果");
     } finally {
@@ -172,6 +187,13 @@ public class LotteryService {
   public RoundView reset(long activityId, long roundId, String reason, AdminPrincipal admin) {
     RoundView round = lockRound(activityId, roundId);
     if (!Set.of("DRAWN", "COMPLETED").contains(round.status())) throw DomainException.conflict("LOTTERY_ROUND_STATUS", "当前轮次没有可作废的抽奖结果");
+    Integer startedLater = jdbc.queryForObject("""
+        SELECT COUNT(*) FROM lottery_round
+        WHERE lottery_rule_id = ? AND round_no > ? AND status NOT IN ('READY', 'DRAFT')
+        """, Integer.class, round.ruleId(), round.roundNo());
+    if (startedLater != null && startedLater > 0) {
+      throw DomainException.conflict("LOTTERY_RESET_OUT_OF_ORDER", "后续轮次已经开始，不能单独重置此前轮次");
+    }
     if (reason == null || reason.isBlank()) throw DomainException.badRequest("RESET_REASON_REQUIRED", "请填写重抽原因");
     jdbc.update("UPDATE lottery_winner SET status = 'INVALIDATED', invalidated_reason = ?, invalidated_at = UTC_TIMESTAMP(3), invalidated_by = ? WHERE round_id = ? AND status = 'VALID'",
         reason.trim(), admin.id(), roundId);
@@ -196,6 +218,27 @@ public class LotteryService {
         WHERE w.activity_id = ? AND w.status = 'VALID' ORDER BY w.created_at DESC, w.winner_position
         """, (rs, rowNum) -> new WinnerView(rs.getLong(1), rs.getInt(2), rs.getLong(3), rs.getString(4), rs.getString(5),
         rs.getString(6), rs.getString(7), rs.getString(8)), activityId);
+  }
+
+  public CandidatePreview preview(long activityId, PreviewRequest request) {
+    validatePreview(request);
+    RoundView virtualRound = new RoundView(0, activityId, 0, request.roundNo(), "预览", null,
+        request.winnerCount(), request.candidateScope(), request.customerType(), request.minimumOrderAmount(), null,
+        request.roundNo() > 1 && request.excludePreviousWinners(), "FULL_NAME", "DRAFT", 0, null,
+        null, null, null, 0);
+    List<CandidatePreviewItem> items = candidates(virtualRound).stream().map(candidate -> new CandidatePreviewItem(
+        candidate.customerId(), candidate.fullName(), candidate.customerType(), candidate.regionCode(), candidate.branchName(),
+        candidate.phoneMasked(), request.candidateScope(), candidate.orderAmount())).toList();
+    int actualWinnerCount = Math.min(request.winnerCount(), items.size());
+    return new CandidatePreview(Instant.now(), items.size(), request.winnerCount(), actualWinnerCount,
+        Math.max(0, request.winnerCount() - actualWinnerCount), items);
+  }
+
+  public WinnerStatistics winnerStatistics(long activityId) {
+    return jdbc.queryForObject("""
+        SELECT SUM(status = 'VALID'), COUNT(DISTINCT CASE WHEN status = 'VALID' THEN activity_customer_id END),
+          SUM(status = 'INVALIDATED') FROM lottery_winner WHERE activity_id = ?
+        """, (rs, rowNum) -> new WinnerStatistics(rs.getLong(1), rs.getLong(2), rs.getLong(3)), activityId);
   }
 
   private List<RoundView> rounds(long ruleId) {
@@ -258,13 +301,10 @@ public class LotteryService {
         AND NOT EXISTS (SELECT 1 FROM lottery_winner pw WHERE pw.activity_id = c.activity_id
           AND pw.activity_customer_id = c.id AND pw.status = 'VALID')
         """ : "";
-    String cutoffClause = round.qualificationCutoffAt() != null && "VALID_ORDERS".equals(round.candidateScope())
-        ? "AND o.last_submitted_at <= ? " : "";
     List<Object> args = new ArrayList<>();
     args.add(round.activityId());
     args.add(round.customerType()); args.add(round.customerType());
     if ("VALID_ORDERS".equals(round.candidateScope())) args.add(round.minimumOrderAmount());
-    if (!cutoffClause.isEmpty()) args.add(Timestamp.from(round.qualificationCutoffAt()));
     return jdbc.query("""
         SELECT c.id, c.dealer_short_name, c.dealer_full_name, c.customer_type, c.region_code, c.branch_name,
           c.phone_masked, o.id, o.total_amount
@@ -273,16 +313,19 @@ public class LotteryService {
           AND wb.current_version_id = c.data_version_id
         LEFT JOIN customer_order o ON o.activity_id = c.activity_id AND o.activity_customer_id = c.id
         WHERE c.activity_id = ? AND c.is_active = TRUE AND (? = 'ALL' OR c.customer_type = ?)
-        """ + scopeClause + cutoffClause + previousClause + " ORDER BY c.id",
+        """ + scopeClause + previousClause + " ORDER BY c.id",
         (rs, rowNum) -> new Candidate(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
             rs.getString(6), rs.getString(7), rs.getObject(8) == null ? null : rs.getLong(8), rs.getBigDecimal(9), null), args.toArray());
   }
 
   private long insertAttempt(long activityId, RoundView round, int attemptNo, int candidateCount, byte[] resultHash, AdminPrincipal admin) {
+    int actualWinnerCount = Math.min(round.winnerCount(), candidateCount);
     GeneratedKeyHolder keys = new GeneratedKeyHolder();
     String snapshot = toJson(Map.of("scope", round.candidateScope(), "customerType", round.customerType(),
         "minimumOrderAmount", round.minimumOrderAmount(), "excludePreviousWinners", round.excludePreviousWinners(),
-        "winnerCount", round.winnerCount(), "displayNameType", round.displayNameType()));
+        "configuredWinnerCount", round.winnerCount(), "actualWinnerCount", actualWinnerCount,
+        "unawardedCount", round.winnerCount() - actualWinnerCount, "candidateCount", candidateCount,
+        "deduplicationKey", "activity_customer.id", "displayNameType", round.displayNameType()));
     jdbc.update(connection -> {
       PreparedStatement statement = connection.prepareStatement("""
           INSERT INTO lottery_draw_attempt(activity_id, round_id, attempt_no, status, candidate_count, winner_count,
@@ -290,7 +333,7 @@ public class LotteryService {
           VALUES (?, ?, ?, 'DRAWN', ?, ?, ?, ?, UTC_TIMESTAMP(3), ?)
           """, Statement.RETURN_GENERATED_KEYS);
       statement.setLong(1, activityId); statement.setLong(2, round.id()); statement.setInt(3, attemptNo);
-      statement.setInt(4, candidateCount); statement.setInt(5, round.winnerCount()); statement.setString(6, snapshot);
+      statement.setInt(4, candidateCount); statement.setInt(5, actualWinnerCount); statement.setString(6, snapshot);
       statement.setBytes(7, resultHash); statement.setLong(8, admin.id());
       return statement;
     }, keys);
@@ -323,26 +366,84 @@ public class LotteryService {
     int no = 0;
     for (RoundWrite round : rounds) {
       no++;
-      jdbc.update("""
-          INSERT INTO lottery_round(activity_id, lottery_rule_id, round_no, name, prize_name, winner_count,
-            candidate_scope, customer_type, minimum_order_amount, qualification_cutoff_at,
-            exclude_previous_winners, display_name_type, status)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'DRAFT')
-          """, activityId, ruleId, no, round.name(), round.prizeName(), round.winnerCount(), round.candidateScope(),
-          round.customerType(), round.minimumOrderAmount(), round.qualificationCutoffAt() == null ? null : Timestamp.from(round.qualificationCutoffAt()),
-          round.excludePreviousWinners(), round.displayNameType());
+      insertRound(activityId, ruleId, no, round, "DRAFT");
     }
+  }
+
+  private void revisePublishedRounds(long activityId, long ruleId, List<RoundView> current, List<RoundWrite> requested) {
+    int lockedThrough = 0;
+    for (RoundView round : current) if (!"READY".equals(round.status())) lockedThrough = Math.max(lockedThrough, round.roundNo());
+    if (requested.size() < lockedThrough) throw DomainException.conflict("LOTTERY_ROUND_LOCKED", "已开始的轮次不能删除");
+    for (int index = 0; index < lockedThrough; index++) {
+      RoundView before = current.get(index); RoundWrite after = requested.get(index);
+      if (!sameConfiguration(before, after)) {
+        throw DomainException.conflict("LOTTERY_ROUND_LOCKED", "第 " + before.roundNo() + " 轮已开始，不能修改");
+      }
+    }
+    for (int index = lockedThrough; index < Math.min(current.size(), requested.size()); index++) {
+      RoundView before = current.get(index); RoundWrite after = requested.get(index);
+      if (!"READY".equals(before.status())) throw DomainException.conflict("LOTTERY_ROUND_LOCKED", "已开始的轮次不能修改");
+      updateReadyRound(before.id(), index + 1, after);
+    }
+    for (int index = current.size() - 1; index >= requested.size(); index--) {
+      RoundView before = current.get(index);
+      if (!"READY".equals(before.status())) throw DomainException.conflict("LOTTERY_ROUND_LOCKED", "已开始的轮次不能删除");
+      jdbc.update("DELETE FROM lottery_round WHERE id = ? AND status = 'READY'", before.id());
+    }
+    for (int index = current.size(); index < requested.size(); index++) {
+      insertRound(activityId, ruleId, index + 1, requested.get(index), "READY");
+    }
+  }
+
+  private boolean sameConfiguration(RoundView before, RoundWrite after) {
+    return before.name().equals(after.name()) && java.util.Objects.equals(before.prizeName(), after.prizeName())
+        && before.winnerCount() == after.winnerCount() && before.candidateScope().equals(after.candidateScope())
+        && before.customerType().equals(after.customerType())
+        && before.minimumOrderAmount().compareTo(after.minimumOrderAmount()) == 0
+        && (before.roundNo() == 1 || before.excludePreviousWinners() == after.excludePreviousWinners());
+  }
+
+  private void updateReadyRound(long id, int roundNo, RoundWrite round) {
+    jdbc.update("""
+        UPDATE lottery_round SET round_no = ?, name = ?, prize_name = ?, winner_count = ?, candidate_scope = ?,
+          customer_type = ?, minimum_order_amount = ?, qualification_cutoff_at = NULL,
+          exclude_previous_winners = ?, display_name_type = ? WHERE id = ? AND status = 'READY'
+        """, roundNo, round.name(), round.prizeName(), round.winnerCount(), round.candidateScope(), round.customerType(),
+        round.minimumOrderAmount(), roundNo > 1 && round.excludePreviousWinners(), round.displayNameType(), id);
+  }
+
+  private void insertRound(long activityId, long ruleId, int roundNo, RoundWrite round, String status) {
+    jdbc.update("""
+        INSERT INTO lottery_round(activity_id, lottery_rule_id, round_no, name, prize_name, winner_count,
+          candidate_scope, customer_type, minimum_order_amount, qualification_cutoff_at,
+          exclude_previous_winners, display_name_type, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+        """, activityId, ruleId, roundNo, round.name(), round.prizeName(), round.winnerCount(), round.candidateScope(),
+        round.customerType(), round.minimumOrderAmount(), roundNo > 1 && round.excludePreviousWinners(), round.displayNameType(), status);
   }
 
   private void validate(RuleWrite request) {
     if (request == null || request.name() == null || request.name().isBlank()) throw DomainException.badRequest("LOTTERY_NAME_REQUIRED", "请填写规则名称");
     if (request.rounds() == null || request.rounds().isEmpty()) throw DomainException.badRequest("LOTTERY_ROUNDS_EMPTY", "至少配置一个抽奖轮次");
+    int roundNo = 0;
     for (RoundWrite round : request.rounds()) {
+      roundNo++;
       if (round.name() == null || round.name().isBlank() || round.winnerCount() < 1) throw DomainException.badRequest("LOTTERY_ROUND_INVALID", "轮次名称和中奖人数不能为空");
+      if (round.prizeName() == null || round.prizeName().isBlank() || "待配置奖品".equals(round.prizeName().trim())) {
+        throw DomainException.badRequest("LOTTERY_PRIZE_REQUIRED", "第 " + roundNo + " 轮请填写奖品名称");
+      }
       if (!SCOPES.contains(round.candidateScope()) || !CUSTOMER_TYPES.contains(round.customerType()) || !DISPLAY_TYPES.contains(round.displayNameType())) {
         throw DomainException.badRequest("LOTTERY_ROUND_INVALID", "轮次候选范围、客户类型或展示名称配置不正确");
       }
       if (round.minimumOrderAmount() == null || round.minimumOrderAmount().signum() < 0) throw DomainException.badRequest("LOTTERY_AMOUNT_INVALID", "最低订单金额不能小于零");
+    }
+  }
+
+  private void validatePreview(PreviewRequest request) {
+    if (request == null || request.roundNo() < 1 || request.winnerCount() < 1
+        || !SCOPES.contains(request.candidateScope()) || !CUSTOMER_TYPES.contains(request.customerType())
+        || request.minimumOrderAmount() == null || request.minimumOrderAmount().signum() < 0) {
+      throw DomainException.badRequest("LOTTERY_PREVIEW_INVALID", "候选试算条件不正确");
     }
   }
 
@@ -396,6 +497,15 @@ public class LotteryService {
                           Instant drawnAt, Instant completedAt, int lockVersion) {}
   public record WinnerView(long roundId, int position, long activityCustomerId, String dealerDisplayName, String customerType,
                            String regionCode, String branchName, String phoneMasked) {}
-  public record DrawResult(long roundId, long attemptId, int attemptNo, int candidateCount, List<WinnerView> winners,
-                           String resultHash, Instant drawnAt) {}
+  public record DrawResult(long roundId, long attemptId, int attemptNo, int candidateCount,
+                           int configuredWinnerCount, int actualWinnerCount, int unawardedCount,
+                           List<WinnerView> winners, String resultHash, Instant drawnAt) {}
+  public record PreviewRequest(int roundNo, int winnerCount, String candidateScope, String customerType,
+                               BigDecimal minimumOrderAmount, boolean excludePreviousWinners) {}
+  public record CandidatePreviewItem(long activityCustomerId, String dealerFullName, String customerType,
+                                     String regionCode, String branchName, String phoneMasked,
+                                     String qualificationSource, BigDecimal qualifyingOrderAmount) {}
+  public record CandidatePreview(Instant calculatedAt, int candidateCount, int configuredWinnerCount,
+                                 int actualWinnerCount, int unawardedCount, List<CandidatePreviewItem> candidates) {}
+  public record WinnerStatistics(long validWinnerRecords, long validWinnerCustomers, long invalidatedWinnerRecords) {}
 }

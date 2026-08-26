@@ -3,12 +3,15 @@ package com.fengyi.ordershow.imports;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fengyi.ordershow.common.DomainException;
+import com.fengyi.ordershow.catalog.ProductService;
 import com.fengyi.ordershow.customer.AttendanceMatchingService;
 import com.fengyi.ordershow.security.CryptoService;
 import com.fengyi.ordershow.storage.StorageService;
 import java.math.BigDecimal;
 import java.sql.Statement;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -30,10 +33,11 @@ public class ImportService {
   private final TransactionTemplate transactions;
   private final ImportWorkbookProcessor workbookProcessor;
   private final AttendanceMatchingService attendanceMatching;
+  private final ProductService products;
 
   public ImportService(JdbcTemplate jdbc, StorageService storage, CryptoService crypto,
                        ObjectMapper json, TransactionTemplate transactions, ImportWorkbookProcessor workbookProcessor,
-                       AttendanceMatchingService attendanceMatching) {
+                       AttendanceMatchingService attendanceMatching, ProductService products) {
     this.jdbc = jdbc;
     this.storage = storage;
     this.crypto = crypto;
@@ -41,6 +45,7 @@ public class ImportService {
     this.transactions = transactions;
     this.workbookProcessor = workbookProcessor;
     this.attendanceMatching = attendanceMatching;
+    this.products = products;
   }
 
   public ImportTask upload(long activityId, String importType, MultipartFile file, long adminId) {
@@ -107,6 +112,7 @@ public class ImportService {
     ImportTask task = task(taskId);
     if (!"PREVIEW_READY".equals(task.status())) throw DomainException.conflict("IMPORT_NOT_EDITABLE", "当前导入任务不能编辑");
     transactions.executeWithoutResult(status -> {
+      lockTask(taskId);
       List<MaterializeRow> currentRows = jdbc.query("""
           SELECT id, normalized_data_json, edited_data_json, sensitive_data_ciphertext, edited_sensitive_data_ciphertext
           FROM import_staging_row WHERE id = ? AND import_task_id = ? FOR UPDATE
@@ -138,7 +144,41 @@ public class ImportService {
     });
   }
 
-  public ImportTask confirm(long taskId, long adminId) {
+  public void deleteRows(long taskId, List<Long> rowIds, long adminId) {
+    ImportTask task = task(taskId);
+    if (!"PREVIEW_READY".equals(task.status())) throw DomainException.conflict("IMPORT_NOT_EDITABLE", "当前导入任务不能编辑");
+    if (rowIds == null || rowIds.isEmpty()) throw DomainException.badRequest("IMPORT_ROWS_REQUIRED", "请选择要删除的导入预览行");
+
+    List<Long> ids = rowIds.stream().filter(Objects::nonNull).distinct().sorted().toList();
+    if (ids.size() != rowIds.size() || ids.stream().anyMatch(id -> id <= 0)) {
+      throw DomainException.badRequest("IMPORT_ROW_IDS_INVALID", "导入预览行编号无效或重复");
+    }
+
+    transactions.executeWithoutResult(status -> {
+      lockTask(taskId);
+      String placeholders = String.join(", ", Collections.nCopies(ids.size(), "?"));
+      List<Object> selectArgs = new ArrayList<>();
+      selectArgs.add(taskId);
+      selectArgs.addAll(ids);
+      List<Long> existingIds = jdbc.queryForList("SELECT id FROM import_staging_row WHERE import_task_id = ? AND id IN (" + placeholders + ") ORDER BY id FOR UPDATE",
+          Long.class, selectArgs.toArray());
+      if (existingIds.size() != ids.size()) throw DomainException.notFound("IMPORT_ROW_NOT_FOUND", "部分导入预览行不存在");
+
+      List<Object> updateArgs = new ArrayList<>();
+      updateArgs.add(adminId);
+      updateArgs.add(taskId);
+      updateArgs.addAll(ids);
+      jdbc.update("UPDATE import_staging_row SET is_deleted = TRUE, edited_by = ?, edited_at = UTC_TIMESTAMP(3) WHERE import_task_id = ? AND id IN (" + placeholders + ")",
+          updateArgs.toArray());
+      workbookProcessor.revalidateTask(taskId, task.importType());
+    });
+  }
+
+  private void lockTask(long taskId) {
+    jdbc.queryForObject("SELECT id FROM import_task WHERE id = ? FOR UPDATE", Long.class, taskId);
+  }
+
+  public ImportTask confirm(long taskId, long adminId, MultipartFile imageZip, String imageDecisionsJson) {
     ImportTask task = task(taskId);
     if (!"PREVIEW_READY".equals(task.status())) throw DomainException.conflict("IMPORT_NOT_CONFIRMABLE", "当前任务不能确认发布");
     workbookProcessor.revalidateTask(taskId, task.importType());
@@ -146,12 +186,67 @@ public class ImportService {
         SELECT COUNT(*) FROM import_staging_row WHERE import_task_id = ? AND validation_status = 'BLOCKED' AND is_deleted = FALSE
         """, Integer.class, taskId);
     if (blocking != null && blocking > 0) throw DomainException.unprocessable("IMPORT_HAS_BLOCKING_ERRORS", "请先修正或删除阻塞行再确认导入");
+    List<ProductImageDecision> imageDecisions = validateImageDecisions(taskId, task.importType(), imageDecisionsJson);
+    if (!imageDecisions.isEmpty() && (imageZip == null || imageZip.isEmpty())) {
+      throw DomainException.badRequest("IMAGE_DECISIONS_WITHOUT_ZIP", "提交图片匹配决定时必须同时上传本批次图片 ZIP");
+    }
+    Long auxiliaryFileId = null;
+    if (imageZip != null && !imageZip.isEmpty()) {
+      if (!"PRODUCT".equals(task.importType())) throw DomainException.badRequest("IMPORT_AUXILIARY_FILE_INVALID", "只有商品导入可以附带图片 ZIP");
+      String filename = Objects.requireNonNullElse(imageZip.getOriginalFilename(), "product-images.zip");
+      if (!filename.toLowerCase(Locale.ROOT).endsWith(".zip")) throw DomainException.badRequest("IMAGE_ZIP_INVALID", "请选择 ZIP 图片文件");
+      if (imageZip.getSize() > 150L * 1024 * 1024) throw DomainException.badRequest("IMAGE_ZIP_TOO_LARGE", "图片 ZIP 不能超过 150MB");
+      auxiliaryFileId = storage.save(task.activityId(), imageZip, "IMAGE_ARCHIVE", adminId).id();
+    }
     int changed = jdbc.update("""
-        UPDATE import_task SET status = 'CONFIRMING', confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(3), next_attempt_at = UTC_TIMESTAMP(3)
+        UPDATE import_task SET status = 'CONFIRMING', auxiliary_file_id = ?, image_decisions_json = ?, confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(3), next_attempt_at = UTC_TIMESTAMP(3)
         WHERE id = ? AND status = 'PREVIEW_READY'
-        """, adminId, taskId);
+        """, auxiliaryFileId, imageDecisions.isEmpty() ? null : writeJson(imageDecisions), adminId, taskId);
     if (changed != 1) throw DomainException.conflict("IMPORT_STATE_CHANGED", "导入任务状态已变化，请刷新后重试");
     return task(taskId);
+  }
+
+  private List<ProductImageDecision> validateImageDecisions(long taskId, String importType, String value) {
+    if (value == null || value.isBlank()) return List.of();
+    if (!"PRODUCT".equals(importType)) throw DomainException.badRequest("IMAGE_DECISIONS_NOT_ALLOWED", "只有商品导入可以提交图片匹配决定");
+    List<ProductImageDecision> decisions;
+    try { decisions = json.readValue(value, new TypeReference<List<ProductImageDecision>>() {}); }
+    catch (Exception exception) { throw DomainException.badRequest("IMAGE_DECISIONS_INVALID", "图片匹配决定格式不正确"); }
+    if (decisions.size() > 20_000) throw DomainException.badRequest("IMAGE_DECISIONS_TOO_MANY", "图片匹配决定数量过多");
+
+    Map<Long, String> productNames = new LinkedHashMap<>();
+    for (StagingRow row : rows(taskId, null)) {
+      if (row.deleted()) continue;
+      Map<String, Object> effective = new LinkedHashMap<>(row.normalizedData());
+      if (row.editedData() != null) effective.putAll(row.editedData());
+      productNames.put(row.id(), text(effective.get("materialName")));
+    }
+    Set<String> paths = new java.util.HashSet<>();
+    for (ProductImageDecision decision : decisions) {
+      String path = normalizeArchivePath(decision.entryPath());
+      if (path.isBlank() || !paths.add(path)) throw DomainException.badRequest("IMAGE_DECISION_PATH_INVALID", "图片路径为空或重复");
+      if (!Set.of("CONFIRMED", "PENDING", "UNMATCHED").contains(decision.status())) {
+        throw DomainException.badRequest("IMAGE_DECISION_STATUS_INVALID", "图片匹配决定状态不正确");
+      }
+      List<Long> targetIds = decision.targetRowIds() == null ? List.of() : decision.targetRowIds().stream().filter(Objects::nonNull).distinct().toList();
+      if ("CONFIRMED".equals(decision.status()) && targetIds.isEmpty()) {
+        throw DomainException.badRequest("IMAGE_DECISION_TARGET_REQUIRED", "已确认图片必须选择商品");
+      }
+      if (!"CONFIRMED".equals(decision.status()) && !targetIds.isEmpty()) {
+        throw DomainException.badRequest("IMAGE_DECISION_TARGET_NOT_ALLOWED", "未确认图片不能绑定商品");
+      }
+      if (targetIds.stream().anyMatch(id -> !productNames.containsKey(id))) {
+        throw DomainException.badRequest("IMAGE_DECISION_TARGET_INVALID", "图片匹配目标不属于当前导入任务");
+      }
+      Set<String> names = targetIds.stream().map(productNames::get).map(ImportService::normalize).collect(java.util.stream.Collectors.toSet());
+      if (names.size() > 1) throw DomainException.badRequest("IMAGE_DECISION_MULTIPLE_PRODUCTS", "一张图片不能绑定多个不同商品");
+    }
+    return decisions.stream().map(decision -> new ProductImageDecision(normalizeArchivePath(decision.entryPath()), decision.status(),
+        decision.targetRowIds() == null ? List.of() : decision.targetRowIds().stream().filter(Objects::nonNull).distinct().toList())).toList();
+  }
+
+  private static String normalizeArchivePath(String value) {
+    return Objects.requireNonNullElse(value, "").replace('\\', '/').replaceAll("^/+", "").trim();
   }
 
 
@@ -180,11 +275,13 @@ public class ImportService {
   }
 
 
- private void publish(long taskId) {
+  private void publish(long taskId) {
     ImportTask task = task(taskId);
     long activityId = task.activityId();
     long adminId = task.confirmedBy();
     jdbc.update("UPDATE import_task SET status = 'MATERIALIZING' WHERE id = ?", taskId);
+    Long previous = jdbc.query("SELECT current_version_id FROM activity_data_binding WHERE activity_id = ? AND data_type = ? FOR UPDATE",
+        rs -> rs.next() ? (Long) rs.getObject(1) : null, activityId, task.importType());
     int versionNo = jdbc.queryForObject("SELECT COALESCE(MAX(version_no), 0) + 1 FROM import_publish_version WHERE activity_id = ? AND data_type = ?", Integer.class, activityId, task.importType());
     GeneratedKeyHolder keys = new GeneratedKeyHolder();
     jdbc.update(connection -> {
@@ -202,15 +299,19 @@ public class ImportService {
         """, (rs, rowNum) -> new MaterializeRow(rs.getLong("id"), readMap(rs.getString("normalized_data_json")),
         readMap(rs.getString("edited_data_json")), rs.getBytes("sensitive_data_ciphertext"), rs.getBytes("edited_sensitive_data_ciphertext")), taskId);
     switch (task.importType()) {
-      case "PRODUCT" -> materializeProducts(activityId, taskId, versionId, rows);
+      case "PRODUCT" -> {
+        materializeProducts(activityId, taskId, versionId, rows);
+        Long imageArchiveId = jdbc.queryForObject("SELECT auxiliary_file_id FROM import_task WHERE id = ?", Long.class, taskId);
+        String decisionsJson = jdbc.queryForObject("SELECT image_decisions_json FROM import_task WHERE id = ?", String.class, taskId);
+        if (imageArchiveId != null) products.attachZipToVersion(activityId, versionId, imageArchiveId, adminId,
+            zipDecisions(rows, readImageDecisions(decisionsJson)));
+      }
       case "WHITELIST" -> materializeWhitelist(activityId, taskId, versionId, rows);
       case "ATTENDANCE" -> materializeAttendance(activityId, taskId, versionId, rows, adminId);
       default -> throw new IllegalStateException("Unsupported import type " + task.importType());
     }
     jdbc.update("UPDATE import_publish_version SET status = 'READY', row_count = ?, ready_at = UTC_TIMESTAMP(3) WHERE id = ?", rows.size(), versionId);
     jdbc.update("UPDATE import_task SET status = 'READY_TO_PUBLISH' WHERE id = ?", taskId);
-    Long previous = jdbc.query("SELECT current_version_id FROM activity_data_binding WHERE activity_id = ? AND data_type = ? FOR UPDATE",
-        rs -> rs.next() ? rs.getLong(1) : null, activityId, task.importType());
     jdbc.update("UPDATE import_task SET status = 'PUBLISHING' WHERE id = ?", taskId);
     jdbc.update("""
         INSERT INTO activity_data_binding(activity_id, data_type, current_version_id, lock_version, updated_by)
@@ -221,6 +322,19 @@ public class ImportService {
     if (previous != null && previous > 0) jdbc.update("UPDATE import_publish_version SET status = 'RETIRED', retired_at = UTC_TIMESTAMP(3) WHERE id = ?", previous);
     jdbc.update("UPDATE import_publish_version SET status = 'PUBLISHED', published_at = UTC_TIMESTAMP(3) WHERE id = ?", versionId);
     jdbc.update("UPDATE import_task SET status = 'COMPLETED', published_version_id = ?, completed_at = UTC_TIMESTAMP(3), lease_owner = NULL, lease_expires_at = NULL WHERE id = ?", versionId, taskId);
+  }
+
+  private List<ProductImageDecision> readImageDecisions(String value) {
+    if (value == null || value.isBlank()) return List.of();
+    try { return json.readValue(value, new TypeReference<List<ProductImageDecision>>() {}); }
+    catch (Exception exception) { throw new IllegalStateException("Stored image decisions are invalid", exception); }
+  }
+
+  private List<ProductService.ZipDecision> zipDecisions(List<MaterializeRow> rows, List<ProductImageDecision> decisions) {
+    Map<Long, MaterializeRow> byId = rows.stream().collect(java.util.stream.Collectors.toMap(MaterializeRow::id, row -> row));
+    return decisions.stream().map(decision -> new ProductService.ZipDecision(decision.entryPath(), decision.status(),
+        decision.targetRowIds().stream().map(byId::get).filter(Objects::nonNull)
+            .map(row -> text(row.effective().get("materialName"))).filter(name -> !name.isBlank()).distinct().toList())).toList();
   }
 
   private void materializeProducts(long activityId, long taskId, long versionId, List<MaterializeRow> rows) {
@@ -384,4 +498,5 @@ public class ImportService {
                            Map<String, Object> normalizedData, Map<String, Object> editedData, boolean deleted) {}
   public record ImportIssue(long id, String severity, String code, String sheetName, Integer sourceRowNumber,
                             String fieldName, String rawValueMasked, String message, Instant resolvedAt) {}
+  public record ProductImageDecision(String entryPath, String status, List<Long> targetRowIds) {}
 }

@@ -479,13 +479,16 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .table-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; color: #897970; font-size: 8px; }.table-pagination > div { display: flex; align-items: center; gap: 6px; }.table-pagination label { display: inline-flex; align-items: center; gap: 4px; }.table-pagination select { height: 25px; padding: 0 5px; color: #5e4e47; border: 1px solid #ded2cb; border-radius: 5px; outline: 0; background: #fff; font-size: 8px; }.table-pagination button { padding: 5px 7px; color: #7e6c63; border: 1px solid #ded2cb; border-radius: 5px; background: #fff; font-size: 8px; cursor: pointer; }.table-pagination button:disabled { color: #c4b9b2; background: #f8f5f2; cursor: not-allowed; }.table-pagination b { min-width: 45px; color: #6d574d; text-align: center; font-size: 8px; }
 .order-table .table-row { grid-template-columns: 145px minmax(130px,1fr) 120px 65px 105px 108px 108px 105px; }
 .order-empty-row { padding: 28px; color: #9b8b82; text-align: center; font-size: 9px; }
-.data-filters { display: flex; align-items: flex-end; gap: 10px; margin-top: 13px; padding: 11px 12px; border: 1px solid #e5ddd7; border-radius: 9px; background: #faf8f6; }
-.data-filters label { display: flex; min-width: 180px; flex-direction: column; gap: 6px; color: #78675f; font-size: 9px; }
+.data-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-top: 13px; padding: 11px 12px; border: 1px solid #e5ddd7; border-radius: 9px; background: #faf8f6; }
+.data-filters label { display: flex; min-width: 180px; flex: 1 1 180px; flex-direction: column; gap: 6px; color: #78675f; font-size: 9px; }
 .data-filters select { height: 32px; padding: 0 30px 0 10px; color: #352a25; border: 1px solid #ddd2cb; border-radius: 6px; outline: 0; background: #fff; font-size: 9px; }
 .data-filters input { height: 32px; padding: 0 10px; color: #352a25; border: 1px solid #ddd2cb; border-radius: 6px; outline: 0; background: #fff; font-size: 9px; }
 .data-filters input:focus { border-color: #ae4b45; box-shadow: 0 0 0 3px rgba(169,35,33,.08); }
-.data-filters .data-filter-search { min-width: 260px; }
-.data-filters small { margin: 0 0 8px auto; color: #8d7d74; font-size: 8px; }
+.data-filters .data-filter-search { min-width: 260px; flex: 1.5 1 260px; }
+.data-filters small { flex: 0 0 100%; margin: 0; color: #8d7d74; font-size: 8px; line-height: 1.6; }
+.product-data-filters { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)) minmax(220px, 1.35fr); align-items: end; }
+.product-data-filters label, .product-data-filters .data-filter-search { min-width: 0; }
+.product-data-filters small { grid-column: 1 / -1; }
 .clickable-row { width: 100%; padding: 0; color: inherit; border: 0; background: #fff; text-align: left; cursor: pointer; }
 .clickable-row:hover { background: #fff8f5; box-shadow: inset 3px 0 #ad2522; }
 .import-mode { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 14px; padding: 12px 14px; border: 1px solid #e4d9d2; border-radius: 9px; background: #faf8f6; }
@@ -513,6 +516,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .image-import-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; margin-top: 10px; }
 .image-import-stats span { display: flex; min-width: 0; flex-direction: column; gap: 2px; padding: 6px 7px; color: #88766d; border: 1px solid #e7dcd5; border-radius: 6px; background: #fff; font-size: 7px; }
 .image-import-stats b { color: #a92321; font-size: 11px; }
+.image-match-review { margin-top: 10px; padding: 8px; border: 1px solid #e7dcd5; border-radius: 7px; background: #fff; }.image-match-review > b { color: #66534a; font-size: 8px; }.image-match-review > div { display: flex; max-height: 220px; flex-direction: column; gap: 5px; margin-top: 7px; overflow-y: auto; }.image-match-review-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 7px; min-height: 36px; padding: 3px 5px; border: 1px solid #eee5df; border-radius: 6px; }.image-match-review-row img { width: 30px; height: 30px; object-fit: contain; border-radius: 4px; background: #faf7f4; }.image-match-review-row span { overflow: hidden; color: #5f5049; font-size: 8px; white-space: nowrap; text-overflow: ellipsis; }.image-match-review-row em { padding: 3px 6px; border-radius: 99px; font-size: 7px; font-style: normal; font-weight: 700; }.image-match-review-row em.pending { color: #936522; background: #fff1d2; }.image-match-review-row em.unmatched { color: #a33b36; background: #f8e1df; }
 .image-upload-error { display: block; margin-top: 8px; color: #b32a25; font-size: 8px; line-height: 1.4; }
 .sheet-tags { display: flex; flex-wrap: wrap; gap: 5px; }.sheet-tags span { padding: 4px 7px; color: #806c62; border: 1px solid #e4d8d1; border-radius: 99px; background: #fff; font-size: 7px; }
 .sheet-counts { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }.sheet-counts span { display: flex; align-items: center; gap: 7px; padding: 6px 9px; color: #6d5c54; border: 1px solid #e3d8d1; border-radius: 7px; background: #fff; font-size: 8px; }.sheet-counts b { color: #a92321; font-size: 10px; }
@@ -529,6 +533,8 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .product-image-tile-preview img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .product-image-tile-preview span { position: absolute; right: 4px; bottom: 4px; padding: 2px 4px; color: #fff; border-radius: 3px; background: rgba(63,24,20,.76); font-size: 7px; }
 .product-image-tile.primary .product-image-tile-preview { border-color: #b12623; box-shadow: 0 0 0 2px rgba(177,38,35,.1); }
+.product-image-tile.pending .product-image-tile-preview { border-color: #d8a345; border-style: dashed; background: #fffaf0; }
+.product-image-tile.pending .product-image-tile-preview span { background: rgba(166,103,18,.86); }
 .product-image-tile-actions { display: flex; gap: 3px; }
 .product-image-tile-actions button { min-width: 0; flex: 1; padding: 3px 2px; overflow: hidden; color: #8e2421; border: 1px solid #dfc1b7; border-radius: 4px; background: #fff; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .product-image-tile-actions button.danger { color: #9f6257; border-color: #ead5ce; }

@@ -142,6 +142,7 @@ H5 与 API 默认通过同站点托管入口提供。H5 的写请求必须携带
 POST 上传文件 → 202 + taskId
 GET 任务 → UPLOADED / PARSING / PREVIEW_READY / CONFIRMING / MATERIALIZING / READY_TO_PUBLISH / PUBLISHING / COMPLETED / FAILED / CANCELLED
 GET 预览行和错误 → 管理员编辑/删除预览行
+PATCH 预览行集合 + rowIds → 批量删除所选预览行并统一重新校验一次
 POST 确认 → CONFIRMING → MATERIALIZING → READY_TO_PUBLISH → PUBLISHING → COMPLETED
 ```
 
@@ -149,6 +150,11 @@ POST 确认 → CONFIRMING → MATERIALIZING → READY_TO_PUBLISH → PUBLISHING
 - 服务端校验扩展名、MIME、文件签名和 SHA-256；
 - 相同活动、类型和文件哈希的重复上传给出提示，但不擅自覆盖；
 - 阻断错误未解决时不能确认；
+- 商品和白名单上传后只创建待发布任务及 staging 预览，不改变当前发布版本；每次 Excel 都是独立完整批次，接口不向管理页面提供跨版本新增、更新、未变化或移除状态；
+- 商品 Excel 可在确认请求中同时携带本批次图片 ZIP 和 `imageDecisions`。前端必须逐张提交 `entryPath`、`CONFIRMED/PENDING/UNMATCHED` 和确认目标 staging 行；后端校验目标属于当前任务且同一图片不能绑定不同物料，再把决定保存到导入任务；Worker 发布时以人工决定为准，不得重新匹配覆盖；
+- 候选图片在商品编辑预览中展示缩略图并提供“确认绑定 / 排除候选”。商品仍有任一候选未处理时为“待确认”；全部处理后，有确认图片为“已匹配”，没有则为“未匹配”。同一物料名称的多行同步确认；重新选择 Excel 时清空客户端待确认 ZIP，新版本不继承上一版本图片；
+- 导入预览中的候选排除属于当前 staging 批次决定，确认发布时统一提交；已发布商品编辑中的图片删除、主图调整和排序必须分别调用商品图片接口并等待成功后再关闭编辑框，不能只修改浏览器数组或提前显示保存成功；
+- 商品、白名单和现场到场的预览批量删除统一调用集合接口；所选行在同一事务中标记删除，整批完成后只重新校验一次导入任务，不允许前端并发调用多个单行删除请求；
 - 解析和预览只写 staging；当前由 Spring Boot 应用内任务执行器准备并发布数据，生产环境可拆为独立 Worker；发布事务失败时不得留下半批有效数据；
 - 发布事务失败时当前目录保持不变，旧版本可以审计或回滚；
 - 活动开始后默认禁止 Excel 全量导入和图片 ZIP 批量导入。
@@ -212,9 +218,12 @@ data: {"activityId":"12","version":"452"}
 
 - 候选主体是 `activity_customer`，即经销商活动身份；
 - 同一轮通过数据库唯一约束去重；
-- `VALID_ORDERS` 只读取资格截止时间前的当前 `SUBMITTED` 订单；
+- `VALID_ORDERS` 读取正式开奖时当前状态为 `SUBMITTED` 且满足最低金额的订单；
+- 三种候选范围统一按 `activity_customer.id` 去重，名称只用于展示；
+- 管理端候选预览与正式开奖复用同一套后端查询，预览结果标注试算时间，正式结果以开奖时固定快照为准；
+- 抽奖严格按轮次执行；候选少于配置中奖人数时全部中奖并记录空缺名额，候选为零时拒绝开奖；
 - `ATTENDEES` 至少存在一条有效到场记录，并按活动客户 ID 去重；
-- 默认排除本活动已有 `VALID` 中奖记录；
+- 第一轮不排除已中奖客户；第二轮起仅在该轮启用排除规则时，按 `activity_customer.id` 排除本活动已有 `VALID` 中奖记录；
 - 后端使用密码学安全随机数，不接受前端提供随机结果；
 - 候选快照和中奖记录持久化成功后，现场页才能揭晓；
 - 重置不删除旧结果，而是标记失效并保存原因。
@@ -237,7 +246,7 @@ data: {"activityId":"12","version":"452"}
 | 409 | `IMPORT_HAS_BLOCKING_ERRORS` | 导入存在未处理阻断错误 |
 | 409 | `IMPORT_STATE_CONFLICT` | 导入任务状态不允许该操作 |
 | 409 | `LOTTERY_ROUND_STATE_CONFLICT` | 轮次状态不允许执行 |
-| 409 | `LOTTERY_NOT_ENOUGH_CANDIDATES` | 候选人数少于中奖人数 |
+| 422 | `LOTTERY_CANDIDATES_EMPTY` | 当前没有符合条件的候选客户 |
 | 413 | `FILE_TOO_LARGE` | 文件超过限制 |
 | 422 | `PRODUCT_NOT_ORDERABLE` | 商品无效、越权或分公司不匹配 |
 | 429 | `RATE_LIMITED` | 请求过于频繁 |

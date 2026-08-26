@@ -80,7 +80,8 @@ export type RuntimeProduct = {
   varietyName?: string; specification?: string; casePack?: string; bottlePrice?: number; casePrice?: number;
   tonCaseFactor?: number; customerType: "GENERAL" | "SPECIAL"; rebateStatus: "PARTICIPATING" | "NOT_PARTICIPATING";
   giftBox: boolean; visible: boolean; orderable: boolean; dataStatus: string; sortNo: number; version: number; branchScope: string[];
-  images: Array<{ id: number; fileId: number; url: string; primary: boolean; sortNo: number }>;
+  images: Array<{ id: number; fileId: number; url: string; primary: boolean; sortNo: number;
+    sourceType: "ZIP_IMPORT" | "MANUAL"; matchStatus: "MATCHED" | "PENDING" | "UNMATCHED" | "CONFIRMED" }>;
 };
 
 export type RuntimeOrder = {
@@ -135,14 +136,21 @@ export type DashboardReport = {
 export type LotteryRoundApi = {
   id: number; activityId: number; ruleId: number; roundNo: number; name: string; prizeName: string;
   winnerCount: number; candidateScope: "ALL_CUSTOMERS" | "ATTENDEES" | "VALID_ORDERS";
-  customerType: "ALL" | "GENERAL" | "SPECIAL"; minimumOrderAmount: number; qualificationCutoffAt?: string;
+  customerType: "ALL" | "GENERAL" | "SPECIAL"; minimumOrderAmount: number;
   excludePreviousWinners: boolean; displayNameType: "SHORT_NAME" | "FULL_NAME"; status: string;
   currentAttemptNo: number; candidateCount?: number; resultHash?: string; drawnAt?: string; completedAt?: string; lockVersion: number;
 };
 
 export type LotteryRuleApi = { id: number; activityId: number; name: string; status: string; createdAt: string; updatedAt: string; rounds: LotteryRoundApi[] };
 export type LotteryWinnerApi = { roundId: number; position: number; activityCustomerId: number; dealerDisplayName: string; customerType: string; regionCode?: string; branchName?: string; phoneMasked: string };
-export type LotteryDrawResult = { roundId: number; attemptId: number; attemptNo: number; candidateCount: number; winners: LotteryWinnerApi[]; resultHash: string; drawnAt: string };
+export type LotteryDrawResult = { roundId: number; attemptId: number; attemptNo: number; candidateCount: number;
+  configuredWinnerCount: number; actualWinnerCount: number; unawardedCount: number;
+  winners: LotteryWinnerApi[]; resultHash: string; drawnAt: string };
+export type LotteryCandidatePreviewItem = { activityCustomerId: number; dealerFullName: string; customerType: string;
+  regionCode?: string; branchName?: string; phoneMasked?: string; qualificationSource: string; qualifyingOrderAmount?: number };
+export type LotteryCandidatePreview = { calculatedAt: string; candidateCount: number; configuredWinnerCount: number;
+  actualWinnerCount: number; unawardedCount: number; candidates: LotteryCandidatePreviewItem[] };
+export type LotteryWinnerStatistics = { validWinnerRecords: number; validWinnerCustomers: number; invalidatedWinnerRecords: number };
 
 export type AdminCustomer = {
   id: number; customerType: "GENERAL" | "SPECIAL"; regionCode?: string; branchName?: string; dealerShortName?: string;
@@ -209,8 +217,11 @@ export async function uploadImport(activityId: number, importType: "PRODUCT" | "
   return (await api<Envelope<ImportTask>>(`/admin/activities/${activityId}/imports`, { method: "POST", body }, "admin")).data;
 }
 
-export async function confirmImport(activityId: number, taskId: number) {
-  return (await api<Envelope<ImportTask>>(`/admin/activities/${activityId}/imports/${taskId}/confirm`, { method: "POST" }, "admin")).data;
+export async function confirmImport(activityId: number, taskId: number, imageZip?: File, imageDecisions?: Array<{ entryPath: string; status: "CONFIRMED" | "PENDING" | "UNMATCHED"; targetRowIds: number[] }>) {
+  const body = imageZip || imageDecisions?.length ? new FormData() : undefined;
+  if (body && imageZip) body.append("imageZip", imageZip);
+  if (body && imageDecisions?.length) body.append("imageDecisions", JSON.stringify(imageDecisions));
+  return (await api<Envelope<ImportTask>>(`/admin/activities/${activityId}/imports/${taskId}/confirm`, { method: "POST", body }, "admin")).data;
 }
 
 export async function loadImportTask(activityId: number, taskId: number) {
@@ -227,6 +238,11 @@ export async function updateImportRow(activityId: number, taskId: number, rowId:
     method: "PATCH", body: JSON.stringify({ changes, deleted }),
   }, "admin")).data;
 }
+export async function deleteImportRows(activityId: number, taskId: number, rowIds: number[]) {
+  return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/imports/${taskId}/rows`, {
+    method: "PATCH", body: JSON.stringify({ rowIds }),
+  }, "admin")).data;
+}
 export async function cancelImport(activityId: number, taskId: number) {
   return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/imports/${taskId}`, { method: "DELETE" }, "admin")).data;
 }
@@ -239,11 +255,6 @@ export async function waitForImport(activityId: number, taskId: number) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   throw new ApiError(408, "IMPORT_TIMEOUT", "导入仍在处理中，请稍后刷新查看");
-}
-
-export async function uploadProductImages(activityId: number, file: File, confirm: boolean) {
-  const body = new FormData(); body.append("file", file); body.append("confirm", String(confirm));
-  return (await api<Envelope<Record<string, unknown>>>(`/admin/activities/${activityId}/product-images/zip`, { method: "POST", body }, "admin")).data;
 }
 
 export async function updateActivity(activity: RuntimeActivity, changes: { name: string; startsAt: string; endsAt: string }) {
@@ -301,6 +312,10 @@ export async function updateLotteryRule(activityId: number, ruleId: number, body
   return (await api<Envelope<LotteryRuleApi>>(`/admin/activities/${activityId}/lottery/rules/${ruleId}`, { method: "PUT", body: JSON.stringify(body) }, "admin")).data;
 }
 export async function publishLotteryRule(activityId: number, ruleId: number) { return (await api<Envelope<LotteryRuleApi>>(`/admin/activities/${activityId}/lottery/rules/${ruleId}/publish`, { method: "POST" }, "admin")).data; }
+export async function previewLotteryCandidates(activityId: number, body: Record<string, unknown>) {
+  return (await api<Envelope<LotteryCandidatePreview>>(`/admin/activities/${activityId}/lottery/candidates/preview`, { method: "POST", body: JSON.stringify(body) }, "admin")).data;
+}
+export async function loadLotteryStatistics(activityId: number) { return (await api<Envelope<LotteryWinnerStatistics>>(`/admin/activities/${activityId}/lottery/statistics`, {}, "admin")).data; }
 export async function drawLotteryRound(activityId: number, roundId: number) { return (await api<Envelope<LotteryDrawResult>>(`/admin/activities/${activityId}/lottery/rounds/${roundId}/draw`, { method: "POST" }, "admin")).data; }
 export async function completeLotteryRound(activityId: number, roundId: number) { return (await api<Envelope<LotteryRoundApi>>(`/admin/activities/${activityId}/lottery/rounds/${roundId}/complete`, { method: "POST" }, "admin")).data; }
 export async function resetLotteryRound(activityId: number, roundId: number, reason: string) { return (await api<Envelope<LotteryRoundApi>>(`/admin/activities/${activityId}/lottery/rounds/${roundId}/reset`, { method: "POST", body: JSON.stringify({ reason }) }, "admin")).data; }
@@ -312,6 +327,24 @@ export async function createAdminProduct(activityId: number, body: Record<string
 export async function updateAdminProduct(activityId: number, productId: number, version: number, body: Record<string, unknown>) {
   return (await api<Envelope<RuntimeProduct>>(`/admin/activities/${activityId}/products/${productId}`, {
     method: "PATCH", headers: { "If-Match": String(version) }, body: JSON.stringify(body),
+  }, "admin")).data;
+}
+export async function addAdminProductImage(activityId: number, productId: number, file: File, primary = false) {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("primary", String(primary));
+  return (await api<Envelope<RuntimeProduct["images"][number]>>(`/admin/activities/${activityId}/products/${productId}/images`, {
+    method: "POST", body,
+  }, "admin")).data;
+}
+export async function updateAdminProductImage(activityId: number, productId: number, imageId: number, primary: boolean, sortNo: number) {
+  return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/products/${productId}/images/${imageId}`, {
+    method: "PATCH", body: JSON.stringify({ primary, sortNo }),
+  }, "admin")).data;
+}
+export async function deleteAdminProductImage(activityId: number, productId: number, imageId: number) {
+  return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/products/${productId}/images/${imageId}`, {
+    method: "DELETE",
   }, "admin")).data;
 }
 export async function deleteAdminProduct(activityId: number, productId: number, version: number) {

@@ -87,7 +87,7 @@ com.fengyi.ordershow
 ├── activity       活动、入口编码、时间和状态
 ├── catalog        商品、图片、分公司范围
 ├── customer       永久客户、活动白名单、H5 验证、到场名单
-├── importjob      Excel/ZIP 解析、差异预览、确认和错误明细
+├── importjob      Excel/ZIP 解析、当前批次预览、确认和错误明细
 ├── ordering       订单、当前明细、版本、撤回和重新提交
 ├── dashboard      排行、专题统计、缓存和 SSE 通知
 ├── lottery        规则、轮次、候选快照、中奖结果

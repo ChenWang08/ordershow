@@ -67,6 +67,53 @@ test("keeps production assets and source wired", async () => {
   await assert.rejects(access(new URL("../app/_sites-preview/SkeletonPreview.tsx", import.meta.url)));
 });
 
+test("keeps product imports as independent full-replacement batches", async () => {
+  const [prototype, domain, productImages, api, importService, importController, productService] = await Promise.all([
+    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/domain/import-domain.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/domain/product-images.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportController.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/catalog/ProductService.java", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(domain, /ProductImportAction|"未上传"/);
+  assert.match(domain, /"有效" \| "待核对" \| "待完善"/);
+  assert.match(domain, /"已匹配" \| "待确认" \| "未匹配"/);
+  assert.match(prototype, /上传只生成预览/);
+  assert.match(prototype, /<span>价格状态<\/span>/);
+  assert.match(prototype, /<option>价格有效<\/option><option>价格待完善<\/option>/);
+  assert.match(api, /body\.append\("imageZip", imageZip\)/);
+  assert.match(api, /body\.append\("imageDecisions", JSON\.stringify\(imageDecisions\)\)/);
+  assert.match(api, /deleteAdminProductImage/);
+  assert.match(api, /updateAdminProductImage/);
+  assert.match(productImages, /hasPendingCandidate \? "PENDING" : "UNMATCHED"/);
+  assert.match(prototype, /确认绑定/);
+  assert.match(prototype, /排除候选/);
+  assert.match(prototype, /await deleteAdminProductImage/);
+  assert.match(prototype, /const saved = await onSave/);
+  assert.match(importController, /MultipartFile imageZip/);
+  assert.match(importService, /auxiliary_file_id/);
+  assert.match(importService, /image_decisions_json/);
+  assert.match(importService, /attachZipToVersion/);
+  assert.match(productService, /"CONFIRMED"\.equals\(decision\.status\(\)\)/);
+  assert.doesNotMatch(importService, /inheritProductImages/);
+});
+
+test("keeps whitelist imports status-only with filtering", async () => {
+  const [prototype, domain] = await Promise.all([
+    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/domain/import-domain.ts", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(domain, /WhitelistImportAction|replaceWhitelistImportRows/);
+  assert.match(domain, /status: "有效" \| "待处理"/);
+  assert.match(domain, /summarizeWhitelistRows/);
+  assert.match(prototype, /<option>有效<\/option><option>待处理<\/option>/);
+  assert.doesNotMatch(prototype, /\$\{row\.importAction\} · \$\{row\.status\}/);
+});
+
 test("keeps orders admin-read-only and wires the formal runtime APIs", async () => {
   const [api, prototype, orderController, openapi] = await Promise.all([
     readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
@@ -83,6 +130,25 @@ test("keeps orders admin-read-only and wires the formal runtime APIs", async () 
   assert.match(orderController, /\/h5\/activities\/\{activityCode\}\/order\/withdraw/);
   assert.doesNotMatch(orderController, /\/admin\/.*withdraw/);
   assert.doesNotMatch(openapi, /\/admin\/activities\/\{activityId\}\/orders\/\{orderId\}\/withdraw/);
+});
+
+test("uses server-calculated lottery candidates and ordered, shortage-safe draws", async () => {
+  const [prototype, api, service, controller] = await Promise.all([
+    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/lottery/LotteryService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/lottery/LotteryController.java", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(api, /previewLotteryCandidates/);
+  assert.match(controller, /lottery\/candidates\/preview/);
+  assert.match(prototype, /按白名单客户 ID 去重/);
+  assert.doesNotMatch(prototype, /资格截止时间|qualificationCutoffAt/);
+  assert.match(prototype, /第一轮暂无历史中奖客户，无需设置/);
+  assert.match(service, /Math\.min\(round\.winnerCount\(\), candidates\.size\(\)\)/);
+  assert.match(service, /LOTTERY_ROUND_OUT_OF_ORDER/);
+  assert.match(service, /deduplicationKey", "activity_customer\.id/);
+  assert.match(service, /LOTTERY_PRIZE_REQUIRED/);
 });
 
 test("uses live overview data, full admin phones, Chinese regions, and linked attendance candidates", async () => {

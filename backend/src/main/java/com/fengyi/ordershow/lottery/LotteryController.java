@@ -46,6 +46,19 @@ public class LotteryController {
     return ApiResponse.of(service.publish(activityId, ruleId, auth.requireAdmin(request)), TraceFilter.id(request));
   }
 
+  @PostMapping("/admin/activities/{activityId}/lottery/candidates/preview")
+  ApiResponse<LotteryService.CandidatePreview> preview(@PathVariable long activityId,
+      @RequestBody LotteryService.PreviewRequest body, HttpServletRequest request) {
+    auth.requireAdmin(request);
+    return ApiResponse.of(service.preview(activityId, body), TraceFilter.id(request));
+  }
+
+  @GetMapping("/admin/activities/{activityId}/lottery/statistics")
+  ApiResponse<LotteryService.WinnerStatistics> statistics(@PathVariable long activityId, HttpServletRequest request) {
+    auth.requireAdmin(request);
+    return ApiResponse.of(service.winnerStatistics(activityId), TraceFilter.id(request));
+  }
+
   @PostMapping("/admin/activities/{activityId}/lottery/rounds/{roundId}/draw")
   ApiResponse<LotteryService.DrawResult> draw(@PathVariable long activityId, @PathVariable long roundId,
       HttpServletRequest request) {

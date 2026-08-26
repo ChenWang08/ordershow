@@ -135,7 +135,7 @@ stateDiagram-v2
 stateDiagram-v2
   [*] --> UPLOADED: 文件保存成功
   UPLOADED --> PARSING: 解析任务领取
-  PARSING --> PREVIEW_READY: 解析、标准化、差异计算完成
+  PARSING --> PREVIEW_READY: 解析、标准化、校验完成
   PARSING --> FAILED: 文件或解析失败
   PREVIEW_READY --> CONFIRMING: 管理员确认且无阻断错误
   PREVIEW_READY --> CANCELLED: 管理员取消
@@ -156,7 +156,7 @@ stateDiagram-v2
 | --- | --- |
 | `UPLOADED` | 查询、等待解析、取消 |
 | `PARSING` | 只读查询进度 |
-| `PREVIEW_READY` | 查询差异/错误、编辑或删除预览行、确认、取消 |
+| `PREVIEW_READY` | 查询当前批次预览/错误、编辑或删除预览行、确认、取消 |
 | `CONFIRMING` | 只读，防止重复确认；等待任务执行器领取 |
 | `MATERIALIZING` | 只读；在非当前数据集内准备不可变发布版本 |
 | `READY_TO_PUBLISH` | 只读；等待短事务原子发布 |
@@ -236,7 +236,8 @@ stateDiagram-v2
 - 中奖人数大于 0；
 - 候选范围三选一；
 - 最低金额只允许用于 `VALID_ORDERS`；
-- 资格截止时间合法；
+- 第一轮不应用排除已中奖规则，第二轮起可配置；
+- 奖品名称必须填写完整且不能使用占位文字；
 - 当前规则没有与已完成轮次相冲突的修改。
 
 ### 5.2 READY → DRAWN
@@ -246,11 +247,13 @@ stateDiagram-v2
 1. 取得 `activityId + roundId` Redis 锁；
 2. 条件更新 `READY → DRAWING`；
 3. 按规则查询并按活动客户 ID 去重；
-4. 默认排除本活动有效中奖经销商；
+4. 第一轮不排除已中奖客户；第二轮起按该轮规则决定是否按活动客户 ID 排除本活动有效中奖客户；
 5. 创建递增 `attempt_no` 的抽取尝试并固定候选快照；
 6. 使用安全随机算法选择指定人数；
 7. 保存中奖结果、结果哈希并更新为 `DRAWN`；
 8. 提交后推送 SSE。
+
+若候选人数少于配置中奖人数，实际中奖人数取两者较小值，所有剩余候选均中奖并在规则快照中记录空缺名额；候选人数为零时不进入抽取事务。后一轮只有在所有前序轮次均为 `COMPLETED` 时才能执行。
 
 上述数据库变化处于同一事务。中途失败全部回滚到 `READY`；现场页面不会看到未保存结果。
 
@@ -267,7 +270,7 @@ stateDiagram-v2
 - 保留旧候选快照、规则快照、结果哈希、管理员和时间；
 - 轮次进入 `RESET`，重新发布后才能再次抽取；
 - 再次抽取创建新的 `attempt_no`，不覆盖旧尝试；
-- 默认排除中奖规则只读取 `VALID` 结果。
+- 某轮启用排除已中奖规则时，只读取 `VALID` 结果；`INVALIDATED` 结果不影响后续候选资格。
 
 ## 6. 导出任务状态机
 

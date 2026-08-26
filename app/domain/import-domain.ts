@@ -1,4 +1,4 @@
-import readXlsxFile from "read-excel-file";
+import readXlsxFile, { readSheetNames } from "read-excel-file";
 import type { ImportStagingRow } from "../api";
 
 function normalizePhone(value: string) {
@@ -7,10 +7,6 @@ function normalizePhone(value: string) {
 
 function normalizeSearchText(value: string) {
   return value.trim().toLocaleLowerCase("zh-CN").replace(/\s+/g, "");
-}
-
-function normalizeMaterialCode(value: string) {
-  return normalizeSearchText(value).replace(/[-_]/g, "");
 }
 
 function textCell(value: unknown) {
@@ -56,7 +52,7 @@ export type ProductImportRow = {
   conversion: string;
   gift: "是" | "否";
   branchScope: string;
-  status: "有效" | "待完善";
+  status: "有效" | "待核对" | "待完善";
   manuallyEdited?: boolean;
   source?: "excel" | "manual";
   sourceSheet?: string;
@@ -64,36 +60,35 @@ export type ProductImportRow = {
   serverRowId?: number;
   images?: ProductImageAsset[];
   imageStatus?: ProductImageStatus;
-  importAction?: ProductImportAction;
 };
-
-export type ProductImportAction = "新增" | "更新" | "未变更" | "疑似重复" | "待确认";
 
 export type ProductImportStats = {
-  added: number;
-  updated: number;
-  unchanged: number;
-  suspected: number;
-  pending: number;
-  removed: number;
+  total: number;
+  valid: number;
+  review: number;
+  incomplete: number;
 };
 
-export const emptyProductImportStats: ProductImportStats = { added: 0, updated: 0, unchanged: 0, suspected: 0, pending: 0, removed: 0 };
+export const emptyProductImportStats: ProductImportStats = { total: 0, valid: 0, review: 0, incomplete: 0 };
 
-export type ProductImageStatus = "未上传" | "已匹配" | "待确认" | "未匹配" | "手动维护";
+export type ProductImageStatus = "已匹配" | "待确认" | "未匹配";
 
 export type ProductImageSource = "zip" | "manual";
 
 export type ProductImageAsset = {
   id: string;
   fileName: string;
+  file?: File;
+  archivePath?: string;
   url: string;
   normalizedName: string;
+  matchingNames?: string[];
+  matchStatus?: "已匹配" | "待确认" | "未匹配";
   source?: ProductImageSource;
 };
 
 export type ProductImageStats = {
-  totalImages: number;
+  totalProducts: number;
   matchedProducts: number;
   pendingProducts: number;
   unmatchedProducts: number;
@@ -120,23 +115,13 @@ export type WhitelistRow = {
   sourceRowNumber?: number;
   serverRowId?: number;
   manuallyEdited?: boolean;
-  importAction?: WhitelistImportAction;
 };
-
-export type WhitelistImportAction = "新增" | "电话已更新" | "信息已更新" | "未变更" | "名称重复" | "电话待处理" | "名称待处理";
 
 export type WhitelistImportStats = {
-  added: number;
-  phoneUpdated: number;
-  updated: number;
-  unchanged: number;
-  duplicateName: number;
-  pendingPhone: number;
-  pendingName: number;
-  removed: number;
+  total: number;
+  valid: number;
+  pending: number;
 };
-
-export const emptyWhitelistImportStats: WhitelistImportStats = { added: 0, phoneUpdated: 0, updated: 0, unchanged: 0, duplicateName: 0, pendingPhone: 0, pendingName: 0, removed: 0 };
 
 export type AttendanceRow = {
   id: string;
@@ -169,10 +154,9 @@ export function bindProductStaging(rows: ProductImportRow[], staging: ImportStag
   return rows.map((row) => {
     const server = bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber));
     if (!server) return row;
-    const importAction: ProductImportAction = server.diffType === "POSSIBLE_DUPLICATE" ? "疑似重复"
-      : server.diffType === "PENDING_CONFIRMATION" ? "待确认"
-      : server.diffType === "UPDATED" ? "更新" : server.diffType === "UNCHANGED" ? "未变更" : "新增";
-    return { ...row, serverRowId: server.id, importAction };
+    const status: ProductImportRow["status"] = server.validationStatus === "BLOCKED" ? "待核对"
+      : server.validationStatus === "WARNING" ? "待完善" : "有效";
+    return { ...row, serverRowId: server.id, status };
   }).filter((row) => !bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber))?.deleted);
 }
 
@@ -181,10 +165,7 @@ export function bindWhitelistStaging(rows: WhitelistRow[], staging: ImportStagin
   return rows.map((row) => {
     const server = bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber));
     if (!server) return row;
-    let importAction: WhitelistImportAction = "新增";
-    if (server.diffType === "PENDING_CONFIRMATION") importAction = "名称重复";
-    else if (server.validationStatus === "BLOCKED") importAction = row.dealerFull.trim() ? "电话待处理" : "名称待处理";
-    return { ...row, serverRowId: server.id, importAction, status: server.validationStatus === "BLOCKED" ? "待处理" as const : row.status };
+    return { ...row, serverRowId: server.id, status: server.validationStatus === "BLOCKED" ? "待处理" as const : "有效" as const };
   }).filter((row) => !bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber))?.deleted);
 }
 
@@ -207,105 +188,55 @@ export function whitelistPhoneIsValid(value: string) {
   return /^1\d{10}$/.test(normalizePhone(value));
 }
 
-export function whitelistProfileEqual(a: WhitelistRow, b: WhitelistRow) {
-  const fields: Array<keyof WhitelistRow> = ["customerType", "region", "branch", "dealerShort", "dealerFull", "dealerType", "dealerName", "confirmerName", "confirmerPhone"];
-  return fields.every((field) => String(a[field] ?? "").trim() === String(b[field] ?? "").trim());
-}
-
-export function whitelistRowsEqual(a: WhitelistRow, b: WhitelistRow) {
-  return whitelistProfileEqual(a, b) && normalizePhone(a.dealerPhone) === normalizePhone(b.dealerPhone) && a.status === b.status;
-}
-
 export function cloneWhitelistRows(rows: WhitelistRow[]) {
   return rows.map((row) => ({ ...row }));
 }
 
-export function replaceWhitelistImportRows(existingRows: WhitelistRow[], incomingRows: WhitelistRow[]) {
-  const rows: WhitelistRow[] = [];
-  const stats: WhitelistImportStats = { ...emptyWhitelistImportStats };
+export function summarizeWhitelistRows(rows: WhitelistRow[]): WhitelistImportStats {
+  return {
+    total: rows.length,
+    valid: rows.filter((row) => row.status === "有效").length,
+    pending: rows.filter((row) => row.status === "待处理").length,
+  };
+}
+
+export function prepareWhitelistImportRows(incomingRows: WhitelistRow[]) {
   const warnings: string[] = [];
-  const usedExistingIds = new Set<string>();
   const incomingNameCounts = new Map<string, number>();
+  const incomingPhoneCounts = new Map<string, number>();
   incomingRows.forEach((row) => {
     const key = whitelistIdentityKey(row);
     if (key) incomingNameCounts.set(key, (incomingNameCounts.get(key) ?? 0) + 1);
+    const phone = normalizePhone(row.dealerPhone);
+    if (phone) {
+      const phoneKey = `${row.customerType}:${phone}`;
+      incomingPhoneCounts.set(phoneKey, (incomingPhoneCounts.get(phoneKey) ?? 0) + 1);
+    }
   });
-
-  incomingRows.forEach((incomingRow) => {
-    const identityKey = whitelistIdentityKey(incomingRow);
-    const incomingPhoneValid = whitelistPhoneIsValid(incomingRow.dealerPhone);
-    const incomingPhonePending = !incomingPhoneValid || incomingRow.status !== "有效";
-    const nameIsMissing = !identityKey;
-    const nameIsDuplicated = Boolean(identityKey && (incomingNameCounts.get(identityKey) ?? 0) > 1);
-
-    if (nameIsMissing || nameIsDuplicated) {
-      rows.push({ ...incomingRow, source: "excel", status: "待处理", identityKey: identityKey || undefined, importAction: nameIsMissing ? "名称待处理" : "名称重复" });
-      stats.added += 1;
-      if (nameIsMissing) stats.pendingName += 1;
-      else stats.duplicateName += 1;
-      if (incomingPhonePending) stats.pendingPhone += 1;
-      return;
-    }
-
-    const candidates = existingRows.filter((row) => !usedExistingIds.has(row.id) && whitelistIdentityKey(row) === identityKey);
-    if (candidates.length > 1) {
-      rows.push({ ...incomingRow, source: "excel", status: "待处理", identityKey, importAction: "名称重复" });
-      stats.added += 1;
-      stats.duplicateName += 1;
-      if (incomingPhonePending) stats.pendingPhone += 1;
-      return;
-    }
-
-    if (candidates.length === 1) {
-      const current = candidates[0];
-      usedExistingIds.add(current.id);
-      const nextStatus: WhitelistRow["status"] = incomingPhonePending ? "待处理" : "有效";
-      const nextRow: WhitelistRow = {
-        ...incomingRow,
-        id: current.id,
-        source: "excel",
-        sourceSheet: incomingRow.sourceSheet,
-        identityKey,
-        status: nextStatus,
-        importAction: undefined,
-        manuallyEdited: undefined,
-      };
-      if (incomingPhonePending) {
-        nextRow.importAction = "电话待处理";
-        stats.pendingPhone += 1;
-      } else if (normalizePhone(current.dealerPhone) !== normalizePhone(incomingRow.dealerPhone)) {
-        nextRow.importAction = "电话已更新";
-        stats.phoneUpdated += 1;
-      } else if (whitelistRowsEqual(current, nextRow)) {
-        nextRow.importAction = "未变更";
-        stats.unchanged += 1;
-      } else {
-        nextRow.importAction = "信息已更新";
-        stats.updated += 1;
-      }
-      rows.push(nextRow);
-      return;
-    }
-
-    const nextRow: WhitelistRow = { ...incomingRow, source: "excel", identityKey, status: incomingPhonePending ? "待处理" : "有效", importAction: incomingPhonePending ? "电话待处理" : "新增" };
-    rows.push(nextRow);
-    stats.added += 1;
-    if (incomingPhonePending) stats.pendingPhone += 1;
+  let missingNames = 0;
+  let duplicateNames = 0;
+  let invalidPhones = 0;
+  let duplicatePhones = 0;
+  const rows = incomingRows.map((row) => {
+    const identityKey = whitelistIdentityKey(row);
+    const phone = normalizePhone(row.dealerPhone);
+    const phoneKey = `${row.customerType}:${phone}`;
+    const missingName = !identityKey;
+    const duplicateName = Boolean(identityKey && (incomingNameCounts.get(identityKey) ?? 0) > 1);
+    const invalidPhone = !whitelistPhoneIsValid(phone);
+    const duplicatePhone = Boolean(phone && (incomingPhoneCounts.get(phoneKey) ?? 0) > 1);
+    if (missingName) missingNames += 1;
+    if (duplicateName) duplicateNames += 1;
+    if (invalidPhone) invalidPhones += 1;
+    if (duplicatePhone) duplicatePhones += 1;
+    return { ...row, source: "excel" as const, identityKey: identityKey || undefined,
+      status: missingName || duplicateName || invalidPhone || duplicatePhone ? "待处理" as const : "有效" as const };
   });
-
-  stats.removed = existingRows.filter((row) => !usedExistingIds.has(row.id)).length;
-
-  if (stats.duplicateName > 0) warnings.push(`有 ${stats.duplicateName} 条白名单客户在同一客户类型下名称全称重复，已标记为“名称重复”。`);
-  if (stats.pendingName > 0) warnings.push(`有 ${stats.pendingName} 条白名单客户缺少经销商名称全称，已标记为“名称待处理”。`);
-  if (stats.pendingPhone > 0) warnings.push(`有 ${stats.pendingPhone} 条白名单客户电话为空、格式异常或存在重复，已标记为“电话待处理”。`);
-  if (stats.removed > 0) warnings.push(`本次 Excel 未包含上次的 ${stats.removed} 名客户，确认后将从当前有效白名单中移除；已有订单不会被删除。`);
-  return { rows, stats, warnings };
-}
-
-export function clearWhitelistImportAction(row: WhitelistRow) {
-  const cleanRow = { ...row };
-  delete cleanRow.importAction;
-  return cleanRow;
+  if (missingNames > 0) warnings.push(`有 ${missingNames} 条白名单缺少经销商名称全称，已标记为待处理。`);
+  if (duplicateNames > 0) warnings.push(`有 ${duplicateNames} 条白名单在同一客户类型下名称全称重复，已标记为待处理。`);
+  if (invalidPhones > 0) warnings.push(`有 ${invalidPhones} 条白名单手机号为空或格式异常，已标记为待处理。`);
+  if (duplicatePhones > 0) warnings.push(`有 ${duplicatePhones} 条白名单在同一客户类型下手机号重复，已标记为待处理。`);
+  return { rows, stats: summarizeWhitelistRows(rows), warnings };
 }
 
 export type AttendanceFieldKey = "dealerName" | "gender" | "contactPhone" | "branch" | "participantType" | "dealerCompany";
@@ -316,7 +247,7 @@ export type AttendanceImportParseResult = {
   sheetCounts: Array<{ name: string; count: number }>;
 };
 
-export type AttendanceImportDraft = AttendanceImportParseResult & { fileName: string };
+export type AttendanceImportDraft = AttendanceImportParseResult & { fileName: string; inputCount: number };
 
 let localImportRowId = 0;
 export const createImportRowId = (prefix: string) => {
@@ -324,93 +255,13 @@ export const createImportRowId = (prefix: string) => {
   return `${prefix}-${localImportRowId}`;
 };
 
-export function normalizeProductIdentityText(value: string) {
-  return normalizeSearchText(value).replace(/[\s\-_/\\()[\]【】{}：:，,。·×xX*]/g, "");
-}
-
-export function productChannelKey(row: ProductImportRow) {
-  return `${row.customerType}|${row.rebate}`;
-}
-
-export function productCodeKey(row: ProductImportRow) {
-  const code = normalizeMaterialCode(row.materialCode);
-  return code ? `${productChannelKey(row)}|${code}` : "";
-}
-
-export function productNoCodeKey(row: ProductImportRow) {
-  return `${productChannelKey(row)}|${normalizeProductIdentityText(row.materialName)}|${normalizeProductIdentityText(row.spec)}|${normalizeProductIdentityText(row.casePack)}`;
-}
-
-export function productNameKey(row: ProductImportRow) {
-  return `${productChannelKey(row)}|${normalizeProductIdentityText(row.materialName)}`;
-}
-
-export function productRowsEqual(a: ProductImportRow, b: ProductImportRow) {
-  const fields: Array<keyof ProductImportRow> = ["customerType", "rebate", "category", "line", "materialCode", "materialName", "brand", "variety", "spec", "casePack", "unitPrice", "casePrice", "conversion", "gift", "branchScope", "status"];
-  return fields.every((field) => String(a[field] ?? "").trim() === String(b[field] ?? "").trim());
-}
-
-export function replaceProductImportRows(existingRows: ProductImportRow[], incomingRows: ProductImportRow[]) {
-  const rows: ProductImportRow[] = [];
-  const stats: ProductImportStats = { ...emptyProductImportStats };
-  const warnings: string[] = [];
-  const usedExistingIds = new Set<string>();
-
-  incomingRows.forEach((incomingRow) => {
-    const code = productCodeKey(incomingRow);
-    const legacyKey = productNoCodeKey(incomingRow);
-    const incomingKeyRows = incomingRows.filter((row) => code ? productCodeKey(row) === code : !row.materialCode.trim() && productNoCodeKey(row) === legacyKey);
-    let candidates = existingRows.filter((row) => !usedExistingIds.has(row.id) && (code ? productCodeKey(row) === code : !row.materialCode.trim() && productNoCodeKey(row) === legacyKey));
-
-    // 首次没有物料代码、后续补上物料代码时，允许唯一的无代码旧记录被识别为同一商品。
-    if (candidates.length === 0 && code) {
-      candidates = existingRows.filter((row) => !usedExistingIds.has(row.id) && !row.materialCode.trim() && productNoCodeKey(row) === legacyKey);
-    }
-
-    if (incomingKeyRows.length > 1 || candidates.length > 1) {
-      stats.pending += 1;
-      rows.push({ ...incomingRow, source: "excel", importAction: "待确认" });
-      return;
-    }
-
-    if (candidates.length === 1) {
-      const current = candidates[0];
-      usedExistingIds.add(current.id);
-      const manualImages = current.images?.filter((image) => image.source === "manual") ?? [];
-      const same = productRowsEqual(current, incomingRow);
-      rows.push({
-        ...incomingRow,
-        id: current.id,
-        source: "excel",
-        images: manualImages.length > 0 ? manualImages : incomingRow.images,
-        imageStatus: manualImages.length > 0 ? "手动维护" : incomingRow.imageStatus,
-        manuallyEdited: undefined,
-        importAction: same ? "未变更" : "更新",
-      });
-      if (same) stats.unchanged += 1;
-      else stats.updated += 1;
-      return;
-    }
-
-    const sameNameExists = rows.some((row) => productNameKey(row) === productNameKey(incomingRow));
-    const importAction: ProductImportAction = sameNameExists ? "疑似重复" : "新增";
-    rows.push({ ...incomingRow, source: "excel", importAction });
-    if (importAction === "疑似重复") stats.suspected += 1;
-    else stats.added += 1;
-  });
-
-  stats.removed = existingRows.filter((row) => !usedExistingIds.has(row.id)).length;
-
-  if (stats.suspected > 0) warnings.push(`有 ${stats.suspected} 条商品名称相同但未能按物料代码唯一匹配，已标记为“疑似重复”，请确认后再导入。`);
-  if (stats.pending > 0) warnings.push(`有 ${stats.pending} 条商品存在多个候选匹配，已标记为“待确认”，请编辑或删除异常行。`);
-  if (stats.removed > 0) warnings.push(`本次 Excel 未包含上次的 ${stats.removed} 条商品，确认后将从当前有效商品中移除；已有订单不会被删除。`);
-  return { rows, stats, warnings };
-}
-
-export function clearProductImportAction(row: ProductImportRow) {
-  const cleanRow = { ...row };
-  delete cleanRow.importAction;
-  return cleanRow;
+export function summarizeProductImportRows(rows: ProductImportRow[]): ProductImportStats {
+  return {
+    total: rows.length,
+    valid: rows.filter((row) => row.status === "有效").length,
+    review: rows.filter((row) => row.status === "待核对").length,
+    incomplete: rows.filter((row) => row.status === "待完善").length,
+  };
 }
 
 export function cloneProductRows(rows: ProductImportRow[]) {
@@ -492,7 +343,7 @@ export async function parseAttendanceWorkbook(file: File): Promise<AttendanceImp
   }
   if (rows.length === 0) throw new Error("Excel 中没有找到可展示的数据行，请检查文件内容。" );
   const duplicatePhones = Array.from(new Set(rows.map((row) => normalizePhone(row.contactPhone)).filter(Boolean).filter((phone, index, phones) => phones.indexOf(phone) !== index)));
-  if (duplicatePhones.length > 0) warnings.push(`发现 ${duplicatePhones.length} 个重复参会人电话，请确认是否应保留多条记录；抽奖候选将按经销商名称去重。`);
+  if (duplicatePhones.length > 0) warnings.push(`发现 ${duplicatePhones.length} 个重复参会人电话，请确认是否应保留多条记录；成功关联同一白名单客户 ID 后只计算一次抽奖资格。`);
   const duplicateCompanies = rows.map((row) => attendanceCompanyKey(row.dealerCompany)).filter(Boolean).filter((key, index, keys) => keys.indexOf(key) !== index);
   if (duplicateCompanies.length > 0) warnings.push(`发现 ${new Set(duplicateCompanies).size} 个重复经销商名称；抽奖候选将按经销商名称合并为一家。`);
   return { rows, warnings, sheetCounts };

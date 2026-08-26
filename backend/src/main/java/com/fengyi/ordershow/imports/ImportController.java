@@ -71,6 +71,14 @@ public class ImportController {
     return ApiResponse.of(true, TraceFilter.id(request));
   }
 
+  @PatchMapping("/{taskId}/rows")
+  ApiResponse<Boolean> deleteRows(@PathVariable long activityId, @PathVariable long taskId,
+      @RequestBody RowBatchDelete body, HttpServletRequest request) {
+    requireActivity(activityId, service.task(taskId));
+    service.deleteRows(taskId, body.rowIds(), auth.requireAdmin(request).id());
+    return ApiResponse.of(true, TraceFilter.id(request));
+  }
+
   @GetMapping("/{taskId}/errors")
   ApiResponse<List<ImportService.ImportIssue>> errors(@PathVariable long activityId, @PathVariable long taskId, HttpServletRequest request) {
     requireActivity(activityId, service.task(taskId));
@@ -79,9 +87,11 @@ public class ImportController {
 
   @PostMapping("/{taskId}/confirm")
   @ResponseStatus(HttpStatus.ACCEPTED)
-  ApiResponse<ImportService.ImportTask> confirm(@PathVariable long activityId, @PathVariable long taskId, HttpServletRequest request) {
+  ApiResponse<ImportService.ImportTask> confirm(@PathVariable long activityId, @PathVariable long taskId,
+      @RequestParam(required = false) MultipartFile imageZip,
+      @RequestParam(required = false) String imageDecisions, HttpServletRequest request) {
     requireActivity(activityId, service.task(taskId));
-    return ApiResponse.of(service.confirm(taskId, auth.requireAdmin(request).id()), TraceFilter.id(request));
+    return ApiResponse.of(service.confirm(taskId, auth.requireAdmin(request).id(), imageZip, imageDecisions), TraceFilter.id(request));
   }
 
   @DeleteMapping("/{taskId}")
@@ -96,4 +106,5 @@ public class ImportController {
   }
 
   public record RowPatch(Map<String, Object> changes, boolean deleted) {}
+  public record RowBatchDelete(List<Long> rowIds) {}
 }

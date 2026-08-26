@@ -180,7 +180,7 @@ public class ProductService {
         VALUES (?, ?, ?, COALESCE((SELECT MAX(pi.sort_no) + 1 FROM product_image pi WHERE pi.activity_product_id = ?), 0), 'MANUAL', 'CONFIRMED', ?)
         """, productId, stored.id(), primary, productId, adminId);
     Long imageId = jdbc.queryForObject("SELECT id FROM product_image WHERE activity_product_id = ? AND stored_file_id = ?", Long.class, productId, stored.id());
-    return new ImageView(imageId, stored.id(), "/api/v1/public/files/" + stored.id(), primary, 0);
+    return new ImageView(imageId, stored.id(), "/api/v1/public/files/" + stored.id(), primary, 0, "MANUAL", "CONFIRMED");
   }
 
   @Transactional
@@ -192,19 +192,57 @@ public class ProductService {
     if (changed != 1) throw DomainException.notFound("PRODUCT_IMAGE_NOT_FOUND", "商品图片不存在");
   }
 
+  @Transactional
   public void deleteImage(long activityId, long productId, long imageId) {
-    product(activityId, productId);
+    ProductView current = product(activityId, productId);
     int changed = jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE id = ? AND activity_product_id = ? AND deleted_at IS NULL", imageId, productId);
     if (changed != 1) throw DomainException.notFound("PRODUCT_IMAGE_NOT_FOUND", "商品图片不存在");
+    ensurePrimaryImages(List.of(current));
   }
 
+  @Transactional
   public ZipPreview previewZip(long activityId, MultipartFile zip, boolean confirm, long adminId) {
     if (zip.getSize() > 150L * 1024 * 1024) throw DomainException.badRequest("IMAGE_ZIP_TOO_LARGE", "图片 ZIP 不能超过 150MB");
-    List<ProductView> products = adminProducts(activityId, null, null, null);
+    try {
+      return processZip(activityId, zip.getBytes(), adminProducts(activityId, null, null, null), confirm, adminId, List.of());
+    } catch (DomainException exception) { throw exception; }
+    catch (Exception exception) { throw DomainException.unprocessable("IMAGE_ZIP_INVALID", "图片 ZIP 解析失败：" + exception.getMessage()); }
+  }
+
+  public ZipPreview attachZipToVersion(long activityId, long versionId, long archiveFileId, long adminId) {
+    return attachZipToVersion(activityId, versionId, archiveFileId, adminId, List.of());
+  }
+
+  public ZipPreview attachZipToVersion(long activityId, long versionId, long archiveFileId, long adminId, List<ZipDecision> decisions) {
+    return processZip(activityId, storage.read(archiveFileId), productsForVersion(activityId, versionId), true, adminId,
+        decisions == null ? List.of() : decisions);
+  }
+
+  private List<ProductView> productsForVersion(long activityId, long versionId) {
+    return jdbc.query("""
+        SELECT p.* FROM activity_product p
+        WHERE p.activity_id = ? AND p.data_version_id = ? AND p.is_visible = TRUE
+        ORDER BY p.sort_no, p.id
+        """, this::map, activityId, versionId);
+  }
+
+  private ZipPreview processZip(long activityId, byte[] zipBytes, List<ProductView> products, boolean confirm, long adminId,
+                                List<ZipDecision> decisions) {
+    if (confirm) {
+      for (ProductView product : products) {
+        jdbc.update("""
+            UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE
+            WHERE activity_product_id = ? AND source_type = 'ZIP_IMPORT' AND deleted_at IS NULL
+            """, product.id());
+      }
+    }
     int images = 0, matched = 0, ambiguous = 0, unmatched = 0;
     List<ZipMatch> matches = new ArrayList<>();
+    boolean explicitDecisionMode = !decisions.isEmpty();
+    Map<String, ZipDecision> decisionsByPath = decisions.stream().collect(java.util.stream.Collectors.toMap(
+        decision -> normalizeArchivePath(decision.entryPath()), decision -> decision, (first, ignored) -> first));
     Set<String> hashes = new HashSet<>();
-    try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(zip.getBytes()), StandardCharsets.UTF_8)) {
+    try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
       ZipEntry entry;
       while ((entry = input.getNextEntry()) != null) {
         if (entry.isDirectory() || !isImage(entry.getName())) continue;
@@ -214,12 +252,20 @@ public class ProductService {
         String hash = java.util.HexFormat.of().formatHex(digest);
         if (!hashes.add(hash)) continue;
         String materialName = baseName(entry.getName());
-        ImageCandidates match = imageCandidates(materialName, products);
-        List<ProductView> candidates = match.products();
+        ZipDecision decision = decisionsByPath.get(normalizeArchivePath(entry.getName()));
+        // 一旦管理端提交了整批决定，未出现在决定清单中的 ZIP 图片也不得在 Worker 阶段重新自动匹配。
+        ImageCandidates match = decision == null && !explicitDecisionMode
+            ? imageCandidates(entry.getName(), products) : new ImageCandidates(List.of(), false);
+        List<ProductView> candidates = decision != null && "CONFIRMED".equals(decision.status())
+            ? products.stream().filter(product -> decision.targetMaterialNames().stream()
+                .map(ProductService::imageMatchName).anyMatch(name -> name.equals(imageMatchName(product.materialName())))).toList()
+            : match.products();
         String status;
         Long productId = null;
-        if (!candidates.isEmpty() && !match.ambiguous()) { status = "MATCHED"; productId = candidates.getFirst().id(); matched++; }
-        else if (match.ambiguous()) { status = "AMBIGUOUS"; ambiguous++; }
+        boolean explicitlyConfirmed = decision != null && "CONFIRMED".equals(decision.status());
+        if (explicitlyConfirmed && candidates.isEmpty()) throw DomainException.unprocessable("IMAGE_DECISION_TARGET_MISSING", "已确认图片对应的商品不存在：" + entry.getName());
+        if (!candidates.isEmpty() && (explicitlyConfirmed || !match.ambiguous())) { status = explicitlyConfirmed ? "CONFIRMED" : "MATCHED"; productId = candidates.getFirst().id(); matched++; }
+        else if ((decision != null && "PENDING".equals(decision.status())) || (decision == null && match.ambiguous())) { status = "AMBIGUOUS"; ambiguous++; }
         else { status = "UNMATCHED"; unmatched++; }
         if (confirm && productId != null) {
           List<Long> existingFiles = jdbc.queryForList("""
@@ -235,30 +281,58 @@ public class ProductService {
                 """, Integer.class, candidate.id(), storedId);
             if (alreadyLinked != null && alreadyLinked > 0) continue;
             int current = jdbc.queryForObject("SELECT COUNT(*) FROM product_image WHERE activity_product_id = ? AND deleted_at IS NULL", Integer.class, candidate.id());
-            jdbc.update("INSERT INTO product_image(activity_product_id, stored_file_id, is_primary, sort_no, source_type, match_status, created_by) VALUES (?, ?, ?, ?, 'ZIP_IMPORT', 'MATCHED', ?)",
-                candidate.id(), storedId, current == 0, current, adminId);
+            jdbc.update("""
+                INSERT INTO product_image(activity_product_id, stored_file_id, is_primary, sort_no, source_type, match_status, created_by)
+                VALUES (?, ?, ?, ?, 'ZIP_IMPORT', ?, ?)
+                ON DUPLICATE KEY UPDATE deleted_at = NULL, is_primary = VALUES(is_primary), sort_no = VALUES(sort_no),
+                  source_type = 'ZIP_IMPORT', match_status = VALUES(match_status), created_by = VALUES(created_by)
+                """,
+                candidate.id(), storedId, current == 0, current, status, adminId);
           }
         }
         matches.add(new ZipMatch(entry.getName(), materialName, productId, status));
       }
+      if (images == 0) throw DomainException.unprocessable("IMAGE_ZIP_EMPTY", "ZIP 中没有找到支持的商品图片");
+      if (confirm) ensurePrimaryImages(products);
     } catch (DomainException exception) { throw exception; }
     catch (Exception exception) { throw DomainException.unprocessable("IMAGE_ZIP_INVALID", "图片 ZIP 解析失败：" + exception.getMessage()); }
     return new ZipPreview(images, matched, ambiguous, unmatched, matches, confirm);
   }
 
-  private static ImageCandidates imageCandidates(String filename, List<ProductView> products) {
-    String imageKey = imageMatchName(filename);
-    if (imageKey.isBlank()) return new ImageCandidates(List.of(), false);
+  private static String normalizeArchivePath(String value) {
+    return value == null ? "" : value.replace('\\', '/').replaceAll("^/+", "").trim();
+  }
+
+  private void ensurePrimaryImages(List<ProductView> products) {
+    for (ProductView product : products) {
+      Integer primaryCount = jdbc.queryForObject("""
+          SELECT COUNT(*) FROM product_image
+          WHERE activity_product_id = ? AND deleted_at IS NULL AND is_primary = TRUE
+          """, Integer.class, product.id());
+      if (primaryCount != null && primaryCount > 0) continue;
+      List<Long> first = jdbc.queryForList("""
+          SELECT id FROM product_image WHERE activity_product_id = ? AND deleted_at IS NULL
+          ORDER BY sort_no, id LIMIT 1
+          """, Long.class, product.id());
+      if (!first.isEmpty()) jdbc.update("UPDATE product_image SET is_primary = TRUE WHERE id = ?", first.getFirst());
+    }
+  }
+
+  static ImageCandidates imageCandidates(String filename, List<ProductView> products) {
+    List<String> imageKeys = imagePathCandidates(filename).stream().map(ProductService::imageMatchName).filter(key -> !key.isBlank()).toList();
+    if (imageKeys.isEmpty()) return new ImageCandidates(List.of(), false);
     Map<String, List<ProductView>> groups = products.stream()
         .collect(java.util.stream.Collectors.groupingBy(product -> imageMatchName(product.materialName())));
-    List<ProductView> exact = groups.get(imageKey);
-    if (exact != null) return new ImageCandidates(exact, false);
+    for (String imageKey : imageKeys) {
+      List<ProductView> exact = groups.get(imageKey);
+      if (exact != null) return new ImageCandidates(exact, false);
+    }
 
     double best = 0;
     List<String> bestKeys = new ArrayList<>();
     for (String productKey : groups.keySet()) {
       if (productKey.isBlank()) continue;
-      double score = imageNameScore(imageKey, productKey);
+      double score = imageKeys.stream().mapToDouble(imageKey -> imageNameScore(imageKey, productKey)).max().orElse(0);
       if (score > best + 0.015) {
         best = score;
         bestKeys.clear();
@@ -267,13 +341,17 @@ public class ProductService {
         bestKeys.add(productKey);
       }
     }
-    if (best < 0.74 || bestKeys.isEmpty()) return new ImageCandidates(List.of(), false);
-    if (bestKeys.size() > 1) return new ImageCandidates(List.of(), true);
+    if (best < 0.55 || bestKeys.isEmpty()) return new ImageCandidates(List.of(), false);
+    if (best < 0.90 || bestKeys.size() > 1) return new ImageCandidates(List.of(), true);
     return new ImageCandidates(groups.get(bestKeys.getFirst()), false);
   }
 
-  private static double imageNameScore(String image, String product) {
+  static double imageNameScore(String image, String product) {
+    if (signaturesConflict(signature(image), signature(product))) return 0;
     if (image.equals(product)) return 1;
+    String imageCore = withoutPackaging(image).replace("x", "");
+    String productCore = withoutPackaging(product).replace("x", "");
+    if (imageCore.equals(productCore)) return 0.98;
     if (image.contains(product) || product.contains(image)) {
       double ratio = (double) Math.min(image.length(), product.length()) / Math.max(image.length(), product.length());
       if (Math.min(image.length(), product.length()) >= 7 && ratio >= 0.5) return 0.91 + ratio * 0.08;
@@ -301,13 +379,92 @@ public class ProductService {
     if (value == null) return "";
     String normalized = value.toLowerCase(Locale.CHINA)
         .replaceAll("^\\d{8}(?=[\\p{IsHan}])", "")
-        .replaceAll("(?i)(主图|产品图|白底图|清图|玻璃瓶|塑料瓶|塑料袋|纸箱|pet瓶|pe瓶|pe壶|铁罐|礼盒随货发|礼盒随货|随货发)", "")
+        .replaceAll("(?i)(主图|产品图|白底图|清图|组装好发货|天津定制|河南定制|北京定制|武汉分特渠|随货发)", "")
         .replaceAll("(?i)[\\-_]o$", "")
         .replace('×', 'x').replace('*', 'x')
         .replaceAll("[^\\p{IsHan}a-z0-9.]", "")
-        .replace("x", "")
         .replaceAll("(主图|清)\\d*$", "");
     return normalized;
+  }
+
+  static List<String> imagePathCandidates(String path) {
+    if (path == null) return List.of();
+    List<String> segments = new ArrayList<>(java.util.Arrays.stream(path.replace('\\', '/').split("/"))
+        .map(String::trim).filter(segment -> !segment.isBlank() && !segment.equals(".") && !segment.equals("..")).toList());
+    if (segments.isEmpty()) return List.of();
+    int last = segments.size() - 1;
+    segments.set(last, segments.get(last).replaceFirst("(?i)\\.(jpg|jpeg|png|webp|gif|bmp)$", ""));
+    java.util.LinkedHashSet<String> candidates = new java.util.LinkedHashSet<>();
+    for (int start = 0; start < segments.size(); start++) {
+      String candidate = String.join("", segments.subList(start, segments.size()));
+      if (imageMatchName(candidate).length() >= 6) candidates.add(candidate);
+    }
+    return List.copyOf(candidates);
+  }
+
+  private static final List<String> IMAGE_VARIETIES = List.of(
+      "清香米醋", "香甜米醋", "精酿陈醋", "山西陈醋", "镇江香醋", "酿造白醋", "零添加米醋",
+      "零添加特级味极鲜", "零添加金标生抽", "蒸鱼豉油酱油", "蒸鱼豉油", "味极鲜酱油", "金标生抽", "薄盐生抽", "红烧老抽", "草菇老抽", "生抽", "老抽",
+      "藤椒油", "花椒油", "小磨香油", "芝麻油", "调和油", "菜籽油", "玉米油", "葵花籽油",
+      "白醋", "陈醋", "香醋", "米醋");
+  private static final List<String> IMAGE_BRANDS = List.of("金龙鱼", "梁汾", "丸庄", "香满园", "胡姬花", "口福");
+  private static final List<String> IMAGE_CATEGORIES = List.of("酱油", "陈醋", "香醋", "米醋", "白醋", "醋", "料酒", "蚝油", "调味油", "食用油");
+  private static final List<String> IMAGE_GRADES = List.of("特级", "一级", "二级", "三级");
+
+  private static ImageSignature signature(String value) {
+    String normalized = imageMatchName(value);
+    Set<String> volumes = new HashSet<>();
+    java.util.regex.Matcher volumeMatcher = java.util.regex.Pattern.compile("(\\d+(?:\\.\\d+)?)(ml|kg|l|g)").matcher(normalized);
+    while (volumeMatcher.find()) {
+      double amount = Double.parseDouble(volumeMatcher.group(1));
+      String unit = volumeMatcher.group(2);
+      double converted = unit.equals("l") || unit.equals("kg") ? amount * 1000 : amount;
+      volumes.add(java.math.BigDecimal.valueOf(converted).stripTrailingZeros().toPlainString() + (unit.equals("l") || unit.equals("ml") ? "ml" : "g"));
+    }
+    Set<String> packs = regexTokens(normalized, "x(\\d+)", 1);
+    packs.addAll(regexTokens(normalized, "(?:ml|kg|g|l)(\\d+)(?!\\d)", 1));
+    String brand = longestContained(normalized, IMAGE_BRANDS);
+    String category = longestContained(normalized, IMAGE_CATEGORIES).replaceAll("(?:陈|香|米|白)醋", "醋");
+    String variety = IMAGE_VARIETIES.stream().filter(normalized::contains).max(java.util.Comparator.comparingInt(String::length)).orElse("");
+    String grade = longestContained(normalized, IMAGE_GRADES);
+    return new ImageSignature(volumes, packs, brand, category, variety, grade,
+        namedTokens(normalized, Map.of("玻璃瓶", "glass", "塑料瓶", "pet", "pet瓶", "pet", "pe瓶", "pe", "pe壶", "pe", "铁罐", "metal")),
+        namedTokens(normalized, Map.of("葫芦瓶", "gourd")),
+        namedTokens(normalized, Map.of("纸箱", "carton", "礼盒", "gift", "塑料袋", "bag", "袋装", "bag", "散装", "bulk")));
+  }
+
+  private static String longestContained(String value, List<String> terms) {
+    return terms.stream().filter(value::contains).max(java.util.Comparator.comparingInt(String::length)).orElse("");
+  }
+
+  private static Set<String> regexTokens(String value, String regex, int group) {
+    Set<String> tokens = new HashSet<>();
+    java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(regex).matcher(value);
+    while (matcher.find()) tokens.add(matcher.group(group));
+    return tokens;
+  }
+
+  private static Set<String> namedTokens(String value, Map<String, String> terms) {
+    return terms.entrySet().stream().filter(entry -> value.contains(entry.getKey())).map(Map.Entry::getValue).collect(java.util.stream.Collectors.toSet());
+  }
+
+  private static boolean setsConflict(Set<String> first, Set<String> second) {
+    return !first.isEmpty() && !second.isEmpty() && first.stream().noneMatch(second::contains);
+  }
+
+  private static boolean signaturesConflict(ImageSignature first, ImageSignature second) {
+    return setsConflict(first.volumes(), second.volumes()) || setsConflict(first.packCounts(), second.packCounts())
+        || (!first.brand().isBlank() && !second.brand().isBlank() && !first.brand().equals(second.brand()))
+        || (!first.category().isBlank() && !second.category().isBlank() && !first.category().equals(second.category()))
+        || (!first.variety().isBlank() && !second.variety().isBlank() && !first.variety().equals(second.variety()))
+        || (!first.grade().isBlank() && !second.grade().isBlank() && !first.grade().equals(second.grade()))
+        || setsConflict(first.containerMaterial(), second.containerMaterial())
+        || setsConflict(first.containerShape(), second.containerShape())
+        || setsConflict(first.outerPackaging(), second.outerPackaging());
+  }
+
+  private static String withoutPackaging(String value) {
+    return value.replaceAll("(?i)(玻璃瓶|塑料瓶|塑料袋|纸箱|pe瓶|pe壶|pet瓶|pet|葫芦瓶|铁罐|礼盒随货发|礼盒随货|礼盒|袋装|散装)", "");
   }
 
   public ProductView product(long activityId, long productId) {
@@ -332,9 +489,10 @@ public class ProductService {
 
   private ProductView withImages(ProductView product) {
     List<ImageView> images = jdbc.query("""
-        SELECT i.id, i.stored_file_id, i.is_primary, i.sort_no FROM product_image i
+        SELECT i.id, i.stored_file_id, i.is_primary, i.sort_no, i.source_type, i.match_status FROM product_image i
         WHERE i.activity_product_id = ? AND i.deleted_at IS NULL ORDER BY i.is_primary DESC, i.sort_no, i.id
-        """, (rs, rowNum) -> new ImageView(rs.getLong(1), rs.getLong(2), "/api/v1/public/files/" + rs.getLong(2), rs.getBoolean(3), rs.getInt(4)), product.id());
+        """, (rs, rowNum) -> new ImageView(rs.getLong(1), rs.getLong(2), "/api/v1/public/files/" + rs.getLong(2),
+        rs.getBoolean(3), rs.getInt(4), rs.getString(5), rs.getString(6)), product.id());
     List<String> branchScope = jdbc.query("""
         SELECT branch_name FROM activity_product_branch_scope
         WHERE activity_product_id = ? ORDER BY id
@@ -407,7 +565,7 @@ public class ProductService {
       String brandName, String varietyName, String specification, String casePack, BigDecimal bottlePrice, BigDecimal casePrice,
       BigDecimal tonCaseFactor, String customerType, String rebateStatus, boolean giftBox, boolean visible, boolean orderable,
       String dataStatus, int sortNo, int version, List<ImageView> images, List<String> branchScope) {}
-  public record ImageView(long id, long fileId, String url, boolean primary, int sortNo) {}
+  public record ImageView(long id, long fileId, String url, boolean primary, int sortNo, String sourceType, String matchStatus) {}
   public record ProductPatch(String customerType, String rebateStatus, String materialCode, String materialName, String categoryName, String productLine, String brandName,
       String varietyName, String specification, String casePack, BigDecimal bottlePrice, boolean bottlePriceSet,
       BigDecimal casePrice, boolean casePriceSet, BigDecimal tonCaseFactor, boolean tonCaseFactorSet,
@@ -418,6 +576,9 @@ public class ProductService {
       String branchScope, String reason) {}
   public record ZipMatch(String filename, String materialName, Long productId, String status) {}
   public record ZipPreview(int imageCount, int matchedCount, int ambiguousCount, int unmatchedCount, List<ZipMatch> matches, boolean committed) {}
+  public record ZipDecision(String entryPath, String status, List<String> targetMaterialNames) {}
   private record ImageCandidates(List<ProductView> products, boolean ambiguous) {}
+  private record ImageSignature(Set<String> volumes, Set<String> packCounts, String brand, String category, String variety, String grade,
+                                Set<String> containerMaterial, Set<String> containerShape, Set<String> outerPackaging) {}
   private record VersionSource(long versionId, long taskId) {}
 }

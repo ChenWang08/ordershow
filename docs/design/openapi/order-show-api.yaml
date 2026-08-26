@@ -565,6 +565,37 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericPageResponse'
+    patch:
+      operationId: deleteImportPreviewRows
+      tags: [Imports]
+      summary: 批量移除导入预览行并统一重新校验
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rowIds]
+              properties:
+                rowIds:
+                  type: array
+                  minItems: 1
+                  uniqueItems: true
+                  items:
+                    $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: 所选预览行已在同一事务中移除并完成一次重新校验
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
   /admin/activities/{activityId}/imports/{taskId}/rows/{rowId}:
     patch:
       operationId: updateImportPreviewRow
@@ -659,6 +690,7 @@ paths:
       operationId: confirmImportTask
       tags: [Imports]
       summary: 确认导入并全量替换当前数据
+      description: 商品导入可在确认时附带本批次图片 ZIP，并提交浏览器预览阶段形成的图片匹配决定。Excel、ZIP 和匹配决定全部处理成功后才原子切换当前商品版本；未附带 ZIP 时新版本商品均无图片关联。
       security:
         - adminCookie: []
       parameters:
@@ -667,17 +699,19 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CsrfToken'
       requestBody:
-        required: true
+        required: false
         content:
-          application/json:
+          multipart/form-data:
             schema:
               type: object
-              required: [reason]
               properties:
-                reason:
+                imageZip:
                   type: string
-                  minLength: 1
-                  maxLength: 500
+                  format: binary
+                  description: 仅商品导入可传；上传阶段只在浏览器预览，确认时才随任务保存
+                imageDecisions:
+                  type: string
+                  description: 仅商品导入可传；JSON 数组。每项包含 ZIP 内 entryPath、CONFIRMED/PENDING/UNMATCHED 状态和 targetRowIds。CONFIRMED 必须指向当前任务中同一物料名称的一条或多条 staging 行，其他状态不得携带目标。
       responses:
         '202':
           description: 已进入确认任务
@@ -1378,6 +1412,40 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/lottery/candidates/preview:
+    post:
+      operationId: previewLotteryCandidates
+      tags: [Lottery]
+      summary: 按正式抽奖口径实时试算候选客户
+      description: 候选统一按白名单客户 ID 去重；结果仅为当前时刻预览，正式开奖时会再次校验并固定快照。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 实时候选人数、实际可中奖人数、空缺名额和完整候选名单
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/lottery/statistics:
+    get:
+      operationId: getLotteryStatistics
+      tags: [Lottery]
+      summary: 查询数据库当前有效中奖客户统计
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 有效中奖记录、按白名单客户 ID 去重的有效中奖客户、已作废记录
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
   /admin/activities/{activityId}/lottery/rounds/{roundId}:
     patch:
       operationId: updateLotteryRound
@@ -1929,7 +1997,7 @@ components:
           type: string
     ProductImage:
       type: object
-      required: [url, primary, sortNo]
+      required: [url, primary, sortNo, sourceType, matchStatus]
       properties:
         url:
           type: string
@@ -1938,6 +2006,13 @@ components:
           type: boolean
         sortNo:
           type: integer
+        sourceType:
+          type: string
+          enum: [ZIP_IMPORT, MANUAL]
+          description: 图片内部来源，仅供管理逻辑使用，不作为商品列表状态展示。
+        matchStatus:
+          type: string
+          enum: [MATCHED, PENDING, UNMATCHED, CONFIRMED]
     OrderableProduct:
       type: object
       required: [id, materialName, customerType, rebateStatus, giftBox, visible, orderable, sortNo, images, branchScope]
@@ -2244,9 +2319,6 @@ components:
           enum: [ALL, GENERAL, SPECIAL]
         minimumOrderAmount:
           $ref: '#/components/schemas/Decimal'
-        qualificationCutoffAt:
-          type: [string, 'null']
-          format: date-time
         excludePreviousWinners:
           type: boolean
         displayNameType:
