@@ -1,4 +1,5 @@
 export const ACTIVITY_CODE = process.env.NEXT_PUBLIC_ACTIVITY_CODE || "2026-mid-autumn";
+const ADMIN_ACTIVITY_PREFERENCE_KEY = "order-show.admin.activity-code";
 
 let activeActivityCode = ACTIVITY_CODE;
 const activeActivityListeners = new Set<() => void>();
@@ -13,6 +14,17 @@ export function setActiveActivityCode(activityCode: string) {
 
 export function getActiveActivityCode() {
   return activeActivityCode;
+}
+
+export function getPreferredAdminActivityCode() {
+  if (typeof window === "undefined") return "";
+  return window.localStorage.getItem(ADMIN_ACTIVITY_PREFERENCE_KEY)?.trim() || "";
+}
+
+export function setPreferredAdminActivityCode(activityCode: string) {
+  const normalized = activityCode.trim();
+  if (!normalized || typeof window === "undefined") return;
+  window.localStorage.setItem(ADMIN_ACTIVITY_PREFERENCE_KEY, normalized);
 }
 
 /** Subscribe to activity changes for components that must wait before loading data. */
@@ -184,6 +196,44 @@ export type AuditLogApi = { id: number; actorType: string; actorName?: string; a
 
 export async function loadActivity() { return (await api<Envelope<RuntimeActivity>>(`/public/activities/${activeActivityPath()}`)).data; }
 
+export async function loadCurrentActivity() {
+  return (await api<Envelope<RuntimeActivity>>("/public/activities/current")).data;
+}
+
+export async function loadAdminActivities() {
+  return (await api<Envelope<RuntimeActivity[]>>("/admin/activities")).data;
+}
+
+export type CreateActivityInput = {
+  name: string;
+  startsAt: string;
+  endsAt: string;
+};
+
+export async function createActivity(input: CreateActivityInput) {
+  const regions = [
+    { code: "EAST", name: "东区", sortNo: 10 },
+    { code: "SOUTH", name: "南区", sortNo: 20 },
+    { code: "NORTH_1", name: "北1区", sortNo: 30 },
+    { code: "NORTH_2", name: "北2区", sortNo: 40 },
+  ];
+  return (await api<Envelope<RuntimeActivity>>("/admin/activities", {
+    method: "POST",
+    body: JSON.stringify({
+      name: input.name.trim(),
+      description: "",
+      timezone: "Asia/Shanghai",
+      startsAt: new Date(input.startsAt).toISOString(),
+      endsAt: new Date(input.endsAt).toISOString(),
+      customerScope: "ALL",
+      companyRankingTopN: 20,
+      branchRankingTopN: 20,
+      tonDisplayScale: 3,
+      regions,
+    }),
+  }, "admin")).data;
+}
+
 export async function verifyPhone(customerType: "GENERAL" | "SPECIAL", regionCode: string, phone: string) {
   return (await api<Envelope<{ customer: RuntimeIdentity; csrfToken: string }>>(`/public/activities/${activeActivityPath()}/verify-phone`, {
     method: "POST", body: JSON.stringify({ customerType, regionCode: regionCode || null, phone }),
@@ -319,14 +369,15 @@ export async function loadAdminOrder(activityId: number, orderId: number) {
   return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders/${orderId}`)).data;
 }
 
-export async function exportAdminOrders(activityId: number, filters: { status?: string; customerType?: string; keyword?: string } = {}) {
+export async function exportAdminOrders(activityId: number, filters: { status?: string; customerType?: string; keyword?: string } = {}, activityName = "活动") {
   const query = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => { if (value) query.set(key, value); });
   const response = await fetch(`${apiBase()}/admin/activities/${activityId}/orders/export?${query.toString()}`, { credentials: "include" });
   if (!response.ok) throw new ApiError(response.status, "EXPORT_FAILED", "订单导出失败");
   const blob = await response.blob();
   const url = URL.createObjectURL(blob); const link = document.createElement("a");
-  link.href = url; link.download = `订单导出-${new Date().toISOString().slice(0, 10)}.xlsx`; link.click(); URL.revokeObjectURL(url);
+  const safeName = activityName.replace(/[\\/:*?"<>|]/g, "-");
+  link.href = url; link.download = `${safeName}_订单数据_${new Date().toISOString().slice(0, 10)}.xlsx`; link.click(); URL.revokeObjectURL(url);
 }
 
 export async function loadDashboard(filters: { customerType?: string; regionCode?: string } = {}) {

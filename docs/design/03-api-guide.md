@@ -17,9 +17,11 @@
 | `/api/v1/public` | 未验证 H5、公开大屏 | 无；只返回非敏感信息并限流 |
 | `/api/v1/h5` | 已验证活动客户 | Secure、HttpOnly、SameSite Cookie + CSRF Token；跨站部署才使用 Bearer Token |
 | `/api/v1/admin` | 管理后台和抽奖操作员 | Secure HttpOnly Cookie + CSRF Token |
-| `/api/v1/screen` | 现场只读页面 | 活动编码 + 可撤销 screen token（正式环境） |
+| `/api/v1/screen` | 现场只读页面 | 活动编号 + 可撤销 screen token（正式环境） |
 
 H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时间和会话 ID。默认使用不透明 HttpOnly Cookie，服务端不接受客户端另外指定其他客户 ID；若因跨站部署使用 Bearer Token，仍必须具备同样的活动和客户绑定。
+
+客户页面统一从 `/h5` 进入，并先调用 `GET /public/activities/current` 获取当前唯一可下单活动。活动编号只在页面内部调用活动范围接口时使用，不要求客户链接携带。管理后台统一从 `/admin` 进入，当前活动由后台选择器决定；浏览器保存的选择仅是界面偏好，所有业务查询仍由服务端根据活动 ID 隔离和鉴权。
 
 ## 3. 统一响应
 

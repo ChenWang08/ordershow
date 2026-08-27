@@ -126,7 +126,7 @@ function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRecord {
   };
 }
 
-export function OrderManagement({ activityClosed, activityId }: { activityClosed: boolean; activityId: number }) {
+export function OrderManagement({ activityClosed, activityId, activityName }: { activityClosed: boolean; activityId: number; activityName: string }) {
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [orderCounts, setOrderCounts] = useState({ all: 0, submitted: 0, withdrawn: 0 });
   const [loading, setLoading] = useState(false);
@@ -134,6 +134,8 @@ export function OrderManagement({ activityClosed, activityId }: { activityClosed
   const [orderFilter, setOrderFilter] = useState<"全部" | OrderStatus>("全部");
   const [customerType, setCustomerType] = useState<"全部" | CustomerType>("全部");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
   const [selectedNo, setSelectedNo] = useState<string | null>(null);
   const [expandedVersion, setExpandedVersion] = useState<string | null>(null);
   const selected = orders.find((order) => order.no === selectedNo) ?? null;
@@ -146,13 +148,14 @@ export function OrderManagement({ activityClosed, activityId }: { activityClosed
         const status = orderFilter === "已提交" ? "SUBMITTED" : orderFilter === "已撤回" ? "WITHDRAWN" : undefined;
         const runtimeCustomerType = customerType === "综合" ? "GENERAL" : customerType === "特渠" ? "SPECIAL" : undefined;
         const [current, all, submitted, withdrawn] = await Promise.all([
-          loadAdminOrders(activityId, { status, customerType: runtimeCustomerType, keyword: search, page: 1, size: 200 }),
+          loadAdminOrders(activityId, { status, customerType: runtimeCustomerType, keyword: search, page, size: 50 }),
           loadAdminOrders(activityId, { page: 1, size: 1 }),
           loadAdminOrders(activityId, { status: "SUBMITTED", page: 1, size: 1 }),
           loadAdminOrders(activityId, { status: "WITHDRAWN", page: 1, size: 1 }),
         ]);
         if (!active) return;
         setOrders(current.data.map(toOrderRecord));
+        setTotalPages(Math.max(1, current.page.totalPages));
         setOrderCounts({ all: all.page.totalElements, submitted: submitted.page.totalElements, withdrawn: withdrawn.page.totalElements });
         setLoadError("");
       } catch (reason) {
@@ -165,7 +168,7 @@ export function OrderManagement({ activityClosed, activityId }: { activityClosed
       active = false;
       window.clearTimeout(timer);
     };
-  }, [activityId, customerType, orderFilter, search]);
+  }, [activityId, customerType, orderFilter, page, search]);
 
   const filteredOrders = useMemo(() => orders.filter((order) => {
     const keyword = search.trim();
@@ -173,7 +176,7 @@ export function OrderManagement({ activityClosed, activityId }: { activityClosed
     const matchesPhone = Boolean(keyword) && (order.dealerPhone.includes(keyword) || (digits.length > 0 && order.dealerPhone.includes(digits)));
     return (orderFilter === "全部" || order.status === orderFilter)
       && (customerType === "全部" || order.type === customerType)
-      && (!keyword || order.dealer.includes(keyword) || matchesPhone);
+      && (!keyword || order.no.includes(keyword) || order.dealer.includes(keyword) || matchesPhone);
   }), [customerType, orderFilter, orders, search]);
 
   const openOrder = async (order: OrderRecord) => {
@@ -192,27 +195,28 @@ export function OrderManagement({ activityClosed, activityId }: { activityClosed
     status: orderFilter === "已提交" ? "SUBMITTED" : orderFilter === "已撤回" ? "WITHDRAWN" : undefined,
     customerType: customerType === "综合" ? "GENERAL" : customerType === "特渠" ? "SPECIAL" : undefined,
     keyword: search,
-  });
+  }, activityName);
 
   const currentVersion = selected?.versions.at(-1) ?? null;
   const currentVersionId = currentVersion?.version;
   const operationRecords = selected?.operationRecords ?? [];
 
   return (
-    <div className="admin-panel">
+    <div className="admin-panel order-management-panel">
       <div className="panel-title"><div><h2>订单管理</h2><p>后台只读查看商品明细、金额、版本和操作记录</p></div><button className="admin-primary" onClick={() => void exportOrders()}>导出订单</button></div>
       {activityClosed && <div className="activity-closed-banner"><b>活动已截止</b><span>所有订单进入只读状态，当前仅可查看商品明细和版本记录。</span></div>}
       {loadError && <div className="warning-box"><b>订单数据加载失败</b><span>{loadError}</span></div>}
       <div className="filter-row">
-        {([["全部", `全部 ${orderCounts.all}`], ["已提交", `已提交 ${orderCounts.submitted}`], ["已撤回", `已撤回 ${orderCounts.withdrawn}`]] as const).map(([value, label]) => <button key={value} className={orderFilter === value ? "active" : ""} onClick={() => setOrderFilter(value)}>{label}</button>)}
-        <label className="order-type-filter"><span>客户类型</span><select value={customerType} onChange={(event) => setCustomerType(event.target.value as typeof customerType)}><option>全部</option><option>综合</option><option>特渠</option></select></label>
-        <input placeholder="搜索经销商名称或电话" value={search} onChange={(event) => setSearch(event.target.value)} />
+        {([["全部", `全部 ${orderCounts.all}`], ["已提交", `已提交 ${orderCounts.submitted}`], ["已撤回", `已撤回 ${orderCounts.withdrawn}`]] as const).map(([value, label]) => <button key={value} className={orderFilter === value ? "active" : ""} onClick={() => { setOrderFilter(value); setPage(1); }}>{label}</button>)}
+        <label className="order-type-filter"><span>客户类型</span><select value={customerType} onChange={(event) => { setCustomerType(event.target.value as typeof customerType); setPage(1); }}><option>全部</option><option>综合</option><option>特渠</option></select></label>
+        <input placeholder="搜索订单号、经销商名称或手机号后四位" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} />
       </div>
       <div className="data-table order-table">
         <div className="table-row table-head">{["订单编号", "经销商", "经销商电话", "类型", "金额", "创建时间", "最后修改", "状态 / 客户权限"].map((label) => <b key={label}>{label}</b>)}</div>
         {filteredOrders.map((order) => <button className="table-row clickable-row" key={order.no} onClick={() => void openOrder(order)}><span>{order.no}</span><span>{order.dealer}</span><span>{maskPhone(order.dealerPhone)}</span><span>{order.type}</span><span>{order.amount}</span><span>{order.createdAt}</span><span>{order.updatedAt}</span><span className={`status-cell ${order.status === "已撤回" ? "withdrawn" : ""}`}><b>{order.status}</b><small>{activityClosed ? "已截止" : order.permission}</small></span></button>)}
         {filteredOrders.length === 0 && <div className="order-empty-row">{loading ? "正在加载订单…" : "没有符合条件的订单"}</div>}
       </div>
+      <div className="order-pagination"><span>第 {page} / {totalPages} 页 · 每页最多 50 张</span><div><button disabled={page <= 1 || loading} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button><button disabled={page >= totalPages || loading} onClick={() => setPage((value) => Math.min(totalPages, value + 1))}>下一页</button></div></div>
       {selected && <div className="order-drawer-backdrop" onClick={() => { setSelectedNo(null); setExpandedVersion(null); }}><aside className="order-drawer" onClick={(event) => event.stopPropagation()}>
         <header><div><span>订单详情 · {selected.status}</span><h2>{selected.no}</h2></div><button onClick={() => { setSelectedNo(null); setExpandedVersion(null); }}>×</button></header>
         <div className="order-summary-grid">

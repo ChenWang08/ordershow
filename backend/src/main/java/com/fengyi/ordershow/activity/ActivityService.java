@@ -7,8 +7,11 @@ import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,6 +43,23 @@ public class ActivityService {
     return withRegions(rows.getFirst());
   }
 
+  public ActivityView currentOrderable() {
+    List<ActivityView> rows = jdbc.query("""
+        SELECT * FROM activity
+        WHERE archived_at IS NULL AND published_at IS NOT NULL AND closed_at IS NULL
+          AND status IN ('SCHEDULED', 'ACTIVE')
+          AND starts_at <= UTC_TIMESTAMP(3) AND ends_at > UTC_TIMESTAMP(3)
+        ORDER BY starts_at, id
+        """, this::map);
+    if (rows.isEmpty()) {
+      throw DomainException.notFound("CURRENT_ACTIVITY_NOT_FOUND", "当前暂无可下单活动");
+    }
+    if (rows.size() > 1) {
+      throw DomainException.conflict("CURRENT_ACTIVITY_CONFLICT", "活动时间配置冲突，请联系工作人员处理");
+    }
+    return withRegions(rows.getFirst());
+  }
+
   public List<ActivityView> list() {
     return jdbc.query("SELECT * FROM activity WHERE archived_at IS NULL ORDER BY created_at DESC", this::map)
         .stream().map(this::withRegions).toList();
@@ -49,17 +69,19 @@ public class ActivityService {
   public ActivityView create(ActivityWrite request, AdminPrincipal admin) {
     validateTime(request.startsAt(), request.endsAt());
     requireFutureStart(request.startsAt());
-    int duplicate = jdbc.queryForObject("SELECT COUNT(*) FROM activity WHERE activity_code = ?", Integer.class, request.code());
-    if (duplicate > 0) throw DomainException.conflict("ACTIVITY_CODE_EXISTS", "活动编号已存在");
+    String temporaryCode = "PENDING-" + UUID.randomUUID();
     jdbc.update("""
         INSERT INTO activity(activity_code, name, description, status, timezone, starts_at, ends_at,
                              customer_scope, company_ranking_top_n, branch_ranking_top_n, ton_display_scale,
                              created_by, updated_by)
         VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, request.code(), request.name(), request.description(), request.timezone(), Timestamp.from(request.startsAt()),
+        """, temporaryCode, request.name(), request.description(), request.timezone(), Timestamp.from(request.startsAt()),
         Timestamp.from(request.endsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
         request.tonDisplayScale(), admin.id(), admin.id());
-    Long id = jdbc.queryForObject("SELECT id FROM activity WHERE activity_code = ?", Long.class, request.code());
+    Long id = jdbc.queryForObject("SELECT id FROM activity WHERE activity_code = ?", Long.class, temporaryCode);
+    String activityNo = generateActivityNo(id, now(), request.timezone());
+    int numbered = jdbc.update("UPDATE activity SET activity_code = ? WHERE id = ? AND activity_code = ?", activityNo, id, temporaryCode);
+    if (numbered != 1) throw new IllegalStateException("活动编号生成失败");
     replaceRegions(id, request.regions());
     return byId(id);
   }
@@ -91,6 +113,10 @@ public class ActivityService {
     Instant endsAtToSave = "ACTIVE".equals(effective)
         && request.endsAt().truncatedTo(ChronoUnit.MINUTES).equals(current.endsAt().truncatedTo(ChronoUnit.MINUTES))
         ? current.endsAt() : request.endsAt();
+    if ("SCHEDULED".equals(effective) || "ACTIVE".equals(effective)) {
+      lockActivitiesForScheduleCheck();
+      requireNoPublishedOverlap(id, startsAtToSave, endsAtToSave);
+    }
     int changed = jdbc.update("""
         UPDATE activity SET name = ?, description = ?, timezone = ?, starts_at = ?, ends_at = ?, customer_scope = ?,
           company_ranking_top_n = ?, branch_ranking_top_n = ?, ton_display_scale = ?, updated_by = ?, version = version + 1
@@ -111,6 +137,8 @@ public class ActivityService {
     }
     requireFutureStart(current.startsAt());
     requirePublishReady(id);
+    lockActivitiesForScheduleCheck();
+    requireNoPublishedOverlap(id, current.startsAt(), current.endsAt());
     int changed = jdbc.update("""
         UPDATE activity SET status = 'SCHEDULED', published_at = UTC_TIMESTAMP(3), version = version + 1, updated_by = ?
         WHERE id = ? AND version = ? AND status = 'DRAFT'
@@ -207,6 +235,10 @@ public class ActivityService {
     return configuredStatus;
   }
 
+  static boolean timesOverlap(Instant firstStart, Instant firstEnd, Instant secondStart, Instant secondEnd) {
+    return firstStart.isBefore(secondEnd) && firstEnd.isAfter(secondStart);
+  }
+
   private void replaceRegions(long activityId, List<RegionWrite> regions) {
     jdbc.update("UPDATE activity_region SET is_active = FALSE WHERE activity_id = ?", activityId);
     if (regions == null) return;
@@ -269,7 +301,27 @@ public class ActivityService {
     }
   }
 
+  private void requireNoPublishedOverlap(long activityId, Instant startsAt, Instant endsAt) {
+    List<PublishedActivity> conflicts = jdbc.query("""
+        SELECT activity_code, name FROM activity
+        WHERE id <> ? AND archived_at IS NULL AND published_at IS NOT NULL AND closed_at IS NULL
+          AND status IN ('SCHEDULED', 'ACTIVE') AND starts_at < ? AND ends_at > ?
+        ORDER BY starts_at, id
+        """, (rs, rowNum) -> new PublishedActivity(rs.getString("activity_code"), rs.getString("name")),
+        activityId, Timestamp.from(endsAt), Timestamp.from(startsAt));
+    if (!conflicts.isEmpty()) {
+      PublishedActivity conflict = conflicts.getFirst();
+      throw DomainException.conflict("ACTIVITY_TIME_CONFLICT",
+          "活动时间与“" + conflict.name() + "”（" + conflict.code() + "）重叠，请调整后再发布");
+    }
+  }
+
+  private void lockActivitiesForScheduleCheck() {
+    jdbc.queryForList("SELECT id FROM activity WHERE archived_at IS NULL ORDER BY id FOR UPDATE", Long.class);
+  }
+
   private record BlockingImport(String importType, long id, String status, String filename) {}
+  private record PublishedActivity(String code, String name) {}
 
   private static void requirePublishedDataUnchanged(ActivityView current, ActivityWrite request) {
     List<RegionWrite> requestedRegions = request.regions() == null ? List.of() : request.regions();
@@ -291,6 +343,12 @@ public class ActivityService {
   }
 
   private Instant now() { return clock.instant(); }
+  static String generateActivityNo(long id, Instant createdAt, String timezone) {
+    ZoneId zone;
+    try { zone = ZoneId.of(timezone); } catch (Exception ignored) { zone = ZoneId.of("Asia/Shanghai"); }
+    String date = DateTimeFormatter.ofPattern("yyyyMMdd").withZone(zone).format(createdAt);
+    return "HD" + date + String.format("%03d", id);
+  }
   private static Instant instant(Timestamp value) { return value == null ? null : value.toInstant(); }
 
   public record RegionView(String code, String name, int sortNo) {}

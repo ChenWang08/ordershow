@@ -1,7 +1,16 @@
 "use client";
 
-import { useEffect, useSyncExternalStore } from "react";
-import { ACTIVITY_CODE, getActiveActivityCode, setActiveActivityCode, subscribeActiveActivityCode } from "./api";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import {
+  ACTIVITY_CODE,
+  ApiError,
+  getActiveActivityCode,
+  getPreferredAdminActivityCode,
+  loadCurrentActivity,
+  setActiveActivityCode,
+  setPreferredAdminActivityCode,
+  subscribeActiveActivityCode,
+} from "./api";
 import { Prototype } from "./prototype";
 
 type RoutedSurface = "h5" | "ranking" | "report" | "lottery" | "admin";
@@ -40,4 +49,53 @@ export function RoutedPrototype({ activityCode = ACTIVITY_CODE, surface }: Route
   }
 
   return <Prototype initialSurface={surface} showSurfaceTabs={false} />;
+}
+
+export function AdminRoutedPrototype() {
+  const activityCode = useSyncExternalStore(
+    () => () => undefined,
+    () => getPreferredAdminActivityCode() || ACTIVITY_CODE,
+    () => ACTIVITY_CODE,
+  );
+  return <RoutedPrototype activityCode={activityCode} surface="admin" />;
+}
+
+export function LegacyAdminActivityRoute({ activityCode }: { activityCode: string }) {
+  useEffect(() => {
+    setPreferredAdminActivityCode(activityCode);
+    window.location.replace("/admin");
+  }, [activityCode]);
+
+  return <RouteLoading message="正在进入统一管理后台…" />;
+}
+
+export function CurrentH5Route() {
+  const [activityCode, setActivityCode] = useState("");
+  const [message, setMessage] = useState("正在查找当前订货活动…");
+
+  useEffect(() => {
+    let active = true;
+    void loadCurrentActivity()
+      .then((activity) => { if (active) setActivityCode(activity.code); })
+      .catch((error) => {
+        if (!active) return;
+        setMessage(error instanceof ApiError ? error.message : "当前暂无可下单活动");
+      });
+    return () => { active = false; };
+  }, []);
+
+  if (!activityCode) return <RouteLoading message={message} />;
+  return <RoutedPrototype activityCode={activityCode} surface="h5" />;
+}
+
+function RouteLoading({ message }: { message: string }) {
+  return (
+    <main className="prototype-root">
+      <div className="prototype-canvas">
+        <section className="surface-slot">
+          <div className="empty-state">{message}</div>
+        </section>
+      </div>
+    </main>
+  );
 }

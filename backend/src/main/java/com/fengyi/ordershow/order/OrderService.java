@@ -213,6 +213,30 @@ public class OrderService {
         "AND (? IS NULL OR ? = '' OR o.order_no LIKE CONCAT('%', ?, '%') OR o.dealer_full_name_snapshot LIKE CONCAT('%', ?, '%') OR c.phone_masked LIKE CONCAT('%', ?, '%'))";
     Object[] args = {activityId, status, status, status, customerType, customerType, customerType, keyword, keyword, keyword, keyword, keyword};
     List<OrderSummary> orders = jdbc.query("SELECT o.*, c.phone_masked FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id" + where + " ORDER BY o.last_modified_at DESC, o.id DESC", this::mapSummary, args);
+    List<Map<String, Object>> details = jdbc.queryForList("""
+        SELECT o.order_no, o.status, o.customer_type, o.region_code, o.branch_name_snapshot,
+          o.dealer_full_name_snapshot, c.phone_masked, o.current_version_no, i.line_no, i.material_code,
+          i.material_name, i.product_line, i.specification, i.case_pack, i.quantity, i.case_price,
+          i.line_amount, i.line_tons, o.last_submitted_at
+        FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
+        JOIN order_item i ON i.order_id = o.id
+        """ + where + " ORDER BY o.last_modified_at DESC, o.id DESC, i.line_no", args);
+    String effectiveWhere = where.replace("(? IS NULL OR ? = '' OR o.status = ?)", "o.status = 'SUBMITTED'");
+    Object[] effectiveArgs = {activityId, customerType, customerType, customerType, keyword, keyword, keyword, keyword, keyword};
+    List<Map<String, Object>> productTotals = jdbc.queryForList("""
+        SELECT i.material_code, i.material_name, i.product_line, i.specification, i.case_pack,
+          SUM(i.quantity) total_quantity, SUM(i.line_amount) total_amount,
+          CASE WHEN COUNT(i.line_tons) = COUNT(*) THEN SUM(i.line_tons) ELSE NULL END total_tons,
+          COUNT(DISTINCT o.id) order_count
+        FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
+        JOIN order_item i ON i.order_id = o.id
+        """ + effectiveWhere + " GROUP BY i.material_code, i.material_name, i.product_line, i.specification, i.case_pack ORDER BY i.product_line, i.material_code", effectiveArgs);
+    List<Map<String, Object>> branchTotals = jdbc.queryForList("""
+        SELECT o.region_code, o.branch_name_snapshot, COUNT(*) order_count, SUM(o.total_quantity) total_quantity,
+          CASE WHEN COUNT(o.total_tons) = COUNT(*) THEN SUM(o.total_tons) ELSE NULL END total_tons,
+          SUM(o.total_amount) total_amount
+        FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
+        """ + effectiveWhere + " GROUP BY o.region_code, o.branch_name_snapshot ORDER BY o.region_code, o.branch_name_snapshot", effectiveArgs);
     try (Workbook workbook = new XSSFWorkbook(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
       Sheet sheet = workbook.createSheet("订单汇总");
       String[] headers = {"订单编号", "状态", "客户类型", "大区", "分公司", "经销商", "电话", "版本", "订货箱数", "订货吨数", "订单金额", "首次提交", "最后提交", "最后修改"};
@@ -225,8 +249,40 @@ public class OrderService {
         for (Object value : values) row.createCell(i++).setCellValue(value == null ? "" : value.toString());
       }
       for (int i = 0; i < headers.length; i++) sheet.autoSizeColumn(i);
+      Sheet detailSheet = workbook.createSheet("订单商品明细");
+      String[] detailHeaders = {"订单编号", "状态", "客户类型", "大区", "分公司", "经销商", "电话", "订单版本", "行号", "物料代码", "物料名称", "产品线", "规格", "箱规", "订货箱数", "元/箱", "金额", "吨数", "最后提交"};
+      writeHeaders(detailSheet, detailHeaders);
+      int detailRowNo = 1;
+      for (Map<String, Object> item : details) {
+        writeValues(detailSheet.createRow(detailRowNo++), item.get("order_no"), item.get("status"), item.get("customer_type"),
+            item.get("region_code"), item.get("branch_name_snapshot"), item.get("dealer_full_name_snapshot"), item.get("phone_masked"),
+            item.get("current_version_no"), item.get("line_no"), item.get("material_code"), item.get("material_name"), item.get("product_line"),
+            item.get("specification"), item.get("case_pack"), item.get("quantity"), item.get("case_price"), item.get("line_amount"),
+            item.get("line_tons"), item.get("last_submitted_at"));
+      }
+      Sheet productSheet = workbook.createSheet("有效商品汇总");
+      writeHeaders(productSheet, new String[]{"物料代码", "物料名称", "产品线", "规格", "箱规", "订货箱数", "订货金额", "订货吨数", "下单客户数"});
+      int productRowNo = 1;
+      for (Map<String, Object> item : productTotals) writeValues(productSheet.createRow(productRowNo++), item.get("material_code"), item.get("material_name"),
+          item.get("product_line"), item.get("specification"), item.get("case_pack"), item.get("total_quantity"), item.get("total_amount"),
+          item.get("total_tons"), item.get("order_count"));
+      Sheet branchSheet = workbook.createSheet("有效分公司汇总");
+      writeHeaders(branchSheet, new String[]{"大区", "分公司", "有效订单数", "订货箱数", "订货吨数", "订单金额"});
+      int branchRowNo = 1;
+      for (Map<String, Object> item : branchTotals) writeValues(branchSheet.createRow(branchRowNo++), item.get("region_code"), item.get("branch_name_snapshot"),
+          item.get("order_count"), item.get("total_quantity"), item.get("total_tons"), item.get("total_amount"));
       workbook.write(output); return output.toByteArray();
     } catch (Exception exception) { throw new IllegalStateException("订单导出失败", exception); }
+  }
+
+  private static void writeHeaders(Sheet sheet, String[] headers) {
+    Row row = sheet.createRow(0);
+    for (int i = 0; i < headers.length; i++) row.createCell(i).setCellValue(headers[i]);
+    sheet.createFreezePane(0, 1);
+  }
+
+  private static void writeValues(Row row, Object... values) {
+    for (int i = 0; i < values.length; i++) row.createCell(i).setCellValue(values[i] == null ? "" : values[i].toString());
   }
 
   private List<ProductSnapshot> loadProducts(long activityId, H5Principal customer, Set<Long> ids) {

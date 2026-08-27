@@ -1,6 +1,5 @@
-import { ACTIVITY_CODE } from "../api";
-import { RoutedPrototype } from "../routed-prototype";
+import { AdminRoutedPrototype } from "../routed-prototype";
 
 export default function AdminPage() {
-  return <RoutedPrototype activityCode={ACTIVITY_CODE} surface="admin" />;
+  return <AdminRoutedPrototype />;
 }

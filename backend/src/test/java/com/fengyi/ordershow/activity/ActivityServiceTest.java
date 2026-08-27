@@ -21,4 +21,21 @@ class ActivityServiceTest {
     assertThat(ActivityService.effectiveStatus("ACTIVE", START, END, END.minusMillis(1))).isEqualTo("ACTIVE");
     assertThat(ActivityService.effectiveStatus("ACTIVE", START, END, END)).isEqualTo("CLOSED");
   }
+
+  @Test
+  void generatesStableUniqueBusinessActivityNumbersFromThePersistedId() {
+    Instant createdAt = Instant.parse("2026-08-27T06:30:00Z");
+    assertThat(ActivityService.generateActivityNo(12, createdAt, "Asia/Shanghai")).isEqualTo("HD20260827012");
+    assertThat(ActivityService.generateActivityNo(13, createdAt, "Asia/Shanghai")).isEqualTo("HD20260827013");
+  }
+
+  @Test
+  void detectsOnlyActualTimeOverlaps() {
+    Instant firstStart = Instant.parse("2026-08-28T01:00:00Z");
+    Instant firstEnd = Instant.parse("2026-08-28T03:00:00Z");
+    assertThat(ActivityService.timesOverlap(firstStart, firstEnd,
+        Instant.parse("2026-08-28T02:00:00Z"), Instant.parse("2026-08-28T04:00:00Z"))).isTrue();
+    assertThat(ActivityService.timesOverlap(firstStart, firstEnd,
+        firstEnd, Instant.parse("2026-08-28T04:00:00Z"))).isFalse();
+  }
 }

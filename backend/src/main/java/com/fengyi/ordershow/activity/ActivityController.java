@@ -36,6 +36,11 @@ public class ActivityController {
     return ApiResponse.of(service.byCode(activityCode), TraceFilter.id(request));
   }
 
+  @GetMapping("/public/activities/current")
+  ApiResponse<ActivityService.ActivityView> currentPublicActivity(HttpServletRequest request) {
+    return ApiResponse.of(service.currentOrderable(), TraceFilter.id(request));
+  }
+
   @GetMapping("/admin/activities")
   ApiResponse<List<ActivityService.ActivityView>> activities(HttpServletRequest request) {
     return ApiResponse.of(service.list(), TraceFilter.id(request));
@@ -81,7 +86,7 @@ public class ActivityController {
   }
 
   public record RegionRequest(@NotBlank @Size(max = 64) String code, @NotBlank @Size(max = 100) String name, int sortNo) {}
-  public record ActivityRequest(@NotBlank @Size(max = 64) String code, @NotBlank @Size(max = 200) String name,
+  public record ActivityRequest(@Size(max = 64) String code, @NotBlank @Size(max = 200) String name,
       @Size(max = 2000) String description, @NotBlank String timezone, @NotNull Instant startsAt, @NotNull Instant endsAt,
       @NotBlank String customerScope, int companyRankingTopN, int branchRankingTopN, int tonDisplayScale,
       List<RegionRequest> regions) {

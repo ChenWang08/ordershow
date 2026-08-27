@@ -147,6 +147,50 @@ test("keeps orders admin-read-only and wires the formal runtime APIs", async () 
   assert.doesNotMatch(openapi, /\/admin\/activities\/\{activityId\}\/orders\/\{orderId\}\/withdraw/);
 });
 
+test("supports one admin entry, current H5 resolution, paging, and fulfillment exports", async () => {
+  const [api, prototype, routedPrototype, styles, orders, orderService, authService, activityService, activityController, activityRoute, h5Route] = await Promise.all([
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/routed-prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/orders/OrderManagement.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/order/OrderService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/security/AuthService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/activity/ActivityService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/activity/ActivityController.java", import.meta.url), "utf8"),
+    readFile(new URL("../app/admin/[activityCode]/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/h5/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(api, /loadAdminActivities/);
+  assert.match(api, /createActivity/);
+  assert.match(prototype, /切换活动/);
+  assert.match(prototype, /创建后为草稿状态/);
+  assert.match(prototype, /活动编号.*创建后自动生成/s);
+  assert.doesNotMatch(prototype, /活动编码|newActivity\.code/);
+  assert.match(activityService, /generateActivityNo\(id, now\(\), request\.timezone\(\)\)/);
+  assert.match(activityService, /"HD" \+ date \+ String\.format\("%03d", id\)/);
+  assert.match(api, /order-show\.admin\.activity-code/);
+  assert.match(prototype, /window\.location\.assign\("\/admin"\)/);
+  assert.doesNotMatch(prototype, /window\.location\.assign\(`\/admin\/\$\{/);
+  assert.match(activityRoute, /LegacyAdminActivityRoute activityCode=\{activityCode\}/);
+  assert.match(h5Route, /CurrentH5Route/);
+  assert.match(routedPrototype, /loadCurrentActivity/);
+  assert.match(activityController, /\/public\/activities\/current/);
+  assert.match(activityService, /CURRENT_ACTIVITY_CONFLICT/);
+  assert.match(activityService, /ACTIVITY_TIME_CONFLICT/);
+  assert.doesNotMatch(styles, /admin-main > header > div:first-child/);
+  assert.match(styles, /admin-main > header > div\.admin-heading[^}]*flex-direction: row/);
+  assert.match(styles, /order-table \{ overflow-x: auto/);
+  assert.match(orders, /admin-panel order-management-panel/);
+  assert.match(orders, /size: 50/);
+  assert.match(orders, /第 \{page\} \/ \{totalPages\} 页/);
+  assert.match(orderService, /订单商品明细/);
+  assert.match(orderService, /有效商品汇总/);
+  assert.match(orderService, /有效分公司汇总/);
+  assert.match(authService, /a\.status = 'CLOSED'.*a\.starts_at <= UTC_TIMESTAMP/s);
+});
+
 test("uses published, time-driven activity lifecycle controls", async () => {
   const [prototype, api, activityService, activityController] = await Promise.all([
     readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
