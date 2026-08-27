@@ -16,6 +16,7 @@ import {
   type ProductImageReview,
   type DashboardData,
   type DashboardReport,
+  type ImportTask,
   type ImportStagingRow,
   type AttendanceMatchPreview,
   type AdminAttendee,
@@ -48,11 +49,14 @@ import {
   loadImportRows,
   loadAttendanceMatchPreview,
   loadImportTask,
+  loadImportTasks,
   loadLotteryRules,
   loadLotteryStatistics,
   loadPublicLottery,
   previewLotteryCandidates,
-  transitionActivity,
+  publishActivity,
+  withdrawActivityPublication,
+  closeActivityNow,
   updateActivity,
   updateAdminAttendee,
   updateAdminCustomer,
@@ -65,6 +69,7 @@ import {
   updateImportRow,
   updateLotteryRule,
   uploadImport,
+  cancelImport,
   waitForImport,
   verifyPhone,
   withdrawH5Order,
@@ -161,6 +166,17 @@ function toDateTimeLocal(value: string) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+function nextMinuteDateTimeLocal() {
+  const next = new Date();
+  next.setSeconds(0, 0);
+  next.setMinutes(next.getMinutes() + 1);
+  return toDateTimeLocal(next.toISOString());
+}
+
+function runtimeActivityStatus(status: string): ActivityStatus {
+  return status === "ACTIVE" ? "running" : status === "CLOSED" ? "ended" : status === "SCHEDULED" ? "scheduled" : "draft";
+}
+
 function normalizePhone(value: string) {
   return value.replace(/\D/g, "");
 }
@@ -250,6 +266,69 @@ function runtimeProductToImportRow(product: RuntimeProduct): ProductImportRow {
       matchStatus: "已匹配", source: selectedImage.sourceType === "MANUAL" ? "manual" : "zip",
     }] : undefined,
   };
+}
+
+function stagingData(row: ImportStagingRow) {
+  return { ...row.normalizedData, ...row.editedData };
+}
+
+function restoredSheetCounts(rows: ImportStagingRow[]) {
+  const counts = new Map<string, number>();
+  rows.filter((row) => !row.deleted).forEach((row) => counts.set(row.sheetName, (counts.get(row.sheetName) ?? 0) + 1));
+  return [...counts].map(([name, count]) => ({ name, count }));
+}
+
+function restoreProductPreview(rows: ImportStagingRow[]): ProductImportRow[] {
+  return rows.filter((row) => !row.deleted).map((row, index) => {
+    const data = stagingData(row);
+    return {
+      id: createImportRowId("product-preview"), sequence: index + 1,
+      customerType: data.customerType === "SPECIAL" ? "特渠" : "综合",
+      rebate: data.rebateStatus === "NOT_PARTICIPATING" ? "不参与" : "参与",
+      category: String(data.categoryName ?? ""), line: String(data.productLine ?? ""),
+      materialCode: String(data.materialCode ?? ""), materialName: String(data.materialName ?? ""),
+      brand: String(data.brandName ?? ""), variety: String(data.varietyName ?? ""),
+      spec: String(data.specification ?? ""), casePack: String(data.casePack ?? ""),
+      unitPrice: String(data.bottlePrice ?? ""), casePrice: String(data.casePrice ?? ""),
+      conversion: String(data.tonCaseFactor ?? ""), gift: data.giftBox ? "是" : "否",
+      branchScope: String(data.branchScope ?? ""),
+      status: row.validationStatus === "BLOCKED" ? "待核对" : row.validationStatus === "WARNING" ? "待完善" : "有效",
+      source: "excel", sourceSheet: row.sheetName, sourceRowNumber: row.sourceRowNumber, serverRowId: row.id,
+      imageStatus: "未匹配",
+    };
+  });
+}
+
+function restoreWhitelistPreview(rows: ImportStagingRow[]): WhitelistRow[] {
+  return rows.filter((row) => !row.deleted).map((row, index) => {
+    const data = stagingData(row);
+    return {
+      id: createImportRowId("whitelist-preview"), sequence: Number(data.sequence ?? index + 1),
+      customerType: data.customerType === "SPECIAL" ? "特渠专业客户" : "综合客户",
+      region: String(data.regionName ?? ""), branch: String(data.branchName ?? ""),
+      dealerShort: String(data.dealerShortName ?? ""), dealerFull: String(data.dealerFullName ?? ""),
+      dealerType: String(data.dealerCategory ?? ""), dealerName: String(data.contactName ?? ""),
+      dealerPhone: String(data.phoneMasked ?? ""), confirmerName: String(data.confirmerName ?? ""),
+      confirmerPhone: String(data.confirmerPhoneMasked ?? ""),
+      status: row.validationStatus === "BLOCKED" ? "待处理" : "有效",
+      source: "excel", sourceSheet: row.sheetName, sourceRowNumber: row.sourceRowNumber, serverRowId: row.id,
+    };
+  });
+}
+
+function restoreAttendancePreview(rows: ImportStagingRow[]): AttendanceRow[] {
+  return rows.filter((row) => !row.deleted).map((row, index) => {
+    const data = stagingData(row);
+    const participantType = String(data.participantType ?? "");
+    return {
+      id: createImportRowId("attendance-preview"), sequence: index + 1,
+      dealerName: String(data.participantName ?? ""), gender: String(data.gender ?? ""),
+      contactPhone: String(data.phoneMasked ?? ""), branch: String(data.branchName ?? ""),
+      dealerCompany: String(data.dealerFullName ?? ""), participantType,
+      customerType: attendanceCustomerType(participantType), sourceSheet: row.sheetName,
+      sourceRowNumber: row.sourceRowNumber, serverRowId: row.id,
+    };
+  });
 }
 
 function mergeProductImageReviews(rows: ProductImportRow[], reviews: ProductImageReview[]) {
@@ -561,7 +640,9 @@ function ProductImageViewer({ productName, images, initialIndex = 0, status, onC
 
 type SubmittedOrderItem = { product: Product; quantity: number };
 
-function H5Prototype({ activityClosed, importedRows, importedWhitelistRows, runtimeActivity }: { activityClosed: boolean; importedRows: ProductImportRow[] | null; importedWhitelistRows: WhitelistRow[] | null; runtimeActivity: RuntimeActivity | null }) {
+function H5Prototype({ activityStatus, importedRows, importedWhitelistRows, runtimeActivity }: { activityStatus: ActivityStatus; importedRows: ProductImportRow[] | null; importedWhitelistRows: WhitelistRow[] | null; runtimeActivity: RuntimeActivity | null }) {
+  const activityClosed = activityStatus === "ended";
+  const activityNotStarted = activityStatus === "draft" || activityStatus === "scheduled";
   const [runtimeProducts, setRuntimeProducts] = useState<RuntimeProduct[] | null>(null);
   const [runtimeIdentity, setRuntimeIdentity] = useState<RuntimeIdentity | null>(null);
   const [runtimeOrder, setRuntimeOrder] = useState<RuntimeOrder | null>(null);
@@ -670,7 +751,7 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows, runt
   };
 
   const verifyIdentity = async () => {
-    if (activityClosed && orderStatus === "none") return;
+    if (activityNotStarted) return;
     const normalizedPhone = normalizePhone(phone);
     if (runtimeActivity) {
       setRuntimeBusy(true); setVerifyError(""); setRuntimeMessage("");
@@ -821,9 +902,9 @@ function H5Prototype({ activityClosed, importedRows, importedWhitelistRows, runt
                   <input value={phone} onChange={(e) => { setPhone(e.target.value); setVerifyError(""); }} inputMode="tel" />
                 </label>
                 {verifyError && <div className="verify-error" role="alert">{verifyError}</div>}
-                <button className="primary-btn" disabled={runtimeBusy || !phone.trim() || (activityClosed && orderStatus === "none")} onClick={() => void verifyIdentity()}>{runtimeBusy ? "正在验证…" : activityClosed && orderStatus === "none" ? "活动已截止" : orderStatus === "none" ? "验证并进入订货" : "验证并查看订单"}</button>
+                <button className="primary-btn" disabled={runtimeBusy || !phone.trim() || activityNotStarted} onClick={() => void verifyIdentity()}>{runtimeBusy ? "正在验证…" : activityStatus === "draft" ? "活动尚未发布" : activityStatus === "scheduled" ? "订货尚未开始" : activityClosed ? "验证并查看订单" : orderStatus === "none" ? "验证并进入订货" : "验证并查看订单"}</button>
                 {runtimeMessage && <div className="verify-error" role="status">{runtimeMessage}</div>}
-                <small>{activityClosed && orderStatus === "none" ? "订货活动已截止，暂不接受新订单" : "仅用于本次订货会身份识别"}</small>
+                <small>{activityStatus === "draft" ? "当前活动仍在准备中" : activityStatus === "scheduled" ? `将于 ${runtimeActivity ? new Date(runtimeActivity.startsAt).toLocaleString("zh-CN", { hour12: false }) : "设定时间"} 开放订货` : activityClosed ? "订货已截止，验证后可查看历史订单" : "仅用于本次订货会身份识别"}</small>
               </div>
             </section>
           )}
@@ -1202,10 +1283,6 @@ function LotteryBoard({ rounds, attendanceRows, activityId, onComplete }: { roun
   const availableRounds = rounds.filter((item) => item.status !== "draft");
   const [roundId, setRoundId] = useState(availableRounds.find((item) => item.serverStatus !== "COMPLETED")?.id ?? availableRounds[0]?.id ?? 0);
   const currentRound = availableRounds.find((item) => item.id === roundId) ?? availableRounds[0];
-  useEffect(() => {
-    if (!availableRounds.length || availableRounds.some((item) => item.id === roundId)) return;
-    setRoundId(availableRounds.find((item) => item.serverStatus !== "COMPLETED")?.id ?? availableRounds[0].id);
-  }, [availableRounds, roundId]);
   useEffect(() => {
     if (status !== "rolling") return;
     const timer = window.setInterval(() => setTicker((n) => n + 1), 90);
@@ -1704,7 +1781,7 @@ function LotterySettings({ rounds, attendanceRows, activityId, customerCount, on
         .finally(() => setPreviewLoading(false));
     }, 250);
     return () => window.clearTimeout(timer);
-  }, [activityId, selected.id, selected.scope, selected.customerType, selected.minAmount, selected.winnerCount, selected.excludeWinners, selectedIndex]);
+  }, [activityId, selected, selectedIndex]);
   useEffect(() => {
     if (!Number.isFinite(activityId) || activityId <= 0) return;
     void loadLotteryStatistics(activityId).then(setStatistics).catch(() => undefined);
@@ -1957,24 +2034,24 @@ function AttendancePage({ rows, fileName, warnings, sheetCounts, error, activity
   return (
     <div className="admin-panel attendance-panel">
       <div className="panel-title"><div><h2>现场到场客户</h2><p>按现场参会名单模板导入；抽奖选择现场到场客户时，现场大屏显示经销商名称。</p></div><div className="panel-actions"><button className="secondary-button" disabled={activityClosed} onClick={onAdd}>＋ 手动添加到场客户</button></div></div>
-      <div className="import-rule-hint"><b>{isPending ? "待确认导入" : activityClosed ? "活动已截止" : activityStarted ? "活动已开始" : "导入规则"}</b><span>{isPending ? "Excel 已解析，下面显示的是待导入预览；确认后才会替换当前名单并更新抽奖候选池，可先编辑或删除异常记录。" : activityClosed ? "活动已截止，现场到场名单只读。" : activityStarted ? "活动已开始，现场到场 Excel 导入和批量替换已锁定；如需补录，请手动添加或编辑单条记录。" : "活动开始前允许导入完整现场到场 Excel；分公司、参会人姓名、性别、参会人电话、参会人员类型、经销商名称会按表头识别。"}</span></div>
+      <div className="import-rule-hint"><b>{isPending ? "待确认导入" : activityClosed ? "活动已截止" : activityStarted ? "现场名单维护中" : "导入规则"}</b><span>{isPending ? "Excel 已解析，下面显示的是待导入预览；确认后才会替换当前名单并更新抽奖候选池，可先编辑或删除异常记录。" : activityClosed ? "活动已截止，现场到场名单只读。" : activityStarted ? "订货进行中仍可维护现场到场名单，确认替换后会更新抽奖候选池。" : "现场到场名单独立于订货基础数据，可在活动开始前或进行中导入；确认后更新抽奖候选池。"}</span></div>
       <div className="attendance-upload-grid">
         <article className={`file-upload-card attendance-upload-card ${isPending ? "pending" : displayFileName && !error ? "ready" : ""}`}>
           <div className="file-card-heading"><span>XL</span><div><b>现场到场客户 Excel</b><small>选择文件后先预览，确认后替换当前名单</small></div><em>{isPending ? "待确认" : error ? "解析失败" : displayFileName ? "解析完成" : "待上传"}</em></div>
           <p title={displayFileName}>{displayFileName || "尚未选择真实 Excel 文件"}</p>
           <div className="sheet-counts">{displaySheetCounts.length > 0 ? displaySheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>) : <span>{isPending ? "待导入名单" : "当前名单"}<b>{previewRows.length}</b></span>}</div>
           {error && <div className="warning-box"><b>文件无法导入</b><span>{error}</span></div>}
-                <footer><small>{isPending ? `Excel 原始 ${originalCount} 名 · 已移除 ${removedCount} 名 · 待发布 ${previewRows.length} 名` : activityClosed ? "活动已截止，名单只读" : activityStarted ? "活动已开始，Excel 导入已锁定" : error ? "文件解析失败，请修正后重试" : displayFileName ? `已读取 ${previewRows.length} 名客户` : "支持 .xlsx 文件"}</small><div>{isPending && <button type="button" disabled={publishing} onClick={onCancelImport}>取消导入</button>}{error && !isPending && <button type="button" onClick={onCancelImport}>清除错误</button>}<label className={`file-button ${activityStarted || publishing ? "disabled" : ""}`}><input type="file" accept=".xlsx" disabled={activityStarted || publishing} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void onFile(file); }} />{isPending || displayFileName ? "重新选择文件" : "选择 Excel"}</label></div></footer>
+                <footer><small>{isPending ? `Excel 原始 ${originalCount} 名 · 已移除 ${removedCount} 名 · 待发布 ${previewRows.length} 名` : activityClosed ? "活动已截止，名单只读" : error ? "文件解析失败，请修正后重试" : displayFileName ? `已读取 ${previewRows.length} 名客户` : "支持 .xlsx 文件"}</small><div>{isPending && <button type="button" disabled={publishing} onClick={onCancelImport}>取消导入</button>}{error && !isPending && <button type="button" onClick={onCancelImport}>清除错误</button>}<label className={`file-button ${activityClosed || publishing ? "disabled" : ""}`}><input type="file" accept=".xlsx" disabled={activityClosed || publishing} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ""; if (file) void onFile(file); }} />{isPending || displayFileName ? "重新选择文件" : "选择 Excel"}</label></div></footer>
         </article>
         <div className="attendance-overview-card"><div><span>{isPending ? "待发布名单" : "当前名单"}</span><strong>{previewRows.length}<small> 名</small></strong><em>{isPending ? `原始 ${originalCount} · 移除 ${removedCount}` : "当前导入批次"}</em></div><div><span>已关联记录／资格客户</span><b>{linkedCount}／{eligibleCustomerCount}</b></div><div><span>待确认</span><b>{pendingCount}</b></div><div><span>未关联</span><b>{unmatchedCount}</b></div><div><span>综合／特渠</span><b>{comprehensiveCount}／{specialCount}</b></div><div><span>已填写电话</span><b>{phoneCount}</b></div><div><span>未填客户类型</span><b>{blankTypeCount}</b></div><p>{isPending ? "当前为发布前试算；按当前已发布白名单实时计算，正式发布时会再次校验白名单版本。" : "仅已关联当前有效白名单的到场记录具备现场抽奖资格。"}</p></div>
       </div>
       {displayWarnings.length > 0 && <div className="warning-box attendance-warning"><b>导入提示</b>{displayWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}
       <div className="data-section-title"><div><b>{isPending ? "待导入到场客户预览" : "到场客户名单"}</b><span>{isPending ? `${pendingImport?.fileName} · 尚未确认` : fileName ? `${fileName} · 当前导入结果` : "尚未导入到场名单"}</span></div><span className={`attendance-not-linked ${isPending ? "pending" : ""}`}>{isPending ? `白名单实时试算 · 已关联 ${linkedCount}` : `已关联 ${linkedCount} / ${previewRows.length}`}</span></div>
-      <AttendanceTable rows={previewRows} onEdit={onEdit} onDelete={onDelete} allowDelete={!activityStarted} allowDeleteAll={!activityStarted} readOnly={activityClosed} />
+      <AttendanceTable rows={previewRows} onEdit={onEdit} onDelete={onDelete} allowDelete={!activityClosed} allowDeleteAll={!activityClosed} readOnly={activityClosed} />
       {isPending && <div className="attendance-publish-panel">
         <div className="attendance-publish-summary"><b>发布摘要</b><span>待发布 <strong>{previewRows.length}</strong> 名</span><span>已关联 <strong>{linkedCount}</strong> 条</span><span>资格客户 <strong>{eligibleCustomerCount}</strong> 名</span><span>待确认 <strong>{pendingCount}</strong> 条</span><span>未关联 <strong>{unmatchedCount}</strong> 条</span></div>
         <p>{blockingCount > 0 ? `存在 ${blockingCount} 条 Excel 数据异常，必须先编辑或删除。` : "按客户类型和经销商名称关联当前白名单；现场手机号仅作联系信息。待确认和未关联记录可以发布，但不会进入抽奖候选池。"}</p>
-        <button type="button" className="admin-primary wide" disabled={activityStarted || activityClosed || previewRows.length === 0 || blockingCount > 0 || previewLoading || publishing} onClick={onConfirmImport}>{publishing ? "正在发布…" : previewLoading ? "正在计算关联结果…" : blockingCount > 0 ? `请先处理 ${blockingCount} 条异常记录` : `确认替换当前到场名单 ${previewRows.length} 名`}</button>
+        <button type="button" className="admin-primary wide" disabled={activityClosed || previewRows.length === 0 || blockingCount > 0 || previewLoading || publishing} onClick={onConfirmImport}>{publishing ? "正在发布…" : previewLoading ? "正在计算关联结果…" : blockingCount > 0 ? `请先处理 ${blockingCount} 条异常记录` : `确认替换当前到场名单 ${previewRows.length} 名`}</button>
       </div>}
     </div>
   );
@@ -1988,6 +2065,8 @@ type OperationLogEntry = { id: string; action: string; target: string; detail: s
 function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivityNameChange, activityId, activityStatus, onActivityStatusChange, activityStartAt, onActivityStartAtChange, activityEndAt, onActivityEndAtChange, productRows, onProductRowsChange, productImportCompleted, onProductImportCompleted, onProductImportCommitted, productImportHasRun, whitelistRows, onWhitelistRowsChange, whitelistImportCompleted, onWhitelistImportCompleted, onWhitelistImportCommitted, whitelistImportHasRun, attendanceRows, onAttendanceRowsChange, attendanceFileName, onAttendanceFileNameChange, attendanceWarnings, onAttendanceWarningsChange, attendanceSheetCounts, onAttendanceSheetCountsChange, attendanceImportError, onAttendanceImportErrorChange }: { lotteryRounds: LotteryRound[]; onLotteryChange: (rounds: LotteryRound[]) => void; activityName: string; onActivityNameChange: (value: string) => void; activityId: string; activityStatus: ActivityStatus; onActivityStatusChange: (status: ActivityStatus) => void; activityStartAt: string; onActivityStartAtChange: (value: string) => void; activityEndAt: string; onActivityEndAtChange: (value: string) => void; productRows: ProductImportRow[]; onProductRowsChange: ProductRowsSetter; productImportCompleted: boolean; onProductImportCompleted: (completed: boolean) => void; onProductImportCommitted: () => void; productImportHasRun: boolean; whitelistRows: WhitelistRow[]; onWhitelistRowsChange: WhitelistRowsSetter; whitelistImportCompleted: boolean; onWhitelistImportCompleted: (completed: boolean) => void; onWhitelistImportCommitted: () => void; whitelistImportHasRun: boolean; attendanceRows: AttendanceRow[]; onAttendanceRowsChange: AttendanceRowsSetter; attendanceFileName: string; onAttendanceFileNameChange: (value: string) => void; attendanceWarnings: string[]; onAttendanceWarningsChange: (value: string[]) => void; attendanceSheetCounts: Array<{ name: string; count: number }>; onAttendanceSheetCountsChange: (value: Array<{ name: string; count: number }>) => void; attendanceImportError: string; onAttendanceImportErrorChange: (value: string) => void }) {
   const activityStarted = activityStatus === "running" || activityStatus === "ended";
   const activityClosed = activityStatus === "ended";
+  const activityPublished = activityStatus !== "draft";
+  const baseDataReadOnly = activityStatus === "scheduled" || activityClosed;
   const [tab, setTab] = useState("活动概览");
   const setProductRows = onProductRowsChange;
   const setWhitelistRows = onWhitelistRowsChange;
@@ -2003,6 +2082,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
   const [activityStartDraft, setActivityStartDraft] = useState(activityStartAt);
   const [activityEndDraft, setActivityEndDraft] = useState(activityEndAt);
   const [activityNameDraft, setActivityNameDraft] = useState(activityName);
+  const [minimumFutureAt, setMinimumFutureAt] = useState(nextMinuteDateTimeLocal);
   const [productFileName, setProductFileName] = useState("");
   const [productImportWarnings, setProductImportWarnings] = useState<string[]>([]);
   const [productImportError, setProductImportError] = useState("");
@@ -2050,6 +2130,11 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
   const removedProductCount = Math.max(0, parsedProductCount - productImportStats.total);
   const removedWhitelistCount = Math.max(0, parsedWhitelistCount - whitelistImportStats.total);
   useEffect(() => {
+    const refreshMinimum = () => setMinimumFutureAt(nextMinuteDateTimeLocal());
+    const timer = window.setInterval(refreshMinimum, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => {
     let active = true;
     const refreshOverview = async () => {
       try {
@@ -2073,23 +2158,25 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     if (!Number.isFinite(numericActivityId)) return;
     let active = true;
     void Promise.all([loadActivity(), loadAdminProducts(numericActivityId), loadProductImageReviews(numericActivityId), loadAdminCustomers(numericActivityId),
-      loadAdminAttendees(numericActivityId), loadLotteryRules(numericActivityId), loadAuditLogs(numericActivityId)]).then(([activity, serverProducts, imageReviews, customers, attendees, rules, auditLogs]) => {
+      loadAdminAttendees(numericActivityId), loadLotteryRules(numericActivityId), loadAuditLogs(numericActivityId), loadImportTasks(numericActivityId)]).then(async ([activity, serverProducts, imageReviews, customers, attendees, rules, auditLogs, importTasks]) => {
       if (!active) return;
       const regionNames = new Map(activity.regions.map((region) => [region.code, region.name]));
       setRegionCodesByName(Object.fromEntries(activity.regions.map((region) => [region.name, region.code])));
+      const publishedProductRows = mergeProductImageReviews(serverProducts.map(runtimeProductToImportRow), imageReviews);
       if (serverProducts.length > 0) {
-        setProductRows(mergeProductImageReviews(serverProducts.map(runtimeProductToImportRow), imageReviews));
+        setProductRows(publishedProductRows);
         onProductImportCompleted(true); onProductImportCommitted(); setProductFileName("当前已发布商品目录"); setProductImportInputCount(serverProducts.length);
       }
+      const publishedWhitelistRows: WhitelistRow[] = customers.map((customer, index) => ({
+        id: String(customer.id), serverVersion: customer.lockVersion, sequence: customer.excelSequence ?? index + 1,
+        customerType: customer.customerType === "GENERAL" ? "综合客户" : "特渠专业客户",
+        region: regionNames.get(customer.regionCode || "") || customer.regionCode || "", branch: customer.branchName || "",
+        dealerShort: customer.dealerShortName || "", dealerFull: customer.dealerFullName, dealerType: customer.dealerCategory || "",
+        dealerName: customer.contactName || "", dealerPhone: customer.phone || customer.phoneMasked, confirmerName: customer.confirmerName || "",
+        confirmerPhone: customer.confirmerPhone || customer.confirmerPhoneMasked || "", status: customer.active ? "有效" : "待处理", source: "excel",
+      }));
       if (customers.length > 0) {
-        setWhitelistRows(customers.map((customer, index) => ({
-          id: String(customer.id), serverVersion: customer.lockVersion, sequence: customer.excelSequence ?? index + 1,
-          customerType: customer.customerType === "GENERAL" ? "综合客户" : "特渠专业客户",
-          region: regionNames.get(customer.regionCode || "") || customer.regionCode || "", branch: customer.branchName || "",
-          dealerShort: customer.dealerShortName || "", dealerFull: customer.dealerFullName, dealerType: customer.dealerCategory || "",
-          dealerName: customer.contactName || "", dealerPhone: customer.phone || customer.phoneMasked, confirmerName: customer.confirmerName || "",
-          confirmerPhone: customer.confirmerPhone || customer.confirmerPhoneMasked || "", status: customer.active ? "有效" : "待处理", source: "excel",
-        })));
+        setWhitelistRows(publishedWhitelistRows);
         onWhitelistImportCompleted(true); onWhitelistImportCommitted(); setWhitelistFileName("当前已发布白名单"); setWhitelistImportInputCount(customers.length);
       }
       if (attendees.length > 0) {
@@ -2102,6 +2189,34 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
         detail: entry.result === "SUCCESS" ? `操作成功 · 追踪号 ${entry.traceId}` : `操作失败：${entry.errorCode || "未知错误"}`,
         operator: entry.actorName || (entry.actorType === "H5_CUSTOMER" ? "H5 客户" : "系统"),
         time: new Date(entry.occurredAt).toLocaleString("zh-CN", { hour12: false }) })));
+      const pendingTasks = (["PRODUCT", "WHITELIST", "ATTENDANCE"] as const)
+        .map((type) => importTasks.find((task) => task.importType === type && task.status === "PREVIEW_READY"))
+        .filter((task): task is ImportTask => Boolean(task));
+      for (const task of pendingTasks) {
+        const staging = await loadImportRows(numericActivityId, task.id);
+        if (!active) return;
+        setServerImportTasks((current) => ({ ...current, [task.importType]: task.id }));
+        setServerImportBlocking((current) => ({ ...current, [task.importType]: task.errorCount }));
+        if (task.importType === "PRODUCT") {
+          setPendingProductRollbackRows(cloneProductRows(publishedProductRows));
+          setProductRows(restoreProductPreview(staging));
+          setProductFileName(task.sourceFilename); setProductSheetCounts(restoredSheetCounts(staging));
+          setProductImportInputCount(task.inputCount); onProductImportCompleted(false);
+        } else if (task.importType === "WHITELIST") {
+          setPendingWhitelistRollbackRows(cloneWhitelistRows(publishedWhitelistRows));
+          setWhitelistRows(restoreWhitelistPreview(staging));
+          setWhitelistFileName(task.sourceFilename); setWhitelistSheetCounts(restoredSheetCounts(staging));
+          setWhitelistImportInputCount(task.inputCount); onWhitelistImportCompleted(false);
+        } else {
+          const restoredRows = restoreAttendancePreview(staging);
+          const matchPreview = await loadAttendanceMatchPreview(numericActivityId, task.id);
+          if (!active) return;
+          setAttendanceMatchPreview(matchPreview); setAttendanceImportAttemptName(task.sourceFilename);
+          setPendingAttendanceImport({ rows: mergeAttendanceMatchPreview(restoredRows, matchPreview), warnings: [],
+            sheetCounts: restoredSheetCounts(staging), fileName: task.sourceFilename, inputCount: task.inputCount });
+        }
+      }
+      if (pendingTasks.length > 0) setActionNotice("已恢复服务器中尚未确认的导入预览，请确认或取消后再发布活动。");
     }).catch((reason) => { if (active) setActionNotice(reason instanceof ApiError ? reason.message : "后台数据加载失败"); });
     return () => { active = false; };
   }, [activityId, onAttendanceFileNameChange, onLotteryChange, onProductImportCommitted, onProductImportCompleted,
@@ -2109,62 +2224,103 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
   const recordOperation = (action: string, target: string, detail: string) => {
     setOperationLogs((current) => [{ id: createImportRowId("operation"), action, target, detail, operator: "运营管理员", time: new Date().toLocaleString("zh-CN", { hour12: false }) }, ...current]);
   };
-  const changeActivityStatus = async (nextStatus: ActivityStatus) => {
-    if (Number.isFinite(Number(activityId))) {
-      try {
-        const current = await loadActivity();
-        const target = nextStatus === "running" ? "ACTIVE" : nextStatus === "ended" ? "CLOSED" : nextStatus === "scheduled" ? "SCHEDULED" : "DRAFT";
-        await transitionActivity(current, target);
-      } catch (error) {
-        setActionNotice(error instanceof ApiError ? error.message : "活动状态保存失败，请稍后重试。");
-        return;
-      }
-    }
-    const nextStarted = nextStatus === "running" || nextStatus === "ended";
-    if (nextStatus === "ended" && !activityClosed) {
-      setActionNotice("活动已截止，基础数据已锁定并进入只读状态。" );
-      recordOperation("截止活动并锁定基础数据", "活动及基础数据", "活动截止后订单和基础数据进入只读状态。" );
-    } else if (nextStarted && !activityStarted) {
-      if (!productImportCompleted && productFileName) cancelProductImport();
-      if (!whitelistImportCompleted && whitelistFileName) cancelWhitelistImport();
-      if (pendingAttendanceImport) cancelAttendanceImport();
-      setActionNotice(nextStatus === "ended" ? "活动已截止，基础数据已锁定并进入只读状态。" : "活动已开始，商品、白名单和现场到场 Excel 导入已锁定；如需调整只能改单条。");
-      recordOperation(nextStatus === "ended" ? "截止活动并锁定基础数据" : "开始活动并锁定基础数据", "活动及基础数据", nextStatus === "ended" ? "活动截止后订单和基础数据进入只读状态。" : "活动开始后禁止 Excel、批量图片导入和批量删除。" );
-    } else if (!nextStarted && activityStarted) {
-      setActionNotice("活动已恢复为准备状态，当前可重新导入完整 Excel。");
-      recordOperation("恢复活动准备状态", "活动及基础数据", "解除活动开始后的导入锁定，可重新导入完整商品、白名单和现场到场 Excel。" );
-    } else {
-      setActionNotice(`活动状态已切换为${nextStatus === "draft" ? "草稿" : nextStatus === "scheduled" ? "待开始" : nextStatus === "running" ? "进行中" : "已截止"}。`);
-      recordOperation("调整活动状态", "活动状态", `状态调整为${nextStatus === "draft" ? "草稿" : nextStatus === "scheduled" ? "待开始" : nextStatus === "running" ? "进行中" : "已截止"}。`);
-    }
+  const applyActivity = (activity: RuntimeActivity) => {
+    const nextStatus = runtimeActivityStatus(activity.status);
     onActivityStatusChange(nextStatus);
+    onActivityNameChange(activity.name);
+    onActivityStartAtChange(toDateTimeLocal(activity.startsAt));
+    onActivityEndAtChange(toDateTimeLocal(activity.endsAt));
+    setActivityNameDraft(activity.name);
+    setActivityStartDraft(toDateTimeLocal(activity.startsAt));
+    setActivityEndDraft(toDateTimeLocal(activity.endsAt));
   };
-  const saveActivityConfig = async () => {
+  const saveActivityConfig = async (): Promise<boolean> => {
     if (!activityNameDraft.trim()) {
       setActionNotice("请填写活动名称。" );
-      return;
+      return false;
     }
     if (!activityStartDraft || !activityEndDraft) {
       setActionNotice("请填写活动开始时间和截止时间。" );
-      return;
+      return false;
     }
-    if (new Date(activityStartDraft).getTime() >= new Date(activityEndDraft).getTime()) {
+    const startTime = new Date(activityStartDraft).getTime();
+    const endTime = new Date(activityEndDraft).getTime();
+    if (startTime >= endTime) {
       setActionNotice("活动开始时间必须早于截止时间。" );
-      return;
+      return false;
+    }
+    if ((activityStatus === "draft" || activityStatus === "scheduled") && startTime <= Date.now()) {
+      setActionNotice("订货开始时间必须晚于当前时间，请重新选择。" );
+      return false;
+    }
+    if (activityStatus === "running" && startTime !== new Date(activityStartAt).getTime()) {
+      setActionNotice("活动进行中，订货开始时间不能修改。" );
+      return false;
+    }
+    if (activityStatus === "running" && endTime < new Date(activityEndAt).getTime()) {
+      setActionNotice("活动进行中只能延长截止时间；如需停止，请使用“立即截止订货”。" );
+      return false;
     }
     if (Number.isFinite(Number(activityId))) {
-      try { await updateActivity(await loadActivity(), { name: activityNameDraft.trim(), startsAt: activityStartDraft, endsAt: activityEndDraft }); }
-      catch (error) { setActionNotice(error instanceof ApiError ? error.message : "活动配置保存失败，请稍后重试。"); return; }
+      try {
+        const updated = await updateActivity(await loadActivity(), { name: activityNameDraft.trim(), startsAt: activityStartDraft, endsAt: activityEndDraft });
+        applyActivity(updated);
+      } catch (error) {
+        setActionNotice(error instanceof ApiError ? error.message : "活动配置保存失败，请稍后重试。");
+        return false;
+      }
+    } else {
+      onActivityNameChange(activityNameDraft.trim());
+      onActivityStartAtChange(activityStartDraft);
+      onActivityEndAtChange(activityEndDraft);
     }
-    onActivityNameChange(activityNameDraft.trim());
-    onActivityStartAtChange(activityStartDraft);
-    onActivityEndAtChange(activityEndDraft);
     recordOperation("保存活动配置", activityId, `活动名称：${activityNameDraft.trim()}；活动编号：${activityId}；开始：${activityStartDraft.replace("T", " ")}；截止：${activityEndDraft.replace("T", " ")}。`);
-    setActionNotice("活动名称、编号和时间配置已保存。" );
+    setActionNotice(activityStatus === "running" ? "新的订货截止时间已保存。" : "活动名称和时间配置已保存。" );
+    return true;
+  };
+  const publishCurrentActivity = async () => {
+    if (!productImportCompleted || !whitelistImportCompleted) {
+      setActionNotice("发布活动前必须完成商品和白名单导入。" );
+      return;
+    }
+    if (!window.confirm(`发布后活动将于 ${activityStartDraft.replace("T", " ")} 自动开始，商品和白名单将锁定。确定发布吗？`)) return;
+    if (!await saveActivityConfig()) return;
+    try {
+      if (Number.isFinite(Number(activityId))) applyActivity(await publishActivity(await loadActivity()));
+      else onActivityStatusChange("scheduled");
+      recordOperation("发布活动", activityId, `活动将于 ${activityStartDraft.replace("T", " ")} 自动开始订货。`);
+      setActionNotice("活动已发布，当前为待开始；到达开始时间后将自动开放 H5 订货。" );
+    } catch (error) {
+      setActionNotice(error instanceof ApiError ? error.message : "活动发布失败，请稍后重试。" );
+    }
+  };
+  const withdrawCurrentActivity = async () => {
+    if (!window.confirm("撤回发布后活动将恢复为草稿，并重新开放商品和白名单维护。确定撤回吗？")) return;
+    try {
+      if (Number.isFinite(Number(activityId))) applyActivity(await withdrawActivityPublication(await loadActivity()));
+      else onActivityStatusChange("draft");
+      recordOperation("撤回活动发布", activityId, "活动恢复为草稿，H5 保持关闭。" );
+      setActionNotice("活动已撤回发布并恢复为草稿。" );
+    } catch (error) {
+      setActionNotice(error instanceof ApiError ? error.message : "撤回发布失败，请稍后重试。" );
+    }
+  };
+  const closeCurrentActivity = async () => {
+    const reason = window.prompt("请输入立即截止原因（必填）：")?.trim();
+    if (!reason) return;
+    if (!window.confirm("确定立即截止订货吗？截止后客户将无法新增、修改或撤回订单。")) return;
+    try {
+      if (Number.isFinite(Number(activityId))) applyActivity(await closeActivityNow(await loadActivity(), reason));
+      else onActivityStatusChange("ended");
+      recordOperation("立即截止订货", activityId, `原因：${reason}`);
+      setActionNotice("活动已立即截止；H5 订单只读，看板和抽奖仍可使用。" );
+    } catch (error) {
+      setActionNotice(error instanceof ApiError ? error.message : "立即截止失败，请稍后重试。" );
+    }
   };
   const beginProductImport = () => {
-    if (activityStarted) {
-      setActionNotice("活动已开始，禁止重新导入商品 Excel。");
+    if (activityPublished) {
+      setActionNotice("活动发布后商品 Excel 已锁定，请先撤回发布。");
       return;
     }
     setProductImportCompleted(false);
@@ -2179,7 +2335,18 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     setProductImageFileName("");
     setProductImageUploadFile(null);
   };
-  const cancelProductImport = () => {
+  const cancelProductImport = async () => {
+    const taskId = serverImportTasks.PRODUCT;
+    if (taskId && Number.isFinite(Number(activityId))) {
+      try {
+        await cancelImport(Number(activityId), taskId);
+      } catch (error) {
+        setActionNotice(error instanceof ApiError ? error.message : "取消商品导入失败，请稍后重试。");
+        return;
+      }
+      setServerImportTasks((current) => ({ ...current, PRODUCT: undefined }));
+      setServerImportBlocking((current) => ({ ...current, PRODUCT: 0 }));
+    }
     const hadConfirmedImport = productImportHasRun;
     if (pendingProductRollbackRows) setProductRows(cloneProductRows(pendingProductRollbackRows));
     setPendingProductRollbackRows(null);
@@ -2196,8 +2363,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     setActionNotice("已取消本次商品替换，当前商品目录保持不变。" );
   };
   const confirmProductImport = async () => {
-    if (activityStarted) {
-      setActionNotice("活动已开始，禁止确认商品 Excel 导入。");
+    if (activityPublished) {
+      setActionNotice("活动发布后禁止确认商品 Excel 导入，请先撤回发布。");
       return;
     }
     if ((serverImportBlocking.PRODUCT ?? 0) > 0) {
@@ -2231,9 +2398,9 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     setActionNotice(`商品目录已替换：共 ${productImportStats.total} 条，有效 ${productImportStats.valid} 条、待完善 ${productImportStats.incomplete} 条${productImageUploadFile ? "，本批次图片已同步" : "，未匹配商品使用默认图片"}。`);
   };
   const handleProductFile = async (file: File) => {
-    if (activityStarted) {
-      setProductImportError("活动已开始，禁止重新导入商品 Excel。");
-      setActionNotice("活动已开始，禁止重新导入商品 Excel。");
+    if (activityPublished) {
+      setProductImportError("活动发布后商品 Excel 已锁定，请先撤回发布。");
+      setActionNotice("活动发布后商品 Excel 已锁定，请先撤回发布。");
       return;
     }
     setProductImportError("");
@@ -2271,9 +2438,9 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     }
   };
   const handleProductImageFile = async (file: File) => {
-    if (activityStarted) {
-      setProductImageError("活动已开始，禁止批量导入商品图片。");
-      setActionNotice("活动已开始，禁止批量导入商品图片；如需修改请编辑单条商品。");
+    if (activityPublished) {
+      setProductImageError("活动发布后禁止批量导入商品图片，请先撤回发布。");
+      setActionNotice("活动发布后禁止批量导入商品图片，请先撤回发布。");
       return;
     }
     setProductImageError("");
@@ -2291,8 +2458,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     }
   };
   const removeProductImages = () => {
-    if (activityStarted) {
-      setActionNotice("活动已开始，禁止批量移除商品图片；如需修改请编辑单条商品。");
+    if (activityPublished) {
+      setActionNotice("活动发布后禁止批量移除商品图片，请先撤回发布。");
       return;
     }
     revokeProductImageAssets(productImageAssets);
@@ -2329,8 +2496,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     }
   };
   const openProductForm = () => {
-    if (activityClosed) {
-      setActionNotice("活动已截止，商品数据只读。" );
+    if (baseDataReadOnly) {
+      setActionNotice(activityClosed ? "活动已截止，商品数据只读。" : "活动已发布，修改商品请先撤回发布。" );
       return;
     }
     if (!productImportCompleted && (!productFileName || productImportError)) {
@@ -2464,8 +2631,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     return true;
   };
   const beginWhitelistImport = () => {
-    if (activityStarted) {
-      setActionNotice("活动已开始，禁止重新导入白名单 Excel。");
+    if (activityPublished) {
+      setActionNotice("活动发布后白名单 Excel 已锁定，请先撤回发布。");
       return;
     }
     setWhitelistImportCompleted(false);
@@ -2476,7 +2643,18 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     setWhitelistImportInputCount(0);
     setPendingWhitelistRollbackRows(null);
   };
-  const cancelWhitelistImport = () => {
+  const cancelWhitelistImport = async () => {
+    const taskId = serverImportTasks.WHITELIST;
+    if (taskId && Number.isFinite(Number(activityId))) {
+      try {
+        await cancelImport(Number(activityId), taskId);
+      } catch (error) {
+        setActionNotice(error instanceof ApiError ? error.message : "取消白名单导入失败，请稍后重试。");
+        return;
+      }
+      setServerImportTasks((current) => ({ ...current, WHITELIST: undefined }));
+      setServerImportBlocking((current) => ({ ...current, WHITELIST: 0 }));
+    }
     const hadConfirmedImport = whitelistImportHasRun;
     const rollbackRows = pendingWhitelistRollbackRows ? cloneWhitelistRows(pendingWhitelistRollbackRows) : whitelistRows;
     if (pendingWhitelistRollbackRows) setWhitelistRows(rollbackRows);
@@ -2490,8 +2668,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     setActionNotice("已取消本次白名单替换，当前白名单保持不变。" );
   };
   const confirmWhitelistImport = async () => {
-    if (activityStarted) {
-      setActionNotice("活动已开始，禁止确认白名单 Excel 导入。");
+    if (activityPublished) {
+      setActionNotice("活动发布后禁止确认白名单 Excel 导入，请先撤回发布。");
       return;
     }
     if ((serverImportBlocking.WHITELIST ?? 0) > 0) {
@@ -2517,9 +2695,9 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     setActionNotice(`白名单已替换：共 ${whitelistImportStats.total} 名，有效 ${whitelistImportStats.valid} 名；当前到场已重新关联 ${linkedAttendance} 名。`);
   };
   const handleWhitelistFile = async (file: File) => {
-    if (activityStarted) {
-      setWhitelistImportError("活动已开始，禁止重新导入白名单 Excel。");
-      setActionNotice("活动已开始，禁止重新导入白名单 Excel。");
+    if (activityPublished) {
+      setWhitelistImportError("活动发布后白名单 Excel 已锁定，请先撤回发布。");
+      setActionNotice("活动发布后白名单 Excel 已锁定，请先撤回发布。");
       return;
     }
     setWhitelistImportError("");
@@ -2553,8 +2731,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     }
   };
   const openWhitelistForm = () => {
-    if (activityClosed) {
-      setActionNotice("活动已截止，白名单数据只读。" );
+    if (baseDataReadOnly) {
+      setActionNotice(activityClosed ? "活动已截止，白名单数据只读。" : "活动已发布，修改白名单请先撤回发布。" );
       return;
     }
     if (!whitelistImportCompleted && (!whitelistFileName || whitelistImportError)) {
@@ -2565,9 +2743,9 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     setWhitelistFormOpen(true);
   };
   const handleAttendanceFile = async (file: File) => {
-    if (activityStarted) {
-      onAttendanceImportErrorChange("活动已开始，禁止重新导入现场到场 Excel。" );
-      setActionNotice("活动已开始，禁止重新导入现场到场 Excel。" );
+    if (activityClosed) {
+      onAttendanceImportErrorChange("活动已截止，现场到场名单只读。" );
+      setActionNotice("活动已截止，现场到场名单只读。" );
       return;
     }
     setAttendanceImportAttemptName(file.name);
@@ -2596,8 +2774,19 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
       setAttendanceMatchPreview(null);
     }
   };
-  const cancelAttendanceImport = () => {
+  const cancelAttendanceImport = async () => {
     if (!pendingAttendanceImport && !attendanceImportError) return;
+    const taskId = serverImportTasks.ATTENDANCE;
+    if (taskId && Number.isFinite(Number(activityId))) {
+      try {
+        await cancelImport(Number(activityId), taskId);
+      } catch (error) {
+        setActionNotice(error instanceof ApiError ? error.message : "取消现场到场导入失败，请稍后重试。");
+        return;
+      }
+      setServerImportTasks((current) => ({ ...current, ATTENDANCE: undefined }));
+      setServerImportBlocking((current) => ({ ...current, ATTENDANCE: 0 }));
+    }
     setPendingAttendanceImport(null);
     setAttendanceMatchPreview(null);
     setAttendanceImportAttemptName("");
@@ -2608,8 +2797,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
   };
   const confirmAttendanceImport = async () => {
     if (attendancePublishing) return;
-    if (activityStarted) {
-      setActionNotice("活动已开始，禁止确认现场到场 Excel 导入。" );
+    if (activityClosed) {
+      setActionNotice("活动已截止，现场到场名单只读。" );
       return;
     }
     if (!pendingAttendanceImport) return;
@@ -2780,8 +2969,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     }
   };
   const deleteProductRows = async (ids: string[]) => {
-    if (activityStarted) {
-      setActionNotice("活动已开始，禁止删除商品；如需紧急处理请改单条并记录原因。");
+    if (activityPublished) {
+      setActionNotice("活动发布后禁止删除商品；待开始状态请先撤回发布。");
       return;
     }
     if (!productImportCompleted && serverImportTasks.PRODUCT) {
@@ -2802,8 +2991,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     setActionNotice(`${productImportCompleted ? "已删除" : "已从待导入结果移除"} ${ids.length} 条商品，已有订单明细和金额不受影响。`);
   };
   const deleteWhitelistRows = async (ids: string[]) => {
-    if (activityStarted) {
-      setActionNotice("活动已开始，禁止删除白名单客户；如需紧急处理请改单条并记录原因。");
+    if (activityPublished) {
+      setActionNotice("活动发布后禁止删除白名单客户；待开始状态请先撤回发布。");
       return;
     }
     if (!whitelistImportCompleted && serverImportTasks.WHITELIST) {
@@ -2827,8 +3016,8 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
     setActionNotice(`${whitelistImportCompleted ? "已删除" : "已从待导入结果移除"} ${ids.length} 名白名单客户，已有订单不会被删除。`);
   };
   const deleteAttendanceRows = async (ids: string[]) => {
-    if (activityStarted) {
-      setActionNotice("活动已开始，禁止批量删除现场到场客户；如需调整请编辑单条记录。");
+    if (activityClosed) {
+      setActionNotice("活动已截止，现场到场名单只读。");
       return;
     }
     if (ids.length === 0) return;
@@ -2875,7 +3064,7 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
         <div className="admin-user"><span>陈</span><p><b>运营管理员</b><small>调味品事业部</small></p></div>
       </aside>
       <main className="admin-main">
-        <header><div><span>{activityName}</span><b>{tab}</b></div><div className="admin-actions"><button onClick={() => setOperationLogOpen((value) => !value)}>操作日志{operationLogs.length > 0 ? ` · ${operationLogs.length}` : ""}</button><span className={activityClosed ? "closed" : activityStarted ? "" : "pending"}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "进行中" : "已截止"}</span>{activityStarted && <span className="locked">数据已锁定</span>}{operationLogOpen && <div className="operation-log-popover"><div><b>操作日志</b><button type="button" onClick={() => setOperationLogOpen(false)}>×</button></div>{operationLogs.length === 0 ? <p>暂无操作记录</p> : operationLogs.slice(0, 8).map((entry) => <article key={entry.id}><b>{entry.action}</b><span>{entry.target}</span><small>{entry.detail}</small><em>{entry.operator} · {entry.time}</em></article>)}</div>}</div></header>
+        <header><div><span>{activityName}</span><b>{tab}</b></div><div className="admin-actions"><button onClick={() => setOperationLogOpen((value) => !value)}>操作日志{operationLogs.length > 0 ? ` · ${operationLogs.length}` : ""}</button><span className={activityClosed ? "closed" : activityStarted ? "" : "pending"}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "进行中" : "已截止"}</span>{activityPublished && <span className="locked">商品和白名单已锁定</span>}{operationLogOpen && <div className="operation-log-popover"><div><b>操作日志</b><button type="button" onClick={() => setOperationLogOpen(false)}>×</button></div>{operationLogs.length === 0 ? <p>暂无操作记录</p> : operationLogs.slice(0, 8).map((entry) => <article key={entry.id}><b>{entry.action}</b><span>{entry.target}</span><small>{entry.detail}</small><em>{entry.operator} · {entry.time}</em></article>)}</div>}</div></header>
         {tab === "活动概览" && (
           <>
             <div className="admin-stats">
@@ -2883,41 +3072,41 @@ function AdminPrototype({ lotteryRounds, onLotteryChange, activityName, onActivi
             </div>
             <div className="admin-grid">
               <article className="progress-card"><h2>客户提交进度</h2>{progressRows.map((item) => <div key={item.label}><p><b>{item.label}</b><span>{item.submitted} / {item.total}</span></p><i><em style={{ width: `${item.percentage}%` }} /></i></div>)}</article>
-              <article className="activity-card"><h2>活动设置</h2><div className="activity-config-grid"><label><span>活动名称 *</span><input value={activityNameDraft} onChange={(event) => setActivityNameDraft(event.target.value)} placeholder="例如：2026 年中秋订货会" /></label><label><span>活动编号</span><input value={activityId} readOnly aria-label="活动编号，只读" /></label><label><span>订货开始时间</span><input type="datetime-local" value={activityStartDraft} onChange={(event) => setActivityStartDraft(event.target.value)} /></label><label><span>订货截止时间</span><input type="datetime-local" value={activityEndDraft} onChange={(event) => setActivityEndDraft(event.target.value)} /></label><label><span>活动状态</span><select value={activityStatus} onChange={(event) => changeActivityStatus(event.target.value as ActivityStatus)}><option value="draft">草稿</option><option value="scheduled">待开始</option><option value="running">进行中</option><option value="ended">已截止</option></select></label></div><p><span>当前状态</span><b className={activityClosed ? "closed-text" : activityStarted ? "green" : "pending-text"}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "进行中" : "已截止"}</b></p><p><span>基础数据</span><b className={activityStarted ? "closed-text" : "green"}>{activityStarted ? "已锁定" : "可导入"}</b></p><p><span>运行规则</span><small>{activityClosed ? "全部数据只读" : activityStarted ? "仅可单条手动调整" : "可批量导入和替换"}</small></p><div className="activity-card-actions"><button className="admin-primary" onClick={saveActivityConfig}>保存活动设置</button><button onClick={() => changeActivityStatus(activityStarted ? "scheduled" : "running")}>{activityStarted ? "恢复为待开始" : "立即开始并锁定导入"}</button></div></article>
+              <article className="activity-card"><h2>活动设置</h2><div className="activity-config-grid"><label><span>活动名称 *</span><input value={activityNameDraft} disabled={activityClosed} onChange={(event) => setActivityNameDraft(event.target.value)} placeholder="例如：2026 年中秋订货会" /></label><label><span>活动编号</span><input value={activityId} readOnly aria-label="活动编号，只读" /></label><label><span>订货开始时间</span><input type="datetime-local" min={activityStatus === "draft" || activityStatus === "scheduled" ? minimumFutureAt : undefined} value={activityStartDraft} disabled={activityStarted} onChange={(event) => setActivityStartDraft(event.target.value)} /></label><label><span>订货截止时间</span><input type="datetime-local" min={activityStatus === "running" ? activityEndAt : activityStartDraft || minimumFutureAt} value={activityEndDraft} disabled={activityClosed} onChange={(event) => setActivityEndDraft(event.target.value)} /></label><label><span>活动状态</span><div className={`activity-status-display ${activityStatus}`}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "进行中" : "已截止"}</div></label></div><p><span>当前状态</span><b className={activityClosed ? "closed-text" : activityStarted ? "green" : "pending-text"}>{activityStatus === "draft" ? "草稿 · H5 未发布" : activityStatus === "scheduled" ? `待开始 · ${activityStartDraft.replace("T", " ")} 自动开放` : activityStatus === "running" ? "进行中 · H5 可下单" : "已截止 · H5 订单只读"}</b></p><p><span>基础数据</span><b className={activityPublished ? "closed-text" : "green"}>{activityPublished ? "商品和白名单已锁定" : "可导入和替换"}</b></p><p><span>运行规则</span><small>{activityClosed ? "订单和基础数据只读；看板、抽奖可继续使用" : activityStatus === "running" ? "开始时间不可修改；截止时间只能延长" : activityStatus === "scheduled" ? "可调整未来时间；修改基础数据请先撤回发布" : "保存设置不会发布活动"}</small></p><div className="activity-card-actions">{!activityClosed && <button className="admin-primary" onClick={() => void saveActivityConfig()}>{activityStatus === "running" ? "保存延长时间" : activityStatus === "scheduled" ? "保存时间调整" : "保存活动设置"}</button>}{activityStatus === "draft" && <button onClick={() => void publishCurrentActivity()}>发布活动</button>}{activityStatus === "scheduled" && <button onClick={() => void withdrawCurrentActivity()}>撤回发布</button>}{activityStatus === "running" && <button className="danger-action" onClick={() => void closeCurrentActivity()}>立即截止订货</button>}{activityClosed && <button type="button" onClick={() => setTab("订单管理")}>查看最终数据</button>}</div></article>
             </div>
           </>
         )}
         {tab === "商品导入" && (
           <div className="admin-panel">
-            <div className="panel-title"><div><h2>{productImportCompleted ? "当前活动商品" : "活动商品导入"}</h2><p>{productImportCompleted ? "当前数据来自最近一次确认的完整 Excel，可在活动开始前重新替换" : "上传完整商品 Excel，浏览器解析后替换当前商品目录"}</p></div><div className="panel-actions"><button className="secondary-button" disabled={activityClosed || (!productImportCompleted && (!productFileName || Boolean(productImportError)))} onClick={openProductForm}>＋ 手动添加商品</button>{productImportCompleted && <button className="admin-primary" disabled={activityStarted} onClick={beginProductImport}>重新导入 Excel</button>}</div></div>
-            {!productImportCompleted && <div className="import-rule-hint"><b>全量替换规则</b><span>{activityStarted ? "活动已开始，商品 Excel 和批量图片导入已锁定；如需紧急处理，只能编辑单条商品并记录操作日志。" : "每次 Excel 与本次 ZIP 构成一套独立批次，不比较上一版本，也不继承上一版本图片。上传只生成预览，点击确认且全部保存成功后，才会整体替换当前商品目录。"}</span></div>}
+            <div className="panel-title"><div><h2>{productImportCompleted ? "当前活动商品" : "活动商品导入"}</h2><p>{productImportCompleted ? "当前数据来自最近一次确认的完整 Excel；发布活动后锁定" : "上传完整商品 Excel，浏览器解析后替换当前商品目录"}</p></div><div className="panel-actions"><button className="secondary-button" disabled={baseDataReadOnly || (!productImportCompleted && (!productFileName || Boolean(productImportError)))} onClick={openProductForm}>＋ 手动添加商品</button>{productImportCompleted && <button className="admin-primary" disabled={activityPublished} onClick={beginProductImport}>重新导入 Excel</button>}</div></div>
+            {!productImportCompleted && <div className="import-rule-hint"><b>全量替换规则</b><span>{activityPublished ? "活动已发布，商品 Excel 和批量图片导入已锁定；待开始状态可先撤回发布再修改。" : "每次 Excel 与本次 ZIP 构成一套独立批次，不比较上一版本，也不继承上一版本图片。上传只生成预览，点击确认且全部保存成功后，才会整体替换当前商品目录。"}</span></div>}
             {!productImportCompleted && <div className="dual-upload-grid product-import-upload-grid">
               <article className={`file-upload-card ${productFileName && !productImportError ? "ready" : ""}`}>
                 <div className="file-card-heading"><span>XL</span><div><b>商品信息 Excel</b><small>统一文件 · 读取 4 个商品 Sheet</small></div><em>{productFileName ? (productImportError ? "解析失败" : "解析完成") : "待上传"}</em></div>
                 {productFileName ? <p title={productFileName}>{productFileName}</p> : <p>请选择：调味产品信息表.xlsx</p>}
                 <div className="sheet-tags">{productSheetConfig.map((item) => <span key={item.name}>{item.name}</span>)}</div>
-                <footer><small>{activityStarted ? "活动已开始，Excel 导入已锁定" : productFileName && !productImportError ? `识别 ${parsedProductCount} 条商品` : "必须包含上述 4 个 Sheet"}</small><div>{productFileName && <button type="button" disabled={activityStarted} onClick={cancelProductImport}>移除</button>}<label className={activityStarted ? "disabled" : ""}><input type="file" accept=".xlsx" disabled={activityStarted} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleProductFile(file); event.currentTarget.value = ""; }} />{productFileName ? "替换文件" : "选择文件"}</label></div></footer>
+                <footer><small>{activityPublished ? "活动已发布，Excel 导入已锁定" : productFileName && !productImportError ? `识别 ${parsedProductCount} 条商品` : "必须包含上述 4 个 Sheet"}</small><div>{productFileName && <button type="button" disabled={activityPublished} onClick={cancelProductImport}>移除</button>}<label className={activityPublished ? "disabled" : ""}><input type="file" accept=".xlsx" disabled={activityPublished} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleProductFile(file); event.currentTarget.value = ""; }} />{productFileName ? "替换文件" : "选择文件"}</label></div></footer>
               </article>
-              <ProductImageUploadCard fileName={productImageFileName} stats={productImageStats} assets={resolvedProductImageAssets} error={productImageError} disabled={activityStarted || (!productFileName && !productImportCompleted)} disabledMessage={activityStarted ? "活动已开始，批量图片导入已锁定" : undefined} onFile={handleProductImageFile} onRemove={removeProductImages} />
+              <ProductImageUploadCard fileName={productImageFileName} stats={productImageStats} assets={resolvedProductImageAssets} error={productImageError} disabled={activityPublished || (!productFileName && !productImportCompleted)} disabledMessage={activityPublished ? "活动已发布，批量图片导入已锁定" : undefined} onFile={handleProductImageFile} onRemove={removeProductImages} />
             </div>}
-            {!productImportCompleted && productFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{productImportError ? "文件解析失败" : "Excel 与图片预览完成 · 等待确认替换"}</b><small>{productImportError ? "请修正文件后重新选择" : `Excel 原始 ${parsedProductCount} 条、已移除 ${removedProductCount} 条、待发布 ${productImportStats.total} 条；有效 ${productImportStats.valid} 条、待完善 ${productImportStats.incomplete} 条、待核对 ${productImportStats.review} 条`}</small></p><strong>{productImportStats.total} 条待发布</strong></div>{productImportError && <div className="warning-box"><b>文件无法导入</b><span>{productImportError}</span></div>}{!productImportError && productImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{productImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!productImportError && <><div className="sheet-counts">{productSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><div className="product-import-stats">{[["待发布商品", productImportStats.total], ["有效", productImportStats.valid], ["待核对", productImportStats.review], ["待完善", productImportStats.incomplete]].map(([label, count]) => <span key={label as string}><b>{count}</b><small>{label}</small></span>)}</div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} readOnly={activityClosed} allowDelete={!activityStarted} onDelete={deleteProductRows} /><button className="admin-primary wide" disabled={!productImportStats.total || activityStarted || productImportStats.review > 0 || (serverImportBlocking.PRODUCT ?? 0) > 0} onClick={confirmProductImport}>{productImportStats.review > 0 || (serverImportBlocking.PRODUCT ?? 0) > 0 ? `请先处理 ${Math.max(productImportStats.review, serverImportBlocking.PRODUCT ?? 0)} 条待核对商品` : `确认替换当前商品 ${productImportStats.total} 条`}</button></>}</div>}
-            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品目录替换完成</b><small>{activityClosed ? "活动已截止，商品数据只读。" : activityStarted ? "活动已开始，Excel 导入已锁定；待确认图片仍可逐个处理。" : "商品已发布；待确认图片保留在当前版本，可在下方逐个选择，确认前 H5 使用占位图。"}</small></p><div><strong>{productRows.length}</strong><small>商品总数</small></div><div><strong>{productRows.filter((row) => row.status === "有效").length}</strong><small>有效</small></div><div><strong>{productRows.filter((row) => row.imageStatus === "待确认").length}</strong><small>图片待确认</small></div><div><strong>{productRows.filter((row) => row.imageStatus === "未匹配").length}</strong><small>图片未匹配</small></div></div><div className="data-section-title"><div><b>当前活动商品</b><span>{productFileName} · 共 {productRows.length} 条 · {activityClosed ? "活动已截止，只读" : activityStarted ? "活动已锁定，待确认图片可继续处理" : "可编辑、单条/批量删除"}</span></div></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} readOnly={activityClosed} allowDelete={!activityStarted} allowDeleteAll={!activityStarted} onDelete={deleteProductRows} /></>}
+            {!productImportCompleted && productFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{productImportError ? "文件解析失败" : "Excel 与图片预览完成 · 等待确认替换"}</b><small>{productImportError ? "请修正文件后重新选择" : `Excel 原始 ${parsedProductCount} 条、已移除 ${removedProductCount} 条、待发布 ${productImportStats.total} 条；有效 ${productImportStats.valid} 条、待完善 ${productImportStats.incomplete} 条、待核对 ${productImportStats.review} 条`}</small></p><strong>{productImportStats.total} 条待发布</strong></div>{productImportError && <div className="warning-box"><b>文件无法导入</b><span>{productImportError}</span></div>}{!productImportError && productImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{productImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!productImportError && <><div className="sheet-counts">{productSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><div className="product-import-stats">{[["待发布商品", productImportStats.total], ["有效", productImportStats.valid], ["待核对", productImportStats.review], ["待完善", productImportStats.incomplete]].map(([label, count]) => <span key={label as string}><b>{count}</b><small>{label}</small></span>)}</div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} readOnly={baseDataReadOnly} allowDelete={!activityPublished} onDelete={deleteProductRows} /><button className="admin-primary wide" disabled={!productImportStats.total || activityPublished || productImportStats.review > 0 || (serverImportBlocking.PRODUCT ?? 0) > 0} onClick={confirmProductImport}>{productImportStats.review > 0 || (serverImportBlocking.PRODUCT ?? 0) > 0 ? `请先处理 ${Math.max(productImportStats.review, serverImportBlocking.PRODUCT ?? 0)} 条待核对商品` : `确认替换当前商品 ${productImportStats.total} 条`}</button></>}</div>}
+            {productImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次商品目录替换完成</b><small>{activityClosed ? "活动已截止，商品数据只读。" : activityStatus === "scheduled" ? "活动已发布，商品已锁定；如需修改请先撤回发布。" : activityStarted ? "活动已开始，Excel 导入已锁定；待确认图片仍可逐个处理。" : "商品已发布；待确认图片保留在当前版本，可在下方逐个选择，确认前 H5 使用占位图。"}</small></p><div><strong>{productRows.length}</strong><small>商品总数</small></div><div><strong>{productRows.filter((row) => row.status === "有效").length}</strong><small>有效</small></div><div><strong>{productRows.filter((row) => row.imageStatus === "待确认").length}</strong><small>图片待确认</small></div><div><strong>{productRows.filter((row) => row.imageStatus === "未匹配").length}</strong><small>图片未匹配</small></div></div><div className="data-section-title"><div><b>当前活动商品</b><span>{productFileName} · 共 {productRows.length} 条 · {activityClosed ? "活动已截止，只读" : activityStatus === "scheduled" ? "活动已发布，只读" : activityStarted ? "活动已锁定，待确认图片可继续处理" : "可编辑、单条/批量删除"}</span></div></div><ProductImportTable rows={productRows} onEdit={setEditingProductRow} readOnly={baseDataReadOnly} allowDelete={!activityPublished} allowDeleteAll={!activityPublished} onDelete={deleteProductRows} /></>}
           </div>
         )}
         {tab === "白名单" && (
           <div className="admin-panel">
-            <div className="panel-title"><div><h2>{whitelistImportCompleted ? "当前客户白名单" : "客户白名单导入"}</h2><p>{whitelistImportCompleted ? "当前数据来自最近一次确认的完整 Excel，可在活动开始前重新替换" : "上传完整白名单 Excel，浏览器解析后替换当前白名单"}</p></div><div className="panel-actions"><button className="secondary-button" disabled={activityClosed || (!whitelistImportCompleted && (!whitelistFileName || Boolean(whitelistImportError)))} onClick={openWhitelistForm}>＋ 手动添加客户</button>{whitelistImportCompleted && <button className="admin-primary" disabled={activityStarted} onClick={beginWhitelistImport}>重新导入 Excel</button>}</div></div>
-            {!whitelistImportCompleted && <div className="import-rule-hint"><b>全量替换规则</b><span>{activityStarted ? "活动已开始，白名单 Excel 导入已锁定；如需紧急处理，只能编辑单条客户并记录操作日志。" : "每次白名单 Excel 都是一套独立完整名单，不展示新增、更新或移除差异。上传只生成预览，点击确认且保存成功后才整体替换当前白名单；客户类型由 Sheet 确定，综合和特渠可以存在同一个手机号。"}</span></div>}
+            <div className="panel-title"><div><h2>{whitelistImportCompleted ? "当前客户白名单" : "客户白名单导入"}</h2><p>{whitelistImportCompleted ? "当前数据来自最近一次确认的完整 Excel；发布活动后锁定" : "上传完整白名单 Excel，浏览器解析后替换当前白名单"}</p></div><div className="panel-actions"><button className="secondary-button" disabled={baseDataReadOnly || (!whitelistImportCompleted && (!whitelistFileName || Boolean(whitelistImportError)))} onClick={openWhitelistForm}>＋ 手动添加客户</button>{whitelistImportCompleted && <button className="admin-primary" disabled={activityPublished} onClick={beginWhitelistImport}>重新导入 Excel</button>}</div></div>
+            {!whitelistImportCompleted && <div className="import-rule-hint"><b>全量替换规则</b><span>{activityPublished ? "活动已发布，白名单 Excel 已锁定；待开始状态可先撤回发布再修改。" : "每次白名单 Excel 都是一套独立完整名单，不展示新增、更新或移除差异。上传只生成预览，点击确认且保存成功后才整体替换当前白名单；客户类型由 Sheet 确定，综合和特渠可以存在同一个手机号。"}</span></div>}
             {!whitelistImportCompleted && <div className="single-upload-grid">
               <article className={"file-upload-card " + (whitelistFileName && !whitelistImportError ? "ready" : "")}>
                 <div className="file-card-heading"><span>XL</span><div><b>客户白名单 Excel</b><small>统一文件 · 读取 2 个白名单 Sheet</small></div><em>{whitelistFileName ? (whitelistImportError ? "解析失败" : "解析完成") : "待上传"}</em></div>
                 {whitelistFileName ? <p title={whitelistFileName}>{whitelistFileName}</p> : <p>请选择：【白名单】26年中秋订货会经销商白名单7.2.xlsx</p>}
                 <div className="sheet-tags">{whitelistSheetConfig.map((item) => <span key={item.name}>{item.name}</span>)}</div>
-                <footer><small>{activityStarted ? "活动已开始，Excel 导入已锁定" : whitelistFileName && !whitelistImportError ? "识别 " + parsedWhitelistCount + " 名客户" : "必须包含上述 2 个 Sheet"}</small><div>{whitelistFileName && <button type="button" disabled={activityStarted} onClick={cancelWhitelistImport}>移除</button>}<label className={activityStarted ? "disabled" : ""}><input type="file" accept=".xlsx" disabled={activityStarted} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleWhitelistFile(file); event.currentTarget.value = ""; }} />{whitelistFileName ? "替换文件" : "选择文件"}</label></div></footer>
+                <footer><small>{activityPublished ? "活动已发布，Excel 导入已锁定" : whitelistFileName && !whitelistImportError ? "识别 " + parsedWhitelistCount + " 名客户" : "必须包含上述 2 个 Sheet"}</small><div>{whitelistFileName && <button type="button" disabled={activityPublished} onClick={cancelWhitelistImport}>移除</button>}<label className={activityPublished ? "disabled" : ""}><input type="file" accept=".xlsx" disabled={activityPublished} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleWhitelistFile(file); event.currentTarget.value = ""; }} />{whitelistFileName ? "替换文件" : "选择文件"}</label></div></footer>
               </article>
             </div>}
-            {!whitelistImportCompleted && whitelistFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{whitelistImportError ? "文件解析失败" : "Excel 预览完成 · 等待确认替换"}</b><small>{whitelistImportError ? "请修正文件后重新选择" : `Excel 原始 ${parsedWhitelistCount} 名、已移除 ${removedWhitelistCount} 名、待发布 ${whitelistImportStats.total} 名；有效 ${whitelistImportStats.valid} 名、待处理 ${whitelistImportStats.pending} 名`}</small></p><strong>{whitelistImportStats.total} 名待发布</strong></div>{whitelistImportError && <div className="warning-box"><b>文件无法导入</b><span>{whitelistImportError}</span></div>}{!whitelistImportError && whitelistImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{whitelistImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!whitelistImportError && <><div className="sheet-counts">{whitelistSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><div className="product-import-stats">{[["待发布客户", whitelistImportStats.total], ["有效", whitelistImportStats.valid], ["待处理", whitelistImportStats.pending]].map(([label, count]) => <span key={label as string}><b>{count}</b><small>{label}</small></span>)}</div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} readOnly={activityClosed} allowDelete={!activityStarted} onDelete={deleteWhitelistRows} /><button className="admin-primary wide" disabled={!whitelistImportStats.total || activityStarted || whitelistImportStats.pending > 0 || (serverImportBlocking.WHITELIST ?? 0) > 0} onClick={confirmWhitelistImport}>{whitelistImportStats.pending > 0 || (serverImportBlocking.WHITELIST ?? 0) > 0 ? `请先处理 ${Math.max(whitelistImportStats.pending, serverImportBlocking.WHITELIST ?? 0)} 条待处理白名单` : `确认替换当前白名单 ${whitelistImportStats.total} 名`}</button></>}</div>}
-            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单替换完成</b><small>{activityClosed ? "活动已截止，白名单数据只读。" : activityStarted ? "活动已开始，白名单 Excel 导入已锁定；紧急修改单条客户会记录操作日志。" : "当前白名单来自最近一次确认的完整 Excel；重新导入后以新文件为准，历史订单不会被删除。"}</small></p><div><strong>{whitelistRows.length}</strong><small>客户总数</small></div><div><strong>{whitelistRows.filter((row) => row.status === "有效").length}</strong><small>有效</small></div><div><strong>{whitelistRows.filter((row) => row.status === "待处理").length}</strong><small>待处理</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>{whitelistFileName} · 综合客户和特渠客户共 {whitelistRows.length} 名 · {activityClosed ? "活动已截止，只读" : activityStarted ? "活动已锁定，仅可改单条" : "可编辑、单条/批量删除"}</span></div></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} readOnly={activityClosed} allowDelete={!activityStarted} allowDeleteAll={!activityStarted} onDelete={deleteWhitelistRows} /></>}
+            {!whitelistImportCompleted && whitelistFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{whitelistImportError ? "文件解析失败" : "Excel 预览完成 · 等待确认替换"}</b><small>{whitelistImportError ? "请修正文件后重新选择" : `Excel 原始 ${parsedWhitelistCount} 名、已移除 ${removedWhitelistCount} 名、待发布 ${whitelistImportStats.total} 名；有效 ${whitelistImportStats.valid} 名、待处理 ${whitelistImportStats.pending} 名`}</small></p><strong>{whitelistImportStats.total} 名待发布</strong></div>{whitelistImportError && <div className="warning-box"><b>文件无法导入</b><span>{whitelistImportError}</span></div>}{!whitelistImportError && whitelistImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{whitelistImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!whitelistImportError && <><div className="sheet-counts">{whitelistSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><div className="product-import-stats">{[["待发布客户", whitelistImportStats.total], ["有效", whitelistImportStats.valid], ["待处理", whitelistImportStats.pending]].map(([label, count]) => <span key={label as string}><b>{count}</b><small>{label}</small></span>)}</div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} readOnly={baseDataReadOnly} allowDelete={!activityPublished} onDelete={deleteWhitelistRows} /><button className="admin-primary wide" disabled={!whitelistImportStats.total || activityPublished || whitelistImportStats.pending > 0 || (serverImportBlocking.WHITELIST ?? 0) > 0} onClick={confirmWhitelistImport}>{whitelistImportStats.pending > 0 || (serverImportBlocking.WHITELIST ?? 0) > 0 ? `请先处理 ${Math.max(whitelistImportStats.pending, serverImportBlocking.WHITELIST ?? 0)} 条待处理白名单` : `确认替换当前白名单 ${whitelistImportStats.total} 名`}</button></>}</div>}
+            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单替换完成</b><small>{activityClosed ? "活动已截止，白名单数据只读。" : activityStatus === "scheduled" ? "活动已发布，白名单已锁定；如需修改请先撤回发布。" : activityStarted ? "活动已开始，白名单 Excel 导入已锁定；紧急修改单条客户会记录操作日志。" : "当前白名单来自最近一次确认的完整 Excel；重新导入后以新文件为准，历史订单不会被删除。"}</small></p><div><strong>{whitelistRows.length}</strong><small>客户总数</small></div><div><strong>{whitelistRows.filter((row) => row.status === "有效").length}</strong><small>有效</small></div><div><strong>{whitelistRows.filter((row) => row.status === "待处理").length}</strong><small>待处理</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>{whitelistFileName} · 综合客户和特渠客户共 {whitelistRows.length} 名 · {activityClosed ? "活动已截止，只读" : activityStatus === "scheduled" ? "活动已发布，只读" : activityStarted ? "活动已锁定，仅可改单条" : "可编辑、单条/批量删除"}</span></div></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} readOnly={baseDataReadOnly} allowDelete={!activityPublished} allowDeleteAll={!activityPublished} onDelete={deleteWhitelistRows} /></>}
           </div>
         )}
         {tab === "现场到场" && <AttendancePage rows={pendingAttendanceImport?.rows ?? attendanceRows} fileName={attendanceFileName} warnings={attendanceWarnings} sheetCounts={attendanceSheetCounts} error={attendanceImportError} activityStarted={activityStarted} activityClosed={activityClosed} pendingImport={pendingAttendanceImport} importAttemptName={attendanceImportAttemptName} blockingCount={serverImportBlocking.ATTENDANCE ?? 0} previewLoading={attendancePreviewLoading} publishing={attendancePublishing} onFile={handleAttendanceFile} onAdd={() => { setEditingAttendanceRow(null); setAttendanceFormOpen(true); }} onEdit={setEditingAttendanceRow} onDelete={deleteAttendanceRows} onConfirmImport={confirmAttendanceImport} onCancelImport={cancelAttendanceImport} />}
@@ -2985,7 +3174,6 @@ export function Prototype({ initialSurface = "h5", showSurfaceTabs = true }: Pro
   const [activityStatus, setActivityStatus] = useState<ActivityStatus>("scheduled");
   const [activityStartAt, setActivityStartAt] = useState("2030-07-28T14:30");
   const [activityEndAt, setActivityEndAt] = useState("2030-07-30T18:30");
-  const activityClosed = activityStatus === "ended";
   const [productRows, setProductRows] = useState<ProductImportRow[]>([]);
   const [productImportCompleted, setProductImportCompleted] = useState(false);
   const [productImportHasRun, setProductImportHasRun] = useState(false);
@@ -3010,6 +3198,15 @@ export function Prototype({ initialSurface = "h5", showSurfaceTabs = true }: Pro
       if (rule) setLotteryRounds(mapLotteryRule(rule));
     }).catch(() => setRuntimeConnected(false));
   }, []);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadActivity().then((activity) => {
+        setRuntimeActivity(activity);
+        setActivityStatus(runtimeActivityStatus(activity.status));
+      }).catch(() => undefined);
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const surfaces: { key: Surface; label: string; sub: string }[] = [
     { key: "h5", label: "订货 H5", sub: "手机端" },
     { key: "ranking", label: "订货排行", sub: "大屏 A" },
@@ -3026,17 +3223,17 @@ export function Prototype({ initialSurface = "h5", showSurfaceTabs = true }: Pro
       </nav>
       <div className="prototype-canvas">
         {showSurfaceTabs ? <>
-          <div className={surface === "h5" ? "surface-slot" : "surface-slot surface-hidden"}><H5Prototype activityClosed={activityClosed} importedRows={productImportCompleted ? productRows : null} importedWhitelistRows={whitelistImportCompleted ? whitelistRows : null} runtimeActivity={runtimeActivity} /></div>
+          <div className={surface === "h5" ? "surface-slot" : "surface-slot surface-hidden"}><H5Prototype activityStatus={activityStatus} importedRows={productImportCompleted ? productRows : null} importedWhitelistRows={whitelistImportCompleted ? whitelistRows : null} runtimeActivity={runtimeActivity} /></div>
           {surface === "ranking" && <RankingBoard activity={runtimeActivity} />}
           {surface === "report" && <ReportBoard activity={runtimeActivity} />}
           {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed", serverStatus: "COMPLETED" } : item))} />}
-          {surface === "admin" && <AdminGateway><AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityName={activityName} onActivityNameChange={setActivityName} activityId={runtimeActivity ? String(runtimeActivity.id) : activityId} activityStatus={activityStatus} onActivityStatusChange={setActivityStatus} activityStartAt={activityStartAt} onActivityStartAtChange={setActivityStartAt} activityEndAt={activityEndAt} onActivityEndAtChange={setActivityEndAt} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={markProductImportCommitted} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={markWhitelistImportCommitted} whitelistImportHasRun={whitelistImportHasRun} attendanceRows={attendanceRows} onAttendanceRowsChange={setAttendanceRows} attendanceFileName={attendanceFileName} onAttendanceFileNameChange={setAttendanceFileName} attendanceWarnings={attendanceWarnings} onAttendanceWarningsChange={setAttendanceWarnings} attendanceSheetCounts={attendanceSheetCounts} onAttendanceSheetCountsChange={setAttendanceSheetCounts} attendanceImportError={attendanceImportError} onAttendanceImportErrorChange={setAttendanceImportError} /></AdminGateway>}
+          {surface === "admin" && <AdminGateway><AdminPrototype key={`${activityId}-${activityStartAt}-${activityEndAt}`} lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityName={activityName} onActivityNameChange={setActivityName} activityId={runtimeActivity ? String(runtimeActivity.id) : activityId} activityStatus={activityStatus} onActivityStatusChange={setActivityStatus} activityStartAt={activityStartAt} onActivityStartAtChange={setActivityStartAt} activityEndAt={activityEndAt} onActivityEndAtChange={setActivityEndAt} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={markProductImportCommitted} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={markWhitelistImportCommitted} whitelistImportHasRun={whitelistImportHasRun} attendanceRows={attendanceRows} onAttendanceRowsChange={setAttendanceRows} attendanceFileName={attendanceFileName} onAttendanceFileNameChange={setAttendanceFileName} attendanceWarnings={attendanceWarnings} onAttendanceWarningsChange={setAttendanceWarnings} attendanceSheetCounts={attendanceSheetCounts} onAttendanceSheetCountsChange={setAttendanceSheetCounts} attendanceImportError={attendanceImportError} onAttendanceImportErrorChange={setAttendanceImportError} /></AdminGateway>}
         </> : <>
-          {surface === "h5" && <H5Prototype activityClosed={activityClosed} importedRows={productImportCompleted ? productRows : null} importedWhitelistRows={whitelistImportCompleted ? whitelistRows : null} runtimeActivity={runtimeActivity} />}
+          {surface === "h5" && <H5Prototype activityStatus={activityStatus} importedRows={productImportCompleted ? productRows : null} importedWhitelistRows={whitelistImportCompleted ? whitelistRows : null} runtimeActivity={runtimeActivity} />}
           {surface === "ranking" && <RankingBoard activity={runtimeActivity} />}
           {surface === "report" && <ReportBoard activity={runtimeActivity} />}
           {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed", serverStatus: "COMPLETED" } : item))} />}
-          {surface === "admin" && <AdminGateway><AdminPrototype lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityName={activityName} onActivityNameChange={setActivityName} activityId={runtimeActivity ? String(runtimeActivity.id) : activityId} activityStatus={activityStatus} onActivityStatusChange={setActivityStatus} activityStartAt={activityStartAt} onActivityStartAtChange={setActivityStartAt} activityEndAt={activityEndAt} onActivityEndAtChange={setActivityEndAt} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={markProductImportCommitted} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={markWhitelistImportCommitted} whitelistImportHasRun={whitelistImportHasRun} attendanceRows={attendanceRows} onAttendanceRowsChange={setAttendanceRows} attendanceFileName={attendanceFileName} onAttendanceFileNameChange={setAttendanceFileName} attendanceWarnings={attendanceWarnings} onAttendanceWarningsChange={setAttendanceWarnings} attendanceSheetCounts={attendanceSheetCounts} onAttendanceSheetCountsChange={setAttendanceSheetCounts} attendanceImportError={attendanceImportError} onAttendanceImportErrorChange={setAttendanceImportError} /></AdminGateway>}
+          {surface === "admin" && <AdminGateway><AdminPrototype key={`${activityId}-${activityStartAt}-${activityEndAt}`} lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityName={activityName} onActivityNameChange={setActivityName} activityId={runtimeActivity ? String(runtimeActivity.id) : activityId} activityStatus={activityStatus} onActivityStatusChange={setActivityStatus} activityStartAt={activityStartAt} onActivityStartAtChange={setActivityStartAt} activityEndAt={activityEndAt} onActivityEndAtChange={setActivityEndAt} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={markProductImportCommitted} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={markWhitelistImportCommitted} whitelistImportHasRun={whitelistImportHasRun} attendanceRows={attendanceRows} onAttendanceRowsChange={setAttendanceRows} attendanceFileName={attendanceFileName} onAttendanceFileNameChange={setAttendanceFileName} attendanceWarnings={attendanceWarnings} onAttendanceWarningsChange={setAttendanceWarnings} attendanceSheetCounts={attendanceSheetCounts} onAttendanceSheetCountsChange={setAttendanceSheetCounts} attendanceImportError={attendanceImportError} onAttendanceImportErrorChange={setAttendanceImportError} /></AdminGateway>}
         </>}
       </div>
     </main>

@@ -57,18 +57,24 @@ public class ImportService {
       throw DomainException.badRequest("IMPORT_FILE_INVALID", "请选择 Excel 文件");
     }
     StorageService.StoredFile stored = storage.save(activityId, file, "IMPORT_SOURCE", adminId);
-    long taskId = insertTask(activityId, importType, stored, adminId);
+    long taskId = Objects.requireNonNull(transactions.execute(status -> {
+      jdbc.queryForObject("SELECT id FROM activity WHERE id = ? FOR UPDATE", Long.class, activityId);
+      cancelReplaceableTasks(activityId, importType, Long.MAX_VALUE);
+      return insertTask(activityId, importType, stored, adminId);
+    }));
     try {
-      jdbc.update("UPDATE import_task SET status = 'PARSING', started_at = UTC_TIMESTAMP(3) WHERE id = ?", taskId);
+      int parsing = jdbc.update("UPDATE import_task SET status = 'PARSING', started_at = UTC_TIMESTAMP(3) WHERE id = ? AND status = 'UPLOADED'", taskId);
+      if (parsing != 1) throw DomainException.conflict("IMPORT_REPLACED", "本次导入已被更新的文件替换");
       byte[] bytes = storage.read(stored.id());
       ImportWorkbookProcessor.ParseSummary summary = transactions.execute(status -> workbookProcessor.parse(taskId, importType, bytes));
-      jdbc.update("""
+      int previewReady = jdbc.update("""
           UPDATE import_task SET status = 'PREVIEW_READY', input_count = ?, added_count = ?, warning_count = ?, error_count = ?,
-            preview_ready_at = UTC_TIMESTAMP(3) WHERE id = ?
+            preview_ready_at = UTC_TIMESTAMP(3) WHERE id = ? AND status = 'PARSING'
           """, summary.inputCount(), summary.addedCount(), summary.warnings(), summary.blocking(), taskId);
+      if (previewReady != 1) throw DomainException.conflict("IMPORT_REPLACED", "本次导入已被更新的文件替换");
       return task(taskId);
     } catch (Exception exception) {
-      jdbc.update("UPDATE import_task SET status = 'FAILED', failed_at = UTC_TIMESTAMP(3), failure_code = 'PARSE_FAILED', failure_message = ? WHERE id = ?",
+      jdbc.update("UPDATE import_task SET status = 'FAILED', failed_at = UTC_TIMESTAMP(3), failure_code = 'PARSE_FAILED', failure_message = ? WHERE id = ? AND status <> 'CANCELLED'",
           truncate(exception.getMessage(), 900), taskId);
       if (exception instanceof DomainException domain) throw domain;
       throw DomainException.unprocessable("IMPORT_PARSE_FAILED", "Excel 解析失败：" + Objects.requireNonNullElse(exception.getMessage(), "文件格式不正确"));
@@ -338,9 +344,17 @@ public class ImportService {
   }
 
 
- public void cancel(long taskId) {
+  public void cancel(long taskId) {
     int changed = jdbc.update("UPDATE import_task SET status = 'CANCELLED' WHERE id = ? AND status IN ('UPLOADED','PARSING','PREVIEW_READY')", taskId);
     if (changed != 1) throw DomainException.conflict("IMPORT_NOT_CANCELLABLE", "当前任务不能取消");
+  }
+
+  private int cancelReplaceableTasks(long activityId, String importType, long beforeTaskId) {
+    return jdbc.update("""
+        UPDATE import_task SET status = 'CANCELLED'
+        WHERE activity_id = ? AND import_type = ? AND id < ?
+          AND status IN ('UPLOADED', 'PARSING', 'PREVIEW_READY')
+        """, activityId, importType, beforeTaskId);
   }
 
   @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 1_000)
@@ -416,6 +430,7 @@ public class ImportService {
     if (previous != null && previous > 0) jdbc.update("UPDATE import_publish_version SET status = 'RETIRED', retired_at = UTC_TIMESTAMP(3) WHERE id = ?", previous);
     jdbc.update("UPDATE import_publish_version SET status = 'PUBLISHED', published_at = UTC_TIMESTAMP(3) WHERE id = ?", versionId);
     jdbc.update("UPDATE import_task SET status = 'COMPLETED', published_version_id = ?, completed_at = UTC_TIMESTAMP(3), lease_owner = NULL, lease_expires_at = NULL WHERE id = ?", versionId, taskId);
+    cancelReplaceableTasks(activityId, task.importType(), taskId);
   }
 
   private List<ProductImageDecision> readImageDecisions(String value) {

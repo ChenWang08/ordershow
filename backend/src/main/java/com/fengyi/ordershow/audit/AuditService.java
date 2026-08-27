@@ -87,6 +87,7 @@ public class AuditService {
   private static String action(String method, String uri) {
     String suffix = uri.contains("/withdraw") ? "WITHDRAW" : uri.contains("/confirm") ? "CONFIRM"
         : uri.contains("/publish") ? "PUBLISH" : uri.contains("/draw") ? "DRAW"
+        : uri.contains("/close") ? "CLOSE"
         : uri.contains("/complete") ? "COMPLETE" : uri.contains("/reset") ? "RESET"
         : uri.contains("/transition") ? "TRANSITION" : method;
     return objectType(uri) + "_" + suffix;

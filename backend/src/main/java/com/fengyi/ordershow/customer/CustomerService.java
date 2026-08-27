@@ -55,7 +55,7 @@ public class CustomerService {
 
   @Transactional
   public CustomerView updateCustomer(long activityId, long customerId, CustomerWrite request) {
-    requireWritable(activityId);
+    requireCustomerWritable(activityId, request.reason());
     CustomerView current = customer(activityId, customerId);
     boolean replacePhone = request.phone() != null && !request.phone().isBlank() && !request.phone().contains("*");
     String phone = replacePhone ? CryptoService.normalizePhone(request.phone()) : "";
@@ -91,7 +91,7 @@ public class CustomerService {
 
   @Transactional
   public CustomerView addCustomer(long activityId, CustomerWrite request) {
-    requireWritable(activityId);
+    requireCustomerWritable(activityId, request.reason());
     String customerType = required(request.customerType(), "客户类型不能为空");
     if (!List.of("GENERAL", "SPECIAL").contains(customerType)) throw DomainException.badRequest("CUSTOMER_TYPE_INVALID", "客户类型不正确");
     String fullName = required(request.dealerFullName(), "经销商名称不能为空");
@@ -133,8 +133,9 @@ public class CustomerService {
 
   @Transactional
   public void deleteCustomer(long activityId, long customerId, int expectedVersion) {
-    requireWritable(activityId);
     String status = activities.byId(activityId).status();
+    if ("CLOSED".equals(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后数据只读");
+    if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后白名单已锁定，请先撤回发布");
     if ("ACTIVE".equals(status)) throw DomainException.conflict("ACTIVITY_IMPORT_LOCKED", "活动开始后不能删除白名单客户");
     int changed = jdbc.update("""
         UPDATE activity_customer SET is_active = FALSE, deactivated_at = UTC_TIMESTAMP(3), lock_version = lock_version + 1
@@ -173,7 +174,7 @@ public class CustomerService {
 
   @Transactional
   public AttendeeView addAttendee(long activityId, AttendeeWrite request, AdminPrincipal admin) {
-    requireWritable(activityId);
+    requireAttendanceWritable(activityId);
     String phone = CryptoService.normalizePhone(request.phone());
     AttendanceMatchingService.MatchResult match = attendanceMatching.match(activityId,
         attendanceMatching.currentWhitelistVersion(activityId), request.participantType(), request.branchName(), request.dealerName());
@@ -195,7 +196,7 @@ public class CustomerService {
 
   @Transactional
   public AttendeeView updateAttendee(long activityId, long attendeeId, AttendeeWrite request) {
-    requireWritable(activityId);
+    requireAttendanceWritable(activityId);
     boolean replacePhone = request.phone() != null && !request.phone().isBlank() && !request.phone().contains("*");
     byte[] currentPhoneCiphertext = jdbc.query("SELECT phone_ciphertext FROM activity_attendee WHERE id = ? AND activity_id = ? AND is_active = TRUE",
         rs -> rs.next() ? rs.getBytes(1) : null, attendeeId, activityId);
@@ -218,7 +219,7 @@ public class CustomerService {
   }
 
   public void deleteAttendee(long activityId, long attendeeId) {
-    requireWritable(activityId);
+    requireAttendanceWritable(activityId);
     int changed = jdbc.update("UPDATE activity_attendee SET is_active = FALSE WHERE id = ? AND activity_id = ? AND is_active = TRUE", attendeeId, activityId);
     if (changed != 1) throw DomainException.notFound("ATTENDEE_NOT_FOUND", "到场记录不存在");
   }
@@ -261,8 +262,17 @@ public class CustomerService {
         .orElseThrow(() -> DomainException.conflict("DATA_VERSION_REQUIRED", "请先发布一次名单 Excel，再手动维护数据"));
   }
 
-  private void requireWritable(long activityId) {
-    if ("CLOSED".equals(activities.byId(activityId).status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后数据只读");
+  private void requireCustomerWritable(long activityId, String reason) {
+    String status = activities.byId(activityId).status();
+    if ("CLOSED".equals(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后数据只读");
+    if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后白名单已锁定，请先撤回发布");
+    if ("ACTIVE".equals(status) && (reason == null || reason.isBlank())) {
+      throw DomainException.badRequest("CUSTOMER_EDIT_REASON_REQUIRED", "活动开始后修改白名单必须填写原因");
+    }
+  }
+
+  private void requireAttendanceWritable(long activityId) {
+    if ("CLOSED".equals(activities.byId(activityId).status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后到场名单只读");
   }
 
   private CustomerView mapCustomer(ResultSet rs, int rowNum) throws SQLException {
@@ -285,7 +295,7 @@ public class CustomerService {
       String dealerFullName, String dealerCategory, String contactName, String phone, String phoneMasked, String confirmerName,
       String confirmerPhone, String confirmerPhoneMasked, Integer excelSequence, boolean active, int lockVersion, java.time.Instant updatedAt) {}
   public record CustomerWrite(String customerType, String regionCode, String branchName, String dealerShortName, String dealerFullName,
-      String dealerCategory, String contactName, String phone, String confirmerName, String confirmerPhone, int expectedVersion) {}
+      String dealerCategory, String contactName, String phone, String confirmerName, String confirmerPhone, int expectedVersion, String reason) {}
   public record AttendeeView(long id, Long activityCustomerId, String participantName, String gender, String participantType,
       String dealerName, String branchName, String phone, String phoneMasked, String matchStatus, String matchMethod,
       String matchReasonCode, String matchedDealerName, boolean lotteryEligible, java.time.Instant createdAt, java.time.Instant updatedAt) {}

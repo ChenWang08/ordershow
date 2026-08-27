@@ -75,6 +75,7 @@ public class ProductService {
   public ProductView update(long activityId, long productId, int expectedVersion, ProductPatch patch) {
     var activity = activities.byId(activityId);
     if ("CLOSED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后商品只读");
+    if ("SCHEDULED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品已锁定，请先撤回发布");
     requireEditReason(activity.status(), patch.reason());
     ProductView current = product(activityId, productId);
     List<String> branchScopes = patch.branchScope() == null ? current.branchScope() : splitBranchScope(patch.branchScope());
@@ -117,6 +118,7 @@ public class ProductService {
   public ProductView create(long activityId, ProductCreate request) {
     var activity = activities.byId(activityId);
     if ("CLOSED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后商品只读");
+    if ("SCHEDULED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品已锁定，请先撤回发布");
     String customerType = value(request.customerType(), "GENERAL");
     String rebateStatus = value(request.rebateStatus(), "NOT_PARTICIPATING");
     validateTypes(customerType, rebateStatus);
@@ -158,8 +160,8 @@ public class ProductService {
   @Transactional
   public void delete(long activityId, long productId, int expectedVersion) {
     var activity = activities.byId(activityId);
-    if ("ACTIVE".equals(activity.status()) || "CLOSED".equals(activity.status())) {
-      throw DomainException.conflict("ACTIVITY_IMPORT_LOCKED", "活动开始后不能删除商品");
+    if (!"DRAFT".equals(activity.status())) {
+      throw DomainException.conflict("ACTIVITY_IMPORT_LOCKED", "活动发布后不能删除商品");
     }
     int changed = jdbc.update("""
         UPDATE activity_product
@@ -171,6 +173,7 @@ public class ProductService {
 
   @Transactional
   public ImageView addImage(long activityId, long productId, MultipartFile file, boolean primary, long adminId) {
+    requireImageWritable(activityId);
     ProductView product = product(activityId, productId);
     validateImage(file.getOriginalFilename(), file.getSize());
     List<ProductView> targets = sameMaterialCodeProducts(activityId, product);
@@ -199,6 +202,7 @@ public class ProductService {
 
   @Transactional
   public void updateImage(long activityId, long productId, long imageId, Boolean primary, Integer sortNo) {
+    requireImageWritable(activityId);
     product(activityId, productId);
     if (Boolean.TRUE.equals(primary)) jdbc.update("UPDATE product_image SET is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", productId);
     int changed = jdbc.update("UPDATE product_image SET is_primary = COALESCE(?, is_primary), sort_no = COALESCE(?, sort_no) WHERE id = ? AND activity_product_id = ? AND deleted_at IS NULL",
@@ -208,6 +212,7 @@ public class ProductService {
 
   @Transactional
   public void deleteImage(long activityId, long productId, long imageId) {
+    requireImageWritable(activityId);
     ProductView current = product(activityId, productId);
     int changed = jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE id = ? AND activity_product_id = ? AND deleted_at IS NULL", imageId, productId);
     if (changed != 1) throw DomainException.notFound("PRODUCT_IMAGE_NOT_FOUND", "商品图片不存在");
@@ -242,6 +247,7 @@ public class ProductService {
 
   @Transactional
   public void selectImageReview(long activityId, long candidateId, long adminId) {
+    requireImageWritable(activityId);
     ImageReviewRow candidate = currentImageReview(activityId, candidateId);
     List<ProductView> targets = productsForVersion(activityId, candidate.versionId()).stream()
         .filter(product -> materialCodeKey(product.materialCode()).equals(candidate.materialCodeKey())).toList();
@@ -266,6 +272,7 @@ public class ProductService {
 
   @Transactional
   public void excludeImageReview(long activityId, long candidateId, long adminId) {
+    requireImageWritable(activityId);
     ImageReviewRow candidate = currentImageReview(activityId, candidateId);
     int changed = jdbc.update("""
         UPDATE product_image_review_candidate SET status = 'EXCLUDED', resolved_by = ?, resolved_at = UTC_TIMESTAMP(3)
@@ -655,6 +662,12 @@ public class ProductService {
     if ("ACTIVE".equals(activityStatus) && (reason == null || reason.isBlank())) {
       throw DomainException.badRequest("PRODUCT_EDIT_REASON_REQUIRED", "活动开始后修改商品必须填写原因");
     }
+  }
+
+  private void requireImageWritable(long activityId) {
+    String status = activities.byId(activityId).status();
+    if ("CLOSED".equals(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后商品图片只读");
+    if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品图片已锁定，请先撤回发布");
   }
 
   private static String normalize(String value) { return value == null ? "" : value.toLowerCase(Locale.CHINA).replaceAll("[\\s　_\\-（）()]+", ""); }

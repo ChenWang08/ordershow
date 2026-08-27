@@ -38,8 +38,11 @@ public class ImportController {
   ApiResponse<ImportService.ImportTask> upload(@PathVariable long activityId,
       @RequestParam String importType, @RequestParam MultipartFile file, HttpServletRequest request) {
     var activity = activities.byId(activityId);
-    if ("ACTIVE".equals(activity.status()) || "CLOSED".equals(activity.status())) {
-      throw com.fengyi.ordershow.common.DomainException.conflict("BULK_IMPORT_LOCKED", "活动开始后不能批量导入");
+    if (!"ATTENDANCE".equals(importType) && !"DRAFT".equals(activity.status())) {
+      throw com.fengyi.ordershow.common.DomainException.conflict("BULK_IMPORT_LOCKED", "活动发布后商品和白名单全量导入已锁定，请先撤回发布");
+    }
+    if ("CLOSED".equals(activity.status())) {
+      throw com.fengyi.ordershow.common.DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后数据只读");
     }
     return ApiResponse.of(service.upload(activityId, importType, file, auth.requireAdmin(request).id()), TraceFilter.id(request));
   }
@@ -99,7 +102,15 @@ public class ImportController {
       @RequestParam(required = false) MultipartFile imageZip,
       @RequestParam(required = false) String imageDecisions,
       @RequestParam(required = false) Long attendanceWhitelistVersionId, HttpServletRequest request) {
-    requireActivity(activityId, service.task(taskId));
+    ImportService.ImportTask task = service.task(taskId);
+    requireActivity(activityId, task);
+    var activity = activities.byId(activityId);
+    if (!"ATTENDANCE".equals(task.importType()) && !"DRAFT".equals(activity.status())) {
+      throw com.fengyi.ordershow.common.DomainException.conflict("BULK_IMPORT_LOCKED", "活动发布后不能确认商品或白名单导入，请先撤回发布");
+    }
+    if ("CLOSED".equals(activity.status())) {
+      throw com.fengyi.ordershow.common.DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后数据只读");
+    }
     return ApiResponse.of(service.confirm(taskId, auth.requireAdmin(request).id(), imageZip, imageDecisions,
         attendanceWhitelistVersionId), TraceFilter.id(request));
   }
@@ -107,6 +118,7 @@ public class ImportController {
   @DeleteMapping("/{taskId}")
   ApiResponse<Boolean> cancel(@PathVariable long activityId, @PathVariable long taskId, HttpServletRequest request) {
     requireActivity(activityId, service.task(taskId));
+    auth.requireAdmin(request);
     service.cancel(taskId);
     return ApiResponse.of(true, TraceFilter.id(request));
   }

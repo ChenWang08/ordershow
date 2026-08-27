@@ -68,6 +68,7 @@ export type RuntimeActivity = {
   timezone: string; startsAt: string; endsAt: string; customerScope: string; companyRankingTopN: number;
   branchRankingTopN: number; tonDisplayScale: number; version: number;
   regions: Array<{ code: string; name: string; sortNo: number }>;
+  publishedAt?: string; actualStartedAt?: string; closedAt?: string;
 };
 
 export type RuntimeIdentity = {
@@ -241,6 +242,10 @@ export async function loadImportTask(activityId: number, taskId: number) {
   return (await api<Envelope<ImportTask>>(`/admin/activities/${activityId}/imports/${taskId}`)).data;
 }
 
+export async function loadImportTasks(activityId: number) {
+  return (await api<Envelope<ImportTask[]>>(`/admin/activities/${activityId}/imports`)).data;
+}
+
 export async function loadImportRows(activityId: number, taskId: number, validationStatus?: string) {
   const query = validationStatus ? `?validationStatus=${encodeURIComponent(validationStatus)}` : "";
   return (await api<Envelope<ImportStagingRow[]>>(`/admin/activities/${activityId}/imports/${taskId}/rows${query}`)).data;
@@ -286,9 +291,21 @@ export async function updateActivity(activity: RuntimeActivity, changes: { name:
   }, "admin")).data;
 }
 
-export async function transitionActivity(activity: RuntimeActivity, targetStatus: string) {
-  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/transition`, {
-    method: "POST", headers: { "If-Match": String(activity.version) }, body: JSON.stringify({ targetStatus }),
+export async function publishActivity(activity: RuntimeActivity) {
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/publish`, {
+    method: "POST", headers: { "If-Match": String(activity.version) },
+  }, "admin")).data;
+}
+
+export async function withdrawActivityPublication(activity: RuntimeActivity) {
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/withdraw-publication`, {
+    method: "POST", headers: { "If-Match": String(activity.version) },
+  }, "admin")).data;
+}
+
+export async function closeActivityNow(activity: RuntimeActivity, reason: string) {
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/close`, {
+    method: "POST", headers: { "If-Match": String(activity.version) }, body: JSON.stringify({ reason }),
   }, "admin")).data;
 }
 

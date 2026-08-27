@@ -28,6 +28,9 @@ class OpenApiContractTest {
     Map<String, Object> paths = (Map<String, Object>) document.get("paths");
     assertThat(paths).containsKeys(
         "/admin/activities/{activityId}/orders",
+        "/admin/activities/{activityId}/publish",
+        "/admin/activities/{activityId}/withdraw-publication",
+        "/admin/activities/{activityId}/close",
         "/admin/activities/{activityId}/orders/{orderId}",
         "/admin/activities/{activityId}/orders/export",
         "/admin/activities/{activityId}/products/{productId}",

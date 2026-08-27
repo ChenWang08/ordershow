@@ -147,6 +147,50 @@ test("keeps orders admin-read-only and wires the formal runtime APIs", async () 
   assert.doesNotMatch(openapi, /\/admin\/activities\/\{activityId\}\/orders\/\{orderId\}\/withdraw/);
 });
 
+test("uses published, time-driven activity lifecycle controls", async () => {
+  const [prototype, api, activityService, activityController] = await Promise.all([
+    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/activity/ActivityService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/activity/ActivityController.java", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(prototype, />发布活动</);
+  assert.match(prototype, />撤回发布</);
+  assert.match(prototype, />立即截止订货</);
+  assert.doesNotMatch(prototype, /立即开始并锁定导入|恢复为待开始|changeActivityStatus/);
+  assert.match(prototype, /订货开始时间必须晚于当前时间/);
+  assert.match(prototype, /活动进行中只能延长截止时间/);
+  assert.match(api, /publishActivity/);
+  assert.match(api, /withdrawActivityPublication/);
+  assert.match(api, /closeActivityNow/);
+  assert.match(activityController, /\/publish/);
+  assert.match(activityController, /\/withdraw-publication/);
+  assert.match(activityController, /\/close/);
+  assert.doesNotMatch(activityController, /\/transition/);
+  assert.match(activityService, /status = 'ACTIVE'.*actual_started_at/s);
+  assert.match(activityService, /ACTIVITY_END_CAN_ONLY_EXTEND/);
+});
+
+test("cancels superseded import previews and only blocks publication for newer pending work", async () => {
+  const [prototype, api, activityService, importService, cleanupMigration] = await Promise.all([
+    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/activity/ActivityService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportService.java", import.meta.url), "utf8"),
+    readFile(new URL("../db/migrations/V009__cancel_superseded_import_previews.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(api, /loadImportTasks/);
+  assert.match(prototype, /await cancelImport\(Number\(activityId\), taskId\)/);
+  assert.match(prototype, /已恢复服务器中尚未确认的导入预览/);
+  assert.match(activityService, /t\.id > v\.source_import_task_id/);
+  assert.match(activityService, /请确认或取消后再发布活动/);
+  assert.match(importService, /cancelReplaceableTasks\(activityId, importType/);
+  assert.match(cleanupMigration, /t\.id < v\.source_import_task_id/);
+  assert.match(cleanupMigration, /SET t\.status = 'CANCELLED'/);
+});
+
 test("uses server-calculated lottery candidates and ordered, shortage-safe draws", async () => {
   const [prototype, api, service, controller] = await Promise.all([
     readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),

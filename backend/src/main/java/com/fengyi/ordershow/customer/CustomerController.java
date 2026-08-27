@@ -3,6 +3,7 @@ package com.fengyi.ordershow.customer;
 import com.fengyi.ordershow.common.ApiResponse;
 import com.fengyi.ordershow.common.PageResponse;
 import com.fengyi.ordershow.common.TraceFilter;
+import com.fengyi.ordershow.audit.AuditService;
 import com.fengyi.ordershow.security.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -34,6 +35,7 @@ public class CustomerController {
   ApiResponse<CustomerService.CustomerView> addCustomer(@PathVariable long activityId,
       @RequestBody CustomerService.CustomerWrite body, HttpServletRequest request) {
     auth.requireAdmin(request);
+    request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason());
     return ApiResponse.of(service.addCustomer(activityId, body), TraceFilter.id(request));
   }
 
@@ -41,6 +43,7 @@ public class CustomerController {
   ApiResponse<CustomerService.CustomerView> updateCustomer(@PathVariable long activityId, @PathVariable long customerId,
       @RequestBody CustomerService.CustomerWrite body, HttpServletRequest request) {
     auth.requireAdmin(request);
+    request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason());
     return ApiResponse.of(service.updateCustomer(activityId, customerId, body), TraceFilter.id(request));
   }
 

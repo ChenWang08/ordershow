@@ -2,6 +2,7 @@ package com.fengyi.ordershow.lottery;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.security.AdminPrincipal;
 import java.math.BigDecimal;
@@ -36,12 +37,14 @@ public class LotteryService {
   private final JdbcTemplate jdbc;
   private final StringRedisTemplate redis;
   private final ObjectMapper json;
+  private final ActivityService activities;
   private final SecureRandom random = new SecureRandom();
 
-  public LotteryService(JdbcTemplate jdbc, StringRedisTemplate redis, ObjectMapper json) {
+  public LotteryService(JdbcTemplate jdbc, StringRedisTemplate redis, ObjectMapper json, ActivityService activities) {
     this.jdbc = jdbc;
     this.redis = redis;
     this.json = json;
+    this.activities = activities;
   }
 
   public List<RuleView> rules(long activityId) {
@@ -110,6 +113,10 @@ public class LotteryService {
 
   @Transactional
   public DrawResult draw(long activityId, long roundId, AdminPrincipal admin) {
+    String activityStatus = activities.byId(activityId).status();
+    if (!Set.of("ACTIVE", "CLOSED").contains(activityStatus)) {
+      throw DomainException.conflict("LOTTERY_ACTIVITY_NOT_STARTED", "活动开始后才可以正式抽奖");
+    }
     String lockKey = "order-show:lottery:round:" + roundId;
     boolean redisLocked = false;
     try {

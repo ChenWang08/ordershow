@@ -2,6 +2,7 @@ package com.fengyi.ordershow.activity;
 
 import com.fengyi.ordershow.common.ApiResponse;
 import com.fengyi.ordershow.common.TraceFilter;
+import com.fengyi.ordershow.audit.AuditService;
 import com.fengyi.ordershow.security.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -56,10 +57,23 @@ public class ActivityController {
     return ApiResponse.of(service.update(activityId, parseVersion(ifMatch), body.toWrite(), auth.requireAdmin(request)), TraceFilter.id(request));
   }
 
-  @PostMapping("/admin/activities/{activityId}/transition")
-  ApiResponse<ActivityService.ActivityView> transition(@PathVariable long activityId,
-      @RequestHeader("If-Match") String ifMatch, @Valid @RequestBody TransitionRequest body, HttpServletRequest request) {
-    return ApiResponse.of(service.transition(activityId, parseVersion(ifMatch), body.targetStatus(), auth.requireAdmin(request)), TraceFilter.id(request));
+  @PostMapping("/admin/activities/{activityId}/publish")
+  ApiResponse<ActivityService.ActivityView> publish(@PathVariable long activityId,
+      @RequestHeader("If-Match") String ifMatch, HttpServletRequest request) {
+    return ApiResponse.of(service.publish(activityId, parseVersion(ifMatch), auth.requireAdmin(request)), TraceFilter.id(request));
+  }
+
+  @PostMapping("/admin/activities/{activityId}/withdraw-publication")
+  ApiResponse<ActivityService.ActivityView> withdrawPublication(@PathVariable long activityId,
+      @RequestHeader("If-Match") String ifMatch, HttpServletRequest request) {
+    return ApiResponse.of(service.withdrawPublication(activityId, parseVersion(ifMatch), auth.requireAdmin(request)), TraceFilter.id(request));
+  }
+
+  @PostMapping("/admin/activities/{activityId}/close")
+  ApiResponse<ActivityService.ActivityView> close(@PathVariable long activityId,
+      @RequestHeader("If-Match") String ifMatch, @Valid @RequestBody CloseRequest body, HttpServletRequest request) {
+    request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason().trim());
+    return ApiResponse.of(service.closeNow(activityId, parseVersion(ifMatch), auth.requireAdmin(request)), TraceFilter.id(request));
   }
 
   private static int parseVersion(String value) {
@@ -77,5 +91,5 @@ public class ActivityController {
           regions == null ? List.of() : regions.stream().map(r -> new ActivityService.RegionWrite(r.code(), r.name(), r.sortNo())).toList());
     }
   }
-  public record TransitionRequest(@NotBlank String targetStatus) {}
+  public record CloseRequest(@NotBlank @Size(max = 500) String reason) {}
 }

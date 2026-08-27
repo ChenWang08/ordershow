@@ -439,35 +439,72 @@ paths:
                 $ref: '#/components/schemas/ActivityResponse'
         '409':
           $ref: '#/components/responses/Problem'
-  /admin/activities/{activityId}/transition:
+  /admin/activities/{activityId}/publish:
     post:
-      operationId: transitionActivity
+      operationId: publishActivity
       tags: [Activities]
-      summary: 迁移活动状态
+      summary: 发布草稿活动并进入待开始
       security:
         - adminCookie: []
       parameters:
         - $ref: '#/components/parameters/ActivityId'
         - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/CsrfToken'
-        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: 发布成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/withdraw-publication:
+    post:
+      operationId: withdrawActivityPublication
+      tags: [Activities]
+      summary: 将未开始活动撤回为草稿
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 撤回成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/close:
+    post:
+      operationId: closeActivityNow
+      tags: [Activities]
+      summary: 立即截止进行中的订货活动
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [targetStatus, reason]
+              required: [reason]
               properties:
-                targetStatus:
-                  $ref: '#/components/schemas/ActivityStatus'
                 reason:
                   type: string
                   minLength: 1
                   maxLength: 500
       responses:
         '200':
-          description: 状态迁移成功
+          description: 截止成功
           content:
             application/json:
               schema:
@@ -2447,6 +2484,15 @@ components:
               format: date-time
             updatedAt:
               type: string
+              format: date-time
+            publishedAt:
+              type: [string, 'null']
+              format: date-time
+            actualStartedAt:
+              type: [string, 'null']
+              format: date-time
+            closedAt:
+              type: [string, 'null']
               format: date-time
     ActivityWriteRequest:
       type: object
