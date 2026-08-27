@@ -70,13 +70,33 @@ public class ProductController {
   @PatchMapping("/admin/activities/{activityId}/products/{productId}/images/{imageId}")
   ApiResponse<Boolean> updateImage(@PathVariable long activityId, @PathVariable long productId, @PathVariable long imageId,
       @RequestBody ImagePatch body, HttpServletRequest request) {
+    auth.requireAdmin(request);
     service.updateImage(activityId, productId, imageId, body.primary(), body.sortNo());
     return ApiResponse.of(true, TraceFilter.id(request));
   }
 
   @DeleteMapping("/admin/activities/{activityId}/products/{productId}/images/{imageId}")
   ApiResponse<Boolean> deleteImage(@PathVariable long activityId, @PathVariable long productId, @PathVariable long imageId, HttpServletRequest request) {
+    auth.requireAdmin(request);
     service.deleteImage(activityId, productId, imageId);
+    return ApiResponse.of(true, TraceFilter.id(request));
+  }
+
+  @GetMapping("/admin/activities/{activityId}/product-image-reviews")
+  ApiResponse<List<ProductService.ImageReviewView>> imageReviews(@PathVariable long activityId, HttpServletRequest request) {
+    auth.requireAdmin(request);
+    return ApiResponse.of(service.pendingImageReviews(activityId), TraceFilter.id(request));
+  }
+
+  @PostMapping("/admin/activities/{activityId}/product-image-reviews/{candidateId}/select")
+  ApiResponse<Boolean> selectImageReview(@PathVariable long activityId, @PathVariable long candidateId, HttpServletRequest request) {
+    service.selectImageReview(activityId, candidateId, auth.requireAdmin(request).id());
+    return ApiResponse.of(true, TraceFilter.id(request));
+  }
+
+  @DeleteMapping("/admin/activities/{activityId}/product-image-reviews/{candidateId}")
+  ApiResponse<Boolean> excludeImageReview(@PathVariable long activityId, @PathVariable long candidateId, HttpServletRequest request) {
+    service.excludeImageReview(activityId, candidateId, auth.requireAdmin(request).id());
     return ApiResponse.of(true, TraceFilter.id(request));
   }
 

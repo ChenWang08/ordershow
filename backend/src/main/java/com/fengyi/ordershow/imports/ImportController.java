@@ -63,6 +63,14 @@ public class ImportController {
     return ApiResponse.of(service.rows(taskId, validationStatus), TraceFilter.id(request));
   }
 
+  @GetMapping("/{taskId}/attendance-match-preview")
+  ApiResponse<ImportService.AttendanceMatchPreview> attendanceMatchPreview(@PathVariable long activityId,
+      @PathVariable long taskId, HttpServletRequest request) {
+    requireActivity(activityId, service.task(taskId));
+    auth.requireAdmin(request);
+    return ApiResponse.of(service.attendanceMatchPreview(taskId), TraceFilter.id(request));
+  }
+
   @PatchMapping("/{taskId}/rows/{rowId}")
   ApiResponse<Boolean> updateRow(@PathVariable long activityId, @PathVariable long taskId, @PathVariable long rowId,
       @RequestBody RowPatch body, HttpServletRequest request) {
@@ -89,9 +97,11 @@ public class ImportController {
   @ResponseStatus(HttpStatus.ACCEPTED)
   ApiResponse<ImportService.ImportTask> confirm(@PathVariable long activityId, @PathVariable long taskId,
       @RequestParam(required = false) MultipartFile imageZip,
-      @RequestParam(required = false) String imageDecisions, HttpServletRequest request) {
+      @RequestParam(required = false) String imageDecisions,
+      @RequestParam(required = false) Long attendanceWhitelistVersionId, HttpServletRequest request) {
     requireActivity(activityId, service.task(taskId));
-    return ApiResponse.of(service.confirm(taskId, auth.requireAdmin(request).id(), imageZip, imageDecisions), TraceFilter.id(request));
+    return ApiResponse.of(service.confirm(taskId, auth.requireAdmin(request).id(), imageZip, imageDecisions,
+        attendanceWhitelistVersionId), TraceFilter.id(request));
   }
 
   @DeleteMapping("/{taskId}")

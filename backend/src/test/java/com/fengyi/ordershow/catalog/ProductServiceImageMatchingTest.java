@@ -55,5 +55,8 @@ class ProductServiceImageMatchingTest {
     assertThat(ProductService.imageNameScore(
         "梁汾陈醋4.5度1.8lx6纸箱",
         "金龙鱼蒸鱼豉油酱油y二级1.8lx6纸箱")).isZero();
+    assertThat(ProductService.imageNameScore(
+        "梁汾陈醋4.5度1.8lx6纸箱",
+        "金龙鱼酿造白醋5度1.8lx6纸箱")).isZero();
   }
 }

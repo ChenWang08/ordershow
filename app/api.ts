@@ -84,6 +84,10 @@ export type RuntimeProduct = {
     sourceType: "ZIP_IMPORT" | "MANUAL"; matchStatus: "MATCHED" | "PENDING" | "UNMATCHED" | "CONFIRMED" }>;
 };
 
+export type ProductImageReview = {
+  id: number; fileId: number; url: string; archivePath: string; materialCode: string; materialName: string; status: "PENDING";
+};
+
 export type RuntimeOrder = {
   id: number; activityId: number; orderNo: string; status: "SUBMITTED" | "WITHDRAWN"; customerType: string;
   regionCode?: string; branchName?: string; dealerShortName?: string; dealerFullName: string; phoneMasked: string;
@@ -107,6 +111,14 @@ export type ImportStagingRow = {
   id: number; sheetName: string; sourceRowNumber: number; diffType: "ADDED" | "UPDATED" | "UNCHANGED" | "DEACTIVATED" | "POSSIBLE_DUPLICATE" | "PENDING_CONFIRMATION";
   validationStatus: "VALID" | "WARNING" | "BLOCKED"; normalizedData: Record<string, unknown>;
   editedData: Record<string, unknown>; deleted: boolean;
+};
+
+export type AttendanceMatchPreview = {
+  whitelistVersionId?: number; calculatedAt: string; totalCount: number; matchedCount: number;
+  pendingCount: number; unmatchedCount: number; eligibleCustomerCount: number;
+  rows: Array<{ stagingRowId: number; activityCustomerId?: number; matchStatus: "MATCHED" | "PENDING_CONFIRMATION" | "UNMATCHED";
+    matchMethod?: "PHONE" | "FULL_NAME" | "SHORT_NAME" | "MANUAL"; matchReasonCode?: string;
+    matchedDealerName?: string; lotteryEligible: boolean }>;
 };
 
 export type AdminOrderSummary = Omit<RuntimeOrder, "items" | "versions" | "operations" | "dealerShortName" | "withdrawnAt" | "withdrawnReason">;
@@ -217,10 +229,11 @@ export async function uploadImport(activityId: number, importType: "PRODUCT" | "
   return (await api<Envelope<ImportTask>>(`/admin/activities/${activityId}/imports`, { method: "POST", body }, "admin")).data;
 }
 
-export async function confirmImport(activityId: number, taskId: number, imageZip?: File, imageDecisions?: Array<{ entryPath: string; status: "CONFIRMED" | "PENDING" | "UNMATCHED"; targetRowIds: number[] }>) {
-  const body = imageZip || imageDecisions?.length ? new FormData() : undefined;
+export async function confirmImport(activityId: number, taskId: number, imageZip?: File, imageDecisions?: Array<{ entryPath: string; status: "CONFIRMED" | "PENDING" | "UNMATCHED"; targetRowIds: number[] }>, attendanceWhitelistVersionId?: number | null) {
+  const body = imageZip || imageDecisions?.length || attendanceWhitelistVersionId !== undefined ? new FormData() : undefined;
   if (body && imageZip) body.append("imageZip", imageZip);
   if (body && imageDecisions?.length) body.append("imageDecisions", JSON.stringify(imageDecisions));
+  if (body && attendanceWhitelistVersionId != null) body.append("attendanceWhitelistVersionId", String(attendanceWhitelistVersionId));
   return (await api<Envelope<ImportTask>>(`/admin/activities/${activityId}/imports/${taskId}/confirm`, { method: "POST", body }, "admin")).data;
 }
 
@@ -231,6 +244,10 @@ export async function loadImportTask(activityId: number, taskId: number) {
 export async function loadImportRows(activityId: number, taskId: number, validationStatus?: string) {
   const query = validationStatus ? `?validationStatus=${encodeURIComponent(validationStatus)}` : "";
   return (await api<Envelope<ImportStagingRow[]>>(`/admin/activities/${activityId}/imports/${taskId}/rows${query}`)).data;
+}
+
+export async function loadAttendanceMatchPreview(activityId: number, taskId: number) {
+  return (await api<Envelope<AttendanceMatchPreview>>(`/admin/activities/${activityId}/imports/${taskId}/attendance-match-preview`)).data;
 }
 
 export async function updateImportRow(activityId: number, taskId: number, rowId: number, changes: Record<string, unknown>, deleted = false) {
@@ -321,6 +338,15 @@ export async function completeLotteryRound(activityId: number, roundId: number) 
 export async function resetLotteryRound(activityId: number, roundId: number, reason: string) { return (await api<Envelope<LotteryRoundApi>>(`/admin/activities/${activityId}/lottery/rounds/${roundId}/reset`, { method: "POST", body: JSON.stringify({ reason }) }, "admin")).data; }
 
 export async function loadAdminProducts(activityId: number) { return (await api<Envelope<RuntimeProduct[]>>(`/admin/activities/${activityId}/products`)).data; }
+export async function loadProductImageReviews(activityId: number) {
+  return (await api<Envelope<ProductImageReview[]>>(`/admin/activities/${activityId}/product-image-reviews`)).data;
+}
+export async function selectProductImageReview(activityId: number, candidateId: number) {
+  return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/product-image-reviews/${candidateId}/select`, { method: "POST" }, "admin")).data;
+}
+export async function excludeProductImageReview(activityId: number, candidateId: number) {
+  return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/product-image-reviews/${candidateId}`, { method: "DELETE" }, "admin")).data;
+}
 export async function createAdminProduct(activityId: number, body: Record<string, unknown>) {
   return (await api<Envelope<RuntimeProduct>>(`/admin/activities/${activityId}/products`, { method: "POST", body: JSON.stringify(body) }, "admin")).data;
 }

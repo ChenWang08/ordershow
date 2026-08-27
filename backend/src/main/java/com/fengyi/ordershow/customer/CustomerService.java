@@ -176,7 +176,7 @@ public class CustomerService {
     requireWritable(activityId);
     String phone = CryptoService.normalizePhone(request.phone());
     AttendanceMatchingService.MatchResult match = attendanceMatching.match(activityId,
-        attendanceMatching.currentWhitelistVersion(activityId), request.participantType(), request.branchName(), request.dealerName(), phone);
+        attendanceMatching.currentWhitelistVersion(activityId), request.participantType(), request.branchName(), request.dealerName());
     Long versionId = currentVersion(activityId, "ATTENDANCE");
     jdbc.update("""
         INSERT INTO activity_attendee(activity_id, activity_customer_id, match_status, match_method, match_reason_code,
@@ -201,7 +201,7 @@ public class CustomerService {
         rs -> rs.next() ? rs.getBytes(1) : null, attendeeId, activityId);
     String phone = replacePhone ? CryptoService.normalizePhone(request.phone()) : currentPhoneCiphertext == null ? "" : crypto.decrypt(currentPhoneCiphertext);
     AttendanceMatchingService.MatchResult match = attendanceMatching.match(activityId,
-        attendanceMatching.currentWhitelistVersion(activityId), request.participantType(), request.branchName(), request.dealerName(), phone);
+        attendanceMatching.currentWhitelistVersion(activityId), request.participantType(), request.branchName(), request.dealerName());
     int changed = jdbc.update("""
         UPDATE activity_attendee SET activity_customer_id = ?, match_status = ?, match_method = ?, match_reason_code = ?,
           participant_name = ?, gender = ?, participant_type = ?,

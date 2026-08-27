@@ -75,6 +75,12 @@ export type ProductImageStatus = "已匹配" | "待确认" | "未匹配";
 
 export type ProductImageSource = "zip" | "manual";
 
+export type ProductImageRelationStatus = "CONFIRMED" | "CANDIDATE";
+
+export function productMaterialCodeKey(value: string) {
+  return value.trim().replace(/\s+/g, "").toLocaleLowerCase("zh-CN");
+}
+
 export type ProductImageAsset = {
   id: string;
   fileName: string;
@@ -84,6 +90,9 @@ export type ProductImageAsset = {
   normalizedName: string;
   matchingNames?: string[];
   matchStatus?: "已匹配" | "待确认" | "未匹配";
+  /** 当前商品行与该图片之间的关系；ZIP 图片不能依赖共享资源的全局匹配状态。 */
+  relationStatus?: ProductImageRelationStatus;
+  reviewCandidateId?: number;
   source?: ProductImageSource;
 };
 
@@ -165,14 +174,28 @@ export function bindWhitelistStaging(rows: WhitelistRow[], staging: ImportStagin
   return rows.map((row) => {
     const server = bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber));
     if (!server) return row;
-    return { ...row, serverRowId: server.id, status: server.validationStatus === "BLOCKED" ? "待处理" as const : "有效" as const };
+    const edited = server.editedData ?? {};
+    const customerType = edited.customerType === "GENERAL" ? "综合客户" : edited.customerType === "SPECIAL" ? "特渠专业客户" : row.customerType;
+    return { ...row, serverRowId: server.id, customerType,
+      region: String(edited.regionName ?? row.region), branch: String(edited.branchName ?? row.branch),
+      dealerShort: String(edited.dealerShortName ?? row.dealerShort), dealerFull: String(edited.dealerFullName ?? row.dealerFull),
+      dealerType: String(edited.dealerCategory ?? row.dealerType), dealerName: String(edited.contactName ?? row.dealerName),
+      confirmerName: String(edited.confirmerName ?? row.confirmerName),
+      status: server.validationStatus === "BLOCKED" ? "待处理" as const : "有效" as const };
   }).filter((row) => !bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber))?.deleted);
 }
 
 export function bindAttendanceStaging(rows: AttendanceRow[], staging: ImportStagingRow[]) {
   const bySource = new Map(staging.map((row) => [stagingRowKey(row.sheetName, row.sourceRowNumber), row]));
-  return rows.map((row) => ({ ...row, serverRowId: bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber))?.id }))
-    .filter((row) => !bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber))?.deleted);
+  return rows.map((row) => {
+    const server = bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber));
+    if (!server) return row;
+    const edited = server.editedData ?? {};
+    const participantType = String(edited.participantType ?? row.participantType);
+    return { ...row, serverRowId: server.id, participantType, customerType: attendanceCustomerType(participantType),
+      dealerName: String(edited.participantName ?? row.dealerName), gender: String(edited.gender ?? row.gender),
+      branch: String(edited.branchName ?? row.branch), dealerCompany: String(edited.dealerFullName ?? row.dealerCompany) };
+  }).filter((row) => !bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber))?.deleted);
 }
 
 export function normalizeWhitelistName(value: string) {
@@ -345,7 +368,7 @@ export async function parseAttendanceWorkbook(file: File): Promise<AttendanceImp
   const duplicatePhones = Array.from(new Set(rows.map((row) => normalizePhone(row.contactPhone)).filter(Boolean).filter((phone, index, phones) => phones.indexOf(phone) !== index)));
   if (duplicatePhones.length > 0) warnings.push(`发现 ${duplicatePhones.length} 个重复参会人电话，请确认是否应保留多条记录；成功关联同一白名单客户 ID 后只计算一次抽奖资格。`);
   const duplicateCompanies = rows.map((row) => attendanceCompanyKey(row.dealerCompany)).filter(Boolean).filter((key, index, keys) => keys.indexOf(key) !== index);
-  if (duplicateCompanies.length > 0) warnings.push(`发现 ${new Set(duplicateCompanies).size} 个重复经销商名称；抽奖候选将按经销商名称合并为一家。`);
+  if (duplicateCompanies.length > 0) warnings.push(`发现 ${new Set(duplicateCompanies).size} 个重复经销商名称；成功关联后抽奖候选按白名单客户 ID 去重。`);
   return { rows, warnings, sheetCounts };
 }
 

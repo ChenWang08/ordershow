@@ -173,14 +173,28 @@ public class ProductService {
   public ImageView addImage(long activityId, long productId, MultipartFile file, boolean primary, long adminId) {
     ProductView product = product(activityId, productId);
     validateImage(file.getOriginalFilename(), file.getSize());
+    List<ProductView> targets = sameMaterialCodeProducts(activityId, product);
+    String materialCode = materialCodeKey(product.materialCode());
+    if (!materialCode.isBlank()) {
+      VersionSource source = currentSource(activityId);
+      jdbc.update("""
+          UPDATE product_image_review_candidate
+          SET status = 'EXCLUDED', resolved_by = ?, resolved_at = UTC_TIMESTAMP(3)
+          WHERE activity_id = ? AND data_version_id = ? AND normalized_material_code = ? AND status = 'PENDING'
+          """, adminId, activityId, source.versionId(), materialCode);
+    }
     StorageService.StoredFile stored = storage.save(activityId, file, "PRODUCT_IMAGE", adminId);
-    if (primary) jdbc.update("UPDATE product_image SET is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", productId);
-    jdbc.update("""
-        INSERT INTO product_image(activity_product_id, stored_file_id, is_primary, sort_no, source_type, match_status, created_by)
-        VALUES (?, ?, ?, COALESCE((SELECT MAX(pi.sort_no) + 1 FROM product_image pi WHERE pi.activity_product_id = ?), 0), 'MANUAL', 'CONFIRMED', ?)
-        """, productId, stored.id(), primary, productId, adminId);
+    for (ProductView target : targets) {
+      jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", target.id());
+      jdbc.update("""
+          INSERT INTO product_image(activity_product_id, stored_file_id, is_primary, sort_no, source_type, match_status, created_by)
+          VALUES (?, ?, TRUE, 0, 'MANUAL', 'CONFIRMED', ?)
+          ON DUPLICATE KEY UPDATE deleted_at = NULL, is_primary = TRUE, sort_no = 0,
+            source_type = 'MANUAL', match_status = 'CONFIRMED', created_by = VALUES(created_by)
+          """, target.id(), stored.id(), adminId);
+    }
     Long imageId = jdbc.queryForObject("SELECT id FROM product_image WHERE activity_product_id = ? AND stored_file_id = ?", Long.class, productId, stored.id());
-    return new ImageView(imageId, stored.id(), "/api/v1/public/files/" + stored.id(), primary, 0, "MANUAL", "CONFIRMED");
+    return new ImageView(imageId, stored.id(), "/api/v1/public/files/" + stored.id(), true, 0, "MANUAL", "CONFIRMED");
   }
 
   @Transactional
@@ -197,14 +211,86 @@ public class ProductService {
     ProductView current = product(activityId, productId);
     int changed = jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE id = ? AND activity_product_id = ? AND deleted_at IS NULL", imageId, productId);
     if (changed != 1) throw DomainException.notFound("PRODUCT_IMAGE_NOT_FOUND", "商品图片不存在");
-    ensurePrimaryImages(List.of(current));
+    for (ProductView target : sameMaterialCodeProducts(activityId, current)) {
+      jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", target.id());
+    }
+  }
+
+  private List<ProductView> sameMaterialCodeProducts(long activityId, ProductView product) {
+    String code = materialCodeKey(product.materialCode());
+    if (code.isBlank()) return List.of(product);
+    VersionSource source = currentSource(activityId);
+    List<ProductView> group = productsForVersion(activityId, source.versionId()).stream()
+        .filter(candidate -> materialCodeKey(candidate.materialCode()).equals(code)).toList();
+    if (group.stream().map(ProductView::materialName).map(ProductService::normalize).distinct().count() > 1) {
+      throw DomainException.conflict("PRODUCT_MATERIAL_NAME_CONFLICT", "同一物料代码存在不同商品名称，请先核对商品数据");
+    }
+    return group;
+  }
+
+  public List<ImageReviewView> pendingImageReviews(long activityId) {
+    return jdbc.query("""
+        SELECT c.id, c.stored_file_id, c.archive_path, c.material_code, c.material_name, c.status
+        FROM product_image_review_candidate c
+        JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'PRODUCT' AND b.current_version_id = c.data_version_id
+        WHERE c.activity_id = ? AND c.status = 'PENDING'
+        ORDER BY c.normalized_material_code, c.id
+        """, (rs, rowNum) -> new ImageReviewView(rs.getLong("id"), rs.getLong("stored_file_id"),
+        "/api/v1/public/files/" + rs.getLong("stored_file_id"), rs.getString("archive_path"),
+        rs.getString("material_code"), rs.getString("material_name"), rs.getString("status")), activityId);
+  }
+
+  @Transactional
+  public void selectImageReview(long activityId, long candidateId, long adminId) {
+    ImageReviewRow candidate = currentImageReview(activityId, candidateId);
+    List<ProductView> targets = productsForVersion(activityId, candidate.versionId()).stream()
+        .filter(product -> materialCodeKey(product.materialCode()).equals(candidate.materialCodeKey())).toList();
+    if (targets.isEmpty()) throw DomainException.conflict("IMAGE_REVIEW_PRODUCT_MISSING", "当前商品版本中已不存在该物料代码");
+    if (targets.stream().map(ProductView::materialName).map(ProductService::normalize).distinct().count() > 1) {
+      throw DomainException.conflict("PRODUCT_MATERIAL_NAME_CONFLICT", "同一物料代码存在不同商品名称，请先核对商品数据");
+    }
+    jdbc.update("""
+        UPDATE product_image_review_candidate SET status = 'EXCLUDED', resolved_by = ?, resolved_at = UTC_TIMESTAMP(3)
+        WHERE data_version_id = ? AND (normalized_material_code = ? OR stored_file_id = ?) AND status = 'PENDING'
+        """, adminId, candidate.versionId(), candidate.materialCodeKey(), candidate.storedFileId());
+    jdbc.update("UPDATE product_image_review_candidate SET status = 'SELECTED' WHERE id = ?", candidateId);
+    for (ProductView target : targets) {
+      jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", target.id());
+      jdbc.update("""
+          INSERT INTO product_image(activity_product_id, stored_file_id, is_primary, sort_no, source_type, match_status, created_by)
+          VALUES (?, ?, TRUE, 0, 'ZIP_IMPORT', 'CONFIRMED', ?)
+          ON DUPLICATE KEY UPDATE deleted_at = NULL, is_primary = TRUE, sort_no = 0, match_status = 'CONFIRMED', created_by = VALUES(created_by)
+          """, target.id(), candidate.storedFileId(), adminId);
+    }
+  }
+
+  @Transactional
+  public void excludeImageReview(long activityId, long candidateId, long adminId) {
+    ImageReviewRow candidate = currentImageReview(activityId, candidateId);
+    int changed = jdbc.update("""
+        UPDATE product_image_review_candidate SET status = 'EXCLUDED', resolved_by = ?, resolved_at = UTC_TIMESTAMP(3)
+        WHERE id = ? AND status = 'PENDING'
+        """, adminId, candidateId);
+    if (changed != 1) throw DomainException.conflict("IMAGE_REVIEW_STATE_CHANGED", "图片候选已被其他操作处理，请刷新后重试");
+  }
+
+  private ImageReviewRow currentImageReview(long activityId, long candidateId) {
+    List<ImageReviewRow> rows = jdbc.query("""
+        SELECT c.id, c.data_version_id, c.stored_file_id, c.normalized_material_code
+        FROM product_image_review_candidate c
+        JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'PRODUCT' AND b.current_version_id = c.data_version_id
+        WHERE c.activity_id = ? AND c.id = ? AND c.status = 'PENDING' FOR UPDATE
+        """, (rs, rowNum) -> new ImageReviewRow(rs.getLong("id"), rs.getLong("data_version_id"),
+        rs.getLong("stored_file_id"), rs.getString("normalized_material_code")), activityId, candidateId);
+    if (rows.size() != 1) throw DomainException.notFound("IMAGE_REVIEW_NOT_FOUND", "待确认图片不存在或已经处理");
+    return rows.getFirst();
   }
 
   @Transactional
   public ZipPreview previewZip(long activityId, MultipartFile zip, boolean confirm, long adminId) {
     if (zip.getSize() > 150L * 1024 * 1024) throw DomainException.badRequest("IMAGE_ZIP_TOO_LARGE", "图片 ZIP 不能超过 150MB");
     try {
-      return processZip(activityId, zip.getBytes(), adminProducts(activityId, null, null, null), confirm, adminId, List.of());
+      return processZip(activityId, null, null, zip.getBytes(), adminProducts(activityId, null, null, null), confirm, adminId, List.of());
     } catch (DomainException exception) { throw exception; }
     catch (Exception exception) { throw DomainException.unprocessable("IMAGE_ZIP_INVALID", "图片 ZIP 解析失败：" + exception.getMessage()); }
   }
@@ -214,7 +300,8 @@ public class ProductService {
   }
 
   public ZipPreview attachZipToVersion(long activityId, long versionId, long archiveFileId, long adminId, List<ZipDecision> decisions) {
-    return processZip(activityId, storage.read(archiveFileId), productsForVersion(activityId, versionId), true, adminId,
+    Long importTaskId = jdbc.queryForObject("SELECT source_import_task_id FROM import_publish_version WHERE id = ? AND activity_id = ?", Long.class, versionId, activityId);
+    return processZip(activityId, versionId, importTaskId, storage.read(archiveFileId), productsForVersion(activityId, versionId), true, adminId,
         decisions == null ? List.of() : decisions);
   }
 
@@ -226,7 +313,7 @@ public class ProductService {
         """, this::map, activityId, versionId);
   }
 
-  private ZipPreview processZip(long activityId, byte[] zipBytes, List<ProductView> products, boolean confirm, long adminId,
+  private ZipPreview processZip(long activityId, Long versionId, Long importTaskId, byte[] zipBytes, List<ProductView> products, boolean confirm, long adminId,
                                 List<ZipDecision> decisions) {
     if (confirm) {
       for (ProductView product : products) {
@@ -257,8 +344,8 @@ public class ProductService {
         ImageCandidates match = decision == null && !explicitDecisionMode
             ? imageCandidates(entry.getName(), products) : new ImageCandidates(List.of(), false);
         List<ProductView> candidates = decision != null && "CONFIRMED".equals(decision.status())
-            ? products.stream().filter(product -> decision.targetMaterialNames().stream()
-                .map(ProductService::imageMatchName).anyMatch(name -> name.equals(imageMatchName(product.materialName())))).toList()
+            ? products.stream().filter(product -> decision.targetMaterialCodes().stream()
+                .map(ProductService::materialCodeKey).anyMatch(code -> code.equals(materialCodeKey(product.materialCode())))).toList()
             : match.products();
         String status;
         Long productId = null;
@@ -268,13 +355,7 @@ public class ProductService {
         else if ((decision != null && "PENDING".equals(decision.status())) || (decision == null && match.ambiguous())) { status = "AMBIGUOUS"; ambiguous++; }
         else { status = "UNMATCHED"; unmatched++; }
         if (confirm && productId != null) {
-          List<Long> existingFiles = jdbc.queryForList("""
-              SELECT id FROM stored_file WHERE activity_id = ? AND file_purpose = 'PRODUCT_IMAGE'
-                AND sha256 = ? AND deleted_at IS NULL ORDER BY id LIMIT 1
-              """, Long.class, activityId, digest);
-          long storedId = existingFiles.isEmpty()
-              ? storage.save(activityId, entry.getName(), contentType(entry.getName()), content, "PRODUCT_IMAGE", adminId).id()
-              : existingFiles.getFirst();
+          long storedId = storeZipImage(activityId, entry.getName(), content, digest, adminId);
           for (ProductView candidate : candidates) {
             Integer alreadyLinked = jdbc.queryForObject("""
                 SELECT COUNT(*) FROM product_image WHERE activity_product_id = ? AND stored_file_id = ? AND deleted_at IS NULL
@@ -286,8 +367,22 @@ public class ProductService {
                 VALUES (?, ?, ?, ?, 'ZIP_IMPORT', ?, ?)
                 ON DUPLICATE KEY UPDATE deleted_at = NULL, is_primary = VALUES(is_primary), sort_no = VALUES(sort_no),
                   source_type = 'ZIP_IMPORT', match_status = VALUES(match_status), created_by = VALUES(created_by)
-                """,
+            """,
                 candidate.id(), storedId, current == 0, current, status, adminId);
+          }
+        }
+        if (confirm && decision != null && "PENDING".equals(decision.status()) && versionId != null && importTaskId != null) {
+          long storedId = storeZipImage(activityId, entry.getName(), content, digest, adminId);
+          for (String targetCode : decision.targetMaterialCodes().stream().map(ProductService::materialCodeKey).filter(code -> !code.isBlank()).distinct().toList()) {
+            String candidateMaterialName = products.stream().filter(product -> materialCodeKey(product.materialCode()).equals(targetCode))
+                .map(ProductView::materialName).findFirst().orElse("");
+            jdbc.update("""
+                INSERT INTO product_image_review_candidate(activity_id, data_version_id, import_task_id, stored_file_id,
+                  archive_path, material_code, normalized_material_code, material_name, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
+                ON DUPLICATE KEY UPDATE archive_path = VALUES(archive_path), material_name = VALUES(material_name), status = 'PENDING',
+                  resolved_by = NULL, resolved_at = NULL
+                """, activityId, versionId, importTaskId, storedId, normalizeArchivePath(entry.getName()), targetCode, targetCode, candidateMaterialName);
           }
         }
         matches.add(new ZipMatch(entry.getName(), materialName, productId, status));
@@ -301,6 +396,20 @@ public class ProductService {
 
   private static String normalizeArchivePath(String value) {
     return value == null ? "" : value.replace('\\', '/').replaceAll("^/+", "").trim();
+  }
+
+  private long storeZipImage(long activityId, String filename, byte[] content, byte[] digest, long adminId) throws Exception {
+    List<Long> existingFiles = jdbc.queryForList("""
+        SELECT id FROM stored_file WHERE activity_id = ? AND file_purpose = 'PRODUCT_IMAGE'
+          AND sha256 = ? AND deleted_at IS NULL ORDER BY id LIMIT 1
+        """, Long.class, activityId, digest);
+    return existingFiles.isEmpty()
+        ? storage.save(activityId, filename, contentType(filename), content, "PRODUCT_IMAGE", adminId).id()
+        : existingFiles.getFirst();
+  }
+
+  private static String materialCodeKey(String value) {
+    return value == null ? "" : value.replaceAll("\\s+", "").toLowerCase(Locale.CHINA);
   }
 
   private void ensurePrimaryImages(List<ProductView> products) {
@@ -576,7 +685,9 @@ public class ProductService {
       String branchScope, String reason) {}
   public record ZipMatch(String filename, String materialName, Long productId, String status) {}
   public record ZipPreview(int imageCount, int matchedCount, int ambiguousCount, int unmatchedCount, List<ZipMatch> matches, boolean committed) {}
-  public record ZipDecision(String entryPath, String status, List<String> targetMaterialNames) {}
+  public record ZipDecision(String entryPath, String status, List<String> targetMaterialCodes) {}
+  public record ImageReviewView(long id, long fileId, String url, String archivePath, String materialCode, String materialName, String status) {}
+  private record ImageReviewRow(long id, long versionId, long storedFileId, String materialCodeKey) {}
   private record ImageCandidates(List<ProductView> products, boolean ambiguous) {}
   private record ImageSignature(Set<String> volumes, Set<String> packCounts, String brand, String category, String variety, String grade,
                                 Set<String> containerMaterial, Set<String> containerShape, Set<String> outerPackaging) {}

@@ -99,6 +99,57 @@ public class ImportService {
         readMap(rs.getString("normalized_data_json")), readMap(rs.getString("edited_data_json")), rs.getBoolean("is_deleted")), args);
   }
 
+  public AttendanceMatchPreview attendanceMatchPreview(long taskId) {
+    ImportTask task = task(taskId);
+    if (!"ATTENDANCE".equals(task.importType())) {
+      throw DomainException.badRequest("ATTENDANCE_PREVIEW_NOT_ALLOWED", "只有现场到场导入可以试算白名单关联");
+    }
+    Long whitelistVersionId = attendanceMatching.currentWhitelistVersion(task.activityId());
+    List<MaterializeRow> sources = jdbc.query("""
+        SELECT id, normalized_data_json, edited_data_json, sensitive_data_ciphertext, edited_sensitive_data_ciphertext
+        FROM import_staging_row WHERE import_task_id = ? AND is_deleted = FALSE ORDER BY id
+        """, (rs, rowNum) -> new MaterializeRow(rs.getLong("id"), readMap(rs.getString("normalized_data_json")),
+        readMap(rs.getString("edited_data_json")), rs.getBytes("sensitive_data_ciphertext"),
+        rs.getBytes("edited_sensitive_data_ciphertext")), taskId);
+    List<AttendancePreviewDraft> drafts = new ArrayList<>();
+    Set<Long> matchedCustomerIds = new java.util.LinkedHashSet<>();
+    for (MaterializeRow source : sources) {
+      Map<String, Object> data = source.effective();
+      AttendanceMatchingService.MatchResult match = attendanceMatching.match(task.activityId(), whitelistVersionId,
+          text(data.get("participantType")), text(data.get("branchName")), text(data.get("dealerFullName")));
+      if (match.customerId() != null) matchedCustomerIds.add(match.customerId());
+      drafts.add(new AttendancePreviewDraft(source.id(), match));
+    }
+    Map<Long, String> dealerNames = customerNames(matchedCustomerIds);
+    List<AttendanceMatchPreviewRow> previewRows = drafts.stream().map(draft -> new AttendanceMatchPreviewRow(
+        draft.stagingRowId(), draft.match().customerId(), draft.match().status(), draft.match().method(),
+        draft.match().reasonCode(), dealerNames.get(draft.match().customerId()), "MATCHED".equals(draft.match().status()))).toList();
+    int matched = (int) previewRows.stream().filter(row -> "MATCHED".equals(row.matchStatus())).count();
+    int pending = (int) previewRows.stream().filter(row -> "PENDING_CONFIRMATION".equals(row.matchStatus())).count();
+    int unmatched = previewRows.size() - matched - pending;
+    return new AttendanceMatchPreview(whitelistVersionId, Instant.now(), previewRows.size(), matched, pending, unmatched,
+        matchedCustomerIds.size(), previewRows);
+  }
+
+  private List<MaterializeRow> materializeRows(long taskId) {
+    return jdbc.query("""
+        SELECT id, normalized_data_json, edited_data_json, sensitive_data_ciphertext, edited_sensitive_data_ciphertext
+        FROM import_staging_row WHERE import_task_id = ? AND is_deleted = FALSE AND validation_status <> 'BLOCKED' ORDER BY id
+        """, (rs, rowNum) -> new MaterializeRow(rs.getLong("id"), readMap(rs.getString("normalized_data_json")),
+        readMap(rs.getString("edited_data_json")), rs.getBytes("sensitive_data_ciphertext"),
+        rs.getBytes("edited_sensitive_data_ciphertext")), taskId);
+  }
+
+  private Map<Long, String> customerNames(Set<Long> customerIds) {
+    if (customerIds.isEmpty()) return Map.of();
+    String placeholders = String.join(", ", Collections.nCopies(customerIds.size(), "?"));
+    Map<Long, String> result = new LinkedHashMap<>();
+    jdbc.query("SELECT id, dealer_full_name FROM activity_customer WHERE id IN (" + placeholders + ")",
+        (rs, rowNum) -> Map.entry(rs.getLong(1), rs.getString(2)), customerIds.toArray())
+        .forEach(entry -> result.put(entry.getKey(), entry.getValue()));
+    return result;
+  }
+
   public List<ImportIssue> issues(long taskId) {
     return jdbc.query("""
         SELECT id, severity, error_code, sheet_name, source_row_number, field_name, raw_value_masked, message, resolved_at
@@ -178,15 +229,26 @@ public class ImportService {
     jdbc.queryForObject("SELECT id FROM import_task WHERE id = ? FOR UPDATE", Long.class, taskId);
   }
 
-  public ImportTask confirm(long taskId, long adminId, MultipartFile imageZip, String imageDecisionsJson) {
+  public ImportTask confirm(long taskId, long adminId, MultipartFile imageZip, String imageDecisionsJson,
+                            Long attendanceWhitelistVersionId) {
     ImportTask task = task(taskId);
-    if (!"PREVIEW_READY".equals(task.status())) throw DomainException.conflict("IMPORT_NOT_CONFIRMABLE", "当前任务不能确认发布");
+    boolean retryablePublishFailure = "FAILED".equals(task.status()) && "PUBLISH_FAILED".equals(task.failureCode());
+    if (!"PREVIEW_READY".equals(task.status()) && !retryablePublishFailure) {
+      throw DomainException.conflict("IMPORT_NOT_CONFIRMABLE", "当前任务不能确认发布");
+    }
     workbookProcessor.revalidateTask(taskId, task.importType());
     Integer blocking = jdbc.queryForObject("""
         SELECT COUNT(*) FROM import_staging_row WHERE import_task_id = ? AND validation_status = 'BLOCKED' AND is_deleted = FALSE
         """, Integer.class, taskId);
     if (blocking != null && blocking > 0) throw DomainException.unprocessable("IMPORT_HAS_BLOCKING_ERRORS", "请先修正或删除阻塞行再确认导入");
     List<ProductImageDecision> imageDecisions = validateImageDecisions(taskId, task.importType(), imageDecisionsJson);
+    Long matchBaseVersionId = null;
+    if ("ATTENDANCE".equals(task.importType())) {
+      matchBaseVersionId = attendanceMatching.currentWhitelistVersion(task.activityId());
+      if (!Objects.equals(matchBaseVersionId, attendanceWhitelistVersionId)) {
+        throw DomainException.conflict("ATTENDANCE_WHITELIST_VERSION_CHANGED", "当前白名单版本已变化，请刷新关联试算结果后再发布");
+      }
+    }
     if (!imageDecisions.isEmpty() && (imageZip == null || imageZip.isEmpty())) {
       throw DomainException.badRequest("IMAGE_DECISIONS_WITHOUT_ZIP", "提交图片匹配决定时必须同时上传本批次图片 ZIP");
     }
@@ -199,9 +261,11 @@ public class ImportService {
       auxiliaryFileId = storage.save(task.activityId(), imageZip, "IMAGE_ARCHIVE", adminId).id();
     }
     int changed = jdbc.update("""
-        UPDATE import_task SET status = 'CONFIRMING', auxiliary_file_id = ?, image_decisions_json = ?, confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(3), next_attempt_at = UTC_TIMESTAMP(3)
-        WHERE id = ? AND status = 'PREVIEW_READY'
-        """, auxiliaryFileId, imageDecisions.isEmpty() ? null : writeJson(imageDecisions), adminId, taskId);
+        UPDATE import_task SET status = 'CONFIRMING', auxiliary_file_id = ?, match_base_version_id = ?, image_decisions_json = ?, confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(3),
+          next_attempt_at = UTC_TIMESTAMP(3), failed_at = NULL, failure_code = NULL, failure_message = NULL,
+          lease_owner = NULL, lease_expires_at = NULL
+        WHERE id = ? AND (status = 'PREVIEW_READY' OR (status = 'FAILED' AND failure_code = 'PUBLISH_FAILED'))
+        """, auxiliaryFileId, matchBaseVersionId, imageDecisions.isEmpty() ? null : writeJson(imageDecisions), adminId, taskId);
     if (changed != 1) throw DomainException.conflict("IMPORT_STATE_CHANGED", "导入任务状态已变化，请刷新后重试");
     return task(taskId);
   }
@@ -214,14 +278,15 @@ public class ImportService {
     catch (Exception exception) { throw DomainException.badRequest("IMAGE_DECISIONS_INVALID", "图片匹配决定格式不正确"); }
     if (decisions.size() > 20_000) throw DomainException.badRequest("IMAGE_DECISIONS_TOO_MANY", "图片匹配决定数量过多");
 
-    Map<Long, String> productNames = new LinkedHashMap<>();
+    Map<Long, ProductImageIdentity> products = new LinkedHashMap<>();
     for (StagingRow row : rows(taskId, null)) {
       if (row.deleted()) continue;
       Map<String, Object> effective = new LinkedHashMap<>(row.normalizedData());
       if (row.editedData() != null) effective.putAll(row.editedData());
-      productNames.put(row.id(), text(effective.get("materialName")));
+      products.put(row.id(), new ProductImageIdentity(text(effective.get("materialCode")), text(effective.get("materialName"))));
     }
     Set<String> paths = new java.util.HashSet<>();
+    Set<String> confirmedCodes = new java.util.HashSet<>();
     for (ProductImageDecision decision : decisions) {
       String path = normalizeArchivePath(decision.entryPath());
       if (path.isBlank() || !paths.add(path)) throw DomainException.badRequest("IMAGE_DECISION_PATH_INVALID", "图片路径为空或重复");
@@ -232,14 +297,33 @@ public class ImportService {
       if ("CONFIRMED".equals(decision.status()) && targetIds.isEmpty()) {
         throw DomainException.badRequest("IMAGE_DECISION_TARGET_REQUIRED", "已确认图片必须选择商品");
       }
-      if (!"CONFIRMED".equals(decision.status()) && !targetIds.isEmpty()) {
-        throw DomainException.badRequest("IMAGE_DECISION_TARGET_NOT_ALLOWED", "未确认图片不能绑定商品");
+      if ("PENDING".equals(decision.status()) && targetIds.isEmpty()) {
+        throw DomainException.badRequest("IMAGE_DECISION_CANDIDATE_REQUIRED", "待确认图片必须保留候选商品");
       }
-      if (targetIds.stream().anyMatch(id -> !productNames.containsKey(id))) {
+      if ("UNMATCHED".equals(decision.status()) && !targetIds.isEmpty()) {
+        throw DomainException.badRequest("IMAGE_DECISION_TARGET_NOT_ALLOWED", "未匹配图片不能携带候选商品");
+      }
+      if (targetIds.stream().anyMatch(id -> !products.containsKey(id))) {
         throw DomainException.badRequest("IMAGE_DECISION_TARGET_INVALID", "图片匹配目标不属于当前导入任务");
       }
-      Set<String> names = targetIds.stream().map(productNames::get).map(ImportService::normalize).collect(java.util.stream.Collectors.toSet());
-      if (names.size() > 1) throw DomainException.badRequest("IMAGE_DECISION_MULTIPLE_PRODUCTS", "一张图片不能绑定多个不同商品");
+      Set<String> codes = targetIds.stream().map(products::get).map(ProductImageIdentity::materialCode).map(ImportService::normalizeCode)
+          .filter(code -> !code.isBlank()).collect(java.util.stream.Collectors.toSet());
+      if ("CONFIRMED".equals(decision.status()) && codes.isEmpty()) {
+        throw DomainException.badRequest("IMAGE_DECISION_MATERIAL_CODE_REQUIRED", "商品缺少物料代码，不能确认图片");
+      }
+      if ("CONFIRMED".equals(decision.status()) && codes.size() > 1) {
+        throw DomainException.badRequest("IMAGE_DECISION_MULTIPLE_PRODUCTS", "一张图片不能确认给多个不同物料代码");
+      }
+      for (String code : codes) {
+        Set<String> names = targetIds.stream().map(products::get)
+            .filter(product -> normalizeCode(product.materialCode()).equals(code))
+            .map(ProductImageIdentity::materialName).map(ImportService::normalize).filter(name -> !name.isBlank())
+            .collect(java.util.stream.Collectors.toSet());
+        if (names.size() > 1) throw DomainException.badRequest("IMAGE_DECISION_PRODUCT_NAME_CONFLICT", "同一物料代码存在不同商品名称，请先核对商品数据");
+      }
+      if ("CONFIRMED".equals(decision.status()) && codes.size() == 1 && !confirmedCodes.add(codes.iterator().next())) {
+        throw DomainException.badRequest("IMAGE_DECISION_MULTIPLE_IMAGES", "一个物料代码只能确认一张图片");
+      }
     }
     return decisions.stream().map(decision -> new ProductImageDecision(normalizeArchivePath(decision.entryPath()), decision.status(),
         decision.targetRowIds() == null ? List.of() : decision.targetRowIds().stream().filter(Objects::nonNull).distinct().toList())).toList();
@@ -247,6 +331,10 @@ public class ImportService {
 
   private static String normalizeArchivePath(String value) {
     return Objects.requireNonNullElse(value, "").replace('\\', '/').replaceAll("^/+", "").trim();
+  }
+
+  private static String normalizeCode(String value) {
+    return Objects.requireNonNullElse(value, "").replaceAll("\\s+", "").toLowerCase(Locale.CHINA);
   }
 
 
@@ -281,7 +369,11 @@ public class ImportService {
     long adminId = task.confirmedBy();
     jdbc.update("UPDATE import_task SET status = 'MATERIALIZING' WHERE id = ?", taskId);
     Long previous = jdbc.query("SELECT current_version_id FROM activity_data_binding WHERE activity_id = ? AND data_type = ? FOR UPDATE",
-        rs -> rs.next() ? (Long) rs.getObject(1) : null, activityId, task.importType());
+        rs -> {
+          if (!rs.next()) return null;
+          Object value = rs.getObject(1);
+          return value == null ? null : ((Number) value).longValue();
+        }, activityId, task.importType());
     int versionNo = jdbc.queryForObject("SELECT COALESCE(MAX(version_no), 0) + 1 FROM import_publish_version WHERE activity_id = ? AND data_type = ?", Integer.class, activityId, task.importType());
     GeneratedKeyHolder keys = new GeneratedKeyHolder();
     jdbc.update(connection -> {
@@ -293,11 +385,7 @@ public class ImportService {
       return ps;
     }, keys);
     long versionId = keys.getKey().longValue();
-    List<MaterializeRow> rows = jdbc.query("""
-        SELECT id, normalized_data_json, edited_data_json, sensitive_data_ciphertext, edited_sensitive_data_ciphertext
-        FROM import_staging_row WHERE import_task_id = ? AND is_deleted = FALSE AND validation_status <> 'BLOCKED' ORDER BY id
-        """, (rs, rowNum) -> new MaterializeRow(rs.getLong("id"), readMap(rs.getString("normalized_data_json")),
-        readMap(rs.getString("edited_data_json")), rs.getBytes("sensitive_data_ciphertext"), rs.getBytes("edited_sensitive_data_ciphertext")), taskId);
+    List<MaterializeRow> rows = materializeRows(taskId);
     switch (task.importType()) {
       case "PRODUCT" -> {
         materializeProducts(activityId, taskId, versionId, rows);
@@ -307,7 +395,13 @@ public class ImportService {
             zipDecisions(rows, readImageDecisions(decisionsJson)));
       }
       case "WHITELIST" -> materializeWhitelist(activityId, taskId, versionId, rows);
-      case "ATTENDANCE" -> materializeAttendance(activityId, taskId, versionId, rows, adminId);
+      case "ATTENDANCE" -> {
+        Long expectedWhitelistVersion = jdbc.queryForObject("SELECT match_base_version_id FROM import_task WHERE id = ?", Long.class, taskId);
+        if (!Objects.equals(expectedWhitelistVersion, attendanceMatching.currentWhitelistVersion(activityId))) {
+          throw DomainException.conflict("ATTENDANCE_WHITELIST_VERSION_CHANGED", "当前白名单版本已变化，请重新试算到场关联后再发布");
+        }
+        materializeAttendance(activityId, taskId, versionId, rows, adminId);
+      }
       default -> throw new IllegalStateException("Unsupported import type " + task.importType());
     }
     jdbc.update("UPDATE import_publish_version SET status = 'READY', row_count = ?, ready_at = UTC_TIMESTAMP(3) WHERE id = ?", rows.size(), versionId);
@@ -334,7 +428,7 @@ public class ImportService {
     Map<Long, MaterializeRow> byId = rows.stream().collect(java.util.stream.Collectors.toMap(MaterializeRow::id, row -> row));
     return decisions.stream().map(decision -> new ProductService.ZipDecision(decision.entryPath(), decision.status(),
         decision.targetRowIds().stream().map(byId::get).filter(Objects::nonNull)
-            .map(row -> text(row.effective().get("materialName"))).filter(name -> !name.isBlank()).distinct().toList())).toList();
+            .map(row -> text(row.effective().get("materialCode"))).filter(code -> !code.isBlank()).distinct().toList())).toList();
   }
 
   private void materializeProducts(long activityId, long taskId, long versionId, List<MaterializeRow> rows) {
@@ -400,7 +494,7 @@ public class ImportService {
       Map<String, Object> data = row.effective();
       String phone = text(row.sensitive(crypto, json).get("contactPhone"));
       AttendanceMatchingService.MatchResult match = attendanceMatching.match(activityId, whitelistVersion,
-          text(data.get("participantType")), text(data.get("branchName")), text(data.get("dealerFullName")), phone);
+          text(data.get("participantType")), text(data.get("branchName")), text(data.get("dealerFullName")));
       jdbc.update("""
           INSERT INTO activity_attendee(activity_id, activity_customer_id, match_status, match_method, match_reason_code,
             participant_name, gender, participant_type,
@@ -498,5 +592,13 @@ public class ImportService {
                            Map<String, Object> normalizedData, Map<String, Object> editedData, boolean deleted) {}
   public record ImportIssue(long id, String severity, String code, String sheetName, Integer sourceRowNumber,
                             String fieldName, String rawValueMasked, String message, Instant resolvedAt) {}
+  public record AttendanceMatchPreview(Long whitelistVersionId, Instant calculatedAt, int totalCount, int matchedCount,
+                                       int pendingCount, int unmatchedCount, int eligibleCustomerCount,
+                                       List<AttendanceMatchPreviewRow> rows) {}
+  public record AttendanceMatchPreviewRow(long stagingRowId, Long activityCustomerId, String matchStatus,
+                                          String matchMethod, String matchReasonCode, String matchedDealerName,
+                                          boolean lotteryEligible) {}
   public record ProductImageDecision(String entryPath, String status, List<Long> targetRowIds) {}
+  private record ProductImageIdentity(String materialCode, String materialName) {}
+  private record AttendancePreviewDraft(long stagingRowId, AttendanceMatchingService.MatchResult match) {}
 }

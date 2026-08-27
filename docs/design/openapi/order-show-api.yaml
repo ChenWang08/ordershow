@@ -648,6 +648,26 @@ paths:
       responses:
         '204':
           description: 已从预览移除
+  /admin/activities/{activityId}/imports/{taskId}/attendance-match-preview:
+    get:
+      operationId: previewAttendanceWhitelistMatches
+      tags: [Imports]
+      summary: 按当前已发布白名单实时试算到场关联
+      description: 读取当前到场 staging 有效行，先按参会人员类型限定客户通道，再按经销商全称和同分公司简称精确试算；现场手机号仅作联系信息，不参与客户身份关联。结果不写入正式到场版本；编辑或删除预览行、白名单版本变化后应重新调用。响应中的 whitelistVersionId 必须随确认请求提交，用于阻止按过期白名单结果发布。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 当前白名单版本下的实时关联试算结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AttendanceMatchPreviewResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
   /admin/activities/{activityId}/imports/{taskId}/errors:
     get:
       operationId: listImportErrors
@@ -690,7 +710,7 @@ paths:
       operationId: confirmImportTask
       tags: [Imports]
       summary: 确认导入并全量替换当前数据
-      description: 商品导入可在确认时附带本批次图片 ZIP，并提交浏览器预览阶段形成的图片匹配决定。Excel、ZIP 和匹配决定全部处理成功后才原子切换当前商品版本；未附带 ZIP 时新版本商品均无图片关联。
+      description: 商品导入可在确认时附带本批次图片 ZIP，并提交浏览器预览阶段形成的图片匹配决定。现场到场导入必须提交最近一次实时试算返回的白名单版本 ID。全部处理成功后才原子切换当前版本。
       security:
         - adminCookie: []
       parameters:
@@ -711,7 +731,10 @@ paths:
                   description: 仅商品导入可传；上传阶段只在浏览器预览，确认时才随任务保存
                 imageDecisions:
                   type: string
-                  description: 仅商品导入可传；JSON 数组。每项包含 ZIP 内 entryPath、CONFIRMED/PENDING/UNMATCHED 状态和 targetRowIds。CONFIRMED 必须指向当前任务中同一物料名称的一条或多条 staging 行，其他状态不得携带目标。
+                  description: 仅商品导入可传；JSON 数组。每项包含 ZIP 内 entryPath、CONFIRMED/PENDING/UNMATCHED 状态和 targetRowIds。CONFIRMED 与 PENDING 均须携带当前任务中的候选 staging 行，UNMATCHED 不得携带目标；一个物料代码最多确认一张图片，同代码的重复行共享。PENDING 会随商品版本发布并保留为后台待确认候选，不会作为 H5 商品图。
+                attendanceWhitelistVersionId:
+                  $ref: '#/components/schemas/Id'
+                  description: 仅现场到场导入传入；必须等于最近一次关联试算返回的 whitelistVersionId。若当前无已发布白名单则不传。
       responses:
         '202':
           description: 已进入确认任务
@@ -849,7 +872,7 @@ paths:
     post:
       operationId: addProductImage
       tags: [Catalog]
-      summary: 活动开始后追加单条商品图片
+      summary: 上传或替换物料代码当前单图
       security:
         - adminCookie: []
       parameters:
@@ -878,16 +901,74 @@ paths:
                   type: boolean
       responses:
         '201':
-          description: 图片已保存
+          description: 图片已保存，并同步同物料代码商品行；原当前图片转为历史记录
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/product-image-reviews:
+    get:
+      operationId: listPendingProductImageReviews
+      tags: [Catalog]
+      summary: 查询当前商品版本的待确认图片候选
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 仅返回当前 PRODUCT 版本尚未处理的候选；这些图片不会进入 H5 商品列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericListResponse'
+  /admin/activities/{activityId}/product-image-reviews/{candidateId}/select:
+    post:
+      operationId: selectProductImageReview
+      tags: [Catalog]
+      summary: 选择一张候选作为该物料代码的当前单图
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: candidateId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已同步同物料代码商品行，并排除该代码的其他候选及该文件在其他代码下的候选
+        '404':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/product-image-reviews/{candidateId}:
+    delete:
+      operationId: excludeProductImageReview
+      tags: [Catalog]
+      summary: 排除一张待确认图片候选
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: candidateId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 候选已排除；最后一个候选被排除后商品显示为未匹配
+        '404':
+          $ref: '#/components/responses/Problem'
   /admin/activities/{activityId}/products/{productId}/images/{imageId}:
     patch:
       operationId: updateProductImage
       tags: [Catalog]
-      summary: 设置主图或排序
+      summary: 单图兼容更新接口（固定为主图、排序 0）
       security:
         - adminCookie: []
       parameters:
@@ -2013,6 +2094,26 @@ components:
         matchStatus:
           type: string
           enum: [MATCHED, PENDING, UNMATCHED, CONFIRMED]
+    ProductImageReview:
+      type: object
+      required: [id, fileId, url, archivePath, materialCode, materialName, status]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        fileId:
+          $ref: '#/components/schemas/Id'
+        url:
+          type: string
+          format: uri-reference
+        archivePath:
+          type: string
+        materialCode:
+          type: string
+        materialName:
+          type: string
+        status:
+          type: string
+          enum: [PENDING]
     OrderableProduct:
       type: object
       required: [id, materialName, customerType, rebateStatus, giftBox, visible, orderable, sortNo, images, branchScope]
@@ -2464,6 +2565,62 @@ components:
             $ref: '#/components/schemas/ImportTask'
         page:
           $ref: '#/components/schemas/PageMeta'
+        traceId:
+          type: string
+    AttendanceMatchPreviewRow:
+      type: object
+      required: [stagingRowId, matchStatus, lotteryEligible]
+      properties:
+        stagingRowId:
+          $ref: '#/components/schemas/Id'
+        activityCustomerId:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        matchStatus:
+          type: string
+          enum: [MATCHED, PENDING_CONFIRMATION, UNMATCHED]
+        matchMethod:
+          type: [string, 'null']
+          enum: [PHONE, FULL_NAME, SHORT_NAME, MANUAL, null]
+        matchReasonCode:
+          type: [string, 'null']
+        matchedDealerName:
+          type: [string, 'null']
+        lotteryEligible:
+          type: boolean
+    AttendanceMatchPreview:
+      type: object
+      required: [calculatedAt, totalCount, matchedCount, pendingCount, unmatchedCount, eligibleCustomerCount, rows]
+      properties:
+        whitelistVersionId:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        calculatedAt:
+          type: string
+          format: date-time
+        totalCount:
+          type: integer
+        matchedCount:
+          type: integer
+        pendingCount:
+          type: integer
+        unmatchedCount:
+          type: integer
+        eligibleCustomerCount:
+          type: integer
+          description: 已关联记录按 activity_customer.id 去重后的抽奖资格客户数
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/AttendanceMatchPreviewRow'
+    AttendanceMatchPreviewResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          $ref: '#/components/schemas/AttendanceMatchPreview'
         traceId:
           type: string
     OrderPageResponse:

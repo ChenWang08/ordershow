@@ -1,9 +1,10 @@
 import JSZip from "jszip";
 import {
   createImportRowId,
+  productMaterialCodeKey,
   type ProductImageAsset,
+  type ProductImageRelationStatus,
   type ProductImageStats,
-  type ProductImageStatus,
   type ProductImportRow,
 } from "./import-domain";
 
@@ -157,10 +158,14 @@ export function matchProductImages(rows: ProductImportRow[], assets: ProductImag
     } satisfies ProductImageStats };
   }
 
-  const groups = [...new Map(rows.map((row) => [normalizeProductImageName(row.materialName), rows.filter((candidate) => normalizeProductImageName(candidate.materialName) === normalizeProductImageName(row.materialName))])).values()];
-  const assignments = new Map<string, ProductImageAsset[]>();
-  const pendingAssignments = new Map<string, ProductImageAsset[]>();
-  const matchedAssets = assets.map((asset) => {
+  const groupsByCode = new Map<string, ProductImportRow[]>();
+  rows.forEach((row) => {
+    const code = productMaterialCodeKey(row.materialCode);
+    if (code) groupsByCode.set(code, [...(groupsByCode.get(code) ?? []), row]);
+  });
+  const groups = [...groupsByCode.values()];
+  const proposedByRow = new Map<string, Array<{ asset: ProductImageAsset; autoConfirmed: boolean }>>();
+  const baseAssets = assets.map((asset) => {
     const names = asset.matchingNames?.length ? asset.matchingNames : [asset.fileName];
     const scored = groups.map((group) => ({
       group,
@@ -171,24 +176,29 @@ export function matchProductImages(rows: ProductImportRow[], assets: ProductImag
     const status: ProductImageAsset["matchStatus"] = !best || best.score < 0.55 ? "未匹配"
       : best.score >= 0.9 && (!second || best.score - second.score >= 0.08) ? "已匹配" : "待确认";
     const nextAsset = { ...asset, matchStatus: status };
-    // 待确认图片仍属于导入预览候选，必须展示给运营人员，但在人工确认前不得写入正式商品图片。
-    const candidateGroups = status === "已匹配" ? [best.group] : [];
-    candidateGroups.flat().forEach((row) => assignments.set(row.id, [...(assignments.get(row.id) ?? []), nextAsset]));
-    if (status === "待确认" && best) {
-      scored.filter((item) => best.score - item.score <= 0.08).flatMap((item) => item.group)
-        .forEach((row) => pendingAssignments.set(row.id, [...(pendingAssignments.get(row.id) ?? []), nextAsset]));
-    }
+    const candidateGroups = status === "已匹配" && best ? [best.group]
+      : status === "待确认" && best ? scored.filter((item) => best.score - item.score <= 0.08).map((item) => item.group) : [];
+    candidateGroups.flat().forEach((row) => proposedByRow.set(row.id, [
+      ...(proposedByRow.get(row.id) ?? []),
+      { asset: nextAsset, autoConfirmed: status === "已匹配" },
+    ]));
     return nextAsset;
   });
 
   const nextRows = rows.map((row) => {
-    const manualImages = row.images?.filter((asset) => asset.source === "manual") ?? [];
-    const assigned = assignments.get(row.id) ?? [];
-    const pending = pendingAssignments.get(row.id) ?? [];
-    const images = [...manualImages, ...assigned, ...pending];
+    const manualImage = row.images?.find((asset) => asset.source === "manual");
+    const proposed = [...new Map((proposedByRow.get(row.id) ?? []).map((item) => [item.asset.id, item])).values()];
+    // 一个物料代码只能有一张图；同一代码命中多图时全部降级为候选，必须人工选择一张。
+    const images = manualImage ? [{ ...manualImage, relationStatus: "CONFIRMED" as const }]
+      : proposed.map(({ asset, autoConfirmed }) => ({
+        ...asset,
+        matchStatus: proposed.length === 1 && autoConfirmed ? "已匹配" as const : "待确认" as const,
+        relationStatus: proposed.length === 1 && autoConfirmed ? "CONFIRMED" as const : "CANDIDATE" as const,
+      }));
     const imageStatus = productImageStatusForAssets(images);
     return { ...row, images: images.length ? images : undefined, imageStatus };
   });
+  const matchedAssets = synchronizeProductImageAssetStatuses(baseAssets, nextRows);
   return {
     rows: nextRows,
     assets: matchedAssets,
@@ -241,6 +251,7 @@ export function readManualProductImage(file: File) {
         file,
         url: reader.result,
         normalizedName: normalizeProductImageName(file.name),
+        relationStatus: "CONFIRMED",
         source: "manual",
       });
     };
@@ -253,21 +264,39 @@ export async function createManualProductImageAssets(files: File[]) {
   return Promise.all(files.map((file) => readManualProductImage(file)));
 }
 
-export function productImageStatusForAssets(images: ProductImageAsset[] | undefined, previousStatus: ProductImageStatus = "未匹配") {
+export function productImageRelationStatus(image: ProductImageAsset): ProductImageRelationStatus {
+  if (image.relationStatus) return image.relationStatus;
+  if (image.source === "manual" || image.matchStatus === "已匹配") return "CONFIRMED";
+  // 兼容热更新前或旧预览中的 ZIP 候选：缺少状态时必须待确认，不能静默升级为已匹配。
+  return "CANDIDATE";
+}
+
+export function productImageStatusForAssets(images: ProductImageAsset[] | undefined) {
   if (!images?.length) return "未匹配" as const;
-  return images.some((image) => image.matchStatus === "待确认") ? "待确认" as const : "已匹配" as const;
+  return images.some((image) => productImageRelationStatus(image) === "CANDIDATE") ? "待确认" as const : "已匹配" as const;
+}
+
+export function synchronizeProductImageAssetStatuses(assets: ProductImageAsset[], rows: ProductImportRow[]) {
+  return assets.map((asset) => {
+    const relations = rows.flatMap((row) => row.images?.filter((image) => image.id === asset.id) ?? []);
+    const matchStatus: ProductImageAsset["matchStatus"] = relations.some((image) => productImageRelationStatus(image) === "CONFIRMED")
+      ? "已匹配"
+      : relations.some((image) => productImageRelationStatus(image) === "CANDIDATE") ? "待确认" : "未匹配";
+    return { ...asset, matchStatus };
+  });
 }
 
 export type ProductImageDecisionPayload = { entryPath: string; status: "CONFIRMED" | "PENDING" | "UNMATCHED"; targetRowIds: number[] };
 
 export function buildProductImageDecisions(rows: ProductImportRow[], assets: ProductImageAsset[]): ProductImageDecisionPayload[] {
   return assets.filter((asset) => asset.source === "zip" && asset.archivePath).map((asset) => {
-    const confirmedRows = rows.filter((row) => row.images?.some((image) => image.id === asset.id && image.matchStatus !== "待确认"));
-    const hasPendingCandidate = rows.some((row) => row.images?.some((image) => image.id === asset.id && image.matchStatus === "待确认"));
-    const targetRowIds = [...new Set(confirmedRows.map((row) => row.serverRowId).filter((id): id is number => id !== undefined))];
+    const confirmedRows = rows.filter((row) => row.images?.some((image) => image.id === asset.id && productImageRelationStatus(image) === "CONFIRMED"));
+    const pendingRows = rows.filter((row) => row.images?.some((image) => image.id === asset.id && productImageRelationStatus(image) === "CANDIDATE"));
+    const decisionRows = confirmedRows.length > 0 ? confirmedRows : pendingRows;
+    const targetRowIds = [...new Set(decisionRows.map((row) => row.serverRowId).filter((id): id is number => id !== undefined))];
     return {
       entryPath: asset.archivePath!,
-      status: targetRowIds.length > 0 ? "CONFIRMED" : hasPendingCandidate ? "PENDING" : "UNMATCHED",
+      status: confirmedRows.length > 0 ? "CONFIRMED" : pendingRows.length > 0 ? "PENDING" : "UNMATCHED",
       targetRowIds,
     };
   });
