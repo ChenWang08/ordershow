@@ -1,6 +1,10 @@
 # syntax=docker/dockerfile:1.7
 FROM node:24-alpine AS build
 WORKDIR /app
+ARG NEXT_PUBLIC_API_BASE
+ARG NEXT_PUBLIC_ACTIVITY_CODE
+ENV NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE}
+ENV NEXT_PUBLIC_ACTIVITY_CODE=${NEXT_PUBLIC_ACTIVITY_CODE}
 COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm npm ci
 COPY app app

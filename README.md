@@ -71,6 +71,24 @@ docker run --rm -v order-show-m2:/root/.m2 -v ${PWD}:/workspace -w /workspace ma
 docker compose build
 ```
 
+隔离自动化测试环境使用独立的 Compose 项目、端口和临时存储，不连接当前业务数据库：
+
+```powershell
+.\scripts\test-env.ps1 up
+.\scripts\test-env.ps1 status
+.\scripts\test-env.ps1 reset
+```
+
+测试入口为前端 `http://localhost:3100`、后端 `http://localhost:8180/api/v1`。测试 MySQL、Redis 和 MinIO 使用 tmpfs；`reset` 只删除固定项目名 `order-show-e2e` 下的临时测试资源。
+
+一键执行当前已实现的前端、后端和隔离 API 场景测试，并在结束后删除临时测试环境：
+
+```powershell
+.\scripts\run-automated-tests.ps1
+```
+
+仅在排查失败时使用 `-KeepEnvironment` 保留测试栈；排查完成后仍需运行 `.\scripts\test-env.ps1 reset`。
+
 ## 冻结业务规则
 
 - 加入当前活动且物料名称有效的商品可进入 H5；缺少可选字段时隐藏该字段并标记待完善。
@@ -85,7 +103,7 @@ docker compose build
 - 到场名单每次发布都清除上一版本的当前关联语义，并对当前完整白名单重新关联；白名单重新发布时也自动重算当前到场关联。
 - 抽奖结果由后端生成并先保存，前端动画不参与随机计算；现场到场候选必须处于“已关联”状态并指向当前有效白名单，按活动客户 ID 去重。
 
-详细架构、数据库、接口、安全和状态机文档见 [docs/design/README.md](docs/design/README.md)，OpenAPI 契约见 [order-show-api.yaml](docs/design/openapi/order-show-api.yaml)。
+详细架构、数据库、接口、安全和状态机文档见 [docs/design/README.md](docs/design/README.md)，OpenAPI 契约见 [order-show-api.yaml](docs/design/openapi/order-show-api.yaml)，自动化测试范围、隔离数据方案和用例清单见 [automation-test-plan.md](docs/testing/automation-test-plan.md)。
 
 ## 上线前必须完成
 

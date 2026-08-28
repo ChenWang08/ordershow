@@ -1,0 +1,115 @@
+name: order-show-e2e
+
+# Fully isolated local test stack. It intentionally does not reuse any service,
+# network, database, bucket, volume, credential, or host port from docker-compose.yml.
+services:
+  frontend-test:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_BASE: http://localhost:8180/api/v1
+        NEXT_PUBLIC_ACTIVITY_CODE: e2e-active
+    environment:
+      PORT: 3000
+    ports:
+      - "3100:3000"
+    depends_on:
+      backend-test:
+        condition: service_started
+    labels:
+      com.fengyi.order-show.environment: automated-test
+    restart: "no"
+
+  mysql-test:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: order_show_e2e
+      MYSQL_USER: order_show_e2e
+      MYSQL_PASSWORD: e2e_mysql_only_not_for_business
+      MYSQL_ROOT_PASSWORD: e2e_root_only_not_for_business
+      TZ: Asia/Shanghai
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    ports:
+      - "33306:3306"
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uorder_show_e2e -p$${MYSQL_PASSWORD} --silent"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    labels:
+      com.fengyi.order-show.environment: automated-test
+    restart: "no"
+
+  redis-test:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports:
+      - "36379:6379"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    labels:
+      com.fengyi.order-show.environment: automated-test
+    restart: "no"
+
+  minio-test:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: order_show_e2e_minio
+      MINIO_ROOT_PASSWORD: e2e_minio_only_not_for_business
+    ports:
+      - "39000:9000"
+      - "39001:9001"
+    tmpfs:
+      - /data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+    labels:
+      com.fengyi.order-show.environment: automated-test
+    restart: "no"
+
+  backend-test:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      DB_URL: jdbc:mysql://mysql-test:3306/order_show_e2e?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
+      DB_USERNAME: order_show_e2e
+      DB_PASSWORD: e2e_mysql_only_not_for_business
+      REDIS_HOST: redis-test
+      REDIS_PORT: 6379
+      S3_ENDPOINT: http://minio-test:9000
+      S3_ACCESS_KEY: order_show_e2e_minio
+      S3_SECRET_KEY: e2e_minio_only_not_for_business
+      S3_BUCKET: order-show-e2e
+      PUBLIC_ORIGIN: http://localhost:3100
+      COOKIE_SECURE: "false"
+      PHONE_HMAC_KEY: e2e-only-phone-hmac-key-never-use-in-business
+      PHONE_ENCRYPTION_KEY: e2e-only-phone-encryption-key
+      BOOTSTRAP_ADMIN_USERNAME: e2e_admin
+      BOOTSTRAP_ADMIN_PASSWORD: E2eChangeMe123!
+      BOOTSTRAP_ADMIN_DISPLAY_NAME: 自动化测试管理员
+    ports:
+      - "8180:8080"
+    depends_on:
+      mysql-test:
+        condition: service_healthy
+      redis-test:
+        condition: service_healthy
+      minio-test:
+        condition: service_healthy
+    labels:
+      com.fengyi.order-show.environment: automated-test
+    restart: "no"
+
