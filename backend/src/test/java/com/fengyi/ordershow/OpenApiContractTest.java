@@ -38,6 +38,7 @@ class OpenApiContractTest {
         "/admin/activities/{activityId}/attendees",
         "/admin/activities/{activityId}/attendees/{attendeeId}",
         "/h5/activities/{activityCode}/order",
+        "/h5/activities/{activityCode}/order-draft",
         "/h5/activities/{activityCode}/order/withdraw");
     assertThat(paths.keySet()).noneMatch(path -> path.startsWith("/admin/") && path.endsWith("/withdraw"));
     assertThat(paths).doesNotContainKey("/admin/activities/{activityId}/customers/{customerId}/status");

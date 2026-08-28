@@ -101,6 +101,22 @@ H5 与 API 默认通过同站点托管入口提供。H5 的写请求必须携带
 
 相同手机号可在综合和特渠分别匹配；通道不一致返回 `CUSTOMER_CHANNEL_MISMATCH`，不自动切换身份。
 
+### 4.3 H5 购物车草稿
+
+验证成功后，H5 使用当前会话访问活动客户自己的草稿：
+
+| 方法 | 路径 | 作用 |
+| --- | --- | --- |
+| `GET` | `/h5/activities/{activityCode}/order-draft` | 读取当前活动、当前客户尚未过期的草稿；没有草稿时成功响应可省略 `data` |
+| `PUT` | `/h5/activities/{activityCode}/order-draft` | 保存完整购物车快照；需要 CSRF，包含 `customerId`、`baseOrderVersion` 和正数量商品列表 |
+| `DELETE` | `/h5/activities/{activityCode}/order-draft?customerId={id}` | 删除当前客户草稿；需要 CSRF |
+
+前端在购物车变化后短暂防抖保存，并在 `pagehide` 时使用 keepalive 尽力提交最后一次快照。刷新、关闭页面或重新验证同一客户后，先加载正式订单和当前商品目录，再恢复版本一致且仍可订的草稿；无效商品不恢复。切换到其他客户前先尽力提交旧客户快照，但新会话始终只能读取新客户自己的草稿。
+
+草稿按 `activityId + activityCustomerId` 唯一隔离，不接受客户端借 `customerId` 操作其他客户。`baseOrderVersion` 与当前订单版本不一致时返回 409 `DRAFT_BASE_ORDER_VERSION_CONFLICT`；商品失效或越权时返回 422。正式订单提交或撤回成功后，后端在订单事务中清除草稿。
+
+草稿的 `updatedAt`、`expiresAt` 与其他 API 时间一样返回 ISO 8601 UTC；H5 恢复提示显式使用 `Asia/Shanghai` 格式化，避免数据库、JVM和浏览器重复进行 UTC+8 转换。
+
 ## 5. 分页、筛选和排序
 
 - `page` 从 1 开始；

@@ -114,6 +114,12 @@ export type RuntimeOrder = {
   operations: Array<{ type: string; source: string; orderVersion?: number; reason?: string; occurredAt: string }>;
 };
 
+export type RuntimeOrderDraft = {
+  id: number; activityId: number; customerId: number; baseOrderVersion: number; version: number;
+  items: Array<{ productId: number; quantity: number }>;
+  updatedAt: string; expiresAt: string;
+};
+
 export type ImportTask = {
   id: number; activityId: number; importType: "PRODUCT" | "WHITELIST" | "ATTENDANCE"; status: string;
   sourceFilename: string; inputCount: number; addedCount: number; updatedCount: number; unchangedCount: number;
@@ -247,6 +253,23 @@ export async function loadH5Products() {
 export async function loadH5Order() {
   try { return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order`)).data; }
   catch (error) { if (error instanceof ApiError && error.status === 404) return null; throw error; }
+}
+
+export async function loadH5OrderDraft() {
+  return (await api<Envelope<RuntimeOrderDraft | null>>(`/h5/activities/${activeActivityPath()}/order-draft`)).data;
+}
+
+export async function saveH5OrderDraft(customerId: number, baseOrderVersion: number,
+    items: Array<{ productId: number; quantity: number }>, keepalive = false) {
+  return (await api<Envelope<RuntimeOrderDraft>>(`/h5/activities/${activeActivityPath()}/order-draft`, {
+    method: "PUT", body: JSON.stringify({ customerId, baseOrderVersion, items }), keepalive,
+  }, "h5")).data;
+}
+
+export async function deleteH5OrderDraft(customerId: number, keepalive = false) {
+  return (await api<Envelope<boolean>>(`/h5/activities/${activeActivityPath()}/order-draft?customerId=${encodeURIComponent(customerId)}`, {
+    method: "DELETE", keepalive,
+  }, "h5")).data;
 }
 
 export async function saveH5Order(expectedVersion: number, items: Array<{ productId: number; quantity: number }>) {

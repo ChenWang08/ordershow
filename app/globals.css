@@ -122,6 +122,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .dealer-card b { display: block; margin: 4px 0; font-size: 14px; }
 .policy-note { display: flex; align-items: center; gap: 9px; margin: 0 13px 10px; padding: 9px 11px; color: #795847; border-radius: 9px; background: #f7e5c6; font-size: 9px; }
 .policy-note b { color: #9f2522; }
+.h5-draft-status { margin: -4px 14px 8px; color: #8b6c59; text-align: right; font-size: 8px; }
 .product-toolbar { padding: 0 13px; }
 .segment { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 10px; background: #e9dfd2; }
 .segment button { padding: 8px; border: 0; border-radius: 8px; color: #8b776c; background: transparent; font-size: 11px; font-weight: 700; }

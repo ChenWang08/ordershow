@@ -147,6 +147,30 @@ test("keeps orders admin-read-only and wires the formal runtime APIs", async () 
   assert.doesNotMatch(openapi, /\/admin\/activities\/\{activityId\}\/orders\/\{orderId\}\/withdraw/);
 });
 
+test("keeps an H5 draft only when the verified customer is unchanged", async () => {
+  const [prototype, api, controller, service, migration] = await Promise.all([
+    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/order/OrderController.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/order/OrderDraftService.java", import.meta.url), "utf8"),
+    readFile(new URL("../db/migrations/V010__h5_order_draft.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(prototype, /const preserveDraft = runtimeIdentity\?\.activityId === identity\.activityId\s*&& runtimeIdentity\.customerId === identity\.customerId/);
+  assert.match(prototype, /applyRuntimeOrder\(order, liveCatalog, preserveDraft\)/);
+  assert.match(prototype, /if \(!preserveDraft\) setQuantities\(\{\}\)/);
+  assert.match(prototype, /setOrderUpdatedAt\(""\).*setOrderWithdrawnAt\(""\).*setCartOpen\(false\).*setCancelConfirmOpen\(false\)/s);
+  assert.match(prototype, /loadH5OrderDraft\(\)/);
+  assert.match(prototype, /window\.addEventListener\("pagehide", flushOnPageHide\)/);
+  assert.match(prototype, /setTimeout\(\(\) => void queueDraftSync\(snapshot\), 800\)/);
+  assert.match(api, /saveH5OrderDraft/);
+  assert.match(api, /deleteH5OrderDraft/);
+  assert.match(controller, /\/order-draft/);
+  assert.match(service, /DRAFT_CUSTOMER_MISMATCH/);
+  assert.match(service, /DRAFT_BASE_ORDER_VERSION_CONFLICT/);
+  assert.match(migration, /UNIQUE KEY uk_h5_order_draft_customer \(activity_id, activity_customer_id\)/);
+});
+
 test("supports one admin entry, current H5 resolution, paging, and fulfillment exports", async () => {
   const [api, prototype, routedPrototype, styles, orders, orderService, authService, activityService, activityController, activityRoute, h5Route] = await Promise.all([
     readFile(new URL("../app/api.ts", import.meta.url), "utf8"),

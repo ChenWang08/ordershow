@@ -50,6 +50,7 @@ class IsolatedApiE2ETest {
   private HttpClient h5;
   private String adminCsrf;
   private String h5Csrf;
+  private long h5CustomerId;
   private long activityId;
   private String activityCode;
   private int activityVersion;
@@ -168,7 +169,9 @@ class IsolatedApiE2ETest {
     HttpResponse<String> verified = send(h5, "POST", "/public/activities/" + activityCode + "/verify-phone", verify, null, null);
     assertEquals(200, verified.statusCode(), verified.body());
     h5Csrf = data(verified).path("csrfToken").asText();
+    h5CustomerId = data(verified).path("customer").path("customerId").asLong();
     assertFalse(h5Csrf.isBlank());
+    assertTrue(h5CustomerId > 0);
     assertTrue(data(verified).path("customer").path("phoneMasked").asText().contains("****"));
     assertFalse(verified.body().contains(GENERAL_PHONE));
 
@@ -195,6 +198,24 @@ class IsolatedApiE2ETest {
     ObjectNode first = orderBody(0, productId, 2);
     String firstKey = UUID.randomUUID().toString();
 
+    HttpResponse<String> wrongOwner = send(h5, "PUT", "/h5/activities/" + activityCode + "/order-draft",
+        draftBody(h5CustomerId + 1, 0, productId, 2), h5Csrf, null);
+    assertEquals(403, wrongOwner.statusCode(), wrongOwner.body());
+    assertEquals("DRAFT_CUSTOMER_MISMATCH", json(wrongOwner).path("code").asText());
+
+    HttpResponse<String> savedDraft = send(h5, "PUT", "/h5/activities/" + activityCode + "/order-draft",
+        draftBody(h5CustomerId, 0, productId, 2), h5Csrf, null);
+    assertEquals(200, savedDraft.statusCode(), savedDraft.body());
+    assertEquals(h5CustomerId, data(savedDraft).path("customerId").asLong());
+    assertEquals(0, data(savedDraft).path("baseOrderVersion").asInt());
+    assertEquals(2, data(savedDraft).path("items").get(0).path("quantity").asLong());
+    Instant draftUpdatedAt = Instant.parse(data(savedDraft).path("updatedAt").asText());
+    assertTrue(draftUpdatedAt.isBefore(Instant.now().plusSeconds(5)));
+    assertTrue(draftUpdatedAt.isAfter(Instant.now().minusSeconds(30)));
+    HttpResponse<String> loadedDraft = send(h5, "GET", "/h5/activities/" + activityCode + "/order-draft", null, null, null);
+    assertEquals(200, loadedDraft.statusCode(), loadedDraft.body());
+    assertEquals(data(savedDraft).path("id").asLong(), data(loadedDraft).path("id").asLong());
+
     HttpResponse<String> missingCsrf = send(h5, "PUT", "/h5/activities/" + activityCode + "/order", first, null, null, firstKey);
     assertEquals(403, missingCsrf.statusCode());
 
@@ -208,6 +229,14 @@ class IsolatedApiE2ETest {
     assertEquals(2, order.path("totalQuantity").asLong());
     assertEquals("200.00", order.path("totalAmount").decimalValue().setScale(2).toPlainString());
     assertEquals("0.200000", order.path("totalTons").decimalValue().setScale(6).toPlainString());
+    HttpResponse<String> clearedDraft = send(h5, "GET", "/h5/activities/" + activityCode + "/order-draft", null, null, null);
+    assertEquals(200, clearedDraft.statusCode(), clearedDraft.body());
+    assertTrue(json(clearedDraft).path("data").isMissingNode() || json(clearedDraft).path("data").isNull());
+
+    HttpResponse<String> staleDraft = send(h5, "PUT", "/h5/activities/" + activityCode + "/order-draft",
+        draftBody(h5CustomerId, 0, productId, 3), h5Csrf, null);
+    assertEquals(409, staleDraft.statusCode(), staleDraft.body());
+    assertEquals("DRAFT_BASE_ORDER_VERSION_CONFLICT", json(staleDraft).path("code").asText());
 
     HttpResponse<String> replay = send(h5, "PUT", "/h5/activities/" + activityCode + "/order", first, h5Csrf, null, firstKey);
     assertEquals(200, replay.statusCode(), replay.body());
@@ -219,12 +248,20 @@ class IsolatedApiE2ETest {
     assertEquals(409, reused.statusCode());
     assertEquals("IDEMPOTENCY_KEY_REUSED", json(reused).path("code").asText());
 
+    HttpResponse<String> modificationDraft = send(h5, "PUT", "/h5/activities/" + activityCode + "/order-draft",
+        draftBody(h5CustomerId, 1, productId, 3), h5Csrf, null);
+    assertEquals(200, modificationDraft.statusCode(), modificationDraft.body());
+
     HttpResponse<String> modified = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
         orderBody(1, productId, 3), h5Csrf, null, UUID.randomUUID().toString());
     assertEquals(200, modified.statusCode(), modified.body());
     assertEquals(orderNo, data(modified).path("orderNo").asText());
     assertEquals(2, data(modified).path("currentVersion").asInt());
     assertEquals("300.00", data(modified).path("totalAmount").decimalValue().setScale(2).toPlainString());
+    HttpResponse<String> clearedModificationDraft = send(h5, "GET",
+        "/h5/activities/" + activityCode + "/order-draft", null, null, null);
+    assertTrue(json(clearedModificationDraft).path("data").isMissingNode()
+        || json(clearedModificationDraft).path("data").isNull());
 
     HttpResponse<String> stale = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
         orderBody(1, productId, 4), h5Csrf, null, UUID.randomUUID().toString());
@@ -437,6 +474,12 @@ class IsolatedApiE2ETest {
 
   private ObjectNode orderBody(int expectedVersion, long selectedProductId, long quantity) {
     ObjectNode body = JSON.createObjectNode().put("expectedVersion", expectedVersion);
+    body.putArray("items").addObject().put("productId", selectedProductId).put("quantity", quantity);
+    return body;
+  }
+
+  private ObjectNode draftBody(long customerId, int baseOrderVersion, long selectedProductId, long quantity) {
+    ObjectNode body = JSON.createObjectNode().put("customerId", customerId).put("baseOrderVersion", baseOrderVersion);
     body.putArray("items").addObject().put("productId", selectedProductId).put("quantity", quantity);
     return body;
   }

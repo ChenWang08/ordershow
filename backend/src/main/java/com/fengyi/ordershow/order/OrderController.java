@@ -13,6 +13,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -24,9 +25,31 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class OrderController {
   private final OrderService service;
+  private final OrderDraftService drafts;
   private final AuthService auth;
 
-  public OrderController(OrderService service, AuthService auth) { this.service = service; this.auth = auth; }
+  public OrderController(OrderService service, OrderDraftService drafts, AuthService auth) {
+    this.service = service;
+    this.drafts = drafts;
+    this.auth = auth;
+  }
+
+  @GetMapping("/h5/activities/{activityCode}/order-draft")
+  ApiResponse<OrderDraftService.DraftView> currentDraft(@PathVariable String activityCode, HttpServletRequest request) {
+    return ApiResponse.of(drafts.current(activityCode, auth.requireH5(request)), TraceFilter.id(request));
+  }
+
+  @PutMapping("/h5/activities/{activityCode}/order-draft")
+  ApiResponse<OrderDraftService.DraftView> saveDraft(@PathVariable String activityCode,
+      @RequestBody OrderDraftService.SaveDraftRequest body, HttpServletRequest request) {
+    return ApiResponse.of(drafts.save(activityCode, auth.requireH5(request), body), TraceFilter.id(request));
+  }
+
+  @DeleteMapping("/h5/activities/{activityCode}/order-draft")
+  ApiResponse<Boolean> deleteDraft(@PathVariable String activityCode, @RequestParam long customerId,
+      HttpServletRequest request) {
+    return ApiResponse.of(drafts.delete(activityCode, auth.requireH5(request), customerId), TraceFilter.id(request));
+  }
 
   @GetMapping("/h5/activities/{activityCode}/order")
   ApiResponse<OrderService.OrderView> current(@PathVariable String activityCode, HttpServletRequest request) {

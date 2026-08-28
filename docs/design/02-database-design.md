@@ -100,8 +100,15 @@ Excel 解析、标准化、校验和人工编辑只写入 staging，不修改当
 | `order_version_item` | 版本商品和客户/商品快照 | 版本 + 行号唯一 |
 | `order_operation` | 提交、修改、撤回和重新提交记录 | 只追加 |
 | `api_idempotency` | 命令请求的持久幂等记录 | 活动 + 调用者 + 接口 + 幂等键唯一 |
+| `h5_order_draft` | H5 未提交购物车草稿 | 活动 + 活动客户唯一；外键同时约束活动和活动客户 |
 
 `api_idempotency` 保存规范化请求指纹、`PROCESSING/COMPLETED/FAILED` 状态、任务 ID 和可重放的响应摘要。关键业务变更与幂等完成状态必须在同一 MySQL 事务内提交；Redis 只缓存已知结果或做快速互斥，不能替代该记录。
+
+`h5_order_draft` 只保存商品 ID 与数量 JSON、草稿所基于的 `base_order_version`、草稿锁版本、更新时间和过期时间，不保存手机号、客户名称、价格或订单金额。保存、读取和删除必须同时满足 H5 会话中的 `activityId` 与 `activityCustomerId`；请求体中的客户 ID 仅作一致性校验，不能改变会话身份。草稿商品每次保存都重新校验当前商品版本、客户类型、分公司范围、可见和可订状态。
+
+草稿不属于正式订单事实：首次提交前可以存在 `h5_order_draft`，但不存在 `customer_order`、订单号和订单版本。草稿 `base_order_version` 必须等于客户当前订单版本，防止旧页面覆盖已经提交或修改的订单；成功提交、幂等重放确认成功或撤回后删除草稿。`expires_at` 不晚于活动截止时间，过期草稿不再恢复。
+
+V010 新增草稿表；V011 将早期受 MySQL `Asia/Shanghai` 会话默认值影响的明显未来时间校正为 UTC。后续草稿写入显式使用 `UTC_TIMESTAMP(3)`，API 返回 ISO 8601 UTC，页面按 `Asia/Shanghai` 展示。
 
 业务状态只有：
 

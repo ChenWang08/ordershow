@@ -35,8 +35,11 @@ import {
   loadActivity,
   loadAdminActivities,
   loadH5Order,
+  loadH5OrderDraft,
   loadH5Products,
   saveH5Order,
+  saveH5OrderDraft,
+  deleteH5OrderDraft,
   confirmImport,
   completeLotteryRound,
   createLotteryRule,
@@ -644,6 +647,22 @@ function ProductImageViewer({ productName, images, initialIndex = 0, status, onC
 
 type SubmittedOrderItem = { product: Product; quantity: number };
 
+type H5DraftSnapshot = {
+  customerId: number;
+  baseOrderVersion: number;
+  baseSignature: string;
+  signature: string;
+  items: Array<{ productId: number; quantity: number }>;
+};
+
+function h5QuantitySignature(items: Array<{ productId: number; quantity: number }>) {
+  return JSON.stringify(items.filter((item) => item.quantity > 0).sort((a, b) => a.productId - b.productId));
+}
+
+function h5OrderItems(order: RuntimeOrder | null) {
+  return order?.items.map((item) => ({ productId: item.productId, quantity: item.quantity })) ?? [];
+}
+
 function H5Prototype({ activityStatus, importedRows, importedWhitelistRows, runtimeActivity }: { activityStatus: ActivityStatus; importedRows: ProductImportRow[] | null; importedWhitelistRows: WhitelistRow[] | null; runtimeActivity: RuntimeActivity | null }) {
   const activityClosed = activityStatus === "ended";
   const activityNotStarted = activityStatus === "draft" || activityStatus === "scheduled";
@@ -676,6 +695,13 @@ function H5Prototype({ activityStatus, importedRows, importedWhitelistRows, runt
   const [submittedQuantities, setSubmittedQuantities] = useState<Record<string, number>>({});
   const [submittedItems, setSubmittedItems] = useState<SubmittedOrderItem[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [draftReady, setDraftReady] = useState(false);
+  const [draftMessage, setDraftMessage] = useState("");
+  const draftOwnerIdRef = useRef<number | null>(null);
+  const lastSavedDraftSignatureRef = useRef("");
+  const latestDraftSnapshotRef = useRef<H5DraftSnapshot | null>(null);
+  const draftSaveTimerRef = useRef<number | null>(null);
+  const draftSaveChainRef = useRef<Promise<void>>(Promise.resolve());
   const regionOptions = runtimeActivity?.regions?.length
     ? runtimeActivity.regions.map((item) => ({ value: item.code, name: item.name, detail: `${item.name}综合经销商` }))
     : [
@@ -717,10 +743,65 @@ function H5Prototype({ activityStatus, importedRows, importedWhitelistRows, runt
   const displayBranch = runtimeIdentity?.branchName || identityBranch;
   const displayPhone = runtimeIdentity?.phoneMasked || (importedIdentity ? maskPhone(importedIdentity.dealerPhone) : "—");
 
-  const applyRuntimeOrder = (order: RuntimeOrder | null, liveCatalog: Product[]) => {
+  const queueDraftSync = (snapshot: H5DraftSnapshot, showStatus = true) => {
+    draftSaveChainRef.current = draftSaveChainRef.current.catch(() => undefined).then(async () => {
+      if (draftOwnerIdRef.current !== snapshot.customerId || lastSavedDraftSignatureRef.current === snapshot.signature) return;
+      if (showStatus) setDraftMessage("正在自动保存草稿…");
+      if (snapshot.signature === snapshot.baseSignature) {
+        await deleteH5OrderDraft(snapshot.customerId);
+      } else {
+        await saveH5OrderDraft(snapshot.customerId, snapshot.baseOrderVersion, snapshot.items);
+      }
+      if (draftOwnerIdRef.current === snapshot.customerId) {
+        lastSavedDraftSignatureRef.current = snapshot.signature;
+        if (showStatus) setDraftMessage(snapshot.signature === snapshot.baseSignature ? "未提交修改已清除" : "草稿已自动保存");
+      }
+    }).catch((error) => {
+      if (draftOwnerIdRef.current === snapshot.customerId && showStatus) {
+        setDraftMessage(error instanceof ApiError ? `草稿保存失败：${error.message}` : "草稿保存失败，请检查网络");
+      }
+    });
+    return draftSaveChainRef.current;
+  };
+
+  useEffect(() => {
+    if (!draftReady || !runtimeIdentity || activityClosed) return;
+    const items = catalog.filter((product) => product.isOrderable && (quantities[product.id] || 0) > 0)
+      .map((product) => ({ productId: Number(product.id), quantity: quantities[product.id] }));
+    const snapshot = {
+      customerId: runtimeIdentity.customerId,
+      baseOrderVersion: runtimeOrder?.currentVersion || 0,
+      baseSignature: h5QuantitySignature(h5OrderItems(runtimeOrder)),
+      signature: h5QuantitySignature(items),
+      items,
+    };
+    latestDraftSnapshotRef.current = snapshot;
+    if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
+    if (snapshot.signature !== lastSavedDraftSignatureRef.current) {
+      draftSaveTimerRef.current = window.setTimeout(() => void queueDraftSync(snapshot), 800);
+    }
+    return () => {
+      if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
+    };
+  }, [activityClosed, catalog, draftReady, quantities, runtimeIdentity, runtimeOrder]);
+
+  useEffect(() => {
+    const flushOnPageHide = () => {
+      const snapshot = latestDraftSnapshotRef.current;
+      if (!snapshot || snapshot.signature === lastSavedDraftSignatureRef.current) return;
+      if (snapshot.signature === snapshot.baseSignature) void deleteH5OrderDraft(snapshot.customerId, true);
+      else void saveH5OrderDraft(snapshot.customerId, snapshot.baseOrderVersion, snapshot.items, true);
+    };
+    window.addEventListener("pagehide", flushOnPageHide);
+    return () => window.removeEventListener("pagehide", flushOnPageHide);
+  }, []);
+
+  const applyRuntimeOrder = (order: RuntimeOrder | null, liveCatalog: Product[], preserveDraft = false) => {
     setRuntimeOrder(order);
     if (!order) {
+      if (!preserveDraft) setQuantities({});
       setOrderStatus("none"); setOrderVersion(0); setSubmittedQuantities({}); setSubmittedItems([]); setOrderEvents([]);
+      setOrderUpdatedAt(""); setOrderWithdrawnAt(""); setCartOpen(false); setCancelConfirmOpen(false); setPreviewProduct(null);
       return;
     }
     const itemQuantities: Record<string, number> = {};
@@ -760,13 +841,39 @@ function H5Prototype({ activityStatus, importedRows, importedWhitelistRows, runt
     if (runtimeActivity) {
       setRuntimeBusy(true); setVerifyError(""); setRuntimeMessage("");
       try {
+        if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
+        if (latestDraftSnapshotRef.current) await queueDraftSync(latestDraftSnapshotRef.current, false);
+        setDraftReady(false);
         const identity = await verifyPhone(channel === "综合客户" ? "GENERAL" : "SPECIAL", region, normalizedPhone);
+        const preserveDraft = runtimeIdentity?.activityId === identity.activityId
+          && runtimeIdentity.customerId === identity.customerId;
         const liveRows = await loadH5Products();
         const liveCatalog = liveRows.map(runtimeProductToProduct);
         const order = await loadH5Order();
+        const draft = activityClosed ? null : await loadH5OrderDraft();
+        const baseVersion = order?.currentVersion || 0;
+        const validDraft = draft?.baseOrderVersion === baseVersion ? draft : null;
         setRuntimeIdentity(identity); setRuntimeProducts(liveRows); setVerifiedBranch(identity.branchName || "");
-        applyRuntimeOrder(order, liveCatalog);
-        setStep(order ? "submitted" : "order");
+        applyRuntimeOrder(order, liveCatalog, preserveDraft);
+        draftOwnerIdRef.current = identity.customerId;
+        if (validDraft) {
+          const availableIds = new Set(liveCatalog.filter((product) => product.isOrderable).map((product) => product.id));
+          const restored: Record<string, number> = {};
+          validDraft.items.forEach((item) => { if (availableIds.has(String(item.productId))) restored[String(item.productId)] = item.quantity; });
+          setQuantities(restored);
+          lastSavedDraftSignatureRef.current = h5QuantitySignature(validDraft.items);
+          setDraftMessage(`已恢复 ${new Date(validDraft.updatedAt).toLocaleString("zh-CN", {
+            hour12: false,
+            timeZone: "Asia/Shanghai",
+          })} 保存的草稿`);
+          setStep("order");
+        } else {
+          const baseItems = h5OrderItems(order);
+          lastSavedDraftSignatureRef.current = draft ? h5QuantitySignature(draft.items) : h5QuantitySignature(baseItems);
+          setDraftMessage(draft ? "订单已更新，旧草稿未恢复" : "");
+          setStep(order ? "submitted" : "order");
+        }
+        setDraftReady(!activityClosed);
       } catch (error) {
         setVerifyError(error instanceof ApiError ? error.message : "连接服务失败，请稍后重试。");
       } finally { setRuntimeBusy(false); }
@@ -797,12 +904,16 @@ function H5Prototype({ activityStatus, importedRows, importedWhitelistRows, runt
     if (runtimeActivity) {
       setRuntimeBusy(true); setRuntimeMessage("");
       try {
+        if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
+        await draftSaveChainRef.current.catch(() => undefined);
         const isFirstSubmit = !runtimeOrder;
         const order = await saveH5Order(runtimeOrder?.currentVersion || 0,
           selected.map((product) => ({ productId: Number(product.id), quantity: quantities[product.id] })));
         setSubmitMode(isFirstSubmit ? "first" : "update");
         setSubmittedIdentity(verifiedIdentity ? { ...verifiedIdentity } : null);
         applyRuntimeOrder(order, catalog);
+        lastSavedDraftSignatureRef.current = h5QuantitySignature(h5OrderItems(order));
+        setDraftMessage("");
         setStep("success");
       } catch (error) {
         setRuntimeMessage(error instanceof ApiError ? error.message : "订单提交失败，请稍后重试。");
@@ -816,8 +927,11 @@ function H5Prototype({ activityStatus, importedRows, importedWhitelistRows, runt
     if (runtimeActivity && runtimeOrder) {
       setRuntimeBusy(true); setRuntimeMessage("");
       try {
+        if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
+        await draftSaveChainRef.current.catch(() => undefined);
         const order = await withdrawH5Order(runtimeOrder.currentVersion);
-        applyRuntimeOrder(order, catalog); setCancelConfirmOpen(false); setCartOpen(false); setStep("submitted");
+        applyRuntimeOrder(order, catalog); lastSavedDraftSignatureRef.current = h5QuantitySignature(h5OrderItems(order));
+        setDraftMessage(""); setCancelConfirmOpen(false); setCartOpen(false); setStep("submitted");
       } catch (error) {
         setRuntimeMessage(error instanceof ApiError ? error.message : "订单撤回失败，请稍后重试。");
       } finally { setRuntimeBusy(false); }
@@ -926,6 +1040,7 @@ function H5Prototype({ activityStatus, importedRows, importedWhitelistRows, runt
                 <small>{identityLabel} · {displayBranch || "未标注分公司"} · {importedIdentity?.dealerName || "已验证客户"} · 手机 {displayPhone}</small>
               </div>
               <div className="policy-note"><b>订货提示</b><span>{activityClosed ? "活动已截止，当前订单仅可查看。" : "所有商品按箱订购，提交后可在截止时间前修改或取消本次订货。"}</span></div>
+              {draftMessage && <div className="h5-draft-status" role="status">{draftMessage}</div>}
               <div className="product-toolbar">
                 <div className="segment">
                   <button className={rebate ? "active" : ""} onClick={() => setRebate(true)}>返利产品</button>

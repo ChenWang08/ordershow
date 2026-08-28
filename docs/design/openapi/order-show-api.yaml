@@ -170,6 +170,71 @@ paths:
           $ref: '#/components/responses/Problem'
         '422':
           $ref: '#/components/responses/Problem'
+  /h5/activities/{activityCode}/order-draft:
+    get:
+      operationId: getH5OrderDraft
+      tags: [H5]
+      summary: 查询当前客户未提交的订单草稿
+      security:
+        - h5Cookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      responses:
+        '200':
+          description: 当前草稿；没有草稿时 data 为 null
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDraftResponse'
+        '401':
+          $ref: '#/components/responses/Problem'
+    put:
+      operationId: saveH5OrderDraft
+      tags: [H5]
+      summary: 自动保存当前客户订单草稿
+      security:
+        - h5Cookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveOrderDraftRequest'
+      responses:
+        '200':
+          description: 草稿已保存
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderDraftResponse'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+        '422':
+          $ref: '#/components/responses/Problem'
+    delete:
+      operationId: deleteH5OrderDraft
+      tags: [H5]
+      summary: 删除当前客户订单草稿
+      security:
+        - h5Cookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - $ref: '#/components/parameters/CsrfToken'
+        - name: customerId
+          in: query
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: 草稿已删除或原本不存在
+        '403':
+          $ref: '#/components/responses/Problem'
   /h5/activities/{activityCode}/order/withdraw:
     post:
       operationId: withdrawH5Order
@@ -2246,6 +2311,57 @@ components:
           maxItems: 1000
           items:
             $ref: '#/components/schemas/SubmitOrderItem'
+    SaveOrderDraftRequest:
+      type: object
+      required: [customerId, baseOrderVersion, items]
+      properties:
+        customerId:
+          $ref: '#/components/schemas/Id'
+        baseOrderVersion:
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/SubmitOrderItem'
+    OrderDraft:
+      type: object
+      required: [id, activityId, customerId, baseOrderVersion, version, items, updatedAt, expiresAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        activityId:
+          $ref: '#/components/schemas/Id'
+        customerId:
+          $ref: '#/components/schemas/Id'
+        baseOrderVersion:
+          type: integer
+          minimum: 0
+        version:
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SubmitOrderItem'
+        updatedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+    OrderDraftResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/OrderDraft'
+            - type: 'null'
+        traceId:
+          type: string
     OrderItem:
       type: object
       required: [lineNo, productId, materialName, quantity, casePrice, lineAmount]

@@ -70,13 +70,17 @@ public class OrderService {
     }
     byte[] requestHash = hash(request);
     IdempotencyResult replay = beginIdempotency(activity.id(), customer.customerId(), "ORDER_SUBMIT", idempotencyKey, requestHash);
-    if (replay.replay()) return findByCustomer(activity.id(), customer.customerId());
+    if (replay.replay()) {
+      deleteDraft(activity.id(), customer.customerId());
+      return findByCustomer(activity.id(), customer.customerId());
+    }
 
     OrderRow current = lockOrder(activity.id(), customer.customerId());
     int currentVersion = current == null ? 0 : current.version();
     if (request.expectedVersion() != currentVersion) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单已在其他页面更新，请刷新后重试");
     if (current != null && "SUBMITTED".equals(current.status()) && sameItems(current.id(), quantities)) {
       completeIdempotency(activity.id(), customer.customerId(), "ORDER_SUBMIT", idempotencyKey, current.id());
+      deleteDraft(activity.id(), customer.customerId());
       return order(current.id());
     }
 
@@ -141,6 +145,7 @@ public class OrderService {
         """, activity.id(), orderId, first ? "FIRST_SUBMIT" : resubmit ? "RESUBMIT" : "MODIFY_SUBMIT", nextVersion, traceId);
     writeOutbox(activity.id(), orderId, "ORDER_SUBMITTED", Map.of("orderId", orderId, "version", nextVersion));
     completeIdempotency(activity.id(), customer.customerId(), "ORDER_SUBMIT", idempotencyKey, orderId);
+    deleteDraft(activity.id(), customer.customerId());
     return order(orderId);
   }
 
@@ -151,12 +156,16 @@ public class OrderService {
     activities.requireWritable(activity.id());
     byte[] requestHash = hash(Map.of("expectedVersion", expectedVersion));
     IdempotencyResult replay = beginIdempotency(activity.id(), customer.customerId(), "ORDER_WITHDRAW", idempotencyKey, requestHash);
-    if (replay.replay()) return findByCustomer(activity.id(), customer.customerId());
+    if (replay.replay()) {
+      deleteDraft(activity.id(), customer.customerId());
+      return findByCustomer(activity.id(), customer.customerId());
+    }
     OrderRow order = lockOrder(activity.id(), customer.customerId());
     if (order == null) throw DomainException.notFound("ORDER_NOT_FOUND", "尚未提交订单");
     if (order.version() != expectedVersion) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单版本已变化，请刷新后重试");
     if ("WITHDRAWN".equals(order.status())) {
       completeIdempotency(activity.id(), customer.customerId(), "ORDER_WITHDRAW", idempotencyKey, order.id());
+      deleteDraft(activity.id(), customer.customerId());
       return order(order.id());
     }
     int changed = jdbc.update("""
@@ -171,6 +180,7 @@ public class OrderService {
         """, activity.id(), order.id(), expectedVersion, traceId);
     writeOutbox(activity.id(), order.id(), "ORDER_WITHDRAWN", Map.of("orderId", order.id(), "version", expectedVersion));
     completeIdempotency(activity.id(), customer.customerId(), "ORDER_WITHDRAW", idempotencyKey, order.id());
+    deleteDraft(activity.id(), customer.customerId());
     return order(order.id());
   }
 
@@ -357,6 +367,10 @@ public class OrderService {
   private OrderView findByCustomer(long activityId, long customerId) {
     List<Long> ids = jdbc.queryForList("SELECT id FROM customer_order WHERE activity_id = ? AND activity_customer_id = ?", Long.class, activityId, customerId);
     return ids.isEmpty() ? null : order(ids.getFirst());
+  }
+
+  private void deleteDraft(long activityId, long customerId) {
+    jdbc.update("DELETE FROM h5_order_draft WHERE activity_id = ? AND activity_customer_id = ?", activityId, customerId);
   }
 
   private OrderView order(long orderId) {
