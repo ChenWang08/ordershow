@@ -80,7 +80,7 @@ export type RuntimeActivity = {
   timezone: string; startsAt: string; endsAt: string; customerScope: string; companyRankingTopN: number;
   branchRankingTopN: number; tonDisplayScale: number; version: number;
   regions: Array<{ code: string; name: string; sortNo: number }>;
-  publishedAt?: string; actualStartedAt?: string; closedAt?: string;
+  eventEndsAt?: string; publishedAt?: string; actualStartedAt?: string; closedAt?: string; finishedAt?: string;
 };
 
 export type RuntimeIdentity = {
@@ -214,6 +214,7 @@ export type CreateActivityInput = {
   name: string;
   startsAt: string;
   endsAt: string;
+  eventEndsAt: string;
 };
 
 export async function createActivity(input: CreateActivityInput) {
@@ -231,6 +232,7 @@ export async function createActivity(input: CreateActivityInput) {
       timezone: "Asia/Shanghai",
       startsAt: new Date(input.startsAt).toISOString(),
       endsAt: new Date(input.endsAt).toISOString(),
+      eventEndsAt: new Date(input.eventEndsAt).toISOString(),
       customerScope: "ALL",
       companyRankingTopN: 20,
       branchRankingTopN: 20,
@@ -352,10 +354,11 @@ export async function waitForImport(activityId: number, taskId: number) {
   throw new ApiError(408, "IMPORT_TIMEOUT", "导入仍在处理中，请稍后刷新查看");
 }
 
-export async function updateActivity(activity: RuntimeActivity, changes: { name: string; startsAt: string; endsAt: string }) {
+export async function updateActivity(activity: RuntimeActivity, changes: { name: string; startsAt: string; endsAt: string; eventEndsAt: string }) {
   const body = {
     code: activity.code, name: changes.name, description: activity.description || "", timezone: activity.timezone,
     startsAt: new Date(changes.startsAt).toISOString(), endsAt: new Date(changes.endsAt).toISOString(),
+    eventEndsAt: new Date(changes.eventEndsAt).toISOString(),
     customerScope: activity.customerScope, companyRankingTopN: activity.companyRankingTopN,
     branchRankingTopN: activity.branchRankingTopN, tonDisplayScale: activity.tonDisplayScale, regions: activity.regions,
   };
@@ -378,6 +381,12 @@ export async function withdrawActivityPublication(activity: RuntimeActivity) {
 
 export async function closeActivityNow(activity: RuntimeActivity, reason: string) {
   return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/close`, {
+    method: "POST", headers: { "If-Match": String(activity.version) }, body: JSON.stringify({ reason }),
+  }, "admin")).data;
+}
+
+export async function finishActivityNow(activity: RuntimeActivity, reason: string) {
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/finish`, {
     method: "POST", headers: { "If-Match": String(activity.version) }, body: JSON.stringify({ reason }),
   }, "admin")).data;
 }

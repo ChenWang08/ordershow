@@ -134,7 +134,7 @@ public class CustomerService {
   @Transactional
   public void deleteCustomer(long activityId, long customerId, int expectedVersion) {
     String status = activities.byId(activityId).status();
-    if ("CLOSED".equals(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后数据只读");
+    if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后数据只读");
     if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后白名单已锁定，请先撤回发布");
     if ("ACTIVE".equals(status)) throw DomainException.conflict("ACTIVITY_IMPORT_LOCKED", "活动开始后不能删除白名单客户");
     int changed = jdbc.update("""
@@ -264,7 +264,7 @@ public class CustomerService {
 
   private void requireCustomerWritable(long activityId, String reason) {
     String status = activities.byId(activityId).status();
-    if ("CLOSED".equals(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后数据只读");
+    if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后数据只读");
     if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后白名单已锁定，请先撤回发布");
     if ("ACTIVE".equals(status) && (reason == null || reason.isBlank())) {
       throw DomainException.badRequest("CUSTOMER_EDIT_REASON_REQUIRED", "活动开始后修改白名单必须填写原因");
@@ -272,7 +272,7 @@ public class CustomerService {
   }
 
   private void requireAttendanceWritable(long activityId) {
-    if ("CLOSED".equals(activities.byId(activityId).status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后到场名单只读");
+    if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(activities.byId(activityId).status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后到场名单只读");
   }
 
   private CustomerView mapCustomer(ResultSet rs, int rowNum) throws SQLException {

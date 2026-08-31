@@ -23,6 +23,14 @@ class ActivityServiceTest {
   }
 
   @Test
+  void orderClosedActivityFinishesAtTheEventBoundary() {
+    Instant eventEnd = END.plusSeconds(4 * 60 * 60);
+    assertThat(ActivityService.effectiveStatus("CLOSED", START, END, eventEnd, eventEnd.minusMillis(1))).isEqualTo("CLOSED");
+    assertThat(ActivityService.effectiveStatus("CLOSED", START, END, eventEnd, eventEnd)).isEqualTo("FINISHED");
+    assertThat(ActivityService.effectiveStatus("FINISHED", START, END, eventEnd, END)).isEqualTo("FINISHED");
+  }
+
+  @Test
   void generatesStableUniqueBusinessActivityNumbersFromThePersistedId() {
     Instant createdAt = Instant.parse("2026-08-27T06:30:00Z");
     assertThat(ActivityService.generateActivityNo(12, createdAt, "Asia/Shanghai")).isEqualTo("HD20260827012");

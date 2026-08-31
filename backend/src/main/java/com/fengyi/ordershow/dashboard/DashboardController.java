@@ -2,6 +2,7 @@ package com.fengyi.ordershow.dashboard;
 
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.ApiResponse;
+import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.common.TraceFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
@@ -37,6 +38,10 @@ public class DashboardController {
 
   @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
   SseEmitter events(@PathVariable String activityCode) {
-    return events.subscribe(activities.byCode(activityCode).id());
+    var activity = activities.byCode(activityCode);
+    if ("FINISHED".equals(activity.status()) || "ARCHIVED".equals(activity.status())) {
+      throw DomainException.conflict("ACTIVITY_HISTORY_READ_ONLY", "活动已结束，请查看历史看板");
+    }
+    return events.subscribe(activity.id());
   }
 }

@@ -50,6 +50,7 @@ CREATE TABLE activity (
   timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Shanghai',
   starts_at DATETIME(3) NOT NULL,
   ends_at DATETIME(3) NOT NULL,
+  event_ends_at DATETIME(3) NULL,
   customer_scope VARCHAR(20) NOT NULL DEFAULT 'ALL',
   company_ranking_top_n SMALLINT UNSIGNED NOT NULL DEFAULT 90,
   branch_ranking_top_n SMALLINT UNSIGNED NOT NULL DEFAULT 30,
@@ -62,18 +63,31 @@ CREATE TABLE activity (
   published_at DATETIME(3) NULL,
   actual_started_at DATETIME(3) NULL,
   closed_at DATETIME(3) NULL,
+  finished_at DATETIME(3) NULL,
   archived_at DATETIME(3) NULL,
   PRIMARY KEY (id),
   UNIQUE KEY uk_activity_code (activity_code),
   KEY idx_activity_status_time (status, starts_at, ends_at),
   CONSTRAINT fk_activity_created_by FOREIGN KEY (created_by) REFERENCES admin_user (id),
   CONSTRAINT fk_activity_updated_by FOREIGN KEY (updated_by) REFERENCES admin_user (id),
-  CONSTRAINT ck_activity_status CHECK (status IN ('DRAFT', 'SCHEDULED', 'ACTIVE', 'CLOSED', 'ARCHIVED')),
+  CONSTRAINT ck_activity_status CHECK (status IN ('DRAFT', 'SCHEDULED', 'ACTIVE', 'CLOSED', 'FINISHED', 'ARCHIVED')),
   CONSTRAINT ck_activity_scope CHECK (customer_scope IN ('ALL', 'GENERAL', 'SPECIAL')),
   CONSTRAINT ck_activity_time CHECK (starts_at < ends_at),
+  CONSTRAINT ck_activity_event_time CHECK (event_ends_at IS NULL OR ends_at <= event_ends_at),
   CONSTRAINT ck_activity_company_ranking_top CHECK (company_ranking_top_n BETWEEN 1 AND 500),
   CONSTRAINT ck_activity_branch_ranking_top CHECK (branch_ranking_top_n BETWEEN 1 AND 500),
   CONSTRAINT ck_activity_ton_scale CHECK (ton_display_scale BETWEEN 0 AND 6)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE activity_dashboard_snapshot (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  activity_id BIGINT UNSIGNED NOT NULL,
+  snapshot_key VARCHAR(200) NOT NULL,
+  payload_json JSON NOT NULL,
+  generated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_activity_dashboard_snapshot (activity_id, snapshot_key),
+  CONSTRAINT fk_activity_dashboard_snapshot_activity FOREIGN KEY (activity_id) REFERENCES activity (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE activity_region (

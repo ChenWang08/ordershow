@@ -422,6 +422,20 @@ class IsolatedApiE2ETest {
 
     HttpResponse<String> finalDashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null);
     assertEquals(1, data(finalDashboard).path("totals").path("order_count").asInt());
+
+    ObjectNode finishBody = JSON.createObjectNode().put("reason", "AUTOTEST 验证整场活动结束");
+    HttpResponse<String> finished = send(admin, "POST", "/admin/activities/" + activityId + "/finish", finishBody,
+        adminCsrf, Integer.toString(data(closed).path("version").asInt()));
+    assertEquals(200, finished.statusCode(), finished.body());
+    assertEquals("FINISHED", data(finished).path("status").asText());
+
+    HttpResponse<String> historyDashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null);
+    assertEquals(1, data(historyDashboard).path("totals").path("order_count").asInt());
+    assertEquals("FINISHED", data(historyDashboard).path("status").asText());
+    assertEquals(409, send(client(), "GET", "/screen/activities/" + activityCode + "/events", null, null, null).statusCode());
+
+    HttpResponse<String> afterFinish = send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null);
+    assertEquals(401, afterFinish.statusCode());
   }
 
   private long upload(String importType, String filename, byte[] content) throws Exception {
@@ -469,6 +483,7 @@ class IsolatedApiE2ETest {
     ObjectNode body = JSON.createObjectNode();
     body.put("name", name).put("description", "AUTOTEST isolated environment")
         .put("timezone", "Asia/Shanghai").put("startsAt", starts.toString()).put("endsAt", ends.toString())
+        .put("eventEndsAt", ends.plusSeconds(4 * 60 * 60).toString())
         .put("customerScope", "ALL").put("companyRankingTopN", 20).put("branchRankingTopN", 20).put("tonDisplayScale", 3);
     ArrayNode regions = body.putArray("regions");
     regions.addObject().put("code", "EAST").put("name", "东区").put("sortNo", 10);

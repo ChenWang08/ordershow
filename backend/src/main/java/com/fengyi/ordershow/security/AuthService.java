@@ -107,6 +107,8 @@ public class AuthService {
         JOIN activity_customer c ON c.id = s.activity_customer_id
         LEFT JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
         WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > UTC_TIMESTAMP(3)
+          AND a.status IN ('SCHEDULED', 'ACTIVE', 'CLOSED')
+          AND (a.event_ends_at IS NULL OR a.event_ends_at > UTC_TIMESTAMP(3))
           AND c.is_active = TRUE AND (b.current_version_id IS NULL OR c.data_version_id = b.current_version_id)
         """, (rs, rowNum) -> new H5Principal(rs.getLong("session_id"), rs.getLong("activity_id"),
         rs.getLong("activity_customer_id"), rs.getString("activity_code"), rs.getString("customer_type"),
@@ -131,6 +133,7 @@ public class AuthService {
         LEFT JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
         WHERE a.activity_code = ? AND a.archived_at IS NULL
           AND (a.status = 'CLOSED' OR (a.status IN ('SCHEDULED', 'ACTIVE') AND a.starts_at <= UTC_TIMESTAMP(3)))
+          AND (a.event_ends_at IS NULL OR a.event_ends_at > UTC_TIMESTAMP(3))
           AND c.customer_type = ? AND c.phone_lookup_hash = ? AND c.is_active = TRUE
           AND (b.current_version_id IS NULL OR c.data_version_id = b.current_version_id)
           AND (? IS NULL OR ? = '' OR c.region_code = ?)

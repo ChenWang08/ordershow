@@ -74,7 +74,7 @@ public class ProductService {
   @Transactional
   public ProductView update(long activityId, long productId, int expectedVersion, ProductPatch patch) {
     var activity = activities.byId(activityId);
-    if ("CLOSED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后商品只读");
+    if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(activity.status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后商品只读");
     if ("SCHEDULED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品已锁定，请先撤回发布");
     requireEditReason(activity.status(), patch.reason());
     ProductView current = product(activityId, productId);
@@ -117,7 +117,7 @@ public class ProductService {
   @Transactional
   public ProductView create(long activityId, ProductCreate request) {
     var activity = activities.byId(activityId);
-    if ("CLOSED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后商品只读");
+    if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(activity.status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后商品只读");
     if ("SCHEDULED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品已锁定，请先撤回发布");
     String customerType = value(request.customerType(), "GENERAL");
     String rebateStatus = value(request.rebateStatus(), "NOT_PARTICIPATING");

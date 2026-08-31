@@ -81,6 +81,13 @@ public class ActivityController {
     return ApiResponse.of(service.closeNow(activityId, parseVersion(ifMatch), auth.requireAdmin(request)), TraceFilter.id(request));
   }
 
+  @PostMapping("/admin/activities/{activityId}/finish")
+  ApiResponse<ActivityService.ActivityView> finish(@PathVariable long activityId,
+      @RequestHeader("If-Match") String ifMatch, @Valid @RequestBody CloseRequest body, HttpServletRequest request) {
+    request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason().trim());
+    return ApiResponse.of(service.finishNow(activityId, parseVersion(ifMatch), auth.requireAdmin(request)), TraceFilter.id(request));
+  }
+
   private static int parseVersion(String value) {
     return Integer.parseInt(value.replace("W/", "").replace("\"", "").trim());
   }
@@ -88,10 +95,11 @@ public class ActivityController {
   public record RegionRequest(@NotBlank @Size(max = 64) String code, @NotBlank @Size(max = 100) String name, int sortNo) {}
   public record ActivityRequest(@Size(max = 64) String code, @NotBlank @Size(max = 200) String name,
       @Size(max = 2000) String description, @NotBlank String timezone, @NotNull Instant startsAt, @NotNull Instant endsAt,
+      @NotNull Instant eventEndsAt,
       @NotBlank String customerScope, int companyRankingTopN, int branchRankingTopN, int tonDisplayScale,
       List<RegionRequest> regions) {
     ActivityService.ActivityWrite toWrite() {
-      return new ActivityService.ActivityWrite(code, name, description, timezone, startsAt, endsAt, customerScope,
+      return new ActivityService.ActivityWrite(code, name, description, timezone, startsAt, endsAt, eventEndsAt, customerScope,
           companyRankingTopN, branchRankingTopN, tonDisplayScale,
           regions == null ? List.of() : regions.stream().map(r -> new ActivityService.RegionWrite(r.code(), r.name(), r.sortNo())).toList());
     }

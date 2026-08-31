@@ -46,9 +46,9 @@
 
 | 表 | 作用 | 关键约束 |
 | --- | --- | --- |
-| `activity` | 活动名称、编号、时间、状态和展示配置 | 活动编号唯一；开始时间早于截止时间 |
+| `activity` | 活动名称、编号、订货时间、整场活动时间、状态和展示配置 | 活动编号唯一；开始时间早于订货截止时间，订货截止时间不晚于整场活动结束时间 |
 
-活动状态：`DRAFT`、`SCHEDULED`、`ACTIVE`、`CLOSED`、`ARCHIVED`。草稿活动可以时间重叠；已发布且未截止活动通过服务层校验禁止重叠，以保证通用 H5 入口只能解析到一场活动。
+活动状态：`DRAFT`、`SCHEDULED`、`ACTIVE`、`CLOSED`、`FINISHED`、`ARCHIVED`。`CLOSED` 只表示订货截止，H5 订单和基础数据变为只读，但现场抽奖及实时看板仍可继续；到达 `event_ends_at` 或管理员立即结束后进入 `FINISHED`，停止抽奖写操作和 SSE 实时推送。草稿活动可以时间重叠；已发布且未截止活动通过服务层校验禁止重叠，以保证通用 H5 入口只能解析到一场活动。
 
 ### 4.3 文件、导入和导出
 
@@ -115,7 +115,7 @@ V010 新增草稿表；V011 将早期受 MySQL `Asia/Shanghai` 会话默认值�
 - `SUBMITTED`：参加统计和抽奖；
 - `WITHDRAWN`：保留最近一次非空明细，但不参加统计和抽奖。
 
-活动 `CLOSED` 或 `ARCHIVED` 后订单只读，不批量改写订单状态。
+活动 `CLOSED`、`FINISHED` 或 `ARCHIVED` 后订单只读，不批量改写订单状态。
 
 ### 4.6 访问、看板和抽奖
 
@@ -127,9 +127,10 @@ V010 新增草稿表；V011 将早期受 MySQL `Asia/Shanghai` 会话默认值�
 | `lottery_draw_attempt` | 每次实际抽取的不可变规则快照、结果哈希和有效状态 |
 | `lottery_candidate_snapshot` | 开始抽奖时固定的经销商候选快照 |
 | `lottery_winner` | 永久中奖结果及有效/作废标记 |
+| `activity_dashboard_snapshot` | 整场活动结束时冻结的排行与战报 JSON 快照 |
 | `domain_event_outbox` | 事务提交后可靠触发缓存失效和 SSE 通知 |
 
-看板数据可以缓存在 Redis，不另设当前事实表；缓存丢失时从 `customer_order` 和 `order_item` 重建。
+活动结束前，看板数据可以缓存在 Redis，缓存丢失时从 `customer_order` 和 `order_item` 重建。活动进入 `FINISHED` 时生成最终排行和战报快照；之后历史回看只读取冻结快照，不继续订阅 SSE，也不受后续底层数据变化影响。
 
 抽奖候选的业务主体始终是 `activity_customer`。当候选范围为 `ATTENDEES` 时，只选取当前到场发布版本中 `match_status=MATCHED`、且仍指向当前有效白名单版本的活动客户，并按 `activity_customer.id` 去重；`PENDING_CONFIRMATION` 和 `UNMATCHED` 不进入候选池。
 

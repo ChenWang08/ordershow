@@ -1,5 +1,8 @@
 package com.fengyi.ordershow.dashboard;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fengyi.ordershow.activity.ActivityFinishedEvent;
 import com.fengyi.ordershow.activity.ActivityService;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -7,14 +10,18 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 @Service
 public class DashboardService {
   private final JdbcTemplate jdbc;
   private final ActivityService activities;
+  private final ObjectMapper json;
 
-  public DashboardService(JdbcTemplate jdbc, ActivityService activities) { this.jdbc = jdbc; this.activities = activities; }
+  public DashboardService(JdbcTemplate jdbc, ActivityService activities, ObjectMapper json) {
+    this.jdbc = jdbc; this.activities = activities; this.json = json;
+  }
 
   public Dashboard ranking(String activityCode) {
     return ranking(activityCode, null, null);
@@ -22,6 +29,14 @@ public class DashboardService {
 
   public Dashboard ranking(String activityCode, String customerType, String regionCode) {
     var activity = activities.byCode(activityCode);
+    if (isHistorical(activity.status())) {
+      return snapshot(rankingKey(customerType, regionCode), activity.id(), Dashboard.class,
+          () -> liveRanking(activity, customerType, regionCode));
+    }
+    return liveRanking(activity, customerType, regionCode);
+  }
+
+  private Dashboard liveRanking(ActivityService.ActivityView activity, String customerType, String regionCode) {
     Map<String, Object> totals = new LinkedHashMap<>(jdbc.queryForMap("""
         SELECT COUNT(*) order_count, COALESCE(SUM(total_quantity), 0) total_quantity,
           COALESCE(SUM(total_amount), 0) total_amount,
@@ -68,7 +83,18 @@ public class DashboardService {
   }
 
   public Report report(String activityCode, String reportCode) {
-    Dashboard dashboard = ranking(activityCode);
+    var activity = activities.byCode(activityCode);
+    if (isHistorical(activity.status())) {
+      Report frozen = snapshot("REPORT", activity.id(), Report.class, () -> liveReport(activity, "FINAL"));
+      return new Report(reportCode, frozen.dashboard(), frozen.customerTypes(), frozen.regions(),
+          frozen.generalProductLines(), frozen.specialProductLines(), frozen.giftCustomerTypes(),
+          frozen.topGeneral(), frozen.topSpecial(), frozen.trend());
+    }
+    return liveReport(activity, reportCode);
+  }
+
+  private Report liveReport(ActivityService.ActivityView activity, String reportCode) {
+    Dashboard dashboard = liveRanking(activity, null, null);
     List<CustomerTypeTotal> types = jdbc.query("""
         SELECT customer_type, COUNT(*) order_count, SUM(total_amount) amount, SUM(total_quantity) quantity
         FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED' GROUP BY customer_type ORDER BY customer_type
@@ -92,6 +118,52 @@ public class DashboardService {
     return new Report(reportCode, dashboard, types, regions, productLines(dashboard.activityId(), "GENERAL", null),
         productLines(dashboard.activityId(), "SPECIAL", null), giftTypes, topCustomers(dashboard.activityId(), "GENERAL"),
         topCustomers(dashboard.activityId(), "SPECIAL"), trend);
+  }
+
+  @EventListener
+  public void freezeFinalSnapshots(ActivityFinishedEvent event) {
+    var activity = activities.byId(event.activityId());
+    if (!"FINISHED".equals(activity.status())) return;
+    storeSnapshot(activity.id(), rankingKey(null, null), liveRanking(activity, null, null));
+    storeSnapshot(activity.id(), rankingKey("GENERAL", null), liveRanking(activity, "GENERAL", null));
+    storeSnapshot(activity.id(), rankingKey("SPECIAL", null), liveRanking(activity, "SPECIAL", null));
+    for (var region : activity.regions()) {
+      storeSnapshot(activity.id(), rankingKey("GENERAL", region.code()), liveRanking(activity, "GENERAL", region.code()));
+    }
+    storeSnapshot(activity.id(), "REPORT", liveReport(activity, "FINAL"));
+  }
+
+  private String rankingKey(String customerType, String regionCode) {
+    return "RANKING:" + (customerType == null ? "ALL" : customerType) + ":" + (regionCode == null ? "ALL" : regionCode);
+  }
+
+  private boolean isHistorical(String status) {
+    return "FINISHED".equals(status) || "ARCHIVED".equals(status);
+  }
+
+  private <T> T snapshot(String key, long activityId, Class<T> type, java.util.function.Supplier<T> fallback) {
+    List<String> values = jdbc.queryForList(
+        "SELECT CAST(payload_json AS CHAR) FROM activity_dashboard_snapshot WHERE activity_id = ? AND snapshot_key = ?",
+        String.class, activityId, key);
+    if (!values.isEmpty()) {
+      try { return json.readValue(values.getFirst(), type); }
+      catch (JsonProcessingException exception) { throw new IllegalStateException("历史看板快照无法读取", exception); }
+    }
+    T value = fallback.get();
+    storeSnapshot(activityId, key, value);
+    return value;
+  }
+
+  private void storeSnapshot(long activityId, String key, Object value) {
+    try {
+      jdbc.update("""
+          INSERT INTO activity_dashboard_snapshot(activity_id, snapshot_key, payload_json)
+          VALUES (?, ?, CAST(? AS JSON))
+          ON DUPLICATE KEY UPDATE snapshot_key = VALUES(snapshot_key)
+          """, activityId, key, json.writeValueAsString(value));
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException("最终看板快照生成失败", exception);
+    }
   }
 
   private List<RankRow> topCustomers(long activityId, String customerType) {

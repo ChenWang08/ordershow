@@ -593,6 +593,38 @@ paths:
                 $ref: '#/components/schemas/ActivityResponse'
         '409':
           $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/finish:
+    post:
+      operationId: finishActivityNow
+      tags: [Activities]
+      summary: 结束整场活动并冻结抽奖、看板和战报
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '200':
+          description: 整场活动结束成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
   /admin/activities/{activityId}/imports:
     get:
       operationId: listImportTasks
@@ -2022,7 +2054,7 @@ components:
       enum: [PARTICIPATING, NOT_PARTICIPATING]
     ActivityStatus:
       type: string
-      enum: [DRAFT, SCHEDULED, ACTIVE, CLOSED, ARCHIVED]
+      enum: [DRAFT, SCHEDULED, ACTIVE, CLOSED, FINISHED, ARCHIVED]
     OrderStatus:
       type: string
       enum: [SUBMITTED, WITHDRAWN]
@@ -2110,7 +2142,7 @@ components:
           type: string
     PublicActivity:
       type: object
-      required: [code, name, status, startsAt, endsAt, timezone, customerScope]
+      required: [code, name, status, startsAt, endsAt, eventEndsAt, timezone, customerScope]
       properties:
         code:
           type: string
@@ -2127,6 +2159,11 @@ components:
         endsAt:
           type: string
           format: date-time
+          description: 订货截止时间
+        eventEndsAt:
+          type: string
+          format: date-time
+          description: 整场活动结束时间；到时停止抽奖和实时推送，转为历史回看
         timezone:
           type: string
         customerScope:
@@ -2629,9 +2666,12 @@ components:
             closedAt:
               type: [string, 'null']
               format: date-time
+            finishedAt:
+              type: [string, 'null']
+              format: date-time
     ActivityWriteRequest:
       type: object
-      required: [name, startsAt, endsAt, timezone, customerScope]
+      required: [name, startsAt, endsAt, eventEndsAt, timezone, customerScope]
       properties:
         code:
           type: string
@@ -2648,6 +2688,9 @@ components:
           type: string
           format: date-time
         endsAt:
+          type: string
+          format: date-time
+        eventEndsAt:
           type: string
           format: date-time
         timezone:

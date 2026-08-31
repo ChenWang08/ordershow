@@ -13,6 +13,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,15 +21,21 @@ import org.springframework.transaction.annotation.Transactional;
 public class ActivityService {
   private final JdbcTemplate jdbc;
   private final Clock clock;
+  private final ApplicationEventPublisher events;
 
   @org.springframework.beans.factory.annotation.Autowired
-  public ActivityService(JdbcTemplate jdbc) {
-    this(jdbc, Clock.systemUTC());
+  public ActivityService(JdbcTemplate jdbc, ApplicationEventPublisher events) {
+    this(jdbc, Clock.systemUTC(), events);
   }
 
   ActivityService(JdbcTemplate jdbc, Clock clock) {
+    this(jdbc, clock, ignored -> {});
+  }
+
+  ActivityService(JdbcTemplate jdbc, Clock clock, ApplicationEventPublisher events) {
     this.jdbc = jdbc;
     this.clock = clock;
+    this.events = events;
   }
 
   public ActivityView byCode(String code) {
@@ -67,16 +74,16 @@ public class ActivityService {
 
   @Transactional
   public ActivityView create(ActivityWrite request, AdminPrincipal admin) {
-    validateTime(request.startsAt(), request.endsAt());
+    validateTime(request.startsAt(), request.endsAt(), request.eventEndsAt());
     requireFutureStart(request.startsAt());
     String temporaryCode = "PENDING-" + UUID.randomUUID();
     jdbc.update("""
-        INSERT INTO activity(activity_code, name, description, status, timezone, starts_at, ends_at,
+        INSERT INTO activity(activity_code, name, description, status, timezone, starts_at, ends_at, event_ends_at,
                              customer_scope, company_ranking_top_n, branch_ranking_top_n, ton_display_scale,
                              created_by, updated_by)
-        VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, temporaryCode, request.name(), request.description(), request.timezone(), Timestamp.from(request.startsAt()),
-        Timestamp.from(request.endsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
+        Timestamp.from(request.endsAt()), Timestamp.from(request.eventEndsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
         request.tonDisplayScale(), admin.id(), admin.id());
     Long id = jdbc.queryForObject("SELECT id FROM activity WHERE activity_code = ?", Long.class, temporaryCode);
     String activityNo = generateActivityNo(id, now(), request.timezone());
@@ -88,11 +95,11 @@ public class ActivityService {
 
   @Transactional
   public ActivityView update(long id, int expectedVersion, ActivityWrite request, AdminPrincipal admin) {
-    validateTime(request.startsAt(), request.endsAt());
+    validateTime(request.startsAt(), request.endsAt(), request.eventEndsAt());
     ActivityView current = byId(id);
     String effective = current.status();
-    if ("CLOSED".equals(effective) || "ARCHIVED".equals(effective)) {
-      throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后不能修改配置");
+    if ("FINISHED".equals(effective) || "ARCHIVED".equals(effective)) {
+      throw DomainException.conflict("ACTIVITY_READ_ONLY", "整场活动结束后不能修改配置");
     }
     if ("DRAFT".equals(effective) || "SCHEDULED".equals(effective)) {
       requireFutureStart(request.startsAt());
@@ -107,7 +114,19 @@ public class ActivityService {
       if (request.endsAt().truncatedTo(ChronoUnit.MINUTES).isBefore(current.endsAt().truncatedTo(ChronoUnit.MINUTES))) {
         throw DomainException.conflict("ACTIVITY_END_CAN_ONLY_EXTEND", "活动进行中只能延长订货截止时间；如需停止请使用立即截止订货");
       }
+      if (current.eventEndsAt() != null && request.eventEndsAt().truncatedTo(ChronoUnit.MINUTES).isBefore(current.eventEndsAt().truncatedTo(ChronoUnit.MINUTES))) {
+        throw DomainException.conflict("ACTIVITY_EVENT_END_CAN_ONLY_EXTEND", "活动开始后只能延长整场活动结束时间");
+      }
       requirePublishedDataUnchanged(current, request);
+    }
+    if ("CLOSED".equals(effective)) {
+      requireOnlyEventEndChanged(current, request);
+      if (current.eventEndsAt() != null && request.eventEndsAt().truncatedTo(ChronoUnit.MINUTES).isBefore(current.eventEndsAt().truncatedTo(ChronoUnit.MINUTES))) {
+        throw DomainException.conflict("ACTIVITY_EVENT_END_CAN_ONLY_EXTEND", "订货截止后只能延长整场活动结束时间");
+      }
+      if (!request.eventEndsAt().isAfter(now())) {
+        throw DomainException.badRequest("ACTIVITY_EVENT_END_NOT_FUTURE", "整场活动结束时间必须晚于当前时间");
+      }
     }
     Instant startsAtToSave = "ACTIVE".equals(effective) ? current.startsAt() : request.startsAt();
     Instant endsAtToSave = "ACTIVE".equals(effective)
@@ -118,11 +137,11 @@ public class ActivityService {
       requireNoPublishedOverlap(id, startsAtToSave, endsAtToSave);
     }
     int changed = jdbc.update("""
-        UPDATE activity SET name = ?, description = ?, timezone = ?, starts_at = ?, ends_at = ?, customer_scope = ?,
+        UPDATE activity SET name = ?, description = ?, timezone = ?, starts_at = ?, ends_at = ?, event_ends_at = ?, customer_scope = ?,
           company_ranking_top_n = ?, branch_ranking_top_n = ?, ton_display_scale = ?, updated_by = ?, version = version + 1
         WHERE id = ? AND version = ?
         """, request.name(), request.description(), request.timezone(), Timestamp.from(startsAtToSave),
-        Timestamp.from(endsAtToSave), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
+        Timestamp.from(endsAtToSave), Timestamp.from(request.eventEndsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
         request.tonDisplayScale(), admin.id(), id, expectedVersion);
     if (changed != 1) throw DomainException.conflict("ACTIVITY_VERSION_CONFLICT", "活动配置已被其他页面修改，请刷新后重试");
     replaceRegions(id, request.regions());
@@ -179,6 +198,23 @@ public class ActivityService {
     return byId(id);
   }
 
+  @Transactional
+  public ActivityView finishNow(long id, int expectedVersion, AdminPrincipal admin) {
+    ActivityView current = byId(id);
+    if (!"CLOSED".equals(current.status())) {
+      throw DomainException.conflict("ACTIVITY_FINISH_INVALID", "只有订货已截止的活动可以结束整场活动");
+    }
+    int changed = jdbc.update("""
+        UPDATE activity SET status = 'FINISHED', finished_at = UTC_TIMESTAMP(3), version = version + 1, updated_by = ?
+        WHERE id = ? AND version = ? AND status IN ('ACTIVE', 'CLOSED')
+        """, admin.id(), id, expectedVersion);
+    requireChanged(changed);
+    revokeH5Sessions(id);
+    outbox(id, "ACTIVITY_FINISHED");
+    events.publishEvent(new ActivityFinishedEvent(id));
+    return byId(id);
+  }
+
   public void requireWritable(long activityId) {
     ActivityView activity = byId(activityId);
     Instant now = now();
@@ -210,6 +246,28 @@ public class ActivityService {
           """, id);
       if (changed == 1) outbox(id, "ACTIVITY_CLOSED");
     }
+    List<Long> finishing = jdbc.queryForList("""
+        SELECT id FROM activity WHERE status = 'CLOSED' AND event_ends_at IS NOT NULL
+          AND event_ends_at <= UTC_TIMESTAMP(3)
+        """, Long.class);
+    for (Long id : finishing) {
+      int changed = jdbc.update("""
+          UPDATE activity SET status = 'FINISHED', finished_at = COALESCE(finished_at, UTC_TIMESTAMP(3)), version = version + 1
+          WHERE id = ? AND status = 'CLOSED' AND event_ends_at <= UTC_TIMESTAMP(3)
+          """, id);
+      if (changed == 1) {
+        revokeH5Sessions(id);
+        outbox(id, "ACTIVITY_FINISHED");
+        events.publishEvent(new ActivityFinishedEvent(id));
+      }
+    }
+  }
+
+  private void revokeH5Sessions(long activityId) {
+    jdbc.update("""
+        UPDATE h5_session SET revoked_at = UTC_TIMESTAMP(3)
+        WHERE activity_id = ? AND revoked_at IS NULL
+        """, activityId);
   }
 
   private ActivityView withRegions(ActivityView value) {
@@ -218,18 +276,24 @@ public class ActivityService {
         WHERE activity_id = ? AND is_active = TRUE ORDER BY sort_no, id
         """, (rs, rowNum) -> new RegionView(rs.getString(1), rs.getString(2), rs.getInt(3)), value.id());
     return new ActivityView(value.id(), value.code(), value.name(), value.description(), effectiveStatus(value),
-        value.configuredStatus(), value.timezone(), value.startsAt(), value.endsAt(), value.customerScope(),
+        value.configuredStatus(), value.timezone(), value.startsAt(), value.endsAt(), value.eventEndsAt(), value.customerScope(),
         value.companyRankingTopN(), value.branchRankingTopN(), value.tonDisplayScale(), value.version(), regions,
-        value.publishedAt(), value.actualStartedAt(), value.closedAt());
+        value.publishedAt(), value.actualStartedAt(), value.closedAt(), value.finishedAt());
   }
 
   private String effectiveStatus(ActivityView value) {
-    return effectiveStatus(value.configuredStatus(), value.startsAt(), value.endsAt(), now());
+    return effectiveStatus(value.configuredStatus(), value.startsAt(), value.endsAt(), value.eventEndsAt(), now());
   }
 
   static String effectiveStatus(String configuredStatus, Instant startsAt, Instant endsAt, Instant now) {
-    if ("ARCHIVED".equals(configuredStatus) || "CLOSED".equals(configuredStatus)) return configuredStatus;
+    return effectiveStatus(configuredStatus, startsAt, endsAt, null, now);
+  }
+
+  static String effectiveStatus(String configuredStatus, Instant startsAt, Instant endsAt, Instant eventEndsAt, Instant now) {
+    if ("ARCHIVED".equals(configuredStatus) || "FINISHED".equals(configuredStatus)) return configuredStatus;
     if ("DRAFT".equals(configuredStatus)) return "DRAFT";
+    if ("CLOSED".equals(configuredStatus) && eventEndsAt != null && !now.isBefore(eventEndsAt)) return "FINISHED";
+    if ("CLOSED".equals(configuredStatus)) return "CLOSED";
     if (!now.isBefore(endsAt)) return "CLOSED";
     if (("SCHEDULED".equals(configuredStatus) || "ACTIVE".equals(configuredStatus)) && !now.isBefore(startsAt)) return "ACTIVE";
     return configuredStatus;
@@ -255,15 +319,19 @@ public class ActivityService {
     String configured = rs.getString("status");
     return new ActivityView(rs.getLong("id"), rs.getString("activity_code"), rs.getString("name"),
         rs.getString("description"), configured, configured, rs.getString("timezone"),
-        rs.getTimestamp("starts_at").toInstant(), rs.getTimestamp("ends_at").toInstant(),
+        rs.getTimestamp("starts_at").toInstant(), rs.getTimestamp("ends_at").toInstant(), instant(rs.getTimestamp("event_ends_at")),
         rs.getString("customer_scope"), rs.getInt("company_ranking_top_n"),
         rs.getInt("branch_ranking_top_n"), rs.getInt("ton_display_scale"), rs.getInt("version"), List.of(),
-        instant(rs.getTimestamp("published_at")), instant(rs.getTimestamp("actual_started_at")), instant(rs.getTimestamp("closed_at")));
+        instant(rs.getTimestamp("published_at")), instant(rs.getTimestamp("actual_started_at")), instant(rs.getTimestamp("closed_at")),
+        instant(rs.getTimestamp("finished_at")));
   }
 
-  private static void validateTime(Instant startsAt, Instant endsAt) {
+  private static void validateTime(Instant startsAt, Instant endsAt, Instant eventEndsAt) {
     if (startsAt == null || endsAt == null || !startsAt.isBefore(endsAt)) {
       throw DomainException.badRequest("ACTIVITY_TIME_INVALID", "活动开始时间必须早于截止时间");
+    }
+    if (eventEndsAt == null || eventEndsAt.isBefore(endsAt)) {
+      throw DomainException.badRequest("ACTIVITY_EVENT_TIME_INVALID", "整场活动结束时间不能早于订货截止时间");
     }
   }
 
@@ -331,6 +399,22 @@ public class ActivityService {
     }
   }
 
+  private static void requireOnlyEventEndChanged(ActivityView current, ActivityWrite request) {
+    boolean unchanged = current.name().equals(request.name())
+        && java.util.Objects.equals(current.description(), request.description())
+        && current.timezone().equals(request.timezone())
+        && current.startsAt().truncatedTo(ChronoUnit.MINUTES).equals(request.startsAt().truncatedTo(ChronoUnit.MINUTES))
+        && current.endsAt().truncatedTo(ChronoUnit.MINUTES).equals(request.endsAt().truncatedTo(ChronoUnit.MINUTES))
+        && current.customerScope().equals(request.customerScope())
+        && current.companyRankingTopN() == request.companyRankingTopN()
+        && current.branchRankingTopN() == request.branchRankingTopN()
+        && current.tonDisplayScale() == request.tonDisplayScale();
+    if (!unchanged) {
+      throw DomainException.conflict("ACTIVITY_CLOSED_CONFIG_LOCKED", "订货截止后只能延长整场活动结束时间");
+    }
+    requirePublishedDataUnchanged(current, request);
+  }
+
   private void requireChanged(int changed) {
     if (changed != 1) throw DomainException.conflict("ACTIVITY_VERSION_CONFLICT", "活动状态已变化，请刷新后重试");
   }
@@ -354,11 +438,11 @@ public class ActivityService {
   public record RegionView(String code, String name, int sortNo) {}
   public record RegionWrite(String code, String name, int sortNo) {}
   public record ActivityWrite(String code, String name, String description, String timezone, Instant startsAt,
-                              Instant endsAt, String customerScope, int companyRankingTopN,
+                              Instant endsAt, Instant eventEndsAt, String customerScope, int companyRankingTopN,
                               int branchRankingTopN, int tonDisplayScale, List<RegionWrite> regions) {}
   public record ActivityView(long id, String code, String name, String description, String status,
                              String configuredStatus, String timezone, Instant startsAt, Instant endsAt,
-                             String customerScope, int companyRankingTopN, int branchRankingTopN,
+                             Instant eventEndsAt, String customerScope, int companyRankingTopN, int branchRankingTopN,
                              int tonDisplayScale, int version, List<RegionView> regions, Instant publishedAt,
-                             Instant actualStartedAt, Instant closedAt) {}
+                             Instant actualStartedAt, Instant closedAt, Instant finishedAt) {}
 }

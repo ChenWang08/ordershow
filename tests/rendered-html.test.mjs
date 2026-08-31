@@ -226,18 +226,25 @@ test("uses published, time-driven activity lifecycle controls", async () => {
   assert.match(prototype, />发布活动</);
   assert.match(prototype, />撤回发布</);
   assert.match(prototype, />立即截止订货</);
+  assert.match(prototype, />结束整场活动</);
+  assert.match(prototype, /整场活动结束时间/);
+  assert.match(prototype, /历史回看/);
   assert.doesNotMatch(prototype, /立即开始并锁定导入|恢复为待开始|changeActivityStatus/);
   assert.match(prototype, /订货开始时间必须晚于当前时间/);
   assert.match(prototype, /活动进行中只能延长截止时间/);
   assert.match(api, /publishActivity/);
   assert.match(api, /withdrawActivityPublication/);
   assert.match(api, /closeActivityNow/);
+  assert.match(api, /finishActivityNow/);
   assert.match(activityController, /\/publish/);
   assert.match(activityController, /\/withdraw-publication/);
   assert.match(activityController, /\/close/);
+  assert.match(activityController, /\/finish/);
   assert.doesNotMatch(activityController, /\/transition/);
   assert.match(activityService, /status = 'ACTIVE'.*actual_started_at/s);
   assert.match(activityService, /ACTIVITY_END_CAN_ONLY_EXTEND/);
+  assert.match(activityService, /ACTIVITY_EVENT_END_CAN_ONLY_EXTEND/);
+  assert.match(activityService, /status = 'FINISHED'.*finished_at/s);
 });
 
 test("cancels superseded import previews and only blocks publication for newer pending work", async () => {

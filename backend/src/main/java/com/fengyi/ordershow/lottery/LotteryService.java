@@ -60,6 +60,7 @@ public class LotteryService {
 
   @Transactional
   public RuleView create(long activityId, RuleWrite request, AdminPrincipal admin) {
+    requireLotteryNotFinished(activityId);
     validate(request);
     GeneratedKeyHolder keys = new GeneratedKeyHolder();
     jdbc.update(connection -> {
@@ -77,6 +78,7 @@ public class LotteryService {
 
   @Transactional
   public RuleView update(long activityId, long ruleId, RuleWrite request, AdminPrincipal admin) {
+    requireLotteryNotFinished(activityId);
     validate(request);
     RuleView current = rule(activityId, ruleId);
     if ("ARCHIVED".equals(current.status())) throw DomainException.conflict("LOTTERY_RULE_READ_ONLY", "已归档规则不能修改");
@@ -94,6 +96,7 @@ public class LotteryService {
 
   @Transactional
   public RuleView publish(long activityId, long ruleId, AdminPrincipal admin) {
+    requireLotteryNotFinished(activityId);
     RuleView current = rule(activityId, ruleId);
     if (!"DRAFT".equals(current.status())) throw DomainException.conflict("LOTTERY_RULE_STATUS", "只有草稿规则可以发布");
     if (current.rounds().isEmpty()) throw DomainException.badRequest("LOTTERY_ROUNDS_EMPTY", "至少配置一个抽奖轮次");
@@ -113,10 +116,7 @@ public class LotteryService {
 
   @Transactional
   public DrawResult draw(long activityId, long roundId, AdminPrincipal admin) {
-    String activityStatus = activities.byId(activityId).status();
-    if (!Set.of("ACTIVE", "CLOSED").contains(activityStatus)) {
-      throw DomainException.conflict("LOTTERY_ACTIVITY_NOT_STARTED", "活动开始后才可以正式抽奖");
-    }
+    requireLotteryWritable(activityId);
     String lockKey = "order-show:lottery:round:" + roundId;
     boolean redisLocked = false;
     try {
@@ -183,6 +183,7 @@ public class LotteryService {
 
   @Transactional
   public RoundView complete(long activityId, long roundId) {
+    requireLotteryWritable(activityId);
     RoundView round = lockRound(activityId, roundId);
     if (!"DRAWN".equals(round.status())) throw DomainException.conflict("LOTTERY_ROUND_STATUS", "只有已抽取轮次可以完成");
     jdbc.update("UPDATE lottery_round SET status = 'COMPLETED', completed_at = UTC_TIMESTAMP(3), lock_version = lock_version + 1 WHERE id = ?", roundId);
@@ -192,6 +193,7 @@ public class LotteryService {
 
   @Transactional
   public RoundView reset(long activityId, long roundId, String reason, AdminPrincipal admin) {
+    requireLotteryWritable(activityId);
     RoundView round = lockRound(activityId, roundId);
     if (!Set.of("DRAWN", "COMPLETED").contains(round.status())) throw DomainException.conflict("LOTTERY_ROUND_STATUS", "当前轮次没有可作废的抽奖结果");
     Integer startedLater = jdbc.queryForObject("""
@@ -246,6 +248,23 @@ public class LotteryService {
         SELECT SUM(status = 'VALID'), COUNT(DISTINCT CASE WHEN status = 'VALID' THEN activity_customer_id END),
           SUM(status = 'INVALIDATED') FROM lottery_winner WHERE activity_id = ?
         """, (rs, rowNum) -> new WinnerStatistics(rs.getLong(1), rs.getLong(2), rs.getLong(3)), activityId);
+  }
+
+  private void requireLotteryWritable(long activityId) {
+    String status = activities.byId(activityId).status();
+    if ("FINISHED".equals(status) || "ARCHIVED".equals(status)) {
+      throw DomainException.conflict("LOTTERY_ACTIVITY_FINISHED", "整场活动已结束，抽奖和重抽均已关闭");
+    }
+    if (!Set.of("ACTIVE", "CLOSED").contains(status)) {
+      throw DomainException.conflict("LOTTERY_ACTIVITY_NOT_STARTED", "活动开始后才可以正式抽奖");
+    }
+  }
+
+  private void requireLotteryNotFinished(long activityId) {
+    String status = activities.byId(activityId).status();
+    if ("FINISHED".equals(status) || "ARCHIVED".equals(status)) {
+      throw DomainException.conflict("LOTTERY_ACTIVITY_FINISHED", "整场活动已结束，抽奖规则和结果均为只读");
+    }
   }
 
   private List<RoundView> rounds(long ruleId) {

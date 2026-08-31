@@ -41,7 +41,7 @@ public class ImportController {
     if (!"ATTENDANCE".equals(importType) && !"DRAFT".equals(activity.status())) {
       throw com.fengyi.ordershow.common.DomainException.conflict("BULK_IMPORT_LOCKED", "活动发布后商品和白名单全量导入已锁定，请先撤回发布");
     }
-    if ("CLOSED".equals(activity.status())) {
+    if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(activity.status())) {
       throw com.fengyi.ordershow.common.DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后数据只读");
     }
     return ApiResponse.of(service.upload(activityId, importType, file, auth.requireAdmin(request).id()), TraceFilter.id(request));
@@ -108,7 +108,7 @@ public class ImportController {
     if (!"ATTENDANCE".equals(task.importType()) && !"DRAFT".equals(activity.status())) {
       throw com.fengyi.ordershow.common.DomainException.conflict("BULK_IMPORT_LOCKED", "活动发布后不能确认商品或白名单导入，请先撤回发布");
     }
-    if ("CLOSED".equals(activity.status())) {
+    if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(activity.status())) {
       throw com.fengyi.ordershow.common.DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后数据只读");
     }
     return ApiResponse.of(service.confirm(taskId, auth.requireAdmin(request).id(), imageZip, imageDecisions,
