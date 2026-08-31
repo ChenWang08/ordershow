@@ -3,6 +3,7 @@ package com.fengyi.ordershow.dashboard;
 import com.fengyi.ordershow.activity.ActivityService;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -21,31 +22,43 @@ public class DashboardService {
 
   public Dashboard ranking(String activityCode, String customerType, String regionCode) {
     var activity = activities.byCode(activityCode);
-    Map<String, Object> totals = jdbc.queryForMap("""
+    Map<String, Object> totals = new LinkedHashMap<>(jdbc.queryForMap("""
         SELECT COUNT(*) order_count, COALESCE(SUM(total_quantity), 0) total_quantity,
           COALESCE(SUM(total_amount), 0) total_amount,
-          CASE WHEN SUM(total_tons IS NULL) > 0 THEN NULL ELSE COALESCE(SUM(total_tons), 0) END total_tons,
           COUNT(DISTINCT branch_name_snapshot) branch_count
         FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED'
           AND (? IS NULL OR ? = '' OR customer_type = ?)
           AND (? IS NULL OR ? = '' OR region_code = ?)
-        """, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode);
+        """, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode));
+    BigDecimal totalTons = jdbc.queryForObject("""
+        SELECT SUM(i.line_tons)
+        FROM order_item i JOIN customer_order o ON o.id = i.order_id
+        WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
+          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
+          AND (? IS NULL OR ? = '' OR o.region_code = ?)
+        """, BigDecimal.class, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode);
+    totals.put("total_tons", totalTons);
     List<RankRow> companies = jdbc.query("""
-        SELECT id, dealer_full_name_snapshot name, branch_name_snapshot branch, total_amount amount, total_quantity quantity, total_tons tons
-        FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED'
-          AND (? IS NULL OR ? = '' OR customer_type = ?)
-          AND (? IS NULL OR ? = '' OR region_code = ?)
-        ORDER BY total_amount DESC, last_submitted_at, id LIMIT ?
+        SELECT o.id, o.dealer_full_name_snapshot name, o.branch_name_snapshot branch, o.total_amount amount,
+          o.total_quantity quantity, item_tons.tons
+        FROM customer_order o
+        LEFT JOIN (SELECT order_id, SUM(line_tons) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
+        WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
+          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
+          AND (? IS NULL OR ? = '' OR o.region_code = ?)
+        ORDER BY o.total_amount DESC, o.last_submitted_at, o.id LIMIT ?
         """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), rs.getString("branch"),
         rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
         customerType, customerType, customerType, regionCode, regionCode, regionCode, activity.companyRankingTopN());
     List<RankRow> branches = jdbc.query("""
-        SELECT branch_name_snapshot name, SUM(total_amount) amount, SUM(total_quantity) quantity,
-          CASE WHEN SUM(total_tons IS NULL) > 0 THEN NULL ELSE SUM(total_tons) END tons
-        FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED'
-          AND (? IS NULL OR ? = '' OR customer_type = ?)
-          AND (? IS NULL OR ? = '' OR region_code = ?)
-        GROUP BY branch_name_snapshot ORDER BY amount DESC, name LIMIT ?
+        SELECT o.branch_name_snapshot name, SUM(o.total_amount) amount, SUM(o.total_quantity) quantity,
+          SUM(item_tons.tons) tons
+        FROM customer_order o
+        LEFT JOIN (SELECT order_id, SUM(line_tons) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
+        WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
+          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
+          AND (? IS NULL OR ? = '' OR o.region_code = ?)
+        GROUP BY o.branch_name_snapshot ORDER BY amount DESC, name LIMIT ?
         """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), null,
         rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
         customerType, customerType, customerType, regionCode, regionCode, regionCode, activity.branchRankingTopN());

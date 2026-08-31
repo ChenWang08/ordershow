@@ -2104,6 +2104,7 @@ components:
       properties:
         data:
           type: object
+          description: 排行数据中的吨数按有效订单当前明细的非空 line_tons 汇总；部分明细缺少转换系数时仍返回可计算合计，全部不可计算时为 null。
           additionalProperties: true
         traceId:
           type: string

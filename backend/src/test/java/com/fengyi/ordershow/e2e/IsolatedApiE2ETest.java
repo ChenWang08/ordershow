@@ -55,6 +55,7 @@ class IsolatedApiE2ETest {
   private String activityCode;
   private int activityVersion;
   private long productId;
+  private long productWithoutTonsId;
   private long orderId;
   private String orderNo;
 
@@ -181,7 +182,9 @@ class IsolatedApiE2ETest {
     assertEquals(3, products.size());
     for (JsonNode product : products) assertEquals("GENERAL", product.path("customerType").asText());
     productId = findProduct(products, "P001").path("id").asLong();
+    productWithoutTonsId = findProduct(products, "P002").path("id").asLong();
     assertTrue(productId > 0);
+    assertTrue(productWithoutTonsId > 0);
 
     HttpClient special = client();
     ObjectNode specialVerify = JSON.createObjectNode().put("customerType", "SPECIAL").putNull("regionCode").put("phone", SPECIAL_PHONE);
@@ -281,7 +284,7 @@ class IsolatedApiE2ETest {
     assertEquals(0, data(withdrawnDashboard).path("totals").path("order_count").asInt());
 
     HttpResponse<String> resubmitted = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
-        orderBody(2, productId, 1), h5Csrf, null, UUID.randomUUID().toString());
+        mixedOrderBody(2, productId, 1, productWithoutTonsId, 1), h5Csrf, null, UUID.randomUUID().toString());
     assertEquals(200, resubmitted.statusCode(), resubmitted.body());
     assertEquals("SUBMITTED", data(resubmitted).path("status").asText());
     assertEquals(3, data(resubmitted).path("currentVersion").asInt());
@@ -394,8 +397,11 @@ class IsolatedApiE2ETest {
 
     HttpResponse<String> dashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null);
     assertEquals(1, data(dashboard).path("totals").path("order_count").asInt());
-    assertEquals(1, data(dashboard).path("totals").path("total_quantity").asInt());
-    assertEquals("100.00", data(dashboard).path("totals").path("total_amount").decimalValue().setScale(2).toPlainString());
+    assertEquals(2, data(dashboard).path("totals").path("total_quantity").asInt());
+    assertEquals("150.00", data(dashboard).path("totals").path("total_amount").decimalValue().setScale(2).toPlainString());
+    assertEquals("0.100000", data(dashboard).path("totals").path("total_tons").decimalValue().setScale(6).toPlainString());
+    assertEquals("0.100000", data(dashboard).path("companies").get(0).path("tons").decimalValue().setScale(6).toPlainString());
+    assertEquals("0.100000", data(dashboard).path("branches").get(0).path("tons").decimalValue().setScale(6).toPlainString());
 
     HttpResponse<String> export = send(admin, "GET", "/admin/activities/" + activityId + "/orders/export", null, null, null);
     assertEquals(200, export.statusCode());
@@ -475,6 +481,15 @@ class IsolatedApiE2ETest {
   private ObjectNode orderBody(int expectedVersion, long selectedProductId, long quantity) {
     ObjectNode body = JSON.createObjectNode().put("expectedVersion", expectedVersion);
     body.putArray("items").addObject().put("productId", selectedProductId).put("quantity", quantity);
+    return body;
+  }
+
+  private ObjectNode mixedOrderBody(int expectedVersion, long firstProductId, long firstQuantity,
+                                    long secondProductId, long secondQuantity) {
+    ObjectNode body = JSON.createObjectNode().put("expectedVersion", expectedVersion);
+    ArrayNode items = body.putArray("items");
+    items.addObject().put("productId", firstProductId).put("quantity", firstQuantity);
+    items.addObject().put("productId", secondProductId).put("quantity", secondQuantity);
     return body;
   }
 
