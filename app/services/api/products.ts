@@ -1,0 +1,44 @@
+import { api } from "./client";
+import type { Envelope, ProductImageReview, RuntimeProduct } from "./types";
+
+export async function loadAdminProducts(activityId: number) { return (await api<Envelope<RuntimeProduct[]>>(`/admin/activities/${activityId}/products`)).data; }
+export async function loadProductImageReviews(activityId: number) {
+  return (await api<Envelope<ProductImageReview[]>>(`/admin/activities/${activityId}/product-image-reviews`)).data;
+}
+export async function selectProductImageReview(activityId: number, candidateId: number) {
+  return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/product-image-reviews/${candidateId}/select`, { method: "POST" }, "admin")).data;
+}
+export async function excludeProductImageReview(activityId: number, candidateId: number) {
+  return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/product-image-reviews/${candidateId}`, { method: "DELETE" }, "admin")).data;
+}
+export async function createAdminProduct(activityId: number, body: Record<string, unknown>) {
+  return (await api<Envelope<RuntimeProduct>>(`/admin/activities/${activityId}/products`, { method: "POST", body: JSON.stringify(body) }, "admin")).data;
+}
+export async function updateAdminProduct(activityId: number, productId: number, version: number, body: Record<string, unknown>) {
+  return (await api<Envelope<RuntimeProduct>>(`/admin/activities/${activityId}/products/${productId}`, {
+    method: "PATCH", headers: { "If-Match": String(version) }, body: JSON.stringify(body),
+  }, "admin")).data;
+}
+export async function addAdminProductImage(activityId: number, productId: number, file: File, primary = false) {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("primary", String(primary));
+  return (await api<Envelope<RuntimeProduct["images"][number]>>(`/admin/activities/${activityId}/products/${productId}/images`, {
+    method: "POST", body,
+  }, "admin")).data;
+}
+export async function updateAdminProductImage(activityId: number, productId: number, imageId: number, primary: boolean, sortNo: number) {
+  return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/products/${productId}/images/${imageId}`, {
+    method: "PATCH", body: JSON.stringify({ primary, sortNo }),
+  }, "admin")).data;
+}
+export async function deleteAdminProductImage(activityId: number, productId: number, imageId: number) {
+  return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/products/${productId}/images/${imageId}`, {
+    method: "DELETE",
+  }, "admin")).data;
+}
+export async function deleteAdminProduct(activityId: number, productId: number, version: number) {
+  return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/products/${productId}`, {
+    method: "DELETE", headers: { "If-Match": String(version) },
+  }, "admin")).data;
+}

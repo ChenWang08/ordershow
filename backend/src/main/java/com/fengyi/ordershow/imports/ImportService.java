@@ -472,6 +472,12 @@ public class ImportService {
       if (productId != null) for (String branch : text(data.get("branchScope")).split("[，,、]")) {
         if (!branch.isBlank()) jdbc.update("INSERT INTO activity_product_branch_scope(activity_product_id, branch_name, normalized_branch_name) VALUES (?, ?, ?)", productId, branch.trim(), normalize(branch));
       }
+      Long tierMinQuantity = integer(data.get("priceTierMinQuantity"));
+      BigDecimal tierCasePrice = decimal(data.get("priceTierCasePrice"));
+      if (productId != null && tierMinQuantity != null && tierCasePrice != null) {
+        jdbc.update("INSERT INTO activity_product_price_tier(activity_product_id, min_quantity, case_price) VALUES (?, ?, ?)",
+            productId, tierMinQuantity, tierCasePrice);
+      }
     }
   }
 
@@ -560,6 +566,11 @@ public class ImportService {
 
   private static BigDecimal decimal(Object value) {
     try { String text = text(value); return text.isBlank() ? null : new BigDecimal(text.replace(",", "")); }
+    catch (Exception ignored) { return null; }
+  }
+
+  private static Long integer(Object value) {
+    try { String text = text(value); return text.isBlank() ? null : new BigDecimal(text.replace(",", "")).longValueExact(); }
     catch (Exception ignored) { return null; }
   }
 

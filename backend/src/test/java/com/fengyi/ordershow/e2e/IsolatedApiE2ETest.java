@@ -127,6 +127,19 @@ class IsolatedApiE2ETest {
     long productTask = upload("PRODUCT", "products-valid.xlsx", productWorkbook());
     assertEquals("PREVIEW_READY", task(productTask).path("status").asText());
     assertEquals(5, task(productTask).path("inputCount").asInt());
+    HttpResponse<String> productRows = send(admin, "GET", "/admin/activities/" + activityId + "/imports/" + productTask + "/rows", null, null, null);
+    JsonNode p001 = null;
+    for (JsonNode row : data(productRows)) {
+      if ("P001".equals(row.path("normalizedData").path("materialCode").asText())) { p001 = row; break; }
+    }
+    assertNotNull(p001);
+    ObjectNode changes = JSON.createObjectNode().put("priceTierMinQuantity", "1500").put("priceTierCasePrice", "90.00");
+    ObjectNode tierPatch = JSON.createObjectNode().set("changes", changes);
+    tierPatch.put("deleted", false);
+    HttpResponse<String> tierSaved = send(admin, "PATCH", "/admin/activities/" + activityId + "/imports/" + productTask
+        + "/rows/" + p001.path("id").asLong(), tierPatch, adminCsrf, null);
+    assertEquals(200, tierSaved.statusCode(), tierSaved.body());
+    assertEquals(0, task(productTask).path("errorCount").asInt());
     confirmAndAwait(productTask);
 
     long whitelistTask = upload("WHITELIST", "whitelist-valid.xlsx", whitelistWorkbook());
@@ -181,7 +194,10 @@ class IsolatedApiE2ETest {
     JsonNode products = data(catalog);
     assertEquals(3, products.size());
     for (JsonNode product : products) assertEquals("GENERAL", product.path("customerType").asText());
-    productId = findProduct(products, "P001").path("id").asLong();
+    JsonNode tieredProduct = findProduct(products, "P001");
+    productId = tieredProduct.path("id").asLong();
+    assertEquals(1500, tieredProduct.path("priceTier").path("minQuantity").asLong());
+    assertEquals("90.00", tieredProduct.path("priceTier").path("casePrice").decimalValue().setScale(2).toPlainString());
     productWithoutTonsId = findProduct(products, "P002").path("id").asLong();
     assertTrue(productId > 0);
     assertTrue(productWithoutTonsId > 0);

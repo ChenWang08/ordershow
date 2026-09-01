@@ -2320,6 +2320,10 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Decimal'
             - type: 'null'
+        priceTier:
+          oneOf:
+            - $ref: '#/components/schemas/ProductPriceTier'
+            - type: 'null'
         tonCaseFactor:
           oneOf:
             - $ref: '#/components/schemas/Decimal'
@@ -2340,6 +2344,18 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProductImage'
+    ProductPriceTier:
+      type: object
+      description: 达到起订箱数后，本商品本次订购的全部箱数使用该优惠箱价。
+      required: [minQuantity, casePrice]
+      properties:
+        minQuantity:
+          type: integer
+          format: int64
+          minimum: 2
+          maximum: 999999
+        casePrice:
+          $ref: '#/components/schemas/Decimal'
     SubmitOrderItem:
       type: object
       required: [productId, quantity]
@@ -2435,6 +2451,11 @@ components:
           format: int64
         casePrice:
           $ref: '#/components/schemas/Decimal'
+        appliedTierMinQuantity:
+          type: [integer, 'null']
+          format: int64
+          minimum: 2
+          description: 为空时使用基础价；有值时表示本订单明细命中了对应整批阶梯价。
         lineAmount:
           $ref: '#/components/schemas/Decimal'
         tonCaseFactor:

@@ -412,6 +412,19 @@ CREATE TABLE activity_product (
   CONSTRAINT ck_product_orderable CHECK (is_orderable = FALSE OR (is_visible = TRUE AND case_price IS NOT NULL AND case_price > 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE activity_product_price_tier (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  activity_product_id BIGINT UNSIGNED NOT NULL,
+  min_quantity BIGINT UNSIGNED NOT NULL,
+  case_price DECIMAL(18,4) NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_product_price_tier (activity_product_id),
+  CONSTRAINT fk_product_price_tier_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
+  CONSTRAINT ck_product_price_tier_values CHECK (min_quantity >= 2 AND case_price > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE activity_product_branch_scope (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   activity_product_id BIGINT UNSIGNED NOT NULL,
@@ -499,6 +512,7 @@ CREATE TABLE order_item (
   primary_image_object_key VARCHAR(512) NULL,
   quantity BIGINT UNSIGNED NOT NULL,
   case_price DECIMAL(18,4) NOT NULL,
+  applied_tier_min_quantity BIGINT UNSIGNED NULL,
   line_amount DECIMAL(18,2) NOT NULL,
   ton_case_factor DECIMAL(18,8) NULL,
   line_tons DECIMAL(18,6) NULL,
@@ -509,7 +523,8 @@ CREATE TABLE order_item (
   CONSTRAINT fk_order_item_order FOREIGN KEY (order_id) REFERENCES customer_order (id),
   CONSTRAINT fk_order_item_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
   CONSTRAINT ck_order_item_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING')),
-  CONSTRAINT ck_order_item_values CHECK (quantity > 0 AND case_price > 0 AND line_amount >= 0 AND (ton_case_factor IS NULL OR ton_case_factor > 0) AND (line_tons IS NULL OR line_tons >= 0))
+  CONSTRAINT ck_order_item_values CHECK (quantity > 0 AND case_price > 0 AND line_amount >= 0 AND (ton_case_factor IS NULL OR ton_case_factor > 0) AND (line_tons IS NULL OR line_tons >= 0)),
+  CONSTRAINT ck_order_item_applied_tier CHECK (applied_tier_min_quantity IS NULL OR applied_tier_min_quantity >= 2)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE order_version (
@@ -559,6 +574,7 @@ CREATE TABLE order_version_item (
   primary_image_object_key VARCHAR(512) NULL,
   quantity BIGINT UNSIGNED NOT NULL,
   case_price DECIMAL(18,4) NOT NULL,
+  applied_tier_min_quantity BIGINT UNSIGNED NULL,
   line_amount DECIMAL(18,2) NOT NULL,
   ton_case_factor DECIMAL(18,8) NULL,
   line_tons DECIMAL(18,6) NULL,
@@ -570,7 +586,8 @@ CREATE TABLE order_version_item (
   CONSTRAINT fk_version_item_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
   CONSTRAINT ck_version_item_customer CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
   CONSTRAINT ck_version_item_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING')),
-  CONSTRAINT ck_version_item_values CHECK (quantity > 0 AND case_price > 0 AND line_amount >= 0 AND (ton_case_factor IS NULL OR ton_case_factor > 0) AND (line_tons IS NULL OR line_tons >= 0))
+  CONSTRAINT ck_version_item_values CHECK (quantity > 0 AND case_price > 0 AND line_amount >= 0 AND (ton_case_factor IS NULL OR ton_case_factor > 0) AND (line_tons IS NULL OR line_tons >= 0)),
+  CONSTRAINT ck_order_version_item_applied_tier CHECK (applied_tier_min_quantity IS NULL OR applied_tier_min_quantity >= 2)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE order_operation (

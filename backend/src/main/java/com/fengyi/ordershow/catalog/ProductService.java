@@ -81,6 +81,10 @@ public class ProductService {
     List<String> branchScopes = patch.branchScope() == null ? current.branchScope() : splitBranchScope(patch.branchScope());
     String name = value(patch.materialName(), current.materialName());
     BigDecimal casePrice = patch.casePriceSet() ? patch.casePrice() : current.casePrice();
+    PriceTierView priceTier = patch.priceTierSet()
+        ? validatePriceTier(casePrice, patch.priceTierMinQuantity(), patch.priceTierCasePrice())
+        : validatePriceTier(casePrice, current.priceTier() == null ? null : current.priceTier().minQuantity(),
+            current.priceTier() == null ? null : current.priceTier().casePrice());
     BigDecimal factor = patch.tonCaseFactorSet() ? patch.tonCaseFactor() : current.tonCaseFactor();
     String customerType = value(patch.customerType(), current.customerType());
     String rebateStatus = value(patch.rebateStatus(), current.rebateStatus());
@@ -108,6 +112,7 @@ public class ProductService {
         productId, activityId, expectedVersion);
       if (changed != 1) throw DomainException.conflict("PRODUCT_VERSION_CONFLICT", "商品已被其他页面修改，请刷新后重试");
       replaceBranchScopes(productId, branchScopes);
+      if (patch.priceTierSet()) replacePriceTier(productId, priceTier);
     } catch (DuplicateKeyException exception) {
       throw DomainException.conflict("PRODUCT_EXISTS", "当前商品目录已存在相同物料代码或同名商品");
     }
@@ -131,6 +136,7 @@ public class ProductService {
     if (orderable && (!visible || request.casePrice() == null || request.casePrice().signum() <= 0)) {
       throw DomainException.unprocessable("PRODUCT_NOT_ORDERABLE", "可订商品必须可见且元/箱大于 0");
     }
+    PriceTierView priceTier = validatePriceTier(request.casePrice(), request.priceTierMinQuantity(), request.priceTierCasePrice());
     VersionSource source = currentSource(activityId);
     String code = choose(request.materialCode(), null);
     try {
@@ -151,6 +157,7 @@ public class ProductService {
       Long id = jdbc.queryForObject("SELECT id FROM activity_product WHERE activity_id = ? AND data_version_id = ? AND business_key = ?",
           Long.class, activityId, source.versionId(), businessKey(customerType, rebateStatus, code, name));
       if (id != null) replaceBranchScopes(id, branchScopes);
+      if (id != null) replacePriceTier(id, priceTier);
       return product(activityId, id);
     } catch (DuplicateKeyException exception) {
       throw DomainException.conflict("PRODUCT_EXISTS", "当前商品目录已存在相同物料代码或同名商品");
@@ -613,10 +620,14 @@ public class ProductService {
         SELECT branch_name FROM activity_product_branch_scope
         WHERE activity_product_id = ? ORDER BY id
         """, (rs, rowNum) -> rs.getString(1), product.id());
+    PriceTierView priceTier = jdbc.query("""
+        SELECT min_quantity, case_price FROM activity_product_price_tier WHERE activity_product_id = ?
+        """, (rs, rowNum) -> new PriceTierView(rs.getLong(1), rs.getBigDecimal(2)), product.id())
+        .stream().findFirst().orElse(null);
     return new ProductView(product.id(), product.materialCode(), product.materialName(), product.categoryName(), product.productLine(),
         product.brandName(), product.varietyName(), product.specification(), product.casePack(), product.bottlePrice(), product.casePrice(),
         product.tonCaseFactor(), product.customerType(), product.rebateStatus(), product.giftBox(), product.visible(), product.orderable(),
-        product.dataStatus(), product.sortNo(), product.version(), images, branchScope);
+        product.dataStatus(), product.sortNo(), product.version(), images, branchScope, priceTier);
   }
 
   private ProductView map(ResultSet rs, int rowNum) throws SQLException {
@@ -625,7 +636,7 @@ public class ProductService {
         rs.getString("specification"), rs.getString("case_pack"), rs.getBigDecimal("bottle_price"), rs.getBigDecimal("case_price"),
         rs.getBigDecimal("ton_case_factor"), rs.getString("customer_type"), rs.getString("rebate_status"),
         rs.getBoolean("is_gift_box"), rs.getBoolean("is_visible"), rs.getBoolean("is_orderable"), rs.getString("data_status"),
-        rs.getInt("sort_no"), rs.getInt("lock_version"), List.of(), List.of());
+        rs.getInt("sort_no"), rs.getInt("lock_version"), List.of(), List.of(), null);
   }
 
   private void replaceBranchScopes(long productId, List<String> branchScopes) {
@@ -636,6 +647,27 @@ public class ProductService {
           VALUES (?, ?, ?)
           """, productId, branch, normalize(branch));
     }
+  }
+
+  private void replacePriceTier(long productId, PriceTierView priceTier) {
+    jdbc.update("DELETE FROM activity_product_price_tier WHERE activity_product_id = ?", productId);
+    if (priceTier != null) jdbc.update("""
+        INSERT INTO activity_product_price_tier(activity_product_id, min_quantity, case_price) VALUES (?, ?, ?)
+        """, productId, priceTier.minQuantity(), priceTier.casePrice());
+  }
+
+  private static PriceTierView validatePriceTier(BigDecimal basePrice, Long minQuantity, BigDecimal tierPrice) {
+    if (minQuantity == null && tierPrice == null) return null;
+    if (minQuantity == null || tierPrice == null) {
+      throw DomainException.unprocessable("PRODUCT_PRICE_TIER_INCOMPLETE", "请同时填写阶梯起订箱数和阶梯箱价");
+    }
+    if (minQuantity < 2 || minQuantity > 999_999) {
+      throw DomainException.unprocessable("PRODUCT_PRICE_TIER_QUANTITY_INVALID", "阶梯起订箱数必须为 2 至 999999 的整数");
+    }
+    if (basePrice == null || basePrice.signum() <= 0 || tierPrice.signum() <= 0 || tierPrice.compareTo(basePrice) >= 0) {
+      throw DomainException.unprocessable("PRODUCT_PRICE_TIER_PRICE_INVALID", "阶梯箱价必须大于 0 且低于基础箱价");
+    }
+    return new PriceTierView(minQuantity, tierPrice);
   }
 
   private static byte[] readLimited(ZipInputStream input, int max) throws Exception {
@@ -686,16 +718,18 @@ public class ProductService {
   public record ProductView(long id, String materialCode, String materialName, String categoryName, String productLine,
       String brandName, String varietyName, String specification, String casePack, BigDecimal bottlePrice, BigDecimal casePrice,
       BigDecimal tonCaseFactor, String customerType, String rebateStatus, boolean giftBox, boolean visible, boolean orderable,
-      String dataStatus, int sortNo, int version, List<ImageView> images, List<String> branchScope) {}
+      String dataStatus, int sortNo, int version, List<ImageView> images, List<String> branchScope, PriceTierView priceTier) {}
+  public record PriceTierView(long minQuantity, BigDecimal casePrice) {}
   public record ImageView(long id, long fileId, String url, boolean primary, int sortNo, String sourceType, String matchStatus) {}
   public record ProductPatch(String customerType, String rebateStatus, String materialCode, String materialName, String categoryName, String productLine, String brandName,
       String varietyName, String specification, String casePack, BigDecimal bottlePrice, boolean bottlePriceSet,
       BigDecimal casePrice, boolean casePriceSet, BigDecimal tonCaseFactor, boolean tonCaseFactorSet,
-      Boolean giftBox, Boolean visible, Boolean orderable, String branchScope, String reason) {}
+      Boolean giftBox, Boolean visible, Boolean orderable, String branchScope, String reason,
+      Long priceTierMinQuantity, BigDecimal priceTierCasePrice, boolean priceTierSet) {}
   public record ProductCreate(String customerType, String rebateStatus, String materialCode, String materialName,
       String categoryName, String productLine, String brandName, String varietyName, String specification, String casePack,
       BigDecimal bottlePrice, BigDecimal casePrice, BigDecimal tonCaseFactor, Boolean giftBox, Boolean visible, Boolean orderable,
-      String branchScope, String reason) {}
+      String branchScope, String reason, Long priceTierMinQuantity, BigDecimal priceTierCasePrice) {}
   public record ZipMatch(String filename, String materialName, Long productId, String status) {}
   public record ZipPreview(int imageCount, int matchedCount, int ambiguousCount, int unmatchedCount, List<ZipMatch> matches, boolean committed) {}
   public record ZipDecision(String entryPath, String status, List<String> targetMaterialCodes) {}

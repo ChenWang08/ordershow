@@ -49,6 +49,8 @@ export type ProductImportRow = {
   casePack: string;
   unitPrice: string;
   casePrice: string;
+  priceTierMinQuantity: string;
+  priceTierCasePrice: string;
   conversion: string;
   gift: "是" | "否";
   branchScope: string;
@@ -165,7 +167,10 @@ export function bindProductStaging(rows: ProductImportRow[], staging: ImportStag
     if (!server) return row;
     const status: ProductImportRow["status"] = server.validationStatus === "BLOCKED" ? "待核对"
       : server.validationStatus === "WARNING" ? "待完善" : "有效";
-    return { ...row, serverRowId: server.id, status };
+    const edited = server.editedData ?? {};
+    return { ...row, serverRowId: server.id, status,
+      priceTierMinQuantity: String(edited.priceTierMinQuantity ?? row.priceTierMinQuantity ?? ""),
+      priceTierCasePrice: String(edited.priceTierCasePrice ?? row.priceTierCasePrice ?? "") };
   }).filter((row) => !bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber))?.deleted);
 }
 

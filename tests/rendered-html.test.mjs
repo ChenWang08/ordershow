@@ -2,6 +2,46 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
+const frontendSourceFiles = [
+  "../app/prototype.tsx",
+  "../app/features/h5/H5Prototype.tsx",
+  "../app/features/screens/ScreenBoards.tsx",
+  "../app/features/lottery/Lottery.tsx",
+  "../app/features/admin/AdminPrototype.tsx",
+  "../app/features/admin/AdminComponents.tsx",
+  "../app/features/admin/admin-utils.ts",
+  "../app/features/shared/utils.ts",
+];
+
+const apiSourceFiles = [
+  "../app/api.ts",
+  "../app/services/api/context.ts",
+  "../app/services/api/client.ts",
+  "../app/services/api/types.ts",
+  "../app/services/api/activity.ts",
+  "../app/services/api/h5-orders.ts",
+  "../app/services/api/auth.ts",
+  "../app/services/api/imports.ts",
+  "../app/services/api/orders.ts",
+  "../app/services/api/dashboard.ts",
+  "../app/services/api/lottery.ts",
+  "../app/services/api/products.ts",
+  "../app/services/api/customers.ts",
+  "../app/services/api/audit.ts",
+];
+
+async function readSources(paths) {
+  return (await Promise.all(paths.map((path) => readFile(new URL(path, import.meta.url), "utf8")))).join("\n");
+}
+
+function readFrontendSource() {
+  return readSources(frontendSourceFiles);
+}
+
+function readApiSource() {
+  return readSources(apiSourceFiles);
+}
+
 async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
@@ -47,7 +87,7 @@ test("server-renders the ordering system shell", async () => {
 test("keeps production assets and source wired", async () => {
   const [page, prototype, layout, css, packageJson] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFrontendSource(),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
@@ -74,10 +114,10 @@ test("keeps production assets and source wired", async () => {
 
 test("keeps product imports as independent full-replacement batches", async () => {
   const [prototype, domain, productImages, api, importService, importController, productService] = await Promise.all([
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFrontendSource(),
     readFile(new URL("../app/domain/import-domain.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/domain/product-images.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readApiSource(),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportService.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportController.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/catalog/ProductService.java", import.meta.url), "utf8"),
@@ -119,9 +159,31 @@ test("keeps product imports as independent full-replacement batches", async () =
   assert.doesNotMatch(importService, /inheritProductImages/);
 });
 
+test("supports manually configured whole-line volume pricing", async () => {
+  const [frontend, importDomain, importService, workbookProcessor, orderService, migration] = await Promise.all([
+    readFrontendSource(),
+    readFile(new URL("../app/domain/import-domain.ts", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportWorkbookProcessor.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/order/OrderService.java", import.meta.url), "utf8"),
+    readFile(new URL("../db/migrations/V013__product_volume_price_tier.sql", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(importDomain, /priceTierMinQuantity: string/);
+  assert.match(frontend, /设置满箱整批优惠/);
+  assert.match(frontend, /达到门槛后，本商品全部箱数按优惠箱价计算/);
+  assert.match(frontend, /function effectiveCasePrice/);
+  assert.match(frontend, /quantity >= product\.tierMinQuantity/);
+  assert.match(importService, /activity_product_price_tier/);
+  assert.match(workbookProcessor, /PRODUCT_PRICE_TIER_INVALID/);
+  assert.match(orderService, /effectiveCasePrice/);
+  assert.match(orderService, /applied_tier_min_quantity/);
+  assert.match(migration, /CREATE TABLE activity_product_price_tier/);
+});
+
 test("keeps whitelist imports status-only with filtering", async () => {
   const [prototype, domain] = await Promise.all([
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFrontendSource(),
     readFile(new URL("../app/domain/import-domain.ts", import.meta.url), "utf8"),
   ]);
 
@@ -134,8 +196,8 @@ test("keeps whitelist imports status-only with filtering", async () => {
 
 test("keeps orders admin-read-only and wires the formal runtime APIs", async () => {
   const [api, prototype, orderController, openapi] = await Promise.all([
-    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readApiSource(),
+    readFrontendSource(),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/order/OrderController.java", import.meta.url), "utf8"),
     readFile(new URL("../docs/design/openapi/order-show-api.yaml", import.meta.url), "utf8"),
   ]);
@@ -154,7 +216,7 @@ test("keeps orders admin-read-only and wires the formal runtime APIs", async () 
 
 test("keeps the hourly order trend inside the activity window and timezone-safe", async () => {
   const [prototype, dashboardService] = await Promise.all([
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFrontendSource(),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/dashboard/DashboardService.java", import.meta.url), "utf8"),
   ]);
 
@@ -169,8 +231,8 @@ test("keeps the hourly order trend inside the activity window and timezone-safe"
 
 test("keeps an H5 draft only when the verified customer is unchanged", async () => {
   const [prototype, api, controller, service, migration] = await Promise.all([
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFrontendSource(),
+    readApiSource(),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/order/OrderController.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/order/OrderDraftService.java", import.meta.url), "utf8"),
     readFile(new URL("../db/migrations/V010__h5_order_draft.sql", import.meta.url), "utf8"),
@@ -193,8 +255,8 @@ test("keeps an H5 draft only when the verified customer is unchanged", async () 
 
 test("supports one admin entry, current H5 resolution, paging, and fulfillment exports", async () => {
   const [api, prototype, routedPrototype, styles, orders, orderService, authService, activityService, activityController, activityRoute, h5Route] = await Promise.all([
-    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readApiSource(),
+    readFrontendSource(),
     readFile(new URL("../app/routed-prototype.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../app/components/orders/OrderManagement.tsx", import.meta.url), "utf8"),
@@ -237,8 +299,8 @@ test("supports one admin entry, current H5 resolution, paging, and fulfillment e
 
 test("uses published, time-driven activity lifecycle controls", async () => {
   const [prototype, api, activityService, activityController] = await Promise.all([
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFrontendSource(),
+    readApiSource(),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/activity/ActivityService.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/activity/ActivityController.java", import.meta.url), "utf8"),
   ]);
@@ -269,8 +331,8 @@ test("uses published, time-driven activity lifecycle controls", async () => {
 
 test("cancels superseded import previews and only blocks publication for newer pending work", async () => {
   const [prototype, api, activityService, importService, cleanupMigration] = await Promise.all([
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFrontendSource(),
+    readApiSource(),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/activity/ActivityService.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportService.java", import.meta.url), "utf8"),
     readFile(new URL("../db/migrations/V009__cancel_superseded_import_previews.sql", import.meta.url), "utf8"),
@@ -288,8 +350,8 @@ test("cancels superseded import previews and only blocks publication for newer p
 
 test("uses server-calculated lottery candidates and ordered, shortage-safe draws", async () => {
   const [prototype, api, service, controller] = await Promise.all([
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readFrontendSource(),
+    readApiSource(),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/lottery/LotteryService.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/lottery/LotteryController.java", import.meta.url), "utf8"),
   ]);
@@ -307,9 +369,9 @@ test("uses server-calculated lottery candidates and ordered, shortage-safe draws
 
 test("uses live overview data, full admin phones, Chinese regions, and linked attendance candidates", async () => {
   const [prototype, importDomain, api, importController, importService, migration, customerService] = await Promise.all([
-    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFrontendSource(),
     readFile(new URL("../app/domain/import-domain.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api.ts", import.meta.url), "utf8"),
+    readApiSource(),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportController.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportService.java", import.meta.url), "utf8"),
     readFile(new URL("../db/migrations/V007__attendance_preview_whitelist_version.sql", import.meta.url), "utf8"),

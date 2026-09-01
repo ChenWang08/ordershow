@@ -114,6 +114,10 @@ final class ImportWorkbookProcessor {
             validation = "BLOCKED"; diffType = "POSSIBLE_DUPLICATE"; blocking++;
             issue(taskId, "BLOCKING", "PRODUCT_NAME_POSSIBLE_DUPLICATE", row.sheet(), row.rowNo(), "materialName",
                 text(row.data().get("materialName")), "商品名称相同但物料代码不同；请确认后保留或删除");
+          } else if (priceTierError(row.data()) != null) {
+            validation = "BLOCKED"; blocking++;
+            issue(taskId, "BLOCKING", "PRODUCT_PRICE_TIER_INVALID", row.sheet(), row.rowNo(), "priceTier",
+                null, priceTierError(row.data()));
           } else if (optionalProductMissing(row.data())) {
             validation = "WARNING"; warnings++;
             issue(taskId, "WARNING", "PRODUCT_INCOMPLETE", row.sheet(), row.rowNo(), null, null,
@@ -447,6 +451,28 @@ final class ImportWorkbookProcessor {
   private static boolean optionalProductMissing(Map<String, Object> data) {
     return List.of("materialCode", "productLine", "specification", "casePack", "casePrice", "tonCaseFactor")
         .stream().anyMatch(key -> text(data.get(key)).isBlank());
+  }
+
+  private static String priceTierError(Map<String, Object> data) {
+    String quantityText = text(data.get("priceTierMinQuantity"));
+    String priceText = text(data.get("priceTierCasePrice"));
+    if (quantityText.isBlank() && priceText.isBlank()) return null;
+    if (quantityText.isBlank() || priceText.isBlank()) return "请同时填写阶梯起订箱数和阶梯箱价";
+    try {
+      BigDecimal quantity = new BigDecimal(quantityText);
+      BigDecimal tierPrice = new BigDecimal(priceText);
+      BigDecimal basePrice = new BigDecimal(text(data.get("casePrice")));
+      if (quantity.stripTrailingZeros().scale() > 0 || quantity.compareTo(BigDecimal.valueOf(2)) < 0
+          || quantity.compareTo(BigDecimal.valueOf(999_999)) > 0) {
+        return "阶梯起订箱数必须为 2 至 999999 的整数";
+      }
+      if (tierPrice.signum() <= 0 || basePrice.signum() <= 0 || tierPrice.compareTo(basePrice) >= 0) {
+        return "阶梯箱价必须大于 0 且低于基础箱价";
+      }
+      return null;
+    } catch (NumberFormatException exception) {
+      return "阶梯起订箱数和阶梯箱价格式不正确";
+    }
   }
 
   private static String productKey(Map<String, Object> data) {

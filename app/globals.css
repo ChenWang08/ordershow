@@ -150,12 +150,14 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .product-action { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; margin-top: auto; }
 .product-action strong { color: #c02724; font-size: 14px; white-space: nowrap; }
 .product-action strong small { margin-left: 2px; font-size: 8px; font-weight: 400; }
+.product-price-block { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.product-price-block > small { color: #b06d32; font-size: 7px; line-height: 1.3; }
 .stepper { display: flex; align-items: center; overflow: hidden; border: 1px solid #d8c9bf; border-radius: 7px; background: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,.7); }
 .stepper button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: #ad211f; border: 0; background: #faf6f2; font-size: 15px; }
 .stepper input { width: 37px; height: 28px; padding: 0 2px; color: #3c2a24; border: 0; border-right: 1px solid #e2d7d0; border-left: 1px solid #e2d7d0; outline: 0; background: #fff; text-align: center; font-size: 11px; font-weight: 800; }
 .stepper input:focus { color: #a91f1d; background: #fff4f1; box-shadow: inset 0 0 0 2px #c83a34; }
 .stepper input::-webkit-outer-spin-button, .stepper input::-webkit-inner-spin-button { margin: 0; appearance: none; }
 .stepper input[type="number"] { appearance: textfield; }
+.drawer-form-grid .price-tier-toggle > span:nth-child(2) { display: flex; align-items: center; gap: 7px; min-height: 36px; color: #5f4940; font-size: 10px; }.drawer-form-grid .price-tier-toggle input[type="checkbox"] { width: auto; margin: 0; accent-color: #a92320; }
 .order-bar { position: relative; z-index: 20; display: grid; flex: 0 0 auto; grid-template-columns: 1fr 118px; gap: 8px; margin-top: 0; padding: 10px 13px 15px; border-top: 1px solid #eadfd6; background: #fffdf9; box-shadow: 0 -8px 24px rgba(55,32,18,.08); }
 .cart-summary { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; padding: 0; border: 0; background: transparent; text-align: left; }
 .cart-summary:disabled { cursor: default; opacity: 1; }
