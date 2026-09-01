@@ -13,7 +13,7 @@ import {
 } from "./api";
 import { Prototype } from "./prototype";
 
-type RoutedSurface = "h5" | "ranking" | "report" | "lottery" | "admin";
+type RoutedSurface = "h5" | "dashboard" | "ranking" | "report" | "lottery" | "admin";
 
 type RoutedPrototypeProps = {
   activityCode?: string;

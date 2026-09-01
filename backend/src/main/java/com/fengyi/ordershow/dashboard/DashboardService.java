@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fengyi.ordershow.activity.ActivityFinishedEvent;
 import com.fengyi.ordershow.activity.ActivityService;
 import java.math.BigDecimal;
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -37,6 +38,10 @@ public class DashboardService {
   }
 
   private Dashboard liveRanking(ActivityService.ActivityView activity, String customerType, String regionCode) {
+    return liveRanking(activity, customerType, regionCode, 0);
+  }
+
+  private Dashboard liveRanking(ActivityService.ActivityView activity, String customerType, String regionCode, int minimumTopN) {
     Map<String, Object> totals = new LinkedHashMap<>(jdbc.queryForMap("""
         SELECT COUNT(*) order_count, COALESCE(SUM(total_quantity), 0) total_quantity,
           COALESCE(SUM(total_amount), 0) total_amount,
@@ -53,6 +58,15 @@ public class DashboardService {
           AND (? IS NULL OR ? = '' OR o.region_code = ?)
         """, BigDecimal.class, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode);
     totals.put("total_tons", totalTons);
+    totals.put("dealer_count", totals.get("order_count"));
+    Long skuCount = jdbc.queryForObject("""
+        SELECT COUNT(DISTINCT i.activity_product_id)
+        FROM order_item i JOIN customer_order o ON o.id = i.order_id
+        WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
+          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
+          AND (? IS NULL OR ? = '' OR o.region_code = ?)
+        """, Long.class, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode);
+    totals.put("sku_count", skuCount == null ? 0L : skuCount);
     List<RankRow> companies = jdbc.query("""
         SELECT o.id, o.dealer_full_name_snapshot name, o.branch_name_snapshot branch, o.total_amount amount,
           o.total_quantity quantity, item_tons.tons
@@ -64,7 +78,7 @@ public class DashboardService {
         ORDER BY o.total_amount DESC, o.last_submitted_at, o.id LIMIT ?
         """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), rs.getString("branch"),
         rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
-        customerType, customerType, customerType, regionCode, regionCode, regionCode, activity.companyRankingTopN());
+        customerType, customerType, customerType, regionCode, regionCode, regionCode, Math.max(activity.companyRankingTopN(), minimumTopN));
     List<RankRow> branches = jdbc.query("""
         SELECT o.branch_name_snapshot name, SUM(o.total_amount) amount, SUM(o.total_quantity) quantity,
           SUM(item_tons.tons) tons
@@ -76,7 +90,7 @@ public class DashboardService {
         GROUP BY o.branch_name_snapshot ORDER BY amount DESC, name LIMIT ?
         """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), null,
         rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
-        customerType, customerType, customerType, regionCode, regionCode, regionCode, activity.branchRankingTopN());
+        customerType, customerType, customerType, regionCode, regionCode, regionCode, Math.max(activity.branchRankingTopN(), minimumTopN));
     return new Dashboard(activity.id(), activity.name(), activity.status(), totals, companies, branches,
         productLines(activity.id(), customerType, regionCode), latestOrders(activity.id(), customerType, regionCode),
         dashboardVersion(activity.id()), Instant.now());
@@ -88,22 +102,29 @@ public class DashboardService {
       Report frozen = snapshot("REPORT", activity.id(), Report.class, () -> liveReport(activity, "FINAL"));
       return new Report(reportCode, frozen.dashboard(), frozen.customerTypes(), frozen.regions(),
           frozen.generalProductLines(), frozen.specialProductLines(), frozen.giftCustomerTypes(),
-          frozen.topGeneral(), frozen.topSpecial(), frozen.trend());
+          frozen.topGeneral(), frozen.topSpecial(), frozen.trend(), frozen.regionProductLines());
     }
     return liveReport(activity, reportCode);
   }
 
   private Report liveReport(ActivityService.ActivityView activity, String reportCode) {
-    Dashboard dashboard = liveRanking(activity, null, null);
+    Dashboard dashboard = liveRanking(activity, null, null, 15);
     List<CustomerTypeTotal> types = jdbc.query("""
         SELECT customer_type, COUNT(*) order_count, SUM(total_amount) amount, SUM(total_quantity) quantity
         FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED' GROUP BY customer_type ORDER BY customer_type
         """, (rs, rowNum) -> new CustomerTypeTotal(rs.getString(1), rs.getLong(2), rs.getBigDecimal(3), rs.getLong(4)), dashboard.activityId());
-    List<TrendPoint> trend = jdbc.query("""
-        SELECT DATE_FORMAT(last_submitted_at, '%Y-%m-%d %H:00:00') bucket, SUM(total_amount) amount, COUNT(*) orders
-        FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED'
+    Instant trendStart = activity.actualStartedAt() == null ? activity.startsAt() : activity.actualStartedAt();
+    Instant trendEnd = activity.closedAt() == null ? dashboard.generatedAt() : activity.closedAt();
+    if (trendEnd.isAfter(activity.endsAt())) trendEnd = activity.endsAt();
+    List<TrendPoint> trend = trendEnd.isBefore(trendStart) ? List.of() : jdbc.query("""
+        SELECT CONCAT(DATE_FORMAT(last_submitted_at, '%Y-%m-%dT%H:00:00'), 'Z') bucket,
+          SUM(total_amount) amount, COUNT(*) orders
+        FROM customer_order
+        WHERE activity_id = ? AND status = 'SUBMITTED'
+          AND last_submitted_at >= ? AND last_submitted_at <= ?
         GROUP BY bucket ORDER BY bucket
-        """, (rs, rowNum) -> new TrendPoint(rs.getString(1), rs.getBigDecimal(2), rs.getLong(3)), dashboard.activityId());
+        """, (rs, rowNum) -> new TrendPoint(rs.getString(1), rs.getBigDecimal(2), rs.getLong(3)),
+        dashboard.activityId(), Timestamp.from(trendStart), Timestamp.from(trendEnd));
     List<RegionTotal> regions = jdbc.query("""
         SELECT COALESCE(region_code, 'UNASSIGNED'), SUM(total_amount), COUNT(*)
         FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED' AND customer_type = 'GENERAL'
@@ -115,9 +136,18 @@ public class DashboardService {
         WHERE o.activity_id = ? AND o.status = 'SUBMITTED' AND i.is_gift_box = TRUE
         GROUP BY o.customer_type ORDER BY o.customer_type
         """, (rs, rowNum) -> new CustomerTypeTotal(rs.getString(1), rs.getLong(2), rs.getBigDecimal(3), rs.getLong(4)), dashboard.activityId());
+    List<RegionProductLineTotal> regionProductLines = jdbc.query("""
+        SELECT COALESCE(o.region_code, 'UNASSIGNED'), COALESCE(i.product_line, '其他'),
+          SUM(i.line_amount), SUM(i.quantity)
+        FROM order_item i JOIN customer_order o ON o.id = i.order_id
+        WHERE o.activity_id = ? AND o.status = 'SUBMITTED' AND o.customer_type = 'GENERAL'
+        GROUP BY o.region_code, i.product_line
+        ORDER BY o.region_code, SUM(i.line_amount) DESC, i.product_line
+        """, (rs, rowNum) -> new RegionProductLineTotal(rs.getString(1), rs.getString(2),
+        rs.getBigDecimal(3), rs.getLong(4)), dashboard.activityId());
     return new Report(reportCode, dashboard, types, regions, productLines(dashboard.activityId(), "GENERAL", null),
         productLines(dashboard.activityId(), "SPECIAL", null), giftTypes, topCustomers(dashboard.activityId(), "GENERAL"),
-        topCustomers(dashboard.activityId(), "SPECIAL"), trend);
+        topCustomers(dashboard.activityId(), "SPECIAL"), trend, regionProductLines);
   }
 
   @EventListener
@@ -209,11 +239,13 @@ public class DashboardService {
   public record CustomerTypeTotal(String customerType, long orderCount, BigDecimal amount, long quantity) {}
   public record RegionTotal(String regionCode, BigDecimal amount, long orderCount) {}
   public record TrendPoint(String bucket, BigDecimal amount, long orders) {}
+  public record RegionProductLineTotal(String regionCode, String productLine, BigDecimal amount, long quantity) {}
   public record Dashboard(long activityId, String activityName, String status, Map<String, Object> totals,
                           List<RankRow> companies, List<RankRow> branches, List<ProductLineTotal> productLines,
                           List<LatestOrder> latestOrders, String version, Instant generatedAt) {}
   public record Report(String reportCode, Dashboard dashboard, List<CustomerTypeTotal> customerTypes,
                        List<RegionTotal> regions, List<ProductLineTotal> generalProductLines,
                        List<ProductLineTotal> specialProductLines, List<CustomerTypeTotal> giftCustomerTypes,
-                       List<RankRow> topGeneral, List<RankRow> topSpecial, List<TrendPoint> trend) {}
+                       List<RankRow> topGeneral, List<RankRow> topSpecial, List<TrendPoint> trend,
+                       List<RegionProductLineTotal> regionProductLines) {}
 }

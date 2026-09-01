@@ -1885,6 +1885,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardResponse'
+  /screen/activities/{activityCode}/dashboard:
+    get:
+      operationId: getOrderDashboard
+      tags: [Dashboard]
+      summary: 订单综合看板快照
+      security:
+        - screenToken: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      responses:
+        '200':
+          description: 订单总览、渠道产线对比、综合渠道片区产线明细、排行和小时趋势
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResponse'
   /screen/activities/{activityCode}/reports/{reportCode}:
     get:
       operationId: getTopicReport

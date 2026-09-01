@@ -31,6 +31,11 @@ public class DashboardController {
     return ApiResponse.of(dashboards.ranking(activityCode, customerType, regionCode), TraceFilter.id(request));
   }
 
+  @GetMapping("/dashboard")
+  ApiResponse<DashboardService.Report> dashboard(@PathVariable String activityCode, HttpServletRequest request) {
+    return ApiResponse.of(dashboards.report(activityCode, "ORDER_DASHBOARD"), TraceFilter.id(request));
+  }
+
   @GetMapping("/reports/{reportCode}")
   ApiResponse<DashboardService.Report> report(@PathVariable String activityCode, @PathVariable String reportCode, HttpServletRequest request) {
     return ApiResponse.of(dashboards.report(activityCode, reportCode), TraceFilter.id(request));

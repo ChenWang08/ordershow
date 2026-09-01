@@ -144,7 +144,7 @@ export type AdminOrderSummary = Omit<RuntimeOrder, "items" | "versions" | "opera
 
 export type DashboardData = {
   activityId: number; activityName: string; status: string;
-  totals: { order_count?: number; total_quantity?: number; total_amount?: number; total_tons?: number; branch_count?: number };
+  totals: { order_count?: number; dealer_count?: number; total_quantity?: number; total_amount?: number; total_tons?: number; branch_count?: number; sku_count?: number };
   companies: Array<{ rank: number; name: string; branch?: string; amount: number; quantity: number; tons?: number }>;
   branches: Array<{ rank: number; name: string; branch?: string; amount: number; quantity: number; tons?: number }>;
   productLines: Array<{ productLine: string; amount: number; quantity: number }>;
@@ -162,6 +162,7 @@ export type DashboardReport = {
   topGeneral: Array<{ rank: number; name: string; branch?: string; amount: number; quantity: number; tons?: number }>;
   topSpecial: Array<{ rank: number; name: string; branch?: string; amount: number; quantity: number; tons?: number }>;
   trend: Array<{ bucket: string; amount: number; orders: number }>;
+  regionProductLines: Array<{ regionCode: string; productLine: string; amount: number; quantity: number }>;
 };
 
 export type LotteryRoundApi = {
@@ -418,6 +419,7 @@ export async function loadDashboard(filters: { customerType?: string; regionCode
   if (filters.regionCode) query.set("regionCode", filters.regionCode);
   return (await api<Envelope<DashboardData>>(`/screen/activities/${activeActivityPath()}/ranking?${query.toString()}`)).data;
 }
+export async function loadOrderDashboard() { return (await api<Envelope<DashboardReport>>(`/screen/activities/${activeActivityPath()}/dashboard`)).data; }
 export async function loadDashboardReport(reportCode: string) { return (await api<Envelope<DashboardReport>>(`/screen/activities/${activeActivityPath()}/reports/${encodeURIComponent(reportCode)}`)).data; }
 
 export async function loadLotteryRules(activityId: number) { return (await api<Envelope<LotteryRuleApi[]>>(`/admin/activities/${activityId}/lottery/rules`)).data; }

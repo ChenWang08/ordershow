@@ -52,6 +52,7 @@ import {
   loadProductImageReviews,
   loadAuditLogs,
   loadDashboard,
+  loadOrderDashboard,
   loadDashboardReport,
   loadImportRows,
   loadAttendanceMatchPreview,
@@ -128,7 +129,7 @@ import {
   synchronizeProductImageAssetStatuses,
 } from "./domain/product-images";
 
-type Surface = "h5" | "ranking" | "report" | "lottery" | "admin";
+type Surface = "h5" | "dashboard" | "ranking" | "report" | "lottery" | "admin";
 type ActivityStatus = "draft" | "scheduled" | "running" | "closed" | "finished";
 type H5Step = "channel" | "region" | "verify" | "order" | "confirm" | "success" | "submitted";
 type H5OrderStatus = "none" | "submitted" | "withdrawn";
@@ -1278,6 +1279,209 @@ function RankingBoard({ activity }: { activity: RuntimeActivity | null }) {
       </div>
     </section>
   );
+}
+
+function dashboardCompactAmount(value: number) {
+  if (value >= 100000000) return `${(value / 100000000).toFixed(2)}亿`;
+  if (value >= 10000) return `${(value / 10000).toFixed(1)}万`;
+  return value.toLocaleString("zh-CN", { maximumFractionDigits: 0 });
+}
+
+type DashboardBarRow = { name: string; amount: number; note?: string; color?: string };
+
+const dashboardChartPalette = [
+  "#f3c900", "#a85d16", "#ed7d22", "#25ad77", "#e74c3c", "#8e55b2", "#3395ca", "#e59b18", "#d94f87", "#5968d8",
+  "#14a6a6", "#70ad24", "#d66b52", "#6e4bb5", "#1688b8", "#c18a12", "#bf3f63", "#3c9b68", "#7b6b3a", "#446fca",
+];
+const dashboardRegionPalette = ["#f3a211", "#ed5046", "#3495ca", "#8e55b2", "#24b89b", "#a85d16"];
+
+function dashboardColorFor(label: string, palette = dashboardChartPalette) {
+  let hash = 0;
+  for (const character of label) hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
+  return palette[Math.abs(hash) % palette.length];
+}
+
+function DashboardBars({ rows, color = "#2f96cc" }: { rows: DashboardBarRow[]; color?: string }) {
+  const max = Math.max(...rows.map((row) => row.amount), 1);
+  return <div className="order-dashboard-bars">{rows.map((row, index) => <div className="order-dashboard-bar" key={`${row.name}-${index}`}>
+    <span>{row.name}</span><div><i style={{ width: row.amount <= 0 ? "0%" : `${Math.max(2, row.amount / max * 100)}%`, background: row.color ?? color }} /></div><b>{dashboardCompactAmount(row.amount)}</b>{row.note && <small>{row.note}</small>}
+  </div>)}</div>;
+}
+
+function dashboardTrendTimestamp(bucket: string) {
+  const normalized = bucket.includes("T") ? bucket : bucket.replace(" ", "T");
+  return new Date(/[zZ]|[+-]\d\d:\d\d$/.test(normalized) ? normalized : `${normalized}Z`).getTime();
+}
+
+function dashboardHourlyTrend(rows: DashboardReport["trend"], activity: RuntimeActivity | null, generatedAt?: string) {
+  if (!activity) return [];
+  const hour = 60 * 60 * 1000;
+  const values = new Map(rows.map((row) => [Math.floor(dashboardTrendTimestamp(row.bucket) / hour) * hour, row]));
+  const activityStart = new Date(activity.actualStartedAt ?? activity.startsAt).getTime();
+  const liveEnd = generatedAt ? new Date(generatedAt).getTime() : Date.now();
+  const activityEnd = new Date(activity.closedAt ?? activity.endsAt).getTime();
+  const start = Math.floor(activityStart / hour) * hour;
+  const end = Math.floor(Math.min(liveEnd, activityEnd) / hour) * hour;
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return [];
+  const result: DashboardReport["trend"] = [];
+  for (let time = start; time <= end; time += hour) {
+    const existing = values.get(time);
+    result.push(existing ?? { bucket: new Date(time).toISOString(), amount: 0, orders: 0 });
+  }
+  return result;
+}
+
+function dashboardSmoothPath(points: Array<{ x: number; y: number }>) {
+  if (points.length === 0) return "M 36 112 L 98 112";
+  if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
+  const slopes = points.slice(0, -1).map((point, index) => (points[index + 1].y - point.y) / (points[index + 1].x - point.x));
+  const tangents = points.map((_, index) => index === 0 ? slopes[0] : index === points.length - 1 ? slopes[slopes.length - 1] : (slopes[index - 1] + slopes[index]) / 2);
+  slopes.forEach((slope, index) => {
+    if (slope === 0) { tangents[index] = 0; tangents[index + 1] = 0; return; }
+    const firstRatio = tangents[index] / slope;
+    const secondRatio = tangents[index + 1] / slope;
+    if (firstRatio < 0 || secondRatio < 0) { tangents[index] = 0; tangents[index + 1] = 0; return; }
+    const magnitude = firstRatio * firstRatio + secondRatio * secondRatio;
+    if (magnitude > 9) {
+      const scale = 3 / Math.sqrt(magnitude);
+      tangents[index] = scale * firstRatio * slope;
+      tangents[index + 1] = scale * secondRatio * slope;
+    }
+  });
+  let path = `M ${points[0].x} ${points[0].y}`;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const current = points[index];
+    const next = points[index + 1];
+    const distance = next.x - current.x;
+    path += ` C ${current.x + distance / 3} ${current.y + tangents[index] * distance / 3}, ${next.x - distance / 3} ${next.y - tangents[index + 1] * distance / 3}, ${next.x} ${next.y}`;
+  }
+  return path;
+}
+
+type DashboardRankingRow = { rank: number; name: string; branch?: string; amount: number; quantity: number };
+
+function DashboardTopRanking({ rows, type }: { rows: DashboardRankingRow[]; type: "branch" | "dealer" }) {
+  const max = Math.max(...rows.map((row) => Number(row.amount)), 1);
+  return <div className="order-dashboard-top-ranking">{rows.map((row, index) => {
+    const accent = dashboardChartPalette[index % dashboardChartPalette.length];
+    return <div className="order-dashboard-ranking-row" key={`${row.rank}-${row.name}`}>
+      <span>{row.rank}</span><p><b>{row.name}</b>{type === "dealer" && <small>{row.branch || "未分公司"}</small>}</p><strong>{(Number(row.amount) / 10000).toLocaleString("zh-CN", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}万</strong><i><em style={{ width: `${Number(row.amount) / max * 100}%`, background: accent }} /></i>
+    </div>;
+  })}</div>;
+}
+
+function OrderDashboard({ activity }: { activity: RuntimeActivity | null }) {
+  const [data, setData] = useState<DashboardReport | null>(null);
+  const [error, setError] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedTrendBucket, setSelectedTrendBucket] = useState<string | null>(null);
+  const trendScrollRef = useRef<HTMLDivElement>(null);
+  const trendDragRef = useRef({ active: false, startX: 0, scrollLeft: 0 });
+  const historical = activity?.status === "FINISHED" || activity?.status === "ARCHIVED";
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try { setData(await loadOrderDashboard()); setError(""); }
+    catch (reason) { setError(reason instanceof ApiError ? reason.message : "订单看板数据加载失败"); }
+    finally { setRefreshing(false); }
+  }, []);
+  useEffect(() => {
+    void refresh();
+    if (historical) return;
+    const timer = window.setInterval(refresh, 15000);
+    const events = new EventSource(`${apiBase()}/screen/activities/${encodeURIComponent(getActiveActivityCode())}/events`);
+    events.addEventListener("invalidate", () => void refresh());
+    return () => { window.clearInterval(timer); events.close(); };
+  }, [historical, refresh]);
+
+  const dashboard = data?.dashboard;
+  const totals = dashboard?.totals ?? {};
+  const amount = Number(totals.total_amount ?? 0);
+  const types = data?.customerTypes ?? [];
+  const generalAmount = Number(types.find((item) => item.customerType === "GENERAL")?.amount ?? 0);
+  const specialAmount = Number(types.find((item) => item.customerType === "SPECIAL")?.amount ?? 0);
+  const generalShare = amount ? generalAmount / amount * 100 : 0;
+  const regions = (activity?.regions ?? []).map((region) => ({
+    name: region.name,
+    amount: Number(data?.regions.find((item) => item.regionCode === region.code)?.amount ?? 0),
+    note: `${data?.regions.find((item) => item.regionCode === region.code)?.orderCount ?? 0}单`,
+    color: dashboardRegionPalette[(activity?.regions ?? []).findIndex((item) => item.code === region.code) % dashboardRegionPalette.length],
+  }));
+  const trend = dashboardHourlyTrend(data?.trend ?? [], activity, dashboard?.generatedAt);
+  const trendMax = Math.max(...trend.map((item) => Number(item.amount)), 1);
+  const trendChartWidth = Math.max(720, Math.max(trend.length - 1, 1) * 62 + 72);
+  const trendPoints = trend.map((item, index) => ({ x: 36 + index * 62, y: 112 - Number(item.amount) / trendMax * 92 }));
+  const trendLinePath = dashboardSmoothPath(trendPoints);
+  const trendAreaPath = trendPoints.length ? `${trendLinePath} L ${trendPoints[trendPoints.length - 1].x} 112 L ${trendPoints[0].x} 112 Z` : "";
+  const selectedTrendIndex = selectedTrendBucket == null ? -1 : trend.findIndex((item) => item.bucket === selectedTrendBucket);
+  const productLineColorMap = new Map((dashboard?.productLines ?? []).map((item, index) => [item.productLine || "其他", dashboardChartPalette[index % dashboardChartPalette.length]]));
+  const productLineColor = (name: string) => productLineColorMap.get(name) ?? dashboardColorFor(name);
+  const productLineRows = (dashboard?.productLines ?? []).slice(0, 6).map((item) => ({ name: item.productLine || "其他", amount: Number(item.amount), color: productLineColor(item.productLine || "其他") }));
+  const specialChannelProductRows = (data?.specialProductLines ?? []).map((item) => ({ name: item.productLine || "其他", amount: Number(item.amount), color: productLineColor(item.productLine || "其他") }));
+  const generalChannelProductRows = (data?.generalProductLines ?? []).map((item) => ({ name: item.productLine || "其他", amount: Number(item.amount), color: productLineColor(item.productLine || "其他") }));
+  const generalProductLineOrder = (data?.generalProductLines ?? []).map((item) => item.productLine || "其他");
+  const regionProductCards = (activity?.regions ?? []).map((region, regionIndex) => ({
+    code: region.code,
+    name: region.name,
+    color: dashboardRegionPalette[regionIndex % dashboardRegionPalette.length],
+    rows: generalProductLineOrder.map((productLine) => {
+      const row = (data?.regionProductLines ?? []).find((item) => item.regionCode === region.code && item.productLine === productLine);
+      return { name: productLine, amount: Number(row?.amount ?? 0), color: productLineColor(productLine) };
+    }),
+  }));
+  const branchRankingRows = (dashboard?.branches ?? []).slice(0, 15);
+  const dealerRankingRows = (dashboard?.companies ?? []).slice(0, 15);
+  const generatedAt = dashboard?.generatedAt ? new Date(dashboard.generatedAt).toLocaleString("zh-CN", { hour12: false }) : "--";
+  const activityTimeZone = activity?.timezone || "Asia/Shanghai";
+  const formatTrendTime = (bucket: string, compact = false) => new Date(dashboardTrendTimestamp(bucket)).toLocaleString("zh-CN", compact
+    ? { timeZone: activityTimeZone, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }
+    : { timeZone: activityTimeZone, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+  useEffect(() => {
+    const scroller = trendScrollRef.current;
+    if (scroller && trend.length) scroller.scrollLeft = scroller.scrollWidth;
+  }, [trend.length]);
+  const beginTrendDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const scroller = trendScrollRef.current;
+    if (!scroller) return;
+    trendDragRef.current = { active: true, startX: event.clientX, scrollLeft: scroller.scrollLeft };
+    scroller.classList.add("dragging");
+    scroller.setPointerCapture(event.pointerId);
+  };
+  const moveTrendDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const scroller = trendScrollRef.current;
+    if (!scroller || !trendDragRef.current.active) return;
+    scroller.scrollLeft = trendDragRef.current.scrollLeft - (event.clientX - trendDragRef.current.startX);
+  };
+  const endTrendDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    const scroller = trendScrollRef.current;
+    trendDragRef.current.active = false;
+    scroller?.classList.remove("dragging");
+    if (scroller?.hasPointerCapture(event.pointerId)) scroller.releasePointerCapture(event.pointerId);
+  };
+  const cards = [
+    { icon: "¥", label: "订单总额", value: dashboardCompactAmount(amount), unit: "元", tone: "mint" },
+    { icon: "△", label: "订单总吨数", value: totals.total_tons == null ? "待完善" : Number(totals.total_tons).toLocaleString("zh-CN", { maximumFractionDigits: 3 }), unit: totals.total_tons == null ? "" : "吨", tone: "blue" },
+    { icon: "单", label: "订单总笔数", value: Number(totals.order_count ?? 0).toLocaleString(), unit: "笔", tone: "orange" },
+    { icon: "商", label: "参与经销商", value: Number(totals.dealer_count ?? totals.order_count ?? 0).toLocaleString(), unit: "家", tone: "purple" },
+    { icon: "司", label: "参与分公司", value: Number(totals.branch_count ?? 0).toLocaleString(), unit: "家", tone: "red" },
+    { icon: "品", label: "成交 SKU", value: Number(totals.sku_count ?? 0).toLocaleString(), unit: "种", tone: "yellow" },
+  ];
+  return <section className="order-dashboard">
+    <header className="order-dashboard-header"><div><h1><span>▦</span> 订货会订单数据可视化看板</h1><p>{activity?.name ?? "订货会"} · 实时汇总有效订单，撤回订单不计入</p></div><div className="order-dashboard-live"><em><i />{historical ? "历史回看" : "LIVE"}</em><button type="button" onClick={() => void refresh()} disabled={refreshing}>{refreshing ? "刷新中…" : "↻ 手动刷新"}</button><small>更新于 {generatedAt}</small></div></header>
+    {error && <div className="order-dashboard-error">{error}</div>}
+    <div className="order-dashboard-kpis">{cards.map((card) => <article className={card.tone} key={card.label}><span>{card.icon}</span><div><small>{card.label}</small><strong>{card.value}<i>{card.unit}</i></strong></div></article>)}</div>
+    <div className="order-dashboard-grid order-dashboard-grid-top">
+      <article className="order-dashboard-panel"><h2><i className="mint" />渠道订单额占比</h2><div className="channel-donut-wrap"><div className="channel-donut" style={{ background: `conic-gradient(#1fbaa1 0 ${generalShare}%, #ed8618 ${generalShare}% 100%)` }}><b>{dashboardCompactAmount(amount)}<small>订单总额</small></b></div><div className="channel-legend"><span><i className="general" />综合客户 <b>{dashboardCompactAmount(generalAmount)}</b></span><span><i className="special" />特渠专业客户 <b>{dashboardCompactAmount(specialAmount)}</b></span></div></div></article>
+      <article className="order-dashboard-panel"><h2><i className="orange" />综合客户 · 片区订单额分布</h2><DashboardBars rows={regions} /></article>
+      <article className="order-dashboard-panel"><h2><i className="brown" />产线订单额排名（全渠道）</h2><DashboardBars rows={productLineRows} /></article>
+      <article className="order-dashboard-panel"><h2><i className="purple" />下单时间趋势（按小时）<small className="order-trend-hint">按住图表左右拖动 · {trend.length} 个小时 · {trend.filter((item) => Number(item.amount) === 0).length} 个零值</small></h2><div className="order-trend"><div className="order-trend-y-axis">{[1, .75, .5, .25, 0].map((ratio) => <span key={ratio}>{(trendMax * ratio / 10000).toFixed(0)}万</span>)}</div><div ref={trendScrollRef} className="order-trend-scroll" onPointerDown={beginTrendDrag} onPointerMove={moveTrendDrag} onPointerUp={endTrendDrag} onPointerCancel={endTrendDrag} onPointerLeave={(event) => { if (trendDragRef.current.active) endTrendDrag(event); }}><div className="order-trend-canvas" style={{ width: trendChartWidth }}><svg width={trendChartWidth} height="132" viewBox={`0 0 ${trendChartWidth} 132`} role="img" aria-label="下单时间趋势"><defs><linearGradient id="orderTrendArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#33bf7b" stopOpacity=".24"/><stop offset="100%" stopColor="#33bf7b" stopOpacity=".03"/></linearGradient></defs>{trendAreaPath && <path className="order-trend-area" d={trendAreaPath}/>}<path className="order-trend-line" d={trendLinePath}/></svg>{trendPoints.map((point, index) => <button type="button" className={`order-trend-point${selectedTrendIndex === index ? " active" : ""}`} key={`${point.x}-${index}`} style={{ left: point.x, top: point.y }} aria-label={`查看 ${formatTrendTime(trend[index].bucket)} 的下单数据`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setSelectedTrendBucket(trend[index].bucket); }} />)}{selectedTrendIndex >= 0 && <div className="order-trend-detail" style={{ left: Math.min(Math.max(trendPoints[selectedTrendIndex].x, 92), trendChartWidth - 92), top: trendPoints[selectedTrendIndex].y < 62 ? trendPoints[selectedTrendIndex].y + 13 : trendPoints[selectedTrendIndex].y - 58 }}><button type="button" aria-label="关闭时间点详情" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setSelectedTrendBucket(null); }}>×</button><b>{formatTrendTime(trend[selectedTrendIndex].bucket)}</b><span>订单金额 <strong>{Number(trend[selectedTrendIndex].amount).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 元</strong></span><span>订单笔数 <strong>{trend[selectedTrendIndex].orders} 笔</strong></span></div>}<div className="order-trend-x-axis">{trend.map((item, index) => <span key={item.bucket} style={{ left: 36 + index * 62 }}>{formatTrendTime(item.bucket, true).replaceAll("/", "-")}</span>)}</div></div></div></div></article>
+    </div>
+    <article className="order-dashboard-panel order-dashboard-products"><h2><i className="purple" />各渠道产线订单额对比</h2><div><section><h3 className="special">特渠专业客户</h3><DashboardBars rows={specialChannelProductRows} /></section><section><h3 className="general">综合客户</h3><DashboardBars rows={generalChannelProductRows} /></section></div></article>
+    <article className="order-dashboard-panel order-dashboard-region-products"><h2><i className="blue" />综合渠道 · 各片区产线订单额明细</h2><div className="order-dashboard-region-grid">{regionProductCards.map((region) => <section key={region.code}><h3 style={{ background: region.color }}>{region.name}<small>{dashboardCompactAmount(region.rows.reduce((sum, row) => sum + row.amount, 0))}</small></h3><DashboardBars rows={region.rows} /></section>)}</div></article>
+    <div className="order-dashboard-grid order-dashboard-rankings">
+      <article className="order-dashboard-panel"><h2><i className="red" />分公司订单额排名 TOP 15</h2><DashboardTopRanking rows={branchRankingRows} type="branch" /></article>
+      <article className="order-dashboard-panel"><h2><i className="orange" />经销商订单额排名 TOP 15</h2><DashboardTopRanking rows={dealerRankingRows} type="dealer" /></article>
+    </div>
+  </section>;
 }
 
 function MetricTable({ title, labels, values, kind = "category" }: { title: string; labels: string[]; values: number[]; kind?: "area" | "product" | "category" }) {
@@ -3413,6 +3617,7 @@ export function Prototype({ initialSurface = "h5", showSurfaceTabs = true }: Pro
   }, []);
   const surfaces: { key: Surface; label: string; sub: string }[] = [
     { key: "h5", label: "订货 H5", sub: "手机端" },
+    { key: "dashboard", label: "订单看板", sub: "大屏总览" },
     { key: "ranking", label: "订货排行", sub: "大屏 A" },
     { key: "report", label: "专题战报", sub: "大屏 B" },
     { key: "lottery", label: "幸运抽奖", sub: "现场" },
@@ -3428,12 +3633,14 @@ export function Prototype({ initialSurface = "h5", showSurfaceTabs = true }: Pro
       <div className="prototype-canvas">
         {showSurfaceTabs ? <>
           <div className={surface === "h5" ? "surface-slot" : "surface-slot surface-hidden"}><H5Prototype activityStatus={activityStatus} importedRows={productImportCompleted ? productRows : null} importedWhitelistRows={whitelistImportCompleted ? whitelistRows : null} runtimeActivity={runtimeActivity} /></div>
+          {surface === "dashboard" && <OrderDashboard activity={runtimeActivity} />}
           {surface === "ranking" && <RankingBoard activity={runtimeActivity} />}
           {surface === "report" && <ReportBoard activity={runtimeActivity} />}
           {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} activityFinished={activityStatus === "finished"} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed", serverStatus: "COMPLETED" } : item))} />}
           {surface === "admin" && <AdminGateway><AdminPrototype key={`${activityId}-${activityStartAt}-${activityEndAt}-${activityEventEndAt}`} lotteryRounds={lotteryRounds} onLotteryChange={setLotteryRounds} activityCode={runtimeActivity?.code || getActiveActivityCode()} activityName={activityName} onActivityNameChange={setActivityName} activityId={runtimeActivity ? String(runtimeActivity.id) : activityId} activityStatus={activityStatus} onActivityStatusChange={setActivityStatus} activityStartAt={activityStartAt} onActivityStartAtChange={setActivityStartAt} activityEndAt={activityEndAt} onActivityEndAtChange={setActivityEndAt} activityEventEndAt={activityEventEndAt} onActivityEventEndAtChange={setActivityEventEndAt} productRows={productRows} onProductRowsChange={setProductRows} productImportCompleted={productImportCompleted} onProductImportCompleted={setProductImportCompleted} onProductImportCommitted={markProductImportCommitted} productImportHasRun={productImportHasRun} whitelistRows={whitelistRows} onWhitelistRowsChange={setWhitelistRows} whitelistImportCompleted={whitelistImportCompleted} onWhitelistImportCompleted={setWhitelistImportCompleted} onWhitelistImportCommitted={markWhitelistImportCommitted} whitelistImportHasRun={whitelistImportHasRun} attendanceRows={attendanceRows} onAttendanceRowsChange={setAttendanceRows} attendanceFileName={attendanceFileName} onAttendanceFileNameChange={setAttendanceFileName} attendanceWarnings={attendanceWarnings} onAttendanceWarningsChange={setAttendanceWarnings} attendanceSheetCounts={attendanceSheetCounts} onAttendanceSheetCountsChange={setAttendanceSheetCounts} attendanceImportError={attendanceImportError} onAttendanceImportErrorChange={setAttendanceImportError} /></AdminGateway>}
         </> : <>
           {surface === "h5" && <H5Prototype activityStatus={activityStatus} importedRows={productImportCompleted ? productRows : null} importedWhitelistRows={whitelistImportCompleted ? whitelistRows : null} runtimeActivity={runtimeActivity} />}
+          {surface === "dashboard" && <OrderDashboard activity={runtimeActivity} />}
           {surface === "ranking" && <RankingBoard activity={runtimeActivity} />}
           {surface === "report" && <ReportBoard activity={runtimeActivity} />}
           {surface === "lottery" && <LotteryBoard rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} activityFinished={activityStatus === "finished"} onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed", serverStatus: "COMPLETED" } : item))} />}

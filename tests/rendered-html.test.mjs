@@ -32,6 +32,7 @@ test("server-renders the ordering system shell", async () => {
   assert.match(html, /<title>订货会管理系统<\/title>/);
   assert.match(html, /客户订货 H5、实时数据大屏、专题战报、幸运抽奖和管理后台/);
   assert.match(html, /订货 H5/);
+  assert.match(html, /订单看板/);
   assert.match(html, /订货排行/);
   assert.match(html, /专题战报/);
   assert.match(html, /幸运抽奖/);
@@ -54,6 +55,8 @@ test("keeps production assets and source wired", async () => {
 
   assert.match(page, /<Prototype \/>/);
   assert.match(prototype, /function H5Prototype/);
+  assert.match(prototype, /function OrderDashboard/);
+  assert.match(prototype, /function DashboardTopRanking/);
   assert.match(prototype, /\(p\.status === "有效" \|\| p\.status === "待完善"\)/);
   assert.match(prototype, /p\.materialCode.*includes\(normalizedProductSearch\)/s);
   assert.match(prototype, /function RankingBoard/);
@@ -141,10 +144,27 @@ test("keeps orders admin-read-only and wires the formal runtime APIs", async () 
   assert.match(api, /withdrawH5Order/);
   assert.match(api, /loadAdminOrders/);
   assert.match(api, /drawLotteryRound/);
+  assert.match(api, /loadOrderDashboard/);
+  assert.match(api, /regionProductLines/);
   assert.match(prototype, /await drawLotteryRound\(activityId, currentRound\.id\)/);
   assert.match(orderController, /\/h5\/activities\/\{activityCode\}\/order\/withdraw/);
   assert.doesNotMatch(orderController, /\/admin\/.*withdraw/);
   assert.doesNotMatch(openapi, /\/admin\/activities\/\{activityId\}\/orders\/\{orderId\}\/withdraw/);
+});
+
+test("keeps the hourly order trend inside the activity window and timezone-safe", async () => {
+  const [prototype, dashboardService] = await Promise.all([
+    readFile(new URL("../app/prototype.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/dashboard/DashboardService.java", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(dashboardService, /activity\.actualStartedAt\(\) == null \? activity\.startsAt\(\) : activity\.actualStartedAt\(\)/);
+  assert.match(dashboardService, /last_submitted_at >= \? AND last_submitted_at <= \?/);
+  assert.match(dashboardService, /DATE_FORMAT\(last_submitted_at, '%Y-%m-%dT%H:00:00'\), 'Z'/);
+  assert.match(prototype, /activity\.actualStartedAt \?\? activity\.startsAt/);
+  assert.match(prototype, /Math\.min\(liveEnd, activityEnd\)/);
+  assert.match(prototype, /timeZone: activityTimeZone/);
+  assert.match(prototype, /existing \?\? \{ bucket: new Date\(time\)\.toISOString\(\), amount: 0, orders: 0 \}/);
 });
 
 test("keeps an H5 draft only when the verified customer is unchanged", async () => {
