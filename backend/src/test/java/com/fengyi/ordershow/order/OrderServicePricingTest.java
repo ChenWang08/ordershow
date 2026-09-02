@@ -11,35 +11,57 @@ class OrderServicePricingTest {
 
   @Test
   void keepsBasePriceBelowTheTierThreshold() {
-    var applied = OrderService.appliedPrice(BASE_PRICE, 1500L, TIER_PRICE, 1499);
+    var applied = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "WHOLE_ORDER", 1499);
 
-    assertThat(applied.casePrice()).isEqualByComparingTo("136.00");
-    assertThat(applied.tierMinQuantity()).isNull();
-    assertThat(applied.casePrice().multiply(BigDecimal.valueOf(1499))).isEqualByComparingTo("203864.00");
+    assertThat(applied.casePriceSnapshot()).isEqualByComparingTo("136.00");
+    assertThat(applied.appliedTierMinQuantity()).isNull();
+    assertThat(applied.baseQuantity()).isEqualTo(1499);
+    assertThat(applied.tierQuantity()).isZero();
+    assertThat(applied.lineAmount()).isEqualByComparingTo("203864.00");
   }
 
   @Test
   void appliesTheDiscountToEveryCaseAtTheThreshold() {
-    var applied = OrderService.appliedPrice(BASE_PRICE, 1500L, TIER_PRICE, 1500);
+    var applied = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "WHOLE_ORDER", 1500);
 
-    assertThat(applied.casePrice()).isEqualByComparingTo("134.00");
-    assertThat(applied.tierMinQuantity()).isEqualTo(1500L);
-    assertThat(applied.casePrice().multiply(BigDecimal.valueOf(1500))).isEqualByComparingTo("201000.00");
+    assertThat(applied.casePriceSnapshot()).isEqualByComparingTo("134.00");
+    assertThat(applied.appliedTierMinQuantity()).isEqualTo(1500L);
+    assertThat(applied.baseQuantity()).isZero();
+    assertThat(applied.tierQuantity()).isEqualTo(1500);
+    assertThat(applied.lineAmount()).isEqualByComparingTo("201000.00");
   }
 
   @Test
   void keepsTheDiscountAboveTheThreshold() {
-    var applied = OrderService.appliedPrice(BASE_PRICE, 1500L, TIER_PRICE, 1501);
+    var applied = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "WHOLE_ORDER", 1501);
 
-    assertThat(applied.casePrice()).isEqualByComparingTo("134.00");
-    assertThat(applied.casePrice().multiply(BigDecimal.valueOf(1501))).isEqualByComparingTo("201134.00");
+    assertThat(applied.casePriceSnapshot()).isEqualByComparingTo("134.00");
+    assertThat(applied.lineAmount()).isEqualByComparingTo("201134.00");
+  }
+
+  @Test
+  void pricesOnlyTheThresholdAndExcessCasesAtTheIncrementalPrice() {
+    var below = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "INCREMENTAL", 1499);
+    var threshold = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "INCREMENTAL", 1500);
+    var above = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "INCREMENTAL", 1501);
+
+    assertThat(below.lineAmount()).isEqualByComparingTo("203864.00");
+    assertThat(below.baseQuantity()).isEqualTo(1499);
+    assertThat(below.tierQuantity()).isZero();
+    assertThat(threshold.lineAmount()).isEqualByComparingTo("203998.00");
+    assertThat(threshold.baseQuantity()).isEqualTo(1499);
+    assertThat(threshold.tierQuantity()).isEqualTo(1);
+    assertThat(above.lineAmount()).isEqualByComparingTo("204132.00");
+    assertThat(above.baseQuantity()).isEqualTo(1499);
+    assertThat(above.tierQuantity()).isEqualTo(2);
   }
 
   @Test
   void keepsLegacyProductsOnTheirBasePrice() {
-    var applied = OrderService.appliedPrice(BASE_PRICE, null, null, 1500);
+    var applied = OrderService.calculatePrice(BASE_PRICE, null, null, null, 1500);
 
-    assertThat(applied.casePrice()).isEqualByComparingTo("136.00");
-    assertThat(applied.tierMinQuantity()).isNull();
+    assertThat(applied.casePriceSnapshot()).isEqualByComparingTo("136.00");
+    assertThat(applied.appliedTierMinQuantity()).isNull();
+    assertThat(applied.lineAmount()).isEqualByComparingTo("204000.00");
   }
 }

@@ -94,14 +94,11 @@ public class OrderService {
     int line = 0;
     for (ProductSnapshot product : products) {
       long quantity = quantities.get(product.id());
-      AppliedPrice appliedPrice = appliedPrice(product.casePrice(), product.priceTierMinQuantity(), product.priceTierCasePrice(), quantity);
-      BigDecimal effectiveCasePrice = appliedPrice.casePrice();
-      Long appliedTierMinQuantity = appliedPrice.tierMinQuantity();
-      BigDecimal amount = effectiveCasePrice.multiply(BigDecimal.valueOf(quantity)).setScale(2, RoundingMode.HALF_UP);
+      PricingResult pricing = calculatePrice(product.casePrice(), product.priceTierMinQuantity(), product.priceTierCasePrice(), product.priceTierPricingMode(), quantity);
       BigDecimal lineTons = product.tonCaseFactor() == null ? null : BigDecimal.valueOf(quantity).divide(product.tonCaseFactor(), 6, RoundingMode.HALF_UP);
-      items.add(new CalculatedItem(++line, product, quantity, effectiveCasePrice, appliedTierMinQuantity, amount, lineTons));
+      items.add(new CalculatedItem(++line, product, quantity, pricing, lineTons));
       totalQuantity += quantity;
-      totalAmount = totalAmount.add(amount);
+      totalAmount = totalAmount.add(pricing.lineAmount());
       if (lineTons == null) tonsAvailable = false; else totalTons = totalTons.add(lineTons);
     }
     if (!tonsAvailable) totalTons = null;
@@ -230,6 +227,7 @@ public class OrderService {
         SELECT o.order_no, o.status, o.customer_type, o.region_code, o.branch_name_snapshot,
           o.dealer_full_name_snapshot, c.phone_masked, o.current_version_no, i.line_no, i.material_code,
           i.material_name, i.product_line, i.specification, i.case_pack, i.quantity, i.case_price, i.applied_tier_min_quantity,
+          i.base_case_price, i.base_price_quantity, i.tier_case_price, i.tier_min_quantity, i.tier_price_quantity, i.pricing_mode,
           i.line_amount, i.line_tons, o.last_submitted_at
         FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
         JOIN order_item i ON i.order_id = o.id
@@ -263,14 +261,16 @@ public class OrderService {
       }
       for (int i = 0; i < headers.length; i++) sheet.autoSizeColumn(i);
       Sheet detailSheet = workbook.createSheet("订单商品明细");
-      String[] detailHeaders = {"订单编号", "状态", "客户类型", "大区", "分公司", "经销商", "电话", "订单版本", "行号", "物料代码", "物料名称", "产品线", "规格", "箱规", "订货箱数", "成交元/箱", "阶梯起订箱数", "金额", "吨数", "最后提交"};
+      String[] detailHeaders = {"订单编号", "状态", "客户类型", "大区", "分公司", "经销商", "电话", "订单版本", "行号", "物料代码", "物料名称", "产品线", "规格", "箱规", "订货箱数", "计价模式", "基础箱价", "基础价箱数", "阶梯箱价", "阶梯箱数", "阶梯起订箱数", "是否命中阶梯", "金额", "吨数", "最后提交"};
       writeHeaders(detailSheet, detailHeaders);
       int detailRowNo = 1;
       for (Map<String, Object> item : details) {
         writeValues(detailSheet.createRow(detailRowNo++), item.get("order_no"), item.get("status"), item.get("customer_type"),
             item.get("region_code"), item.get("branch_name_snapshot"), item.get("dealer_full_name_snapshot"), item.get("phone_masked"),
             item.get("current_version_no"), item.get("line_no"), item.get("material_code"), item.get("material_name"), item.get("product_line"),
-            item.get("specification"), item.get("case_pack"), item.get("quantity"), item.get("case_price"), item.get("applied_tier_min_quantity"), item.get("line_amount"),
+            item.get("specification"), item.get("case_pack"), item.get("quantity"), item.get("pricing_mode"), item.get("base_case_price"),
+            item.get("base_price_quantity"), item.get("tier_case_price"), item.get("tier_price_quantity"), item.get("tier_min_quantity"),
+            item.get("applied_tier_min_quantity") == null ? "否" : "是", item.get("line_amount"),
             item.get("line_tons"), item.get("last_submitted_at"));
       }
       Sheet productSheet = workbook.createSheet("有效商品汇总");
@@ -307,6 +307,7 @@ public class OrderService {
           WHERE pi.activity_product_id = p.id AND pi.deleted_at IS NULL ORDER BY pi.is_primary DESC, pi.sort_no, pi.id LIMIT 1) image_key
           , (SELECT t.min_quantity FROM activity_product_price_tier t WHERE t.activity_product_id = p.id) price_tier_min_quantity
           , (SELECT t.case_price FROM activity_product_price_tier t WHERE t.activity_product_id = p.id) price_tier_case_price
+          , (SELECT t.pricing_mode FROM activity_product_price_tier t WHERE t.activity_product_id = p.id) price_tier_pricing_mode
         FROM activity_product p JOIN activity_data_binding b ON b.current_version_id = p.data_version_id AND b.activity_id = p.activity_id AND b.data_type = 'PRODUCT'
         WHERE p.activity_id = ? AND p.customer_type = ? AND p.is_visible = TRUE AND p.is_orderable = TRUE
           AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id)
@@ -324,12 +325,15 @@ public class OrderService {
     for (CalculatedItem item : items) jdbc.update("""
         INSERT INTO order_item(order_id, activity_product_id, line_no, material_code, material_name, category_name,
           product_line, brand_name, variety_name, specification, case_pack, rebate_status, is_gift_box,
-          primary_image_object_key, quantity, case_price, applied_tier_min_quantity, line_amount, ton_case_factor, line_tons)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          primary_image_object_key, quantity, case_price, applied_tier_min_quantity, base_case_price, base_price_quantity,
+          tier_case_price, tier_min_quantity, tier_price_quantity, pricing_mode, line_amount, ton_case_factor, line_tons)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, orderId, item.product().id(), item.lineNo(), item.product().materialCode(), item.product().materialName(),
         item.product().categoryName(), item.product().productLine(), item.product().brandName(), item.product().varietyName(),
         item.product().specification(), item.product().casePack(), item.product().rebateStatus(), item.product().giftBox(),
-        item.product().imageKey(), item.quantity(), item.effectiveCasePrice(), item.appliedTierMinQuantity(), item.lineAmount(), item.product().tonCaseFactor(), item.lineTons());
+        item.product().imageKey(), item.quantity(), item.pricing().casePriceSnapshot(), item.pricing().appliedTierMinQuantity(),
+        item.pricing().baseCasePrice(), item.pricing().baseQuantity(), item.pricing().tierCasePrice(), item.pricing().tierMinQuantity(), item.pricing().tierQuantity(),
+        item.pricing().pricingMode(), item.pricing().lineAmount(), item.product().tonCaseFactor(), item.lineTons());
   }
 
   private long insertVersion(long activityId, long orderId, int version, H5Principal customer, long totalQuantity,
@@ -354,12 +358,15 @@ public class OrderService {
     for (CalculatedItem item : items) jdbc.update("""
         INSERT INTO order_version_item(order_version_id, line_no, activity_product_id, material_code, material_name,
           category_name, product_line, brand_name, variety_name, specification, case_pack, customer_type, rebate_status,
-          is_gift_box, primary_image_object_key, quantity, case_price, applied_tier_min_quantity, line_amount, ton_case_factor, line_tons)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          is_gift_box, primary_image_object_key, quantity, case_price, applied_tier_min_quantity, base_case_price, base_price_quantity,
+          tier_case_price, tier_min_quantity, tier_price_quantity, pricing_mode, line_amount, ton_case_factor, line_tons)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, versionId, item.lineNo(), item.product().id(), item.product().materialCode(), item.product().materialName(),
         item.product().categoryName(), item.product().productLine(), item.product().brandName(), item.product().varietyName(),
         item.product().specification(), item.product().casePack(), item.product().customerType(), item.product().rebateStatus(),
-        item.product().giftBox(), item.product().imageKey(), item.quantity(), item.effectiveCasePrice(), item.appliedTierMinQuantity(), item.lineAmount(),
+        item.product().giftBox(), item.product().imageKey(), item.quantity(), item.pricing().casePriceSnapshot(), item.pricing().appliedTierMinQuantity(),
+        item.pricing().baseCasePrice(), item.pricing().baseQuantity(), item.pricing().tierCasePrice(), item.pricing().tierMinQuantity(), item.pricing().tierQuantity(),
+        item.pricing().pricingMode(), item.pricing().lineAmount(),
         item.product().tonCaseFactor(), item.lineTons());
   }
 
@@ -444,28 +451,49 @@ public class OrderService {
   private static String orderNo(long activityId) { return "ZY" + DateTimeFormatter.ofPattern("yyyyMMddHHmmss").withZone(ZoneOffset.UTC).format(Instant.now()) + String.format("%02d", activityId % 100) + UUID.randomUUID().toString().substring(0, 4).toUpperCase(Locale.ROOT); }
   private static String normalize(String value) { return value == null ? "" : value.toLowerCase(Locale.CHINA).replaceAll("[\\s　_-]+", ""); }
 
-  private ProductSnapshot mapProduct(ResultSet rs, int rowNum) throws SQLException { return new ProductSnapshot(rs.getLong("id"), rs.getString("material_code"), rs.getString("material_name"), rs.getString("category_name"), rs.getString("product_line"), rs.getString("brand_name"), rs.getString("variety_name"), rs.getString("specification"), rs.getString("case_pack"), rs.getString("customer_type"), rs.getString("rebate_status"), rs.getBoolean("is_gift_box"), rs.getBigDecimal("case_price"), rs.getBigDecimal("ton_case_factor"), rs.getString("image_key"), nullableLong(rs, "price_tier_min_quantity"), rs.getBigDecimal("price_tier_case_price")); }
+  private ProductSnapshot mapProduct(ResultSet rs, int rowNum) throws SQLException { return new ProductSnapshot(rs.getLong("id"), rs.getString("material_code"), rs.getString("material_name"), rs.getString("category_name"), rs.getString("product_line"), rs.getString("brand_name"), rs.getString("variety_name"), rs.getString("specification"), rs.getString("case_pack"), rs.getString("customer_type"), rs.getString("rebate_status"), rs.getBoolean("is_gift_box"), rs.getBigDecimal("case_price"), rs.getBigDecimal("ton_case_factor"), rs.getString("image_key"), nullableLong(rs, "price_tier_min_quantity"), rs.getBigDecimal("price_tier_case_price"), rs.getString("price_tier_pricing_mode")); }
   private OrderView mapOrder(ResultSet rs, int rowNum) throws SQLException { return new OrderView(rs.getLong("id"), rs.getLong("activity_id"), rs.getString("order_no"), rs.getString("status"), rs.getString("customer_type"), rs.getString("region_code"), rs.getString("branch_name_snapshot"), rs.getString("dealer_short_name_snapshot"), rs.getString("dealer_full_name_snapshot"), rs.getString("phone_masked"), rs.getInt("current_version_no"), rs.getLong("total_quantity"), rs.getBigDecimal("total_tons"), rs.getBigDecimal("total_amount"), rs.getTimestamp("first_submitted_at").toInstant(), rs.getTimestamp("last_submitted_at").toInstant(), rs.getTimestamp("last_modified_at").toInstant(), rs.getTimestamp("withdrawn_at") == null ? null : rs.getTimestamp("withdrawn_at").toInstant(), rs.getString("withdrawn_reason"), List.of(), List.of(), List.of()); }
   private OrderSummary mapSummary(ResultSet rs, int rowNum) throws SQLException { return new OrderSummary(rs.getLong("id"), rs.getString("order_no"), rs.getString("status"), rs.getString("customer_type"), rs.getString("region_code"), rs.getString("branch_name_snapshot"), rs.getString("dealer_full_name_snapshot"), rs.getString("phone_masked"), rs.getInt("current_version_no"), rs.getLong("total_quantity"), rs.getBigDecimal("total_tons"), rs.getBigDecimal("total_amount"), rs.getTimestamp("first_submitted_at").toInstant(), rs.getTimestamp("last_submitted_at").toInstant(), rs.getTimestamp("last_modified_at").toInstant()); }
   private ItemView mapItem(ResultSet rs, int rowNum) throws SQLException { return item(rs, "id", "activity_product_id"); }
   private ItemView mapVersionItem(ResultSet rs, int rowNum) throws SQLException { return item(rs, "id", "activity_product_id"); }
-  private ItemView item(ResultSet rs, String idColumn, String productColumn) throws SQLException { return new ItemView(rs.getLong(idColumn), rs.getObject(productColumn) == null ? null : rs.getLong(productColumn), rs.getInt("line_no"), rs.getString("material_code"), rs.getString("material_name"), rs.getString("product_line"), rs.getString("specification"), rs.getString("case_pack"), rs.getLong("quantity"), rs.getBigDecimal("case_price"), nullableLong(rs, "applied_tier_min_quantity"), rs.getBigDecimal("line_amount"), rs.getBigDecimal("ton_case_factor"), rs.getBigDecimal("line_tons")); }
+  private ItemView item(ResultSet rs, String idColumn, String productColumn) throws SQLException { return new ItemView(rs.getLong(idColumn), rs.getObject(productColumn) == null ? null : rs.getLong(productColumn), rs.getInt("line_no"), rs.getString("material_code"), rs.getString("material_name"), rs.getString("product_line"), rs.getString("specification"), rs.getString("case_pack"), rs.getLong("quantity"), rs.getBigDecimal("case_price"), nullableLong(rs, "applied_tier_min_quantity"), rs.getBigDecimal("base_case_price"), nullableLong(rs, "base_price_quantity"), rs.getBigDecimal("tier_case_price"), nullableLong(rs, "tier_min_quantity"), nullableLong(rs, "tier_price_quantity"), rs.getString("pricing_mode"), rs.getBigDecimal("line_amount"), rs.getBigDecimal("ton_case_factor"), rs.getBigDecimal("line_tons")); }
   private OrderVersionView mapVersion(ResultSet rs, int rowNum) throws SQLException { return new OrderVersionView(rs.getLong("id"), rs.getInt("version_no"), rs.getLong("total_quantity"), rs.getBigDecimal("total_tons"), rs.getBigDecimal("total_amount"), rs.getTimestamp("submitted_at").toInstant(), rs.getString("submitted_source"), List.of()); }
 
   private record OrderRow(long id, String status, int version, int lockVersion) {}
   private static Long nullableLong(ResultSet rs, String column) throws SQLException { long value = rs.getLong(column); return rs.wasNull() ? null : value; }
-  static AppliedPrice appliedPrice(BigDecimal basePrice, Long tierMinQuantity, BigDecimal tierCasePrice, long quantity) {
-    boolean tierApplied = tierMinQuantity != null && tierCasePrice != null && quantity >= tierMinQuantity;
-    return new AppliedPrice(tierApplied ? tierCasePrice : basePrice, tierApplied ? tierMinQuantity : null);
+  static PricingResult calculatePrice(BigDecimal basePrice, Long tierMinQuantity, BigDecimal tierCasePrice, String pricingMode, long quantity) {
+    if (tierMinQuantity == null || tierCasePrice == null) {
+      return new PricingResult(basePrice, basePrice, quantity, null, null, 0, null, null,
+          basePrice.multiply(BigDecimal.valueOf(quantity)).setScale(2, RoundingMode.HALF_UP));
+    }
+    String mode = pricingMode == null || pricingMode.isBlank() ? "WHOLE_ORDER" : pricingMode;
+    long baseQuantity;
+    long tierQuantity;
+    BigDecimal casePriceSnapshot;
+    if ("INCREMENTAL".equals(mode)) {
+      baseQuantity = Math.min(quantity, tierMinQuantity - 1);
+      tierQuantity = Math.max(0, quantity - baseQuantity);
+      casePriceSnapshot = basePrice;
+    } else {
+      boolean applied = quantity >= tierMinQuantity;
+      baseQuantity = applied ? 0 : quantity;
+      tierQuantity = applied ? quantity : 0;
+      casePriceSnapshot = applied ? tierCasePrice : basePrice;
+    }
+    BigDecimal amount = basePrice.multiply(BigDecimal.valueOf(baseQuantity))
+        .add(tierCasePrice.multiply(BigDecimal.valueOf(tierQuantity))).setScale(2, RoundingMode.HALF_UP);
+    return new PricingResult(casePriceSnapshot, basePrice, baseQuantity, tierCasePrice, tierMinQuantity, tierQuantity, mode,
+        tierQuantity > 0 ? tierMinQuantity : null, amount);
   }
-  record AppliedPrice(BigDecimal casePrice, Long tierMinQuantity) {}
-  private record ProductSnapshot(long id, String materialCode, String materialName, String categoryName, String productLine, String brandName, String varietyName, String specification, String casePack, String customerType, String rebateStatus, boolean giftBox, BigDecimal casePrice, BigDecimal tonCaseFactor, String imageKey, Long priceTierMinQuantity, BigDecimal priceTierCasePrice) {}
-  private record CalculatedItem(int lineNo, ProductSnapshot product, long quantity, BigDecimal effectiveCasePrice, Long appliedTierMinQuantity, BigDecimal lineAmount, BigDecimal lineTons) {}
+  record PricingResult(BigDecimal casePriceSnapshot, BigDecimal baseCasePrice, long baseQuantity, BigDecimal tierCasePrice,
+                       Long tierMinQuantity, long tierQuantity, String pricingMode, Long appliedTierMinQuantity, BigDecimal lineAmount) {}
+  private record ProductSnapshot(long id, String materialCode, String materialName, String categoryName, String productLine, String brandName, String varietyName, String specification, String casePack, String customerType, String rebateStatus, boolean giftBox, BigDecimal casePrice, BigDecimal tonCaseFactor, String imageKey, Long priceTierMinQuantity, BigDecimal priceTierCasePrice, String priceTierPricingMode) {}
+  private record CalculatedItem(int lineNo, ProductSnapshot product, long quantity, PricingResult pricing, BigDecimal lineTons) {}
   private record IdempotencyResult(boolean replay) {}
   public record SubmitItem(long productId, long quantity) {}
   public record SubmitRequest(int expectedVersion, List<SubmitItem> items) {}
   public record WithdrawRequest(int expectedVersion) {}
-  public record ItemView(long id, Long productId, int lineNo, String materialCode, String materialName, String productLine, String specification, String casePack, long quantity, BigDecimal casePrice, Long appliedTierMinQuantity, BigDecimal lineAmount, BigDecimal tonCaseFactor, BigDecimal lineTons) {}
+  public record ItemView(long id, Long productId, int lineNo, String materialCode, String materialName, String productLine, String specification, String casePack, long quantity, BigDecimal casePrice, Long appliedTierMinQuantity, BigDecimal baseCasePrice, Long basePriceQuantity, BigDecimal tierCasePrice, Long tierMinQuantity, Long tierPriceQuantity, String pricingMode, BigDecimal lineAmount, BigDecimal tonCaseFactor, BigDecimal lineTons) {}
   public record OrderVersionView(long id, int version, long totalQuantity, BigDecimal totalTons, BigDecimal totalAmount, Instant submittedAt, String submittedSource, List<ItemView> items) {}
   public record OperationView(String type, String source, Integer orderVersion, String reason, Instant occurredAt) {}
   public record OrderSummary(long id, String orderNo, String status, String customerType, String regionCode, String branchName, String dealerFullName, String phoneMasked, int currentVersion, long totalQuantity, BigDecimal totalTons, BigDecimal totalAmount, Instant firstSubmittedAt, Instant lastSubmittedAt, Instant lastModifiedAt) {}

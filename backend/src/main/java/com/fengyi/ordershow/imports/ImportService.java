@@ -477,9 +477,11 @@ public class ImportService {
       }
       Long tierMinQuantity = integer(data.get("priceTierMinQuantity"));
       BigDecimal tierCasePrice = decimal(data.get("priceTierCasePrice"));
+      String tierPricingMode = text(data.get("priceTierPricingMode"));
+      if (tierPricingMode.isBlank()) tierPricingMode = "WHOLE_ORDER";
       if (productId != null && tierMinQuantity != null && tierCasePrice != null) {
-        jdbc.update("INSERT INTO activity_product_price_tier(activity_product_id, min_quantity, case_price) VALUES (?, ?, ?)",
-            productId, tierMinQuantity, tierCasePrice);
+        jdbc.update("INSERT INTO activity_product_price_tier(activity_product_id, min_quantity, case_price, pricing_mode) VALUES (?, ?, ?, ?)",
+            productId, tierMinQuantity, tierCasePrice, tierPricingMode);
       }
     }
   }

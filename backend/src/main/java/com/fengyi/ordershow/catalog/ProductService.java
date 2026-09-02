@@ -82,9 +82,10 @@ public class ProductService {
     String name = value(patch.materialName(), current.materialName());
     BigDecimal casePrice = patch.casePriceSet() ? patch.casePrice() : current.casePrice();
     PriceTierView priceTier = patch.priceTierSet()
-        ? validatePriceTier(casePrice, patch.priceTierMinQuantity(), patch.priceTierCasePrice())
+        ? validatePriceTier(casePrice, patch.priceTierMinQuantity(), patch.priceTierCasePrice(), patch.priceTierPricingMode())
         : validatePriceTier(casePrice, current.priceTier() == null ? null : current.priceTier().minQuantity(),
-            current.priceTier() == null ? null : current.priceTier().casePrice());
+            current.priceTier() == null ? null : current.priceTier().casePrice(),
+            current.priceTier() == null ? null : current.priceTier().pricingMode());
     BigDecimal factor = patch.tonCaseFactorSet() ? patch.tonCaseFactor() : current.tonCaseFactor();
     String customerType = value(patch.customerType(), current.customerType());
     String rebateStatus = value(patch.rebateStatus(), current.rebateStatus());
@@ -136,7 +137,7 @@ public class ProductService {
     if (orderable && (!visible || request.casePrice() == null || request.casePrice().signum() <= 0)) {
       throw DomainException.unprocessable("PRODUCT_NOT_ORDERABLE", "可订商品必须可见且元/箱大于 0");
     }
-    PriceTierView priceTier = validatePriceTier(request.casePrice(), request.priceTierMinQuantity(), request.priceTierCasePrice());
+    PriceTierView priceTier = validatePriceTier(request.casePrice(), request.priceTierMinQuantity(), request.priceTierCasePrice(), request.priceTierPricingMode());
     VersionSource source = currentSource(activityId);
     String code = choose(request.materialCode(), null);
     try {
@@ -621,8 +622,8 @@ public class ProductService {
         WHERE activity_product_id = ? ORDER BY id
         """, (rs, rowNum) -> rs.getString(1), product.id());
     PriceTierView priceTier = jdbc.query("""
-        SELECT min_quantity, case_price FROM activity_product_price_tier WHERE activity_product_id = ?
-        """, (rs, rowNum) -> new PriceTierView(rs.getLong(1), rs.getBigDecimal(2)), product.id())
+        SELECT min_quantity, case_price, pricing_mode FROM activity_product_price_tier WHERE activity_product_id = ?
+        """, (rs, rowNum) -> new PriceTierView(rs.getLong(1), rs.getBigDecimal(2), rs.getString(3)), product.id())
         .stream().findFirst().orElse(null);
     return new ProductView(product.id(), product.materialCode(), product.materialName(), product.categoryName(), product.productLine(),
         product.brandName(), product.varietyName(), product.specification(), product.casePack(), product.bottlePrice(), product.casePrice(),
@@ -652,11 +653,11 @@ public class ProductService {
   private void replacePriceTier(long productId, PriceTierView priceTier) {
     jdbc.update("DELETE FROM activity_product_price_tier WHERE activity_product_id = ?", productId);
     if (priceTier != null) jdbc.update("""
-        INSERT INTO activity_product_price_tier(activity_product_id, min_quantity, case_price) VALUES (?, ?, ?)
-        """, productId, priceTier.minQuantity(), priceTier.casePrice());
+        INSERT INTO activity_product_price_tier(activity_product_id, min_quantity, case_price, pricing_mode) VALUES (?, ?, ?, ?)
+        """, productId, priceTier.minQuantity(), priceTier.casePrice(), priceTier.pricingMode());
   }
 
-  private static PriceTierView validatePriceTier(BigDecimal basePrice, Long minQuantity, BigDecimal tierPrice) {
+  private static PriceTierView validatePriceTier(BigDecimal basePrice, Long minQuantity, BigDecimal tierPrice, String pricingMode) {
     if (minQuantity == null && tierPrice == null) return null;
     if (minQuantity == null || tierPrice == null) {
       throw DomainException.unprocessable("PRODUCT_PRICE_TIER_INCOMPLETE", "请同时填写阶梯起订箱数和阶梯箱价");
@@ -667,7 +668,11 @@ public class ProductService {
     if (basePrice == null || basePrice.signum() <= 0 || tierPrice.signum() <= 0 || tierPrice.compareTo(basePrice) >= 0) {
       throw DomainException.unprocessable("PRODUCT_PRICE_TIER_PRICE_INVALID", "阶梯箱价必须大于 0 且低于基础箱价");
     }
-    return new PriceTierView(minQuantity, tierPrice);
+    String mode = pricingMode == null || pricingMode.isBlank() ? "WHOLE_ORDER" : pricingMode;
+    if (!Set.of("WHOLE_ORDER", "INCREMENTAL").contains(mode)) {
+      throw DomainException.unprocessable("PRODUCT_PRICE_TIER_MODE_INVALID", "阶梯计价模式不正确");
+    }
+    return new PriceTierView(minQuantity, tierPrice, mode);
   }
 
   private static byte[] readLimited(ZipInputStream input, int max) throws Exception {
@@ -719,17 +724,17 @@ public class ProductService {
       String brandName, String varietyName, String specification, String casePack, BigDecimal bottlePrice, BigDecimal casePrice,
       BigDecimal tonCaseFactor, String customerType, String rebateStatus, boolean giftBox, boolean visible, boolean orderable,
       String dataStatus, int sortNo, int version, List<ImageView> images, List<String> branchScope, PriceTierView priceTier) {}
-  public record PriceTierView(long minQuantity, BigDecimal casePrice) {}
+  public record PriceTierView(long minQuantity, BigDecimal casePrice, String pricingMode) {}
   public record ImageView(long id, long fileId, String url, boolean primary, int sortNo, String sourceType, String matchStatus) {}
   public record ProductPatch(String customerType, String rebateStatus, String materialCode, String materialName, String categoryName, String productLine, String brandName,
       String varietyName, String specification, String casePack, BigDecimal bottlePrice, boolean bottlePriceSet,
       BigDecimal casePrice, boolean casePriceSet, BigDecimal tonCaseFactor, boolean tonCaseFactorSet,
       Boolean giftBox, Boolean visible, Boolean orderable, String branchScope, String reason,
-      Long priceTierMinQuantity, BigDecimal priceTierCasePrice, boolean priceTierSet) {}
+      Long priceTierMinQuantity, BigDecimal priceTierCasePrice, String priceTierPricingMode, boolean priceTierSet) {}
   public record ProductCreate(String customerType, String rebateStatus, String materialCode, String materialName,
       String categoryName, String productLine, String brandName, String varietyName, String specification, String casePack,
       BigDecimal bottlePrice, BigDecimal casePrice, BigDecimal tonCaseFactor, Boolean giftBox, Boolean visible, Boolean orderable,
-      String branchScope, String reason, Long priceTierMinQuantity, BigDecimal priceTierCasePrice) {}
+      String branchScope, String reason, Long priceTierMinQuantity, BigDecimal priceTierCasePrice, String priceTierPricingMode) {}
   public record ZipMatch(String filename, String materialName, Long productId, String status) {}
   public record ZipPreview(int imageCount, int matchedCount, int ambiguousCount, int unmatchedCount, List<ZipMatch> matches, boolean committed) {}
   public record ZipDecision(String entryPath, String status, List<String> targetMaterialCodes) {}

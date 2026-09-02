@@ -2368,8 +2368,8 @@ components:
             $ref: '#/components/schemas/ProductImage'
     ProductPriceTier:
       type: object
-      description: 达到起订箱数后，本商品本次订购的全部箱数使用该优惠箱价。
-      required: [minQuantity, casePrice]
+      description: 商品阶梯优惠。WHOLE_ORDER 达到门槛后全部箱数按优惠价；INCREMENTAL 从门槛箱开始仅对该箱及超出部分按优惠价。
+      required: [minQuantity, casePrice, pricingMode]
       properties:
         minQuantity:
           type: integer
@@ -2378,6 +2378,9 @@ components:
           maximum: 999999
         casePrice:
           $ref: '#/components/schemas/Decimal'
+        pricingMode:
+          type: string
+          enum: [WHOLE_ORDER, INCREMENTAL]
     SubmitOrderItem:
       type: object
       required: [productId, quantity]
@@ -2477,7 +2480,33 @@ components:
           type: [integer, 'null']
           format: int64
           minimum: 2
-          description: 为空时使用基础价；有值时表示本订单明细命中了对应整批阶梯价。
+          description: 为空时未命中阶梯优惠；有值时表示本订单明细已使用对应门槛的阶梯优惠。
+        baseCasePrice:
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
+          description: 下单时的基础箱价快照。
+        basePriceQuantity:
+          type: [integer, 'null']
+          format: int64
+          description: 按基础箱价计费的箱数。
+        tierCasePrice:
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
+          description: 下单时的阶梯优惠箱价快照。
+        tierMinQuantity:
+          type: [integer, 'null']
+          format: int64
+          description: 下单时的阶梯门槛快照。
+        tierPriceQuantity:
+          type: [integer, 'null']
+          format: int64
+          description: 按阶梯优惠箱价计费的箱数。
+        pricingMode:
+          type: [string, 'null']
+          enum: [WHOLE_ORDER, INCREMENTAL, null]
+          description: 下单时的计价模式快照。
         lineAmount:
           $ref: '#/components/schemas/Decimal'
         tonCaseFactor:

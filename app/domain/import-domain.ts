@@ -51,6 +51,7 @@ export type ProductImportRow = {
   casePrice: string;
   priceTierMinQuantity: string;
   priceTierCasePrice: string;
+  priceTierPricingMode: "WHOLE_ORDER" | "INCREMENTAL";
   conversion: string;
   gift: "是" | "否";
   branchScope: string;
@@ -170,7 +171,8 @@ export function bindProductStaging(rows: ProductImportRow[], staging: ImportStag
     const edited = server.editedData ?? {};
     return { ...row, serverRowId: server.id, status,
       priceTierMinQuantity: String(edited.priceTierMinQuantity ?? row.priceTierMinQuantity ?? ""),
-      priceTierCasePrice: String(edited.priceTierCasePrice ?? row.priceTierCasePrice ?? "") };
+      priceTierCasePrice: String(edited.priceTierCasePrice ?? row.priceTierCasePrice ?? ""),
+      priceTierPricingMode: edited.priceTierPricingMode === "INCREMENTAL" ? "INCREMENTAL" : row.priceTierPricingMode ?? "WHOLE_ORDER" };
   }).filter((row) => !bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber))?.deleted);
 }
 

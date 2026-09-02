@@ -159,26 +159,30 @@ test("keeps product imports as independent full-replacement batches", async () =
   assert.doesNotMatch(importService, /inheritProductImages/);
 });
 
-test("supports manually configured whole-line volume pricing", async () => {
-  const [frontend, importDomain, importService, workbookProcessor, orderService, migration] = await Promise.all([
+test("supports whole-order and incremental volume pricing configured outside Excel", async () => {
+  const [frontend, importDomain, importService, workbookProcessor, orderService, baseMigration, modeMigration] = await Promise.all([
     readFrontendSource(),
     readFile(new URL("../app/domain/import-domain.ts", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportService.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportWorkbookProcessor.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/order/OrderService.java", import.meta.url), "utf8"),
     readFile(new URL("../db/migrations/V013__product_volume_price_tier.sql", import.meta.url), "utf8"),
+    readFile(new URL("../db/migrations/V016__incremental_product_volume_pricing.sql", import.meta.url), "utf8"),
   ]);
 
   assert.match(importDomain, /priceTierMinQuantity: string/);
-  assert.match(frontend, /设置满箱整批优惠/);
-  assert.match(frontend, /达到门槛后，本商品全部箱数按优惠箱价计算/);
-  assert.match(frontend, /function effectiveCasePrice/);
-  assert.match(frontend, /quantity >= product\.tierMinQuantity/);
+  assert.match(importDomain, /priceTierPricingMode: "WHOLE_ORDER" \| "INCREMENTAL"/);
+  assert.match(frontend, /设置阶梯优惠/);
+  assert.match(frontend, /超出部分优惠/);
+  assert.match(frontend, /function priceBreakdown/);
   assert.match(importService, /activity_product_price_tier/);
   assert.match(workbookProcessor, /PRODUCT_PRICE_TIER_INVALID/);
-  assert.match(orderService, /effectiveCasePrice/);
+  assert.match(orderService, /calculatePrice/);
+  assert.match(orderService, /"INCREMENTAL"\.equals\(mode\)/);
   assert.match(orderService, /applied_tier_min_quantity/);
-  assert.match(migration, /CREATE TABLE activity_product_price_tier/);
+  assert.match(baseMigration, /CREATE TABLE activity_product_price_tier/);
+  assert.match(modeMigration, /pricing_mode/);
+  assert.match(modeMigration, /tier_price_quantity/);
 });
 
 test("keeps whitelist imports status-only with filtering", async () => {

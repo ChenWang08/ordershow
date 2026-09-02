@@ -447,8 +447,10 @@ final class ImportWorkbookProcessor {
   private static String priceTierError(Map<String, Object> data) {
     String quantityText = text(data.get("priceTierMinQuantity"));
     String priceText = text(data.get("priceTierCasePrice"));
+    String pricingMode = text(data.get("priceTierPricingMode"));
     if (quantityText.isBlank() && priceText.isBlank()) return null;
     if (quantityText.isBlank() || priceText.isBlank()) return "请同时填写阶梯起订箱数和阶梯箱价";
+    if (!pricingMode.isBlank() && !Set.of("WHOLE_ORDER", "INCREMENTAL").contains(pricingMode)) return "阶梯计价模式不正确";
     try {
       BigDecimal quantity = new BigDecimal(quantityText);
       BigDecimal tierPrice = new BigDecimal(priceText);

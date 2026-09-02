@@ -21,6 +21,7 @@ type Product = {
   price: number;
   tierMinQuantity?: number;
   tierCasePrice?: number;
+  tierPricingMode?: "WHOLE_ORDER" | "INCREMENTAL";
   rebate: boolean;
   gift: boolean;
   atlas: number;
@@ -51,6 +52,7 @@ function productRowToProduct(row: ProductImportRow): Product {
     price: Number(row.casePrice) || 0,
     tierMinQuantity: row.priceTierMinQuantity ? Number(row.priceTierMinQuantity) : undefined,
     tierCasePrice: row.priceTierCasePrice ? Number(row.priceTierCasePrice) : undefined,
+    tierPricingMode: row.priceTierPricingMode,
     rebate: row.rebate === "参与",
     gift: row.gift === "是",
     atlas: lineAtlas,
@@ -76,6 +78,7 @@ function runtimeProductToProduct(row: RuntimeProduct): Product {
     price: Number(row.casePrice || 0),
     tierMinQuantity: row.priceTier?.minQuantity,
     tierCasePrice: row.priceTier?.casePrice,
+    tierPricingMode: row.priceTier?.pricingMode,
     rebate: row.rebateStatus === "PARTICIPATING",
     gift: row.giftBox,
     atlas: row.productLine === "酱油" ? 1 : row.productLine === "食醋" ? 2 : row.giftBox ? 3 : 0,
@@ -96,13 +99,28 @@ function ProductArt({ atlas, imageUrl, alt = "商品图片" }: { atlas: number; 
 
 type SubmittedOrderItem = { product: Product; quantity: number };
 
-function effectiveCasePrice(product: Product, quantity: number) {
-  return product.tierMinQuantity != null && product.tierCasePrice != null && quantity >= product.tierMinQuantity
-    ? product.tierCasePrice : product.price;
+function priceBreakdown(product: Product, quantity: number) {
+  if (product.tierMinQuantity == null || product.tierCasePrice == null) {
+    return { amount: quantity * product.price, displayPrice: product.price, baseQuantity: quantity, tierQuantity: 0 };
+  }
+  if (product.tierPricingMode === "INCREMENTAL") {
+    const baseQuantity = Math.min(quantity, product.tierMinQuantity - 1);
+    const tierQuantity = Math.max(0, quantity - baseQuantity);
+    return { amount: baseQuantity * product.price + tierQuantity * product.tierCasePrice,
+      displayPrice: product.price, baseQuantity, tierQuantity };
+  }
+  const applied = quantity >= product.tierMinQuantity;
+  return { amount: quantity * (applied ? product.tierCasePrice : product.price),
+    displayPrice: applied ? product.tierCasePrice : product.price, baseQuantity: applied ? 0 : quantity, tierQuantity: applied ? quantity : 0 };
 }
 
 function tierPriceLabel(product: Product, quantity: number) {
   if (product.tierMinQuantity == null || product.tierCasePrice == null) return "";
+  if (product.tierPricingMode === "INCREMENTAL") {
+    return quantity >= product.tierMinQuantity
+      ? `前${product.tierMinQuantity - 1}箱¥${money(product.price)}，超出${quantity - product.tierMinQuantity + 1}箱¥${money(product.tierCasePrice)}`
+      : `第${product.tierMinQuantity}箱起，超出部分¥${money(product.tierCasePrice)}/箱`;
+  }
   return quantity >= product.tierMinQuantity
     ? `已享满${product.tierMinQuantity}箱整批优惠`
     : `满${product.tierMinQuantity}箱，整批¥${money(product.tierCasePrice)}/箱`;
@@ -188,11 +206,11 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
   );
   const selected = catalog.filter((p) => (quantities[p.id] || 0) > 0);
   const totalBoxes = selected.reduce((sum, p) => sum + quantities[p.id], 0);
-  const totalAmount = selected.reduce((sum, p) => sum + quantities[p.id] * effectiveCasePrice(p, quantities[p.id]), 0);
+  const totalAmount = selected.reduce((sum, p) => sum + priceBreakdown(p, quantities[p.id]).amount, 0);
   const orderViewQuantities = submittedQuantities;
   const orderViewSelected = submittedItems.map((item) => item.product);
   const orderViewBoxes = orderViewSelected.reduce((sum, p) => sum + orderViewQuantities[p.id], 0);
-  const orderViewAmount = orderViewSelected.reduce((sum, p) => sum + orderViewQuantities[p.id] * p.price, 0);
+  const orderViewAmount = orderViewSelected.reduce((sum, p) => sum + priceBreakdown(p, orderViewQuantities[p.id]).amount, 0);
   const importedIdentity = verifiedIdentity ?? submittedIdentity;
   const identityRegionCode = runtimeIdentity?.regionCode || importedIdentity?.region || region;
   const identityRegion = regionOptions.find((item) => item.value === identityRegionCode)?.name || identityRegionCode;
@@ -270,8 +288,10 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
       const id = String(item.productId);
       itemQuantities[id] = item.quantity;
       const catalogProduct = liveCatalog.find((product) => product.id === id);
-      const found = catalogProduct ? { ...catalogProduct, price: Number(item.casePrice), tierMinQuantity: undefined, tierCasePrice: undefined } : {
-        id, name: item.materialName, line: item.productLine || "未分类", spec: item.specification || "", price: Number(item.casePrice),
+      const snapshot = { price: Number(item.baseCasePrice ?? item.casePrice), tierMinQuantity: item.tierMinQuantity,
+        tierCasePrice: item.tierCasePrice == null ? undefined : Number(item.tierCasePrice), tierPricingMode: item.pricingMode };
+      const found = catalogProduct ? { ...catalogProduct, ...snapshot } : {
+        id, name: item.materialName, line: item.productLine || "未分类", spec: item.specification || "", ...snapshot,
         rebate: true, gift: false, atlas: 0, customerType: "全部" as const, branchScope: [], status: "有效" as const, isOrderable: true,
       };
       return { product: found, quantity: item.quantity };
@@ -522,7 +542,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                     <div className="product-info">
                       <h3>{product.name}</h3>
                       <div className="product-action">
-                        <div className="product-price-block"><strong>{product.isOrderable ? <>¥{money(effectiveCasePrice(product, quantities[product.id] || 0))}<small>/箱</small></> : "价格待完善"}</strong>{product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small>{tierPriceLabel(product, quantities[product.id] || 0)}</small>}</div>
+                        <div className="product-price-block"><strong>{product.isOrderable ? <>¥{money(priceBreakdown(product, quantities[product.id] || 0).displayPrice)}<small>/箱</small></> : "价格待完善"}</strong>{product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small>{tierPriceLabel(product, quantities[product.id] || 0)}</small>}</div>
                         <div className="stepper">
                           <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={activityClosed || !product.isOrderable || !quantities[product.id]}>−</button>
                           <input aria-label={`${product.name}订货箱数`} disabled={activityClosed} inputMode="numeric" type="number" min="0" max="999999" value={quantities[product.id] || 0} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setQuantities({ ...quantities, [product.id]: Math.min(999999, Math.max(0, Math.floor(Number(e.target.value) || 0))) })} />
@@ -554,8 +574,8 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                       <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
                       <div className="cart-item-info">
                         <b>{product.name}</b>
-                        <span>¥{money(effectiveCasePrice(product, quantities[product.id]))}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span>
-                        <strong>小计 ¥{money(effectiveCasePrice(product, quantities[product.id]) * quantities[product.id])}</strong>
+                        <span>¥{money(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span>
+                        <strong>小计 ¥{money(priceBreakdown(product, quantities[product.id]).amount)}</strong>
                       </div>
                       <div className="cart-item-actions">
                         <button className="remove-item" disabled={activityClosed} onClick={() => setQuantities((old) => ({ ...old, [product.id]: 0 }))}>删除</button>
@@ -582,7 +602,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                 {selected.map((product) => (
                   <div key={product.id}>
                     <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
-                    <p><b>{product.name}</b><span>¥{money(effectiveCasePrice(product, quantities[product.id]))}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span></p>
+                    <p><b>{product.name}</b><span>¥{money(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span></p>
                     <strong>× {quantities[product.id]}</strong>
                   </div>
                 ))}
@@ -616,7 +636,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                 {orderViewSelected.map((product) => (
                   <div key={product.id}>
                     <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
-                    <p><b>{product.name}</b><span>¥{money(product.price)}/箱</span></p>
+                    <p><b>{product.name}</b><span>¥{money(priceBreakdown(product, orderViewQuantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, orderViewQuantities[product.id]) ? ` · ${tierPriceLabel(product, orderViewQuantities[product.id])}` : ""}</span></p>
                     <strong>× {orderViewQuantities[product.id]}</strong>
                   </div>
                 ))}

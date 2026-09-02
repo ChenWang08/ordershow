@@ -134,7 +134,8 @@ class IsolatedApiE2ETest {
       if ("P001".equals(row.path("normalizedData").path("materialCode").asText())) { p001 = row; break; }
     }
     assertNotNull(p001);
-    ObjectNode changes = JSON.createObjectNode().put("priceTierMinQuantity", "1500").put("priceTierCasePrice", "90.00");
+    ObjectNode changes = JSON.createObjectNode().put("priceTierMinQuantity", "1500").put("priceTierCasePrice", "90.00")
+        .put("priceTierPricingMode", "INCREMENTAL");
     ObjectNode tierPatch = JSON.createObjectNode().set("changes", changes);
     tierPatch.put("deleted", false);
     HttpResponse<String> tierSaved = send(admin, "PATCH", "/admin/activities/" + activityId + "/imports/" + productTask
@@ -203,6 +204,7 @@ class IsolatedApiE2ETest {
     productId = tieredProduct.path("id").asLong();
     assertEquals(1500, tieredProduct.path("priceTier").path("minQuantity").asLong());
     assertEquals("90.00", tieredProduct.path("priceTier").path("casePrice").decimalValue().setScale(2).toPlainString());
+    assertEquals("INCREMENTAL", tieredProduct.path("priceTier").path("pricingMode").asText());
     productWithoutTonsId = findProduct(products, "P002").path("id").asLong();
     assertTrue(productId > 0);
     assertTrue(productWithoutTonsId > 0);

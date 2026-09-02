@@ -577,6 +577,7 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
       specification: nextRow.spec, casePack: nextRow.casePack, bottlePrice: numeric(nextRow.unitPrice),
       casePrice: numeric(nextRow.casePrice), tonCaseFactor: numeric(nextRow.conversion), giftBox: nextRow.gift === "是",
       priceTierMinQuantity: numeric(nextRow.priceTierMinQuantity), priceTierCasePrice: numeric(nextRow.priceTierCasePrice),
+      priceTierPricingMode: nextRow.priceTierPricingMode,
       visible: true, orderable: Number(nextRow.casePrice) > 0, branchScope: nextRow.branchScope, reason,
     };
     if (editingProductRow) {
@@ -590,6 +591,7 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
             specification: nextRow.spec, casePack: nextRow.casePack, bottlePrice: nextRow.unitPrice,
             casePrice: nextRow.casePrice, tonCaseFactor: nextRow.conversion, giftBox: nextRow.gift === "是",
             priceTierMinQuantity: nextRow.priceTierMinQuantity, priceTierCasePrice: nextRow.priceTierCasePrice,
+            priceTierPricingMode: nextRow.priceTierPricingMode,
             branchScope: nextRow.branchScope,
           });
         } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "商品预览修改失败"); return false; }
