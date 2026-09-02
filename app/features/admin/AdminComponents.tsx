@@ -380,7 +380,7 @@ export function WhitelistFormDrawer({ rows, initialRow, activityStarted = false,
   const phoneValid = (isEditing && form.dealerPhone.includes("*")) || whitelistPhoneIsValid(form.dealerPhone);
   const duplicateDealerName = normalizeWhitelistName(form.dealerFull) !== "" && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && whitelistIdentityKey(row) === whitelistIdentityKey(form));
   const duplicateDealerPhone = whitelistPhoneIsValid(form.dealerPhone) && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && normalizePhone(row.dealerPhone) === normalizePhone(form.dealerPhone));
-  const canSave = form.region.trim() !== "" && form.branch.trim() !== "" && form.dealerShort.trim() !== "" && form.dealerFull.trim() !== "" && phoneValid && !duplicateDealerName && !duplicateDealerPhone && (!activityStarted || editReason.trim() !== "");
+  const canSave = form.branch.trim() !== "" && form.dealerShort.trim() !== "" && form.dealerFull.trim() !== "" && phoneValid && !duplicateDealerName && !duplicateDealerPhone && (!activityStarted || editReason.trim() !== "");
   return (
     <div className="order-drawer-backdrop" onClick={() => { if (!saving) onClose(); }}>
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
@@ -388,7 +388,7 @@ export function WhitelistFormDrawer({ rows, initialRow, activityStarted = false,
         <div className="auto-sequence-note"><span>{isEditing ? "当前客户" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>{form.customerType}分组</small></div>
         <div className="drawer-form-body"><div className="drawer-form-grid">
           <label><span>客户类型</span><select value={form.customerType} onChange={(e) => { const type = e.target.value as WhitelistRow["customerType"]; setForm((current) => ({ ...current, customerType: type, dealerType: type === "综合客户" ? "综合经销商" : "特渠专业经销商" })); }}><option>综合客户</option><option>特渠专业客户</option></select></label>
-          <label><span>大区 *</span><select value={form.region} onChange={(e) => update("region", e.target.value)}><option value="">请选择</option><option>东区</option><option>南区</option><option>北区</option><option>西区</option></select></label>
+          <label><span>大区（选填）</span><input value={form.region} onChange={(e) => update("region", e.target.value)} placeholder="可自行填写；不分大区请留空" /></label>
           <label><span>分公司名称 *</span><input value={form.branch} onChange={(e) => update("branch", e.target.value)} placeholder="例如：长沙分" /></label>
           <label><span>经销商名称（简）*</span><input value={form.dealerShort} onChange={(e) => update("dealerShort", e.target.value)} /><small>{form.dealerShort.length}/10 字</small></label>
           <label className="wide-field"><span>经销商名称（全）*</span><input value={form.dealerFull} onChange={(e) => update("dealerFull", e.target.value)} /><small className={duplicateDealerName ? "field-error" : ""}>{duplicateDealerName ? "同客户类型下已存在，请直接编辑原客户" : "客户身份匹配使用客户类型 + 名称全称；电话变化时会更新原客户"}</small></label>

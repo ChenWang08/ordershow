@@ -7,6 +7,7 @@ import com.fengyi.ordershow.activity.ActivityService;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -102,7 +103,7 @@ public class DashboardService {
       Report frozen = snapshot("REPORT", activity.id(), Report.class, () -> liveReport(activity, "FINAL"));
       return new Report(reportCode, frozen.dashboard(), frozen.customerTypes(), frozen.regions(),
           frozen.generalProductLines(), frozen.specialProductLines(), frozen.giftCustomerTypes(),
-          frozen.topGeneral(), frozen.topSpecial(), frozen.trend(), frozen.regionProductLines());
+          frozen.topGeneral(), frozen.topSpecial(), frozen.trend(), frozen.regionProductLines(), frozen.generalRegions());
     }
     return liveReport(activity, reportCode);
   }
@@ -145,9 +146,48 @@ public class DashboardService {
         ORDER BY o.region_code, SUM(i.line_amount) DESC, i.product_line
         """, (rs, rowNum) -> new RegionProductLineTotal(rs.getString(1), rs.getString(2),
         rs.getBigDecimal(3), rs.getLong(4)), dashboard.activityId());
-    return new Report(reportCode, dashboard, types, regions, productLines(dashboard.activityId(), "GENERAL", null),
+    List<ProductLineTotal> generalProductLines = productLines(dashboard.activityId(), "GENERAL", null);
+    return new Report(reportCode, dashboard, types, regions, generalProductLines,
         productLines(dashboard.activityId(), "SPECIAL", null), giftTypes, topCustomers(dashboard.activityId(), "GENERAL"),
-        topCustomers(dashboard.activityId(), "SPECIAL"), trend, regionProductLines);
+        topCustomers(dashboard.activityId(), "SPECIAL"), trend, regionProductLines,
+        generalRegions(activity, regions, regionProductLines, generalProductLines));
+  }
+
+  private List<GeneralRegion> generalRegions(ActivityService.ActivityView activity, List<RegionTotal> totals,
+                                              List<RegionProductLineTotal> regionLines,
+                                              List<ProductLineTotal> generalProductLines) {
+    Map<String, RegionTotal> totalsByCode = new LinkedHashMap<>();
+    totals.forEach(total -> totalsByCode.put(total.regionCode(), total));
+    Map<String, Map<String, RegionProductLineTotal>> linesByCode = new LinkedHashMap<>();
+    for (var line : regionLines) {
+      linesByCode.computeIfAbsent(line.regionCode(), ignored -> new LinkedHashMap<>()).put(line.productLine(), line);
+    }
+    List<ActivityService.RegionView> definitions = new ArrayList<>(activity.regions());
+    Map<String, String> historicalNames = new LinkedHashMap<>();
+    List<ActivityService.RegionView> dictionary = jdbc.query("""
+        SELECT region_code, region_name FROM activity_region WHERE activity_id = ? ORDER BY id
+        """, (rs, rowNum) -> new ActivityService.RegionView(rs.getString(1), rs.getString(2), rowNum), activity.id());
+    dictionary.forEach(region -> historicalNames.putIfAbsent(region.code(), region.name()));
+    for (String code : totalsByCode.keySet()) {
+      if (definitions.stream().noneMatch(region -> region.code().equals(code))) {
+        String name = "UNASSIGNED".equals(code) ? "未分片区" : historicalNames.getOrDefault(code, code);
+        definitions.add(new ActivityService.RegionView(code, name, 10_000 + definitions.size()));
+      }
+    }
+    if (activity.regions().isEmpty() && definitions.stream().allMatch(region -> "UNASSIGNED".equals(region.code()))) {
+      return List.of();
+    }
+    return definitions.stream().map(region -> {
+      RegionTotal total = totalsByCode.get(region.code());
+      Map<String, RegionProductLineTotal> rows = linesByCode.getOrDefault(region.code(), Map.of());
+      List<ProductLineTotal> productLines = generalProductLines.stream().map(line -> {
+        RegionProductLineTotal value = rows.get(line.productLine());
+        return value == null ? new ProductLineTotal(line.productLine(), BigDecimal.ZERO, 0)
+            : new ProductLineTotal(value.productLine(), value.amount(), value.quantity());
+      }).toList();
+      return new GeneralRegion(region.code(), region.name(), region.sortNo(), total == null ? 0 : total.orderCount(),
+          total == null ? BigDecimal.ZERO : total.amount(), productLines);
+    }).toList();
   }
 
   @EventListener
@@ -240,6 +280,8 @@ public class DashboardService {
   public record RegionTotal(String regionCode, BigDecimal amount, long orderCount) {}
   public record TrendPoint(String bucket, BigDecimal amount, long orders) {}
   public record RegionProductLineTotal(String regionCode, String productLine, BigDecimal amount, long quantity) {}
+  public record GeneralRegion(String regionCode, String regionName, int sortNo, long orderCount, BigDecimal amount,
+                              List<ProductLineTotal> productLines) {}
   public record Dashboard(long activityId, String activityName, String status, Map<String, Object> totals,
                           List<RankRow> companies, List<RankRow> branches, List<ProductLineTotal> productLines,
                           List<LatestOrder> latestOrders, String version, Instant generatedAt) {}
@@ -247,5 +289,5 @@ public class DashboardService {
                        List<RegionTotal> regions, List<ProductLineTotal> generalProductLines,
                        List<ProductLineTotal> specialProductLines, List<CustomerTypeTotal> giftCustomerTypes,
                        List<RankRow> topGeneral, List<RankRow> topSpecial, List<TrendPoint> trend,
-                       List<RegionProductLineTotal> regionProductLines) {}
+                       List<RegionProductLineTotal> regionProductLines, List<GeneralRegion> generalRegions) {}
 }

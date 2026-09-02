@@ -10,7 +10,7 @@ const reports = [
   "综合客户 TOP5",
   "总战绩",
   "特渠专业客户金额、综合客户金额及合计",
-  "综合客户东、南、北1、北2区金额及合计",
+  "综合客户各片区金额及合计",
   "礼盒：特渠专业客户金额、综合客户金额及合计",
   "综合客户各产品线金额及合计",
   "特渠专业客户与综合客户各产品线金额及合计",
@@ -24,7 +24,9 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
   const historical = activity?.status === "FINISHED" || activity?.status === "ARCHIVED";
   const options = useMemo(() => [
     { value: "SPECIAL", label: "特渠专业客户" },
-    ...(activity?.regions ?? []).map((region) => ({ value: `GENERAL:${region.code}`, label: `综合${region.name}` })),
+    ...(activity?.regions?.length
+      ? activity.regions.map((region) => ({ value: `GENERAL:${region.code}`, label: `综合${region.name}` }))
+      : [{ value: "GENERAL", label: "综合客户" }]),
   ], [activity]);
   const effectiveChannel = options.some((option) => option.value === channel) ? channel : options[0]?.value ?? "SPECIAL";
   useEffect(() => {
@@ -115,8 +117,8 @@ function dashboardColorFor(label: string, palette = dashboardChartPalette) {
   return palette[Math.abs(hash) % palette.length];
 }
 
-function DashboardBars({ rows, color = "#2f96cc" }: { rows: DashboardBarRow[]; color?: string }) {
-  const max = Math.max(...rows.map((row) => row.amount), 1);
+function DashboardBars({ rows, color = "#2f96cc", maxAmount }: { rows: DashboardBarRow[]; color?: string; maxAmount?: number }) {
+  const max = Math.max(maxAmount ?? 0, ...rows.map((row) => row.amount), 1);
   return <div className="order-dashboard-bars">{rows.map((row, index) => <div className="order-dashboard-bar" key={`${row.name}-${index}`}>
     <span>{row.name}</span><div><i style={{ width: row.amount <= 0 ? "0%" : `${Math.max(2, row.amount / max * 100)}%`, background: row.color ?? color }} /></div><b>{dashboardCompactAmount(row.amount)}</b>{row.note && <small>{row.note}</small>}
   </div>)}</div>;
@@ -215,11 +217,19 @@ export function OrderDashboard({ activity }: { activity: RuntimeActivity | null 
   const generalAmount = Number(types.find((item) => item.customerType === "GENERAL")?.amount ?? 0);
   const specialAmount = Number(types.find((item) => item.customerType === "SPECIAL")?.amount ?? 0);
   const generalShare = amount ? generalAmount / amount * 100 : 0;
-  const regions = (activity?.regions ?? []).map((region) => ({
-    name: region.name,
+  const legacyGeneralRegions = (activity?.regions ?? []).map((region) => ({
+    regionCode: region.code, regionName: region.name, sortNo: region.sortNo,
     amount: Number(data?.regions.find((item) => item.regionCode === region.code)?.amount ?? 0),
-    note: `${data?.regions.find((item) => item.regionCode === region.code)?.orderCount ?? 0}单`,
-    color: dashboardRegionPalette[(activity?.regions ?? []).findIndex((item) => item.code === region.code) % dashboardRegionPalette.length],
+    orderCount: Number(data?.regions.find((item) => item.regionCode === region.code)?.orderCount ?? 0),
+    productLines: (data?.generalProductLines ?? []).map((line) => {
+      const value = data?.regionProductLines?.find((item) => item.regionCode === region.code && item.productLine === line.productLine);
+      return { productLine: line.productLine, amount: Number(value?.amount ?? 0), quantity: Number(value?.quantity ?? 0) };
+    }),
+  }));
+  const generalRegions = data?.generalRegions ?? legacyGeneralRegions;
+  const regions = generalRegions.map((region, index) => ({
+    name: region.regionName, amount: Number(region.amount), note: `${region.orderCount}单`,
+    color: dashboardRegionPalette[index % dashboardRegionPalette.length],
   }));
   const trend = dashboardHourlyTrend(data?.trend ?? [], activity, dashboard?.generatedAt);
   const trendMax = Math.max(...trend.map((item) => Number(item.amount)), 1);
@@ -233,16 +243,13 @@ export function OrderDashboard({ activity }: { activity: RuntimeActivity | null 
   const productLineRows = (dashboard?.productLines ?? []).slice(0, 6).map((item) => ({ name: item.productLine || "其他", amount: Number(item.amount), color: productLineColor(item.productLine || "其他") }));
   const specialChannelProductRows = (data?.specialProductLines ?? []).map((item) => ({ name: item.productLine || "其他", amount: Number(item.amount), color: productLineColor(item.productLine || "其他") }));
   const generalChannelProductRows = (data?.generalProductLines ?? []).map((item) => ({ name: item.productLine || "其他", amount: Number(item.amount), color: productLineColor(item.productLine || "其他") }));
-  const generalProductLineOrder = (data?.generalProductLines ?? []).map((item) => item.productLine || "其他");
-  const regionProductCards = (activity?.regions ?? []).map((region, regionIndex) => ({
-    code: region.code,
-    name: region.name,
+  const regionProductCards = generalRegions.map((region, regionIndex) => ({
+    code: region.regionCode,
+    name: region.regionName,
     color: dashboardRegionPalette[regionIndex % dashboardRegionPalette.length],
-    rows: generalProductLineOrder.map((productLine) => {
-      const row = (data?.regionProductLines ?? []).find((item) => item.regionCode === region.code && item.productLine === productLine);
-      return { name: productLine, amount: Number(row?.amount ?? 0), color: productLineColor(productLine) };
-    }),
+    rows: region.productLines.map((row) => ({ name: row.productLine || "其他", amount: Number(row.amount), color: productLineColor(row.productLine || "其他") })),
   }));
+  const regionProductMax = Math.max(1, ...regionProductCards.flatMap((region) => region.rows.map((row) => row.amount)));
   const branchRankingRows = (dashboard?.branches ?? []).slice(0, 15);
   const dealerRankingRows = (dashboard?.companies ?? []).slice(0, 15);
   const generatedAt = dashboard?.generatedAt ? new Date(dashboard.generatedAt).toLocaleString("zh-CN", { hour12: false }) : "--";
@@ -286,12 +293,12 @@ export function OrderDashboard({ activity }: { activity: RuntimeActivity | null 
     <div className="order-dashboard-kpis">{cards.map((card) => <article className={card.tone} key={card.label}><span>{card.icon}</span><div><small>{card.label}</small><strong>{card.value}<i>{card.unit}</i></strong></div></article>)}</div>
     <div className="order-dashboard-grid order-dashboard-grid-top">
       <article className="order-dashboard-panel"><h2><i className="mint" />渠道订单额占比</h2><div className="channel-donut-wrap"><div className="channel-donut" style={{ background: `conic-gradient(#1fbaa1 0 ${generalShare}%, #ed8618 ${generalShare}% 100%)` }}><b>{dashboardCompactAmount(amount)}<small>订单总额</small></b></div><div className="channel-legend"><span><i className="general" />综合客户 <b>{dashboardCompactAmount(generalAmount)}</b></span><span><i className="special" />特渠专业客户 <b>{dashboardCompactAmount(specialAmount)}</b></span></div></div></article>
-      <article className="order-dashboard-panel"><h2><i className="orange" />综合客户 · 片区订单额分布</h2><DashboardBars rows={regions} /></article>
+      {generalRegions.length > 0 && <article className="order-dashboard-panel"><h2><i className="orange" />综合客户 · 片区订单额分布</h2><DashboardBars rows={regions} /></article>}
       <article className="order-dashboard-panel"><h2><i className="brown" />产线订单额排名（全渠道）</h2><DashboardBars rows={productLineRows} /></article>
       <article className="order-dashboard-panel"><h2><i className="purple" />下单时间趋势（按小时）<small className="order-trend-hint">按住图表左右拖动 · {trend.length} 个小时 · {trend.filter((item) => Number(item.amount) === 0).length} 个零值</small></h2><div className="order-trend"><div className="order-trend-y-axis">{[1, .75, .5, .25, 0].map((ratio) => <span key={ratio}>{(trendMax * ratio / 10000).toFixed(0)}万</span>)}</div><div ref={trendScrollRef} className="order-trend-scroll" onPointerDown={beginTrendDrag} onPointerMove={moveTrendDrag} onPointerUp={endTrendDrag} onPointerCancel={endTrendDrag} onPointerLeave={(event) => { if (trendDragRef.current.active) endTrendDrag(event); }}><div className="order-trend-canvas" style={{ width: trendChartWidth }}><svg width={trendChartWidth} height="132" viewBox={`0 0 ${trendChartWidth} 132`} role="img" aria-label="下单时间趋势"><defs><linearGradient id="orderTrendArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#33bf7b" stopOpacity=".24"/><stop offset="100%" stopColor="#33bf7b" stopOpacity=".03"/></linearGradient></defs>{trendAreaPath && <path className="order-trend-area" d={trendAreaPath}/>}<path className="order-trend-line" d={trendLinePath}/></svg>{trendPoints.map((point, index) => <button type="button" className={`order-trend-point${selectedTrendIndex === index ? " active" : ""}`} key={`${point.x}-${index}`} style={{ left: point.x, top: point.y }} aria-label={`查看 ${formatTrendTime(trend[index].bucket)} 的下单数据`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setSelectedTrendBucket(trend[index].bucket); }} />)}{selectedTrendIndex >= 0 && <div className="order-trend-detail" style={{ left: Math.min(Math.max(trendPoints[selectedTrendIndex].x, 92), trendChartWidth - 92), top: trendPoints[selectedTrendIndex].y < 62 ? trendPoints[selectedTrendIndex].y + 13 : trendPoints[selectedTrendIndex].y - 58 }}><button type="button" aria-label="关闭时间点详情" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setSelectedTrendBucket(null); }}>×</button><b>{formatTrendTime(trend[selectedTrendIndex].bucket)}</b><span>订单金额 <strong>{Number(trend[selectedTrendIndex].amount).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 元</strong></span><span>订单笔数 <strong>{trend[selectedTrendIndex].orders} 笔</strong></span></div>}<div className="order-trend-x-axis">{trend.map((item, index) => <span key={item.bucket} style={{ left: 36 + index * 62 }}>{formatTrendTime(item.bucket, true).replaceAll("/", "-")}</span>)}</div></div></div></div></article>
     </div>
     <article className="order-dashboard-panel order-dashboard-products"><h2><i className="purple" />各渠道产线订单额对比</h2><div><section><h3 className="special">特渠专业客户</h3><DashboardBars rows={specialChannelProductRows} /></section><section><h3 className="general">综合客户</h3><DashboardBars rows={generalChannelProductRows} /></section></div></article>
-    <article className="order-dashboard-panel order-dashboard-region-products"><h2><i className="blue" />综合渠道 · 各片区产线订单额明细</h2><div className="order-dashboard-region-grid">{regionProductCards.map((region) => <section key={region.code}><h3 style={{ background: region.color }}>{region.name}<small>{dashboardCompactAmount(region.rows.reduce((sum, row) => sum + row.amount, 0))}</small></h3><DashboardBars rows={region.rows} /></section>)}</div></article>
+    {regionProductCards.length > 0 && <article className="order-dashboard-panel order-dashboard-region-products"><h2><i className="blue" />综合渠道 · 各片区产线订单额明细</h2><div className="order-dashboard-region-grid">{regionProductCards.map((region) => <section key={region.code}><h3 style={{ background: region.color }}>{region.name}<small>{dashboardCompactAmount(region.rows.reduce((sum, row) => sum + row.amount, 0))}</small></h3><DashboardBars rows={region.rows} maxAmount={regionProductMax} /></section>)}</div></article>}
     <div className="order-dashboard-grid order-dashboard-rankings">
       <article className="order-dashboard-panel"><h2><i className="red" />分公司订单额排名 TOP 15</h2><DashboardTopRanking rows={branchRankingRows} type="branch" /></article>
       <article className="order-dashboard-panel"><h2><i className="orange" />经销商订单额排名 TOP 15</h2><DashboardTopRanking rows={dealerRankingRows} type="dealer" /></article>
@@ -341,8 +348,11 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
   const displayTitle = displayTitles[report] ?? report;
   const typeValues = (report.includes("礼盒") ? data?.giftCustomerTypes : data?.customerTypes) ?? [];
   const typeAmount = (type: string) => Number(typeValues.find((item) => item.customerType === type)?.amount ?? 0);
-  const regionLabels = (activity?.regions ?? []).map((region) => region.name);
-  const regionValues = (activity?.regions ?? []).map((region) => Number(data?.regions.find((item) => item.regionCode === region.code)?.amount ?? 0));
+  const reportRegions = data?.generalRegions ?? (activity?.regions ?? []).map((region) => ({ regionCode: region.code, regionName: region.name, sortNo: region.sortNo,
+    orderCount: Number(data?.regions.find((item) => item.regionCode === region.code)?.orderCount ?? 0),
+    amount: Number(data?.regions.find((item) => item.regionCode === region.code)?.amount ?? 0), productLines: [] }));
+  const regionLabels = reportRegions.map((region) => region.regionName);
+  const regionValues = reportRegions.map((region) => Number(region.amount));
   const productLineRows = report === "综合客户各产品线金额及合计"
     ? data?.generalProductLines ?? []
     : data?.dashboard.productLines ?? [];
@@ -378,7 +388,7 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
           </>
         ) : report.includes("产品线") ? (
           <MetricTable kind="product" title={displayTitle} labels={productLineRows.map((item) => item.productLine)} values={productLineRows.map((item) => Number(item.amount))} />
-        ) : report.includes("东、南") ? (
+        ) : report.includes("各片区") ? (
           <MetricTable kind="area" title="综合客户" labels={regionLabels} values={regionValues} />
         ) : (
           <MetricTable title={displayTitle} labels={["特渠专业客户", "综合客户"]} values={[typeAmount("SPECIAL"), typeAmount("GENERAL")]} />

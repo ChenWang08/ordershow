@@ -20,12 +20,6 @@ export type CreateActivityInput = {
 };
 
 export async function createActivity(input: CreateActivityInput) {
-  const regions = [
-    { code: "EAST", name: "东区", sortNo: 10 },
-    { code: "SOUTH", name: "南区", sortNo: 20 },
-    { code: "NORTH_1", name: "北1区", sortNo: 30 },
-    { code: "NORTH_2", name: "北2区", sortNo: 40 },
-  ];
   return (await api<Envelope<RuntimeActivity>>("/admin/activities", {
     method: "POST",
     body: JSON.stringify({
@@ -39,7 +33,6 @@ export async function createActivity(input: CreateActivityInput) {
       companyRankingTopN: 20,
       branchRankingTopN: 20,
       tonDisplayScale: 3,
-      regions,
     }),
   }, "admin")).data;
 }
@@ -51,7 +44,7 @@ export async function updateActivity(activity: RuntimeActivity, changes: { name:
     startsAt: new Date(changes.startsAt).toISOString(), endsAt: new Date(changes.endsAt).toISOString(),
     eventEndsAt: new Date(changes.eventEndsAt).toISOString(),
     customerScope: activity.customerScope, companyRankingTopN: activity.companyRankingTopN,
-    branchRankingTopN: activity.branchRankingTopN, tonDisplayScale: activity.tonDisplayScale, regions: activity.regions,
+    branchRankingTopN: activity.branchRankingTopN, tonDisplayScale: activity.tonDisplayScale,
   };
   return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}`, {
     method: "PUT", headers: { "If-Match": String(activity.version) }, body: JSON.stringify(body),
@@ -81,4 +74,3 @@ export async function finishActivityNow(activity: RuntimeActivity, reason: strin
     method: "POST", headers: { "If-Match": String(activity.version) }, body: JSON.stringify({ reason }),
   }, "admin")).data;
 }
-

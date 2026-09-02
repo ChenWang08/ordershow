@@ -125,6 +125,7 @@ public class AuthService {
                                 HttpServletRequest request, HttpServletResponse response) {
     String normalized = CryptoService.normalizePhone(phone);
     if (!normalized.matches("1\\d{10}")) throw DomainException.badRequest("INVALID_PHONE", "请输入有效的 11 位手机号");
+    String requestedRegion = regionCode == null || regionCode.isBlank() ? null : regionCode.trim();
     List<H5Principal> customers = jdbc.query("""
         SELECT 0 session_id, c.activity_id, c.id activity_customer_id, a.activity_code,
                c.customer_type, c.region_code, c.branch_name, c.dealer_short_name, c.dealer_full_name, c.phone_masked
@@ -136,11 +137,25 @@ public class AuthService {
           AND (a.event_ends_at IS NULL OR a.event_ends_at > UTC_TIMESTAMP(3))
           AND c.customer_type = ? AND c.phone_lookup_hash = ? AND c.is_active = TRUE
           AND (b.current_version_id IS NULL OR c.data_version_id = b.current_version_id)
-          AND (? IS NULL OR ? = '' OR c.region_code = ?)
+          AND (c.customer_type <> 'GENERAL' OR (
+            NOT EXISTS (
+              SELECT 1 FROM activity_customer regionalized
+              JOIN activity_data_binding regional_binding
+                ON regional_binding.activity_id = regionalized.activity_id
+               AND regional_binding.data_type = 'WHITELIST'
+               AND regional_binding.current_version_id = regionalized.data_version_id
+              WHERE regionalized.activity_id = c.activity_id AND regionalized.customer_type = 'GENERAL'
+                AND regionalized.is_active = TRUE AND regionalized.region_code IS NOT NULL
+                AND TRIM(regionalized.region_code) <> ''
+            )
+            OR (? = 'UNASSIGNED' AND (c.region_code IS NULL OR TRIM(c.region_code) = ''))
+            OR (? IS NOT NULL AND ? <> '' AND ? <> 'UNASSIGNED' AND c.region_code = ?)
+          ))
         """, (rs, rowNum) -> new H5Principal(0, rs.getLong("activity_id"), rs.getLong("activity_customer_id"),
         rs.getString("activity_code"), rs.getString("customer_type"), rs.getString("region_code"),
         rs.getString("branch_name"), rs.getString("dealer_short_name"), rs.getString("dealer_full_name"),
-        rs.getString("phone_masked")), activityCode, customerType, crypto.lookupHash(normalized), regionCode, regionCode, regionCode);
+        rs.getString("phone_masked")), activityCode, customerType, crypto.lookupHash(normalized),
+        requestedRegion, requestedRegion, requestedRegion, requestedRegion, requestedRegion);
     if (customers.size() != 1) throw DomainException.notFound("WHITELIST_IDENTITY_NOT_FOUND", "该手机号不在所选通道或大区的有效白名单中");
     H5Principal customer = customers.getFirst();
     String token = randomToken();

@@ -53,6 +53,7 @@ class IsolatedApiE2ETest {
   private long h5CustomerId;
   private long activityId;
   private String activityCode;
+  private String generalRegionCode;
   private int activityVersion;
   private long productId;
   private long productWithoutTonsId;
@@ -178,8 +179,12 @@ class IsolatedApiE2ETest {
     assertEquals(200, currentPublic.statusCode(), currentPublic.body());
     assertEquals(activityCode, data(currentPublic).path("code").asText());
     assertEquals("ACTIVE", data(currentPublic).path("status").asText());
+    for (JsonNode region : data(currentPublic).path("regions")) {
+      if ("东区".equals(region.path("name").asText())) generalRegionCode = region.path("code").asText();
+    }
+    assertNotNull(generalRegionCode);
 
-    ObjectNode verify = JSON.createObjectNode().put("customerType", "GENERAL").put("regionCode", "EAST").put("phone", GENERAL_PHONE);
+    ObjectNode verify = JSON.createObjectNode().put("customerType", "GENERAL").put("regionCode", generalRegionCode).put("phone", GENERAL_PHONE);
     HttpResponse<String> verified = send(h5, "POST", "/public/activities/" + activityCode + "/verify-phone", verify, null, null);
     assertEquals(200, verified.statusCode(), verified.body());
     h5Csrf = data(verified).path("csrfToken").asText();
@@ -399,7 +404,7 @@ class IsolatedApiE2ETest {
   }
 
   @Test
-  @Order(7)
+  @Order(8)
   void adminReportingDashboardAndCloseReadOnlyRules() throws Exception {
     HttpResponse<String> orders = send(admin, "GET", "/admin/activities/" + activityId + "/orders?page=1&size=20", null, null, null);
     assertEquals(200, orders.statusCode(), orders.body());
@@ -418,6 +423,14 @@ class IsolatedApiE2ETest {
     assertEquals("0.100000", data(dashboard).path("totals").path("total_tons").decimalValue().setScale(6).toPlainString());
     assertEquals("0.100000", data(dashboard).path("companies").get(0).path("tons").decimalValue().setScale(6).toPlainString());
     assertEquals("0.100000", data(dashboard).path("branches").get(0).path("tons").decimalValue().setScale(6).toPlainString());
+
+    HttpResponse<String> orderDashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/dashboard", null, null, null);
+    assertEquals(200, orderDashboard.statusCode(), orderDashboard.body());
+    JsonNode generalRegions = data(orderDashboard).path("generalRegions");
+    assertEquals(3, generalRegions.size());
+    assertEquals(1, generalRegions.get(0).path("orderCount").asInt());
+    assertEquals(generalRegionCode, generalRegions.get(0).path("regionCode").asText());
+    assertEquals(1, generalRegions.get(0).path("productLines").size());
 
     HttpResponse<String> export = send(admin, "GET", "/admin/activities/" + activityId + "/orders/export", null, null, null);
     assertEquals(200, export.statusCode());
@@ -452,6 +465,75 @@ class IsolatedApiE2ETest {
 
     HttpResponse<String> afterFinish = send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null);
     assertEquals(401, afterFinish.statusCode());
+  }
+
+  @Test
+  @Order(7)
+  void freeTextWhitelistRegionIsPublishedToH5AndRemainsVerifiable() throws Exception {
+    HttpResponse<String> listed = send(admin, "GET",
+        "/admin/activities/" + activityId + "/customers?customerType=GENERAL&keyword=AUTOTEST_%E7%BB%BC%E5%90%88%E7%BB%8F%E9%94%80%E5%95%86%E4%BA%8C&page=1&size=20",
+        null, null, null);
+    assertEquals(200, listed.statusCode(), listed.body());
+    JsonNode customer = data(listed).get(0);
+    ObjectNode update = JSON.createObjectNode()
+        .put("customerType", "GENERAL")
+        .put("regionCode", "华北新区")
+        .put("branchName", customer.path("branchName").asText())
+        .put("dealerShortName", customer.path("dealerShortName").asText())
+        .put("dealerFullName", customer.path("dealerFullName").asText())
+        .put("dealerCategory", customer.path("dealerCategory").asText())
+        .put("contactName", customer.path("contactName").asText())
+        .put("phone", customer.path("phone").asText())
+        .put("confirmerName", customer.path("confirmerName").asText())
+        .put("confirmerPhone", customer.path("confirmerPhone").asText())
+        .put("expectedVersion", customer.path("lockVersion").asInt())
+        .put("reason", "验证自由填写大区自动同步到 H5");
+    HttpResponse<String> saved = send(admin, "PUT",
+        "/admin/activities/" + activityId + "/customers/" + customer.path("id").asLong(), update, adminCsrf, null);
+    assertEquals(200, saved.statusCode(), saved.body());
+    String regionCode = data(saved).path("regionCode").asText();
+    assertTrue(regionCode.startsWith("R_"));
+
+    HttpResponse<String> publicActivity = send(client(), "GET", "/public/activities/" + activityCode, null, null, null);
+    assertEquals(200, publicActivity.statusCode(), publicActivity.body());
+    boolean visible = false;
+    for (JsonNode region : data(publicActivity).path("regions")) {
+      if (regionCode.equals(region.path("code").asText()) && "华北新区".equals(region.path("name").asText())) visible = true;
+    }
+    assertTrue(visible, publicActivity.body());
+
+    HttpClient newRegionCustomer = client();
+    ObjectNode verify = JSON.createObjectNode().put("customerType", "GENERAL")
+        .put("regionCode", regionCode).put("phone", "13900000002");
+    HttpResponse<String> verified = send(newRegionCustomer, "POST",
+        "/public/activities/" + activityCode + "/verify-phone", verify, null, null);
+    assertEquals(200, verified.statusCode(), verified.body());
+    assertEquals(regionCode, data(verified).path("customer").path("regionCode").asText());
+
+    ObjectNode unassignedUpdate = update.deepCopy();
+    unassignedUpdate.putNull("regionCode");
+    unassignedUpdate.put("expectedVersion", data(saved).path("lockVersion").asInt());
+    unassignedUpdate.put("reason", "验证未分大区客户入口");
+    HttpResponse<String> unassignedSaved = send(admin, "PUT",
+        "/admin/activities/" + activityId + "/customers/" + customer.path("id").asLong(), unassignedUpdate, adminCsrf, null);
+    assertEquals(200, unassignedSaved.statusCode(), unassignedSaved.body());
+    assertTrue(data(unassignedSaved).path("regionCode").isNull()
+        || data(unassignedSaved).path("regionCode").isMissingNode());
+
+    HttpResponse<String> mixedActivity = send(client(), "GET", "/public/activities/" + activityCode, null, null, null);
+    assertTrue(data(mixedActivity).path("hasUnassignedGeneralCustomers").asBoolean());
+    assertFalse(data(mixedActivity).path("regions").toString().contains("华北新区"));
+
+    ObjectNode unassignedVerify = JSON.createObjectNode().put("customerType", "GENERAL")
+        .put("regionCode", "UNASSIGNED").put("phone", "13900000002");
+    HttpResponse<String> unassignedVerified = send(client(), "POST",
+        "/public/activities/" + activityCode + "/verify-phone", unassignedVerify, null, null);
+    assertEquals(200, unassignedVerified.statusCode(), unassignedVerified.body());
+
+    ObjectNode missingRegion = JSON.createObjectNode().put("customerType", "GENERAL")
+        .putNull("regionCode").put("phone", "13900000002");
+    assertEquals(404, send(client(), "POST", "/public/activities/" + activityCode + "/verify-phone",
+        missingRegion, null, null).statusCode());
   }
 
   private long upload(String importType, String filename, byte[] content) throws Exception {

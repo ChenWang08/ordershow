@@ -1,6 +1,7 @@
 package com.fengyi.ordershow.customer;
 
 import com.fengyi.ordershow.activity.ActivityService;
+import com.fengyi.ordershow.activity.ActivityRegionService;
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.common.PageResponse;
 import com.fengyi.ordershow.security.AdminPrincipal;
@@ -20,11 +21,12 @@ public class CustomerService {
   private final JdbcTemplate jdbc;
   private final CryptoService crypto;
   private final ActivityService activities;
+  private final ActivityRegionService regions;
   private final AttendanceMatchingService attendanceMatching;
 
-  public CustomerService(JdbcTemplate jdbc, CryptoService crypto, ActivityService activities,
+  public CustomerService(JdbcTemplate jdbc, CryptoService crypto, ActivityService activities, ActivityRegionService regions,
       AttendanceMatchingService attendanceMatching) {
-    this.jdbc = jdbc; this.crypto = crypto; this.activities = activities; this.attendanceMatching = attendanceMatching;
+    this.jdbc = jdbc; this.crypto = crypto; this.activities = activities; this.regions = regions; this.attendanceMatching = attendanceMatching;
   }
 
   public PageResponse<CustomerView> customers(long activityId, String customerType, String regionCode,
@@ -65,6 +67,7 @@ public class CustomerService {
     if (replaceConfirmerPhone && !confirmerPhone.isEmpty() && confirmerPhone.length() != 11) {
       throw DomainException.badRequest("CONFIRMER_PHONE_INVALID", "分公司确认人手机号必须为 11 位");
     }
+    String regionCode = "GENERAL".equals(current.customerType()) ? regions.resolveCode(activityId, request.regionCode()) : null;
     try {
       int changed = jdbc.update("""
           UPDATE activity_customer SET region_code = ?, branch_name = ?, normalized_branch_name = ?, dealer_short_name = ?,
@@ -74,7 +77,7 @@ public class CustomerService {
             confirmer_phone_ciphertext = IF(?, ?, confirmer_phone_ciphertext),
             confirmer_phone_masked = IF(?, ?, confirmer_phone_masked), lock_version = lock_version + 1
           WHERE id = ? AND activity_id = ? AND lock_version = ?
-          """, blankToNull(request.regionCode()), blankToNull(request.branchName()), normalize(request.branchName()),
+          """, regionCode, blankToNull(request.branchName()), normalize(request.branchName()),
           blankToNull(request.dealerShortName()), required(request.dealerFullName(), "经销商名称不能为空"),
           blankToNull(request.dealerCategory()), blankToNull(request.contactName()), replacePhone, replacePhone ? crypto.encrypt(phone) : null,
           replacePhone, replacePhone ? crypto.lookupHash(phone) : null, replacePhone, replacePhone ? CryptoService.maskPhone(phone) : null,
@@ -101,6 +104,7 @@ public class CustomerService {
     if (!confirmerPhone.isEmpty() && confirmerPhone.length() != 11) {
       throw DomainException.badRequest("CONFIRMER_PHONE_INVALID", "分公司确认人手机号必须为 11 位");
     }
+    String regionCode = "GENERAL".equals(customerType) ? regions.resolveCode(activityId, request.regionCode()) : null;
     VersionSource source = currentSource(activityId, "WHITELIST");
     try {
       jdbc.update("""
@@ -116,7 +120,7 @@ public class CustomerService {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             (SELECT COALESCE(MAX(c.excel_sequence), 0) + 1 FROM activity_customer c WHERE c.activity_id = ? AND c.data_version_id = ?),
             TRUE, ?, ?)
-          """, activityId, customerId, customerType, blankToNull(request.regionCode()), blankToNull(request.branchName()),
+          """, activityId, customerId, customerType, regionCode, blankToNull(request.branchName()),
           normalize(request.branchName()), blankToNull(request.dealerShortName()), fullName, blankToNull(request.dealerCategory()),
           blankToNull(request.contactName()), crypto.encrypt(phone), crypto.lookupHash(phone), CryptoService.maskPhone(phone),
           blankToNull(request.confirmerName()), confirmerPhone.isEmpty() ? null : crypto.encrypt(confirmerPhone),

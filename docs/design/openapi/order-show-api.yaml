@@ -1872,12 +1872,18 @@ paths:
         - screenToken: []
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
-        - name: channel
+        - name: customerType
           in: query
-          required: true
+          required: false
           schema:
             type: string
-            enum: [SPECIAL, GENERAL_EAST, GENERAL_SOUTH, GENERAL_NORTH_1, GENERAL_NORTH_2]
+            enum: [SPECIAL, GENERAL]
+        - name: regionCode
+          in: query
+          required: false
+          description: 活动配置的动态片区编码；不分片区活动无需传入。
+          schema:
+            type: string
       responses:
         '200':
           description: 排行榜
@@ -1896,7 +1902,7 @@ paths:
         - $ref: '#/components/parameters/ActivityCode'
       responses:
         '200':
-          description: 订单总览、渠道产线对比、综合渠道片区产线明细、排行和小时趋势
+          description: 订单总览、渠道产线对比、动态综合渠道片区产线明细、排行和小时趋势；data.generalRegions 为自描述片区数组，空数组表示活动不分片区。
           content:
             application/json:
               schema:
@@ -2064,7 +2070,7 @@ components:
       type: string
       minLength: 1
       maxLength: 64
-      description: 活动内动态配置的大区代码，例如 EAST、SOUTH、NORTH；未来可增加 NORTH_1、NORTH_2。
+      description: 根据当前综合客户白名单中的大区名称自动生成或复用的稳定内部代码。
     RebateStatus:
       type: string
       enum: [PARTICIPATING, NOT_PARTICIPATING]
@@ -2187,6 +2193,22 @@ components:
           enum: [ALL, GENERAL, SPECIAL]
         orderWritable:
           type: boolean
+        regions:
+          type: array
+          description: 当前生效综合客户白名单中实际使用的非空大区；空数组表示综合客户无需选择大区。
+          items:
+            type: object
+            required: [code, name, sortNo]
+            properties:
+              code:
+                $ref: '#/components/schemas/RegionCode'
+              name:
+                type: string
+              sortNo:
+                type: integer
+        hasUnassignedGeneralCustomers:
+          type: boolean
+          description: 当前生效白名单是否存在未填写大区的综合客户；与非空 regions 同时存在时 H5 显示“不分大区”入口。
     PublicActivityResponse:
       type: object
       required: [data, traceId]
@@ -2972,6 +2994,7 @@ components:
       properties:
         data:
           type: object
+          description: 看板数据。订单综合看板包含 generalRegions 自描述数组；每项含 regionCode、regionName、sortNo、orderCount、amount 和 productLines。
           additionalProperties: true
         version:
           type: string

@@ -163,14 +163,14 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
   const latestDraftSnapshotRef = useRef<H5DraftSnapshot | null>(null);
   const draftSaveTimerRef = useRef<number | null>(null);
   const draftSaveChainRef = useRef<Promise<void>>(Promise.resolve());
-  const regionOptions = runtimeActivity?.regions?.length
-    ? runtimeActivity.regions.map((item) => ({ value: item.code, name: item.name, detail: `${item.name}综合经销商` }))
-    : [
-        { value: "东区", name: "东区", detail: "华东区域综合经销商" },
-        { value: "南区", name: "南区", detail: "华南区域综合经销商" },
-        { value: "北1区", name: "北1区", detail: "华北一部综合经销商" },
-        { value: "北2区", name: "北2区", detail: "华北二部综合经销商" },
-      ];
+  const whitelistRegions = runtimeActivity?.regions ?? [];
+  const regionOptions = [
+    ...whitelistRegions.map((item) => ({ value: item.code, name: item.name, detail: `${item.name}综合经销商` })),
+    ...(whitelistRegions.length > 0 && runtimeActivity?.hasUnassignedGeneralCustomers
+      ? [{ value: "UNASSIGNED", name: "不分大区", detail: "白名单中未填写大区的综合经销商" }]
+      : []),
+  ];
+  const regionalized = whitelistRegions.length > 0;
   const selectedRegionName = regionOptions.find((item) => item.value === region)?.name || region;
   const lineOptions = useMemo(() => ["全部", ...Array.from(new Set(catalog.map((product) => product.line).filter(Boolean)))], [catalog]);
   const effectiveLine = lineOptions.includes(line) ? line : "全部";
@@ -199,7 +199,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
   const identityBranch = runtimeIdentity?.branchName || importedIdentity?.branch || verifiedBranch;
   const identityLabel = runtimeIdentity
     ? `${runtimeIdentity.customerType === "GENERAL" ? "综合客户" : "特渠专业客户"}${identityRegion ? ` · ${identityRegion}` : ""}`
-    : importedIdentity ? `${importedIdentity.customerType}${identityRegion ? ` · ${identityRegion}` : ""}` : channel === "综合客户" ? `综合客户 · ${selectedRegionName}` : "特渠专业客户";
+    : importedIdentity ? `${importedIdentity.customerType}${identityRegion ? ` · ${identityRegion}` : ""}` : channel === "综合客户" ? `综合客户${selectedRegionName ? ` · ${selectedRegionName}` : ""}` : "特渠专业客户";
   const dealerName = runtimeIdentity?.dealerFullName || importedIdentity?.dealerFull || "—";
   const displayBranch = runtimeIdentity?.branchName || identityBranch;
   const displayPhone = runtimeIdentity?.phoneMasked || (importedIdentity ? maskPhone(importedIdentity.dealerPhone) : "—");
@@ -424,9 +424,9 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                 <h2>选择您的订货通道</h2>
                 <p>请选择白名单中登记的客户类型，进入对应订货专区。</p>
                 <div className="channel-options">
-                  <button onClick={() => { setChannel("综合客户"); setRegion(""); setVerifiedBranch(""); setVerifiedIdentity(null); setStep("region"); }}>
+                  <button onClick={() => { setChannel("综合客户"); setRegion(""); setVerifiedBranch(""); setVerifiedIdentity(null); setStep(regionalized ? "region" : "verify"); }}>
                     <i className="channel-icon">综</i>
-                    <span><b>综合客户订货</b><small>综合经销商 · 进入后选择所属大区</small></span>
+                    <span><b>综合客户订货</b><small>{regionalized ? "综合经销商 · 进入后选择所属片区" : "综合经销商 · 手机号验证身份"}</small></span>
                     <em>›</em>
                   </button>
                   <button onClick={() => { setChannel("特渠专业客户"); setRegion(""); setVerifiedBranch(""); setVerifiedIdentity(null); setStep("verify"); }}>
@@ -466,7 +466,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
 
           {step === "verify" && (
             <section className="h5-page verify-page">
-              <div className="entry-nav"><button onClick={() => setStep(channel === "综合客户" ? "region" : "channel")}>‹</button><span>{identityLabel}</span></div>
+              <div className="entry-nav"><button onClick={() => setStep(channel === "综合客户" && regionalized ? "region" : "channel")}>‹</button><span>{identityLabel}</span></div>
               <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
               <div className="h5-hero-copy">
                 <span className="eyebrow">订货会</span>
@@ -476,7 +476,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
               <div className="verify-card">
                 <div className="verify-context"><span className="step-tag">{identityLabel}</span><button onClick={() => setStep("channel")}>重新选择</button></div>
                 <h2>输入白名单手机号</h2>
-                <p>验证通过后，将为您展示{channel === "综合客户" ? `${selectedRegionName}综合客户` : "特渠专业客户"}的订货商品。</p>
+                <p>验证通过后，将为您展示{channel === "综合客户" ? `${selectedRegionName ? `${selectedRegionName}综合客户` : "综合客户"}` : "特渠专业客户"}的订货商品。</p>
                 <label>
                   <span>手机号</span>
                   <input value={phone} onChange={(e) => { setPhone(e.target.value); setVerifyError(""); }} inputMode="tel" />

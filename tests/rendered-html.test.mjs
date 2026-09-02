@@ -208,10 +208,38 @@ test("keeps orders admin-read-only and wires the formal runtime APIs", async () 
   assert.match(api, /drawLotteryRound/);
   assert.match(api, /loadOrderDashboard/);
   assert.match(api, /regionProductLines/);
+  assert.match(api, /generalRegions/);
   assert.match(prototype, /await drawLotteryRound\(activityId, currentRound\.id\)/);
   assert.match(orderController, /\/h5\/activities\/\{activityCode\}\/order\/withdraw/);
   assert.doesNotMatch(orderController, /\/admin\/.*withdraw/);
   assert.doesNotMatch(openapi, /\/admin\/activities\/\{activityId\}\/orders\/\{orderId\}\/withdraw/);
+});
+
+test("derives H5 and dashboard regions from the current whitelist", async () => {
+  const [prototype, api, dashboardService, activityService, authService, styles, importService] = await Promise.all([
+    readFrontendSource(),
+    readApiSource(),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/dashboard/DashboardService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/activity/ActivityService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/security/AuthService.java", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportService.java", import.meta.url), "utf8"),
+  ]);
+
+  assert.doesNotMatch(api, /NORTH_1.*北1区/);
+  assert.doesNotMatch(prototype, /综合渠道按片区管理/);
+  assert.match(prototype, /hasUnassignedGeneralCustomers/);
+  assert.match(prototype, /value: "UNASSIGNED", name: "不分大区"/);
+  assert.match(prototype, /generalRegions/);
+  assert.match(prototype, /regionProductCards\.length > 0/);
+  assert.match(prototype, /maxAmount=\{regionProductMax\}/);
+  assert.match(prototype, /setStep\(regionalized \? "region" : "verify"\)/);
+  assert.match(styles, /repeat\(auto-fit,minmax\(max\(220px,calc\(\(100% - 30px\)\/4\)\),1fr\)\)/);
+  assert.match(dashboardService, /record GeneralRegion/);
+  assert.match(dashboardService, /"未分片区"/);
+  assert.match(activityService, /b\.current_version_id = c\.data_version_id/);
+  assert.match(authService, /\? = 'UNASSIGNED'/);
+  assert.match(importService, /regions\.resolveCode/);
 });
 
 test("keeps the hourly order trend inside the activity window and timezone-safe", async () => {

@@ -439,15 +439,6 @@ final class ImportWorkbookProcessor {
     return map;
   }
 
-  private String regionCode(long activityId, String name) {
-    if (name == null || name.isBlank()) return null;
-    List<String> codes = jdbc.queryForList("SELECT region_code FROM activity_region WHERE activity_id = ? AND region_name = ?", String.class, activityId, name.trim());
-    if (!codes.isEmpty()) return codes.getFirst();
-    String code = "R_" + java.util.HexFormat.of().formatHex(crypto.sha256(name)).substring(0, 12).toUpperCase(Locale.ROOT);
-    jdbc.update("INSERT INTO activity_region(activity_id, region_code, region_name, sort_no, is_active) VALUES (?, ?, ?, 999, TRUE)", activityId, code, name.trim());
-    return code;
-  }
-
   private static boolean optionalProductMissing(Map<String, Object> data) {
     return List.of("materialCode", "productLine", "specification", "casePack", "casePrice", "tonCaseFactor")
         .stream().anyMatch(key -> text(data.get(key)).isBlank());

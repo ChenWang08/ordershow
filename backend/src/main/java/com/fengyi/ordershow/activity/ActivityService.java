@@ -89,7 +89,6 @@ public class ActivityService {
     String activityNo = generateActivityNo(id, now(), request.timezone());
     int numbered = jdbc.update("UPDATE activity SET activity_code = ? WHERE id = ? AND activity_code = ?", activityNo, id, temporaryCode);
     if (numbered != 1) throw new IllegalStateException("活动编号生成失败");
-    replaceRegions(id, request.regions());
     return byId(id);
   }
 
@@ -144,7 +143,6 @@ public class ActivityService {
         Timestamp.from(endsAtToSave), Timestamp.from(request.eventEndsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
         request.tonDisplayScale(), admin.id(), id, expectedVersion);
     if (changed != 1) throw DomainException.conflict("ACTIVITY_VERSION_CONFLICT", "活动配置已被其他页面修改，请刷新后重试");
-    replaceRegions(id, request.regions());
     return byId(id);
   }
 
@@ -272,12 +270,28 @@ public class ActivityService {
 
   private ActivityView withRegions(ActivityView value) {
     List<RegionView> regions = jdbc.query("""
-        SELECT region_code, region_name, sort_no FROM activity_region
-        WHERE activity_id = ? AND is_active = TRUE ORDER BY sort_no, id
+        SELECT r.region_code, r.region_name, MIN(r.sort_no) sort_no
+        FROM activity_customer c
+        JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
+          AND b.current_version_id = c.data_version_id
+        JOIN activity_region r ON r.activity_id = c.activity_id AND r.region_code = c.region_code
+        WHERE c.activity_id = ? AND c.is_active = TRUE AND c.customer_type = 'GENERAL'
+          AND c.region_code IS NOT NULL AND TRIM(c.region_code) <> ''
+        GROUP BY r.region_code, r.region_name
+        ORDER BY sort_no, r.region_name
         """, (rs, rowNum) -> new RegionView(rs.getString(1), rs.getString(2), rs.getInt(3)), value.id());
+    Boolean hasUnassigned = jdbc.queryForObject("""
+        SELECT COUNT(*) > 0
+        FROM activity_customer c
+        JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
+          AND b.current_version_id = c.data_version_id
+        WHERE c.activity_id = ? AND c.is_active = TRUE AND c.customer_type = 'GENERAL'
+          AND (c.region_code IS NULL OR TRIM(c.region_code) = '')
+        """, Boolean.class, value.id());
     return new ActivityView(value.id(), value.code(), value.name(), value.description(), effectiveStatus(value),
         value.configuredStatus(), value.timezone(), value.startsAt(), value.endsAt(), value.eventEndsAt(), value.customerScope(),
         value.companyRankingTopN(), value.branchRankingTopN(), value.tonDisplayScale(), value.version(), regions,
+        Boolean.TRUE.equals(hasUnassigned),
         value.publishedAt(), value.actualStartedAt(), value.closedAt(), value.finishedAt());
   }
 
@@ -303,25 +317,13 @@ public class ActivityService {
     return firstStart.isBefore(secondEnd) && firstEnd.isAfter(secondStart);
   }
 
-  private void replaceRegions(long activityId, List<RegionWrite> regions) {
-    jdbc.update("UPDATE activity_region SET is_active = FALSE WHERE activity_id = ?", activityId);
-    if (regions == null) return;
-    for (RegionWrite region : regions) {
-      jdbc.update("""
-          INSERT INTO activity_region(activity_id, region_code, region_name, sort_no, is_active)
-          VALUES (?, ?, ?, ?, TRUE)
-          ON DUPLICATE KEY UPDATE region_name = VALUES(region_name), sort_no = VALUES(sort_no), is_active = TRUE
-          """, activityId, region.code(), region.name(), region.sortNo());
-    }
-  }
-
   private ActivityView map(ResultSet rs, int rowNum) throws SQLException {
     String configured = rs.getString("status");
     return new ActivityView(rs.getLong("id"), rs.getString("activity_code"), rs.getString("name"),
         rs.getString("description"), configured, configured, rs.getString("timezone"),
         rs.getTimestamp("starts_at").toInstant(), rs.getTimestamp("ends_at").toInstant(), instant(rs.getTimestamp("event_ends_at")),
         rs.getString("customer_scope"), rs.getInt("company_ranking_top_n"),
-        rs.getInt("branch_ranking_top_n"), rs.getInt("ton_display_scale"), rs.getInt("version"), List.of(),
+        rs.getInt("branch_ranking_top_n"), rs.getInt("ton_display_scale"), rs.getInt("version"), List.of(), false,
         instant(rs.getTimestamp("published_at")), instant(rs.getTimestamp("actual_started_at")), instant(rs.getTimestamp("closed_at")),
         instant(rs.getTimestamp("finished_at")));
   }
@@ -392,10 +394,8 @@ public class ActivityService {
   private record PublishedActivity(String code, String name) {}
 
   private static void requirePublishedDataUnchanged(ActivityView current, ActivityWrite request) {
-    List<RegionWrite> requestedRegions = request.regions() == null ? List.of() : request.regions();
-    if (!current.timezone().equals(request.timezone()) || !current.customerScope().equals(request.customerScope())
-        || !current.regions().equals(requestedRegions.stream().map(r -> new RegionView(r.code(), r.name(), r.sortNo())).toList())) {
-      throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后如需修改客户范围或区域，请先撤回发布");
+    if (!current.timezone().equals(request.timezone()) || !current.customerScope().equals(request.customerScope())) {
+      throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后如需修改客户范围，请先撤回发布");
     }
   }
 
@@ -443,6 +443,7 @@ public class ActivityService {
   public record ActivityView(long id, String code, String name, String description, String status,
                              String configuredStatus, String timezone, Instant startsAt, Instant endsAt,
                              Instant eventEndsAt, String customerScope, int companyRankingTopN, int branchRankingTopN,
-                             int tonDisplayScale, int version, List<RegionView> regions, Instant publishedAt,
+                             int tonDisplayScale, int version, List<RegionView> regions, boolean hasUnassignedGeneralCustomers,
+                             Instant publishedAt,
                              Instant actualStartedAt, Instant closedAt, Instant finishedAt) {}
 }

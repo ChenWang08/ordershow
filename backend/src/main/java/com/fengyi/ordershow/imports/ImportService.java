@@ -3,6 +3,7 @@ package com.fengyi.ordershow.imports;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fengyi.ordershow.common.DomainException;
+import com.fengyi.ordershow.activity.ActivityRegionService;
 import com.fengyi.ordershow.catalog.ProductService;
 import com.fengyi.ordershow.customer.AttendanceMatchingService;
 import com.fengyi.ordershow.security.CryptoService;
@@ -34,10 +35,11 @@ public class ImportService {
   private final ImportWorkbookProcessor workbookProcessor;
   private final AttendanceMatchingService attendanceMatching;
   private final ProductService products;
+  private final ActivityRegionService regions;
 
   public ImportService(JdbcTemplate jdbc, StorageService storage, CryptoService crypto,
                        ObjectMapper json, TransactionTemplate transactions, ImportWorkbookProcessor workbookProcessor,
-                       AttendanceMatchingService attendanceMatching, ProductService products) {
+                       AttendanceMatchingService attendanceMatching, ProductService products, ActivityRegionService regions) {
     this.jdbc = jdbc;
     this.storage = storage;
     this.crypto = crypto;
@@ -46,6 +48,7 @@ public class ImportService {
     this.workbookProcessor = workbookProcessor;
     this.attendanceMatching = attendanceMatching;
     this.products = products;
+    this.regions = regions;
   }
 
   public ImportTask upload(long activityId, String importType, MultipartFile file, long adminId) {
@@ -501,7 +504,9 @@ public class ImportService {
             confirmer_name, confirmer_phone_ciphertext, confirmer_phone_masked, excel_sequence, is_active,
             source_import_task_id, data_version_id)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?)
-          """, activityId, customerId, customerType, regionCode(activityId, text(data.get("regionName"))), nullableText(data.get("branchName")),
+          """, activityId, customerId, customerType,
+          "GENERAL".equals(customerType) ? regions.resolveCode(activityId, text(data.get("regionName"))) : null,
+          nullableText(data.get("branchName")),
           normalize(text(data.get("branchName"))), nullableText(data.get("dealerShortName")), fullName, nullableText(data.get("dealerCategory")),
           nullableText(data.get("contactName")), crypto.encrypt(phone), crypto.lookupHash(phone), CryptoService.maskPhone(phone),
           nullableText(data.get("confirmerName")), confirmerPhone.isBlank() ? null : crypto.encrypt(confirmerPhone),
@@ -543,15 +548,6 @@ public class ImportService {
     return keys.getKey().longValue();
   }
 
-
- private String regionCode(long activityId, String name) {
-    if (name == null || name.isBlank()) return null;
-    List<String> codes = jdbc.queryForList("SELECT region_code FROM activity_region WHERE activity_id = ? AND region_name = ?", String.class, activityId, name.trim());
-    if (!codes.isEmpty()) return codes.getFirst();
-    String code = "R_" + java.util.HexFormat.of().formatHex(crypto.sha256(name)).substring(0, 12).toUpperCase(Locale.ROOT);
-    jdbc.update("INSERT INTO activity_region(activity_id, region_code, region_name, sort_no, is_active) VALUES (?, ?, ?, 999, TRUE)", activityId, code, name.trim());
-    return code;
-  }
 
   private static boolean optionalProductMissing(Map<String, Object> data) {
     return List.of("materialCode", "productLine", "specification", "casePack", "casePrice", "tonCaseFactor")

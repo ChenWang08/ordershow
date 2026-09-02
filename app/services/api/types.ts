@@ -6,6 +6,7 @@ export type RuntimeActivity = {
   timezone: string; startsAt: string; endsAt: string; customerScope: string; companyRankingTopN: number;
   branchRankingTopN: number; tonDisplayScale: number; version: number;
   regions: Array<{ code: string; name: string; sortNo: number }>;
+  hasUnassignedGeneralCustomers?: boolean;
   eventEndsAt?: string; publishedAt?: string; actualStartedAt?: string; closedAt?: string; finishedAt?: string;
 };
 
@@ -90,6 +91,8 @@ export type DashboardReport = {
   topSpecial: Array<{ rank: number; name: string; branch?: string; amount: number; quantity: number; tons?: number }>;
   trend: Array<{ bucket: string; amount: number; orders: number }>;
   regionProductLines: Array<{ regionCode: string; productLine: string; amount: number; quantity: number }>;
+  generalRegions?: Array<{ regionCode: string; regionName: string; sortNo: number; orderCount: number; amount: number;
+    productLines: Array<{ productLine: string; amount: number; quantity: number }> }>;
 };
 
 export type LotteryRoundApi = {
