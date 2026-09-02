@@ -156,12 +156,12 @@ activities/{activityId}/exports/{exportTaskId}.xlsx
 
 ### 6.1 管理员
 
-- 支持多个管理员账号，所有账号一期统一为 `ADMIN` 角色；
+- 支持 `SUPER_ADMIN` 超级管理员和绑定部门的 `DEPARTMENT_ADMIN` 部门共享账号；每个部门最多一个部门账号；部门编码创建时由服务端生成且永久不变；
 - 使用账号密码登录，密码使用 Argon2id 或 BCrypt 哈希；
 - 登录成功后使用 Secure、HttpOnly、SameSite Cookie；
 - 第一次登录必须修改初始密码；
 - 管理员接口全部进行服务端鉴权和 CSRF 防护；
-- 每个敏感操作记录管理员 ID，禁止用共享账号代替审计。
+- 每个敏感操作记录管理员 ID；部门共享账号的审计粒度明确到部门账号、会话和 IP，不能识别部门内部具体操作者。
 
 ### 6.2 H5 客户
 

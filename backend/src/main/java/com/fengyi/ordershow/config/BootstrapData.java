@@ -34,8 +34,8 @@ public class BootstrapData implements ApplicationRunner {
     Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM admin_user", Integer.class);
     if (count != null && count == 0) {
       jdbc.update("""
-          INSERT INTO admin_user(username, display_name, password_hash, role_code, status, must_change_password)
-          VALUES (?, ?, ?, 'ADMIN', 'ACTIVE', TRUE)
+          INSERT INTO admin_user(username, display_name, password_hash, role_code, department_id, status, must_change_password)
+          VALUES (?, ?, ?, 'SUPER_ADMIN', NULL, 'ACTIVE', TRUE)
           """, properties.bootstrapAdminUsername(), properties.bootstrapAdminDisplayName(),
           passwordEncoder.encode(properties.bootstrapAdminPassword()));
       log.warn("Created bootstrap administrator '{}'; change the initial password immediately", properties.bootstrapAdminUsername());
@@ -46,10 +46,10 @@ public class BootstrapData implements ApplicationRunner {
       Instant starts = Instant.now().plus(1, ChronoUnit.DAYS).truncatedTo(ChronoUnit.SECONDS);
       Instant ends = starts.plus(14, ChronoUnit.DAYS);
       jdbc.update("""
-          INSERT INTO activity(activity_code, name, description, status, timezone, starts_at, ends_at,
+          INSERT INTO activity(department_id, activity_code, name, description, status, timezone, starts_at, ends_at,
                                customer_scope, created_by, updated_by)
-          VALUES ('2026-mid-autumn', '2026 年中秋订货会', '订购会本地开发活动', 'DRAFT', 'Asia/Shanghai', ?, ?, 'ALL', ?, ?)
-          """, java.sql.Timestamp.from(starts), java.sql.Timestamp.from(ends), adminId, adminId);
+          VALUES (?, '2026-mid-autumn', '2026 年中秋订货会', '订购会本地开发活动', 'DRAFT', 'Asia/Shanghai', ?, ?, 'ALL', ?, ?)
+          """, defaultDepartmentId(), java.sql.Timestamp.from(starts), java.sql.Timestamp.from(ends), adminId, adminId);
       Long activityId = jdbc.queryForObject("SELECT id FROM activity WHERE activity_code = '2026-mid-autumn'", Long.class);
       if (activityId != null) {
         jdbc.batchUpdate("INSERT INTO activity_region(activity_id, region_code, region_name, sort_no) VALUES (?, ?, ?, ?)",
@@ -67,5 +67,9 @@ public class BootstrapData implements ApplicationRunner {
         WHERE wb.data_type = 'WHITELIST'
         """).forEach(row -> attendanceMatching.reassociateCurrentAttendance(
             ((Number) row.get("activity_id")).longValue(), ((Number) row.get("current_version_id")).longValue()));
+  }
+
+  private Long defaultDepartmentId() {
+    return jdbc.queryForObject("SELECT id FROM department WHERE department_code = 'DEFAULT'", Long.class);
   }
 }

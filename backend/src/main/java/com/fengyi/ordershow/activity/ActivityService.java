@@ -2,6 +2,7 @@ package com.fengyi.ordershow.activity;
 
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.security.AdminPrincipal;
+import com.fengyi.ordershow.security.DepartmentAccessService;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -22,67 +23,99 @@ public class ActivityService {
   private final JdbcTemplate jdbc;
   private final Clock clock;
   private final ApplicationEventPublisher events;
+  private final DepartmentAccessService departmentAccess;
 
   @org.springframework.beans.factory.annotation.Autowired
-  public ActivityService(JdbcTemplate jdbc, ApplicationEventPublisher events) {
-    this(jdbc, Clock.systemUTC(), events);
+  public ActivityService(JdbcTemplate jdbc, ApplicationEventPublisher events, DepartmentAccessService departmentAccess) {
+    this(jdbc, Clock.systemUTC(), events, departmentAccess);
   }
 
   ActivityService(JdbcTemplate jdbc, Clock clock) {
-    this(jdbc, clock, ignored -> {});
+    this(jdbc, clock, ignored -> {}, null);
   }
 
   ActivityService(JdbcTemplate jdbc, Clock clock, ApplicationEventPublisher events) {
+    this(jdbc, clock, events, null);
+  }
+
+  ActivityService(JdbcTemplate jdbc, Clock clock, ApplicationEventPublisher events,
+      DepartmentAccessService departmentAccess) {
     this.jdbc = jdbc;
     this.clock = clock;
     this.events = events;
+    this.departmentAccess = departmentAccess;
   }
 
   public ActivityView byCode(String code) {
-    List<ActivityView> rows = jdbc.query("SELECT * FROM activity WHERE activity_code = ? AND archived_at IS NULL", this::map, code);
+    List<ActivityView> rows = jdbc.query("""
+        SELECT a.*, d.department_name
+        FROM activity a JOIN department d ON d.id = a.department_id
+        WHERE a.activity_code = ? AND a.archived_at IS NULL
+        """, this::map, code);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
     return withRegions(rows.getFirst());
   }
 
   public ActivityView byId(long id) {
-    List<ActivityView> rows = jdbc.query("SELECT * FROM activity WHERE id = ? AND archived_at IS NULL", this::map, id);
+    List<ActivityView> rows = jdbc.query("""
+        SELECT a.*, d.department_name
+        FROM activity a JOIN department d ON d.id = a.department_id
+        WHERE a.id = ? AND a.archived_at IS NULL
+        """, this::map, id);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
     return withRegions(rows.getFirst());
   }
 
   public ActivityView currentOrderable() {
     List<ActivityView> rows = jdbc.query("""
-        SELECT * FROM activity
-        WHERE archived_at IS NULL AND published_at IS NOT NULL AND closed_at IS NULL
-          AND status IN ('SCHEDULED', 'ACTIVE')
-          AND starts_at <= UTC_TIMESTAMP(3) AND ends_at > UTC_TIMESTAMP(3)
-        ORDER BY starts_at, id
+        SELECT a.*, d.department_name
+        FROM activity a JOIN department d ON d.id = a.department_id
+        WHERE a.archived_at IS NULL AND d.status = 'ACTIVE' AND a.published_at IS NOT NULL AND a.closed_at IS NULL
+          AND a.status IN ('SCHEDULED', 'ACTIVE')
+          AND a.starts_at <= UTC_TIMESTAMP(3) AND a.ends_at > UTC_TIMESTAMP(3)
+        ORDER BY a.starts_at, a.id
         """, this::map);
     if (rows.isEmpty()) {
       throw DomainException.notFound("CURRENT_ACTIVITY_NOT_FOUND", "当前暂无可下单活动");
     }
     if (rows.size() > 1) {
-      throw DomainException.conflict("CURRENT_ACTIVITY_CONFLICT", "活动时间配置冲突，请联系工作人员处理");
+      throw DomainException.conflict("CURRENT_ACTIVITY_CONFLICT", "当前存在多个部门活动，请使用对应活动编号的 H5 专属链接");
     }
     return withRegions(rows.getFirst());
   }
 
   public List<ActivityView> list() {
-    return jdbc.query("SELECT * FROM activity WHERE archived_at IS NULL ORDER BY created_at DESC", this::map)
+    return jdbc.query("""
+        SELECT a.*, d.department_name
+        FROM activity a JOIN department d ON d.id = a.department_id
+        WHERE a.archived_at IS NULL ORDER BY a.created_at DESC
+        """, this::map)
         .stream().map(this::withRegions).toList();
+  }
+
+  public List<ActivityView> list(AdminPrincipal admin) {
+    if (admin == null || admin.isSuperAdmin()) return list();
+    if (admin.departmentId() == null) return List.of();
+    return jdbc.query("""
+        SELECT a.*, d.department_name
+        FROM activity a JOIN department d ON d.id = a.department_id
+        WHERE a.archived_at IS NULL AND a.department_id = ?
+        ORDER BY a.created_at DESC
+        """, this::map, admin.departmentId()).stream().map(this::withRegions).toList();
   }
 
   @Transactional
   public ActivityView create(ActivityWrite request, AdminPrincipal admin) {
     validateTime(request.startsAt(), request.endsAt(), request.eventEndsAt());
     requireFutureStart(request.startsAt());
+    long departmentId = departmentAccess.requireDepartmentForCreate(admin, request.departmentId());
     String temporaryCode = "PENDING-" + UUID.randomUUID();
     jdbc.update("""
-        INSERT INTO activity(activity_code, name, description, status, timezone, starts_at, ends_at, event_ends_at,
+        INSERT INTO activity(department_id, activity_code, name, description, status, timezone, starts_at, ends_at, event_ends_at,
                              customer_scope, company_ranking_top_n, branch_ranking_top_n, ton_display_scale,
                              created_by, updated_by)
-        VALUES (?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, temporaryCode, request.name(), request.description(), request.timezone(), Timestamp.from(request.startsAt()),
+        VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, departmentId, temporaryCode, request.name(), request.description(), request.timezone(), Timestamp.from(request.startsAt()),
         Timestamp.from(request.endsAt()), Timestamp.from(request.eventEndsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
         request.tonDisplayScale(), admin.id(), admin.id());
     Long id = jdbc.queryForObject("SELECT id FROM activity WHERE activity_code = ?", Long.class, temporaryCode);
@@ -94,6 +127,7 @@ public class ActivityService {
 
   @Transactional
   public ActivityView update(long id, int expectedVersion, ActivityWrite request, AdminPrincipal admin) {
+    departmentAccess.requireActivityAccess(admin, id);
     validateTime(request.startsAt(), request.endsAt(), request.eventEndsAt());
     ActivityView current = byId(id);
     String effective = current.status();
@@ -131,9 +165,10 @@ public class ActivityService {
     Instant endsAtToSave = "ACTIVE".equals(effective)
         && request.endsAt().truncatedTo(ChronoUnit.MINUTES).equals(current.endsAt().truncatedTo(ChronoUnit.MINUTES))
         ? current.endsAt() : request.endsAt();
-    if ("SCHEDULED".equals(effective) || "ACTIVE".equals(effective)) {
-      lockActivitiesForScheduleCheck();
-      requireNoPublishedOverlap(id, startsAtToSave, endsAtToSave);
+    Instant eventEndsAtToSave = request.eventEndsAt();
+    if ("SCHEDULED".equals(effective) || "ACTIVE".equals(effective) || "CLOSED".equals(effective)) {
+      lockDepartmentForScheduleCheck(current.departmentId());
+      requireNoPublishedOverlap(id, current.departmentId(), startsAtToSave, eventEndsAtToSave == null ? endsAtToSave : eventEndsAtToSave);
     }
     int changed = jdbc.update("""
         UPDATE activity SET name = ?, description = ?, timezone = ?, starts_at = ?, ends_at = ?, event_ends_at = ?, customer_scope = ?,
@@ -148,14 +183,15 @@ public class ActivityService {
 
   @Transactional
   public ActivityView publish(long id, int expectedVersion, AdminPrincipal admin) {
+    departmentAccess.requireActivityAccess(admin, id);
     ActivityView current = byId(id);
     if (!"DRAFT".equals(current.configuredStatus())) {
       throw DomainException.conflict("ACTIVITY_PUBLISH_INVALID", "只有草稿活动可以发布");
     }
     requireFutureStart(current.startsAt());
     requirePublishReady(id);
-    lockActivitiesForScheduleCheck();
-    requireNoPublishedOverlap(id, current.startsAt(), current.endsAt());
+    lockDepartmentForScheduleCheck(current.departmentId());
+    requireNoPublishedOverlap(id, current.departmentId(), current.startsAt(), activityEnd(current.endsAt(), current.eventEndsAt()));
     int changed = jdbc.update("""
         UPDATE activity SET status = 'SCHEDULED', published_at = UTC_TIMESTAMP(3), version = version + 1, updated_by = ?
         WHERE id = ? AND version = ? AND status = 'DRAFT'
@@ -167,6 +203,7 @@ public class ActivityService {
 
   @Transactional
   public ActivityView withdrawPublication(long id, int expectedVersion, AdminPrincipal admin) {
+    departmentAccess.requireActivityAccess(admin, id);
     ActivityView current = byId(id);
     if (!"SCHEDULED".equals(current.configuredStatus()) || !now().isBefore(current.startsAt())) {
       throw DomainException.conflict("ACTIVITY_WITHDRAW_INVALID", "只有尚未开始的待开始活动可以撤回发布");
@@ -182,6 +219,7 @@ public class ActivityService {
 
   @Transactional
   public ActivityView closeNow(long id, int expectedVersion, AdminPrincipal admin) {
+    departmentAccess.requireActivityAccess(admin, id);
     ActivityView current = byId(id);
     if (!"ACTIVE".equals(current.status())) {
       throw DomainException.conflict("ACTIVITY_CLOSE_INVALID", "只有进行中的活动可以立即截止");
@@ -198,6 +236,7 @@ public class ActivityService {
 
   @Transactional
   public ActivityView finishNow(long id, int expectedVersion, AdminPrincipal admin) {
+    departmentAccess.requireActivityAccess(admin, id);
     ActivityView current = byId(id);
     if (!"CLOSED".equals(current.status())) {
       throw DomainException.conflict("ACTIVITY_FINISH_INVALID", "只有订货已截止的活动可以结束整场活动");
@@ -288,7 +327,7 @@ public class ActivityService {
         WHERE c.activity_id = ? AND c.is_active = TRUE AND c.customer_type = 'GENERAL'
           AND (c.region_code IS NULL OR TRIM(c.region_code) = '')
         """, Boolean.class, value.id());
-    return new ActivityView(value.id(), value.code(), value.name(), value.description(), effectiveStatus(value),
+    return new ActivityView(value.id(), value.departmentId(), value.departmentName(), value.code(), value.name(), value.description(), effectiveStatus(value),
         value.configuredStatus(), value.timezone(), value.startsAt(), value.endsAt(), value.eventEndsAt(), value.customerScope(),
         value.companyRankingTopN(), value.branchRankingTopN(), value.tonDisplayScale(), value.version(), regions,
         Boolean.TRUE.equals(hasUnassigned),
@@ -319,7 +358,8 @@ public class ActivityService {
 
   private ActivityView map(ResultSet rs, int rowNum) throws SQLException {
     String configured = rs.getString("status");
-    return new ActivityView(rs.getLong("id"), rs.getString("activity_code"), rs.getString("name"),
+    return new ActivityView(rs.getLong("id"), rs.getLong("department_id"), rs.getString("department_name"),
+        rs.getString("activity_code"), rs.getString("name"),
         rs.getString("description"), configured, configured, rs.getString("timezone"),
         rs.getTimestamp("starts_at").toInstant(), rs.getTimestamp("ends_at").toInstant(), instant(rs.getTimestamp("event_ends_at")),
         rs.getString("customer_scope"), rs.getInt("company_ranking_top_n"),
@@ -371,27 +411,37 @@ public class ActivityService {
     }
   }
 
-  private void requireNoPublishedOverlap(long activityId, Instant startsAt, Instant endsAt) {
+  private void requireNoPublishedOverlap(long activityId, long departmentId, Instant startsAt, Instant endsAt) {
     List<PublishedActivity> conflicts = jdbc.query("""
-        SELECT activity_code, name FROM activity
-        WHERE id <> ? AND archived_at IS NULL AND published_at IS NOT NULL AND closed_at IS NULL
-          AND status IN ('SCHEDULED', 'ACTIVE') AND starts_at < ? AND ends_at > ?
+        SELECT activity_code, name, starts_at, COALESCE(event_ends_at, ends_at) FROM activity
+        WHERE id <> ? AND department_id = ? AND archived_at IS NULL AND published_at IS NOT NULL
+          AND status IN ('SCHEDULED', 'ACTIVE', 'CLOSED')
+          AND starts_at < ? AND COALESCE(event_ends_at, ends_at) > ?
+          AND COALESCE(event_ends_at, ends_at) > UTC_TIMESTAMP(3)
         ORDER BY starts_at, id
-        """, (rs, rowNum) -> new PublishedActivity(rs.getString("activity_code"), rs.getString("name")),
-        activityId, Timestamp.from(endsAt), Timestamp.from(startsAt));
+        """, (rs, rowNum) -> new PublishedActivity(rs.getString("activity_code"), rs.getString("name"),
+            rs.getTimestamp(3).toInstant(), rs.getTimestamp(4).toInstant()),
+        activityId, departmentId, Timestamp.from(endsAt), Timestamp.from(startsAt));
     if (!conflicts.isEmpty()) {
       PublishedActivity conflict = conflicts.getFirst();
-      throw DomainException.conflict("ACTIVITY_TIME_CONFLICT",
-          "活动时间与“" + conflict.name() + "”（" + conflict.code() + "）重叠，请调整后再发布");
+      throw DomainException.conflict("DEPARTMENT_ACTIVITY_TIME_CONFLICT",
+          "当前部门活动时间与“" + conflict.name() + "”（" + conflict.code() + "，" + conflict.startsAt() + " 至 "
+              + conflict.endsAt() + "）重叠，请调整时间或先结束已有活动");
     }
   }
 
-  private void lockActivitiesForScheduleCheck() {
-    jdbc.queryForList("SELECT id FROM activity WHERE archived_at IS NULL ORDER BY id FOR UPDATE", Long.class);
+  private void lockDepartmentForScheduleCheck(long departmentId) {
+    List<Long> locked = jdbc.queryForList("SELECT id FROM department WHERE id = ? AND status = 'ACTIVE' FOR UPDATE",
+        Long.class, departmentId);
+    if (locked.size() != 1) throw DomainException.badRequest("DEPARTMENT_INVALID", "部门不存在或已停用");
+  }
+
+  private static Instant activityEnd(Instant endsAt, Instant eventEndsAt) {
+    return eventEndsAt == null ? endsAt : eventEndsAt;
   }
 
   private record BlockingImport(String importType, long id, String status, String filename) {}
-  private record PublishedActivity(String code, String name) {}
+  private record PublishedActivity(String code, String name, Instant startsAt, Instant endsAt) {}
 
   private static void requirePublishedDataUnchanged(ActivityView current, ActivityWrite request) {
     if (!current.timezone().equals(request.timezone()) || !current.customerScope().equals(request.customerScope())) {
@@ -439,8 +489,8 @@ public class ActivityService {
   public record RegionWrite(String code, String name, int sortNo) {}
   public record ActivityWrite(String code, String name, String description, String timezone, Instant startsAt,
                               Instant endsAt, Instant eventEndsAt, String customerScope, int companyRankingTopN,
-                              int branchRankingTopN, int tonDisplayScale, List<RegionWrite> regions) {}
-  public record ActivityView(long id, String code, String name, String description, String status,
+                              int branchRankingTopN, int tonDisplayScale, List<RegionWrite> regions, Long departmentId) {}
+  public record ActivityView(long id, long departmentId, String departmentName, String code, String name, String description, String status,
                              String configuredStatus, String timezone, Instant startsAt, Instant endsAt,
                              Instant eventEndsAt, String customerScope, int companyRankingTopN, int branchRankingTopN,
                              int tonDisplayScale, int version, List<RegionView> regions, boolean hasUnassignedGeneralCustomers,

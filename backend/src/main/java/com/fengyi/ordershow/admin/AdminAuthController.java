@@ -46,8 +46,8 @@ public class AdminAuthController {
   @GetMapping("/me")
   ApiResponse<MeResponse> me(HttpServletRequest request) {
     AdminPrincipal principal = auth.requireAdmin(request);
-    return ApiResponse.of(new MeResponse(principal.id(), principal.username(), principal.displayName(), "ADMIN",
-        principal.mustChangePassword(), auth.csrfFromCookie(request)), TraceFilter.id(request));
+    return ApiResponse.of(new MeResponse(principal.id(), principal.username(), principal.displayName(), principal.roleCode(),
+        principal.departmentId(), principal.departmentName(), principal.mustChangePassword(), auth.csrfFromCookie(request)), TraceFilter.id(request));
   }
 
   @PostMapping("/auth/change-password")
@@ -62,11 +62,13 @@ public class AdminAuthController {
     }
     jdbc.update("UPDATE admin_user SET password_hash = ?, must_change_password = FALSE, password_changed_at = UTC_TIMESTAMP(3), lock_version = lock_version + 1 WHERE id = ?",
         passwordEncoder.encode(body.newPassword()), principal.id());
+    // Keep the current browser session alive, but invalidate other devices after a password change.
+    auth.revokeOtherAdminSessions(request, principal.id(), "PASSWORD_CHANGED");
     return ApiResponse.of(true, TraceFilter.id(request));
   }
 
   public record LoginRequest(@NotBlank String username, @NotBlank String password) {}
-  public record ChangePasswordRequest(@NotBlank String currentPassword, @NotBlank @Size(min = 10, max = 100) String newPassword) {}
-  public record MeResponse(long id, String username, String displayName, String roleCode,
-                           boolean mustChangePassword, String csrfToken) {}
+  public record ChangePasswordRequest(@NotBlank String currentPassword, @NotBlank @Size(min = 8, max = 100) String newPassword) {}
+  public record MeResponse(long id, String username, String displayName, String roleCode, Long departmentId,
+                           String departmentName, boolean mustChangePassword, String csrfToken) {}
 }

@@ -306,6 +306,9 @@ test("supports one admin entry, current H5 resolution, paging, and fulfillment e
   assert.match(prototype, /创建后为草稿状态/);
   assert.match(prototype, /活动编号.*创建后自动生成/s);
   assert.doesNotMatch(prototype, /活动编码|newActivity\.code/);
+  assert.match(prototype, /无需选择角色/);
+  assert.match(prototype, /退出登录/);
+  assert.match(api, /adminLogout/);
   assert.match(activityService, /generateActivityNo\(id, now\(\), request\.timezone\(\)\)/);
   assert.match(activityService, /"HD" \+ date \+ String\.format\("%03d", id\)/);
   assert.match(api, /order-show\.admin\.activity-code/);

@@ -11,6 +11,7 @@ import {
   updateActivity, updateAdminAttendee, updateAdminCustomer, updateAdminProduct, addAdminProductImage,
   updateAdminProductImage, deleteAdminProductImage, selectProductImageReview, excludeProductImageReview,
   updateImportRow, uploadImport, cancelImport, waitForImport, deleteAdminCustomer, deleteAdminProduct,
+  loadAdminDepartments, type AdminDepartment,
 } from "../../api";
 import { OrderManagement } from "../../components/orders/OrderManagement";
 import {
@@ -35,6 +36,9 @@ import {
   AttendanceFormDrawer, AttendancePage, cloneAttendanceRows, CustomerWhitelistTable, mapAdminAttendanceRows,
   mergeAttendanceMatchPreview, ProductFormDrawer, ProductImageUploadCard, ProductImportTable, WhitelistFormDrawer,
 } from "./AdminComponents";
+import { ActivityEntryLinksCard } from "./ActivityEntryLinksCard";
+import { useAdminIdentity, useAdminSession } from "../../admin-context";
+import { DepartmentAdminPanel } from "./DepartmentAdminPanel";
 
 type ProductRowsSetter = (value: ProductImportRow[] | ((current: ProductImportRow[]) => ProductImportRow[])) => void;
 type WhitelistRowsSetter = (value: WhitelistRow[] | ((current: WhitelistRow[]) => WhitelistRow[])) => void;
@@ -42,6 +46,8 @@ type AttendanceRowsSetter = (value: AttendanceRow[] | ((current: AttendanceRow[]
 type OperationLogEntry = { id: string; action: string; target: string; detail: string; operator: string; time: string };
 
 export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, activityName, onActivityNameChange, activityId, activityStatus, onActivityStatusChange, activityStartAt, onActivityStartAtChange, activityEndAt, onActivityEndAtChange, activityEventEndAt, onActivityEventEndAtChange, productRows, onProductRowsChange, productImportCompleted, onProductImportCompleted, onProductImportCommitted, productImportHasRun, whitelistRows, onWhitelistRowsChange, whitelistImportCompleted, onWhitelistImportCompleted, onWhitelistImportCommitted, whitelistImportHasRun, attendanceRows, onAttendanceRowsChange, attendanceFileName, onAttendanceFileNameChange, attendanceWarnings, onAttendanceWarningsChange, attendanceSheetCounts, onAttendanceSheetCountsChange, attendanceImportError, onAttendanceImportErrorChange }: { lotteryRounds: LotteryRound[]; onLotteryChange: (rounds: LotteryRound[]) => void; activityCode: string; activityName: string; onActivityNameChange: (value: string) => void; activityId: string; activityStatus: ActivityStatus; onActivityStatusChange: (status: ActivityStatus) => void; activityStartAt: string; onActivityStartAtChange: (value: string) => void; activityEndAt: string; onActivityEndAtChange: (value: string) => void; activityEventEndAt: string; onActivityEventEndAtChange: (value: string) => void; productRows: ProductImportRow[]; onProductRowsChange: ProductRowsSetter; productImportCompleted: boolean; onProductImportCompleted: (completed: boolean) => void; onProductImportCommitted: () => void; productImportHasRun: boolean; whitelistRows: WhitelistRow[]; onWhitelistRowsChange: WhitelistRowsSetter; whitelistImportCompleted: boolean; onWhitelistImportCompleted: (completed: boolean) => void; onWhitelistImportCommitted: () => void; whitelistImportHasRun: boolean; attendanceRows: AttendanceRow[]; onAttendanceRowsChange: AttendanceRowsSetter; attendanceFileName: string; onAttendanceFileNameChange: (value: string) => void; attendanceWarnings: string[]; onAttendanceWarningsChange: (value: string[]) => void; attendanceSheetCounts: Array<{ name: string; count: number }>; onAttendanceSheetCountsChange: (value: Array<{ name: string; count: number }>) => void; attendanceImportError: string; onAttendanceImportErrorChange: (value: string) => void }) {
+  const adminIdentity = useAdminIdentity();
+  const adminSession = useAdminSession();
   const activityStarted = activityStatus === "running" || activityStatus === "closed" || activityStatus === "finished";
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
   const activityFinished = activityStatus === "finished";
@@ -49,11 +55,13 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
   const baseDataReadOnly = activityStatus === "scheduled" || activityClosed;
   const [tab, setTab] = useState("活动概览");
   const [activities, setActivities] = useState<RuntimeActivity[]>([]);
+  const [departments, setDepartments] = useState<AdminDepartment[]>([]);
+  const [activityDepartmentFilter, setActivityDepartmentFilter] = useState("");
   const [activityMenuOpen, setActivityMenuOpen] = useState(false);
   const [newActivityOpen, setNewActivityOpen] = useState(false);
   const [creatingActivity, setCreatingActivity] = useState(false);
-  const [newActivity, setNewActivity] = useState<{ name: string; startsAt: string; endsAt: string; eventEndsAt: string }>(
-    { name: "", startsAt: nextMinuteDateTimeLocal(), endsAt: "", eventEndsAt: "" },
+  const [newActivity, setNewActivity] = useState<{ name: string; startsAt: string; endsAt: string; eventEndsAt: string; departmentId: string }>(
+    { name: "", startsAt: nextMinuteDateTimeLocal(), endsAt: "", eventEndsAt: "", departmentId: "" },
   );
   const setProductRows = onProductRowsChange;
   const setWhitelistRows = onWhitelistRowsChange;
@@ -112,7 +120,12 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
   const [regionCodesByName, setRegionCodesByName] = useState<Record<string, string>>({});
   const [overviewDashboard, setOverviewDashboard] = useState<DashboardData | null>(null);
   const [overviewByType, setOverviewByType] = useState<{ GENERAL: DashboardData | null; SPECIAL: DashboardData | null }>({ GENERAL: null, SPECIAL: null });
-  const nav = ["活动概览", "商品导入", "白名单", "现场到场", "订单管理", "抽奖规则"];
+  const nav = ["活动概览", "商品导入", "白名单", "现场到场", "订单管理", "抽奖规则", ...(adminIdentity?.roleCode === "SUPER_ADMIN" ? ["部门与账号"] : [])];
+  const currentActivity = activities.find((item) => item.code === activityCode);
+  const visibleActivities = useMemo(
+    () => activityDepartmentFilter ? activities.filter((item) => String(item.departmentId) === activityDepartmentFilter) : activities,
+    [activities, activityDepartmentFilter],
+  );
   const parsedProductCount = productFileName ? productImportInputCount : 0;
   const parsedWhitelistCount = whitelistFileName ? whitelistImportInputCount : 0;
   const removedProductCount = Math.max(0, parsedProductCount - productImportStats.total);
@@ -120,15 +133,27 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
   useEffect(() => {
     void loadAdminActivities().then((items) => {
       setActivities(items);
-      if (!getPreferredAdminActivityCode() && items.length > 0) {
+      const savedCode = getPreferredAdminActivityCode();
+      const savedActivity = savedCode ? items.find((item) => item.code === savedCode) : undefined;
+      if (!savedActivity && items.length > 0) {
         const preferred = items.find((item) => runtimeActivityStatus(item.status) === "running")
           ?? items.find((item) => runtimeActivityStatus(item.status) === "scheduled")
           ?? items[0];
         setPreferredAdminActivityCode(preferred.code);
         if (preferred.code !== activityCode) window.location.replace("/admin");
+      } else if (savedActivity && savedActivity.code !== activityCode) {
+        window.location.replace("/admin");
       }
     }).catch(() => setActivities([]));
   }, [activityCode, activityId]);
+  useEffect(() => {
+    if (adminIdentity?.roleCode !== "SUPER_ADMIN") {
+      return;
+    }
+    let active = true;
+    void loadAdminDepartments().then((items) => { if (active) setDepartments(items); }).catch(() => { if (active) setDepartments([]); });
+    return () => { active = false; };
+  }, [adminIdentity?.roleCode]);
   useEffect(() => {
     const refreshMinimum = () => setMinimumFutureAt(nextMinuteDateTimeLocal());
     const timer = window.setInterval(refreshMinimum, 30_000);
@@ -140,7 +165,9 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
     startsAt.setSeconds(0, 0);
     const endsAt = new Date(startsAt.getTime() + 2 * 24 * 60 * 60 * 1000);
     const eventEndsAt = new Date(endsAt.getTime() + 4 * 60 * 60 * 1000);
-    setNewActivity({ name: "", startsAt: toDateTimeLocal(startsAt.toISOString()), endsAt: toDateTimeLocal(endsAt.toISOString()), eventEndsAt: toDateTimeLocal(eventEndsAt.toISOString()) });
+    const currentDepartmentId = activities.find((item) => item.code === activityCode)?.departmentId
+      ?? departments.find((item) => item.code === "DEFAULT")?.id;
+    setNewActivity({ name: "", startsAt: toDateTimeLocal(startsAt.toISOString()), endsAt: toDateTimeLocal(endsAt.toISOString()), eventEndsAt: toDateTimeLocal(eventEndsAt.toISOString()), departmentId: currentDepartmentId == null ? "" : String(currentDepartmentId) });
     setActivityMenuOpen(false);
     setNewActivityOpen(true);
   };
@@ -148,6 +175,10 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
   const submitNewActivity = async () => {
     if (!newActivity.name.trim() || !newActivity.startsAt || !newActivity.endsAt || !newActivity.eventEndsAt) {
       setActionNotice("请完整填写活动名称、订货时间和整场活动结束时间。");
+      return;
+    }
+    if (adminIdentity?.roleCode === "SUPER_ADMIN" && !newActivity.departmentId) {
+      setActionNotice("超级管理员创建活动时必须选择所属部门。");
       return;
     }
     if (new Date(newActivity.startsAt) >= new Date(newActivity.endsAt)) {
@@ -160,7 +191,13 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
     }
     setCreatingActivity(true);
     try {
-      const created = await createActivity(newActivity);
+      const created = await createActivity({
+        name: newActivity.name,
+        startsAt: newActivity.startsAt,
+        endsAt: newActivity.endsAt,
+        eventEndsAt: newActivity.eventEndsAt,
+        ...(adminIdentity?.roleCode === "SUPER_ADMIN" ? { departmentId: Number(newActivity.departmentId) } : {}),
+      });
       setPreferredAdminActivityCode(created.code);
       window.location.assign("/admin");
     } catch (error) {
@@ -256,7 +293,7 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
   }, [activityId, onAttendanceFileNameChange, onLotteryChange, onProductImportCommitted, onProductImportCompleted,
     onWhitelistImportCommitted, onWhitelistImportCompleted, setAttendanceRows, setProductRows, setWhitelistRows]);
   const recordOperation = (action: string, target: string, detail: string) => {
-    setOperationLogs((current) => [{ id: createImportRowId("operation"), action, target, detail, operator: "运营管理员", time: new Date().toLocaleString("zh-CN", { hour12: false }) }, ...current]);
+    setOperationLogs((current) => [{ id: createImportRowId("operation"), action, target, detail, operator: adminIdentity?.displayName || adminIdentity?.username || "运营管理员", time: new Date().toLocaleString("zh-CN", { hour12: false }) }, ...current]);
   };
   const applyActivity = (activity: RuntimeActivity) => {
     const nextStatus = runtimeActivityStatus(activity.status);
@@ -1120,13 +1157,14 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
       <aside className="admin-sidebar">
         <div className="admin-logo"><span>金</span><b>订购会管理平台</b></div>
         <nav>{nav.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}><i>{item.slice(0, 1)}</i>{item}</button>)}</nav>
-        <div className="admin-user"><span>陈</span><p><b>运营管理员</b><small>调味品事业部</small></p></div>
+        <div className="admin-user"><span>{(adminIdentity?.displayName || "管").slice(0, 1)}</span><p><b>{adminIdentity?.displayName || "管理员"}</b><small>{adminIdentity?.roleCode === "SUPER_ADMIN" ? "超级管理员" : adminIdentity?.departmentName || "部门账号"}</small></p></div>
       </aside>
       <main className="admin-main">
         <header>
-          <div className="admin-heading"><div className="activity-switcher"><button type="button" onClick={() => setActivityMenuOpen((value) => !value)}><span>当前活动</span><b>{activityName}</b><em>⌄</em></button>{activityMenuOpen && <div className="activity-switcher-menu"><div><b>切换活动</b><button type="button" onClick={openNewActivity}>＋ 新建活动</button></div>{activities.map((activity) => <button type="button" className={activity.code === activityCode ? "active" : ""} key={activity.id} onClick={() => { setPreferredAdminActivityCode(activity.code); window.location.assign("/admin"); }}><span><b>{activity.name}</b><small>{activity.code}</small></span><em className={runtimeActivityStatus(activity.status)}>{runtimeActivityStatus(activity.status) === "draft" ? "草稿" : runtimeActivityStatus(activity.status) === "scheduled" ? "待开始" : runtimeActivityStatus(activity.status) === "running" ? "订货中" : runtimeActivityStatus(activity.status) === "closed" ? "订货已截止" : "活动已结束"}</em></button>)}</div>}</div><strong>{tab}</strong></div>
-          <div className="admin-actions"><button onClick={() => setOperationLogOpen((value) => !value)}>操作日志{operationLogs.length > 0 ? ` · ${operationLogs.length}` : ""}</button><span className={activityClosed ? "closed" : activityStarted ? "" : "pending"}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "订货中" : activityStatus === "closed" ? "订货已截止" : "活动已结束"}</span>{activityPublished && <span className="locked">商品和白名单已锁定</span>}{operationLogOpen && <div className="operation-log-popover"><div><b>操作日志</b><button type="button" onClick={() => setOperationLogOpen(false)}>×</button></div>{operationLogs.length === 0 ? <p>暂无操作记录</p> : operationLogs.slice(0, 8).map((entry) => <article key={entry.id}><b>{entry.action}</b><span>{entry.target}</span><small>{entry.detail}</small><em>{entry.operator} · {entry.time}</em></article>)}</div>}</div>
+           <div className="admin-heading"><div className="activity-switcher"><button type="button" onClick={() => setActivityMenuOpen((value) => !value)}><span>当前活动</span><b>{activityName}</b><em>⌄</em></button>{activityMenuOpen && <div className="activity-switcher-menu"><div><b>切换活动</b><button type="button" onClick={openNewActivity}>＋ 新建活动</button></div>{adminIdentity?.roleCode === "SUPER_ADMIN" && <label className="activity-department-filter"><span>按部门筛选</span><select value={activityDepartmentFilter} onChange={(event) => setActivityDepartmentFilter(event.target.value)}><option value="">全部部门</option>{departments.filter((item) => item.status === "ACTIVE").map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}{visibleActivities.map((activity) => <button type="button" className={activity.code === activityCode ? "active" : ""} key={activity.id} onClick={() => { setPreferredAdminActivityCode(activity.code); window.location.assign("/admin"); }}><span><b>{activity.name}</b><small>{activity.code}{adminIdentity?.roleCode === "SUPER_ADMIN" && activity.departmentName ? ` · ${activity.departmentName}` : ""}</small></span><em className={runtimeActivityStatus(activity.status)}>{runtimeActivityStatus(activity.status) === "draft" ? "草稿" : runtimeActivityStatus(activity.status) === "scheduled" ? "待开始" : runtimeActivityStatus(activity.status) === "running" ? "订货中" : runtimeActivityStatus(activity.status) === "closed" ? "订货已截止" : "活动已结束"}</em></button>)}</div>}</div><strong>{tab}</strong></div>
+          <div className="admin-actions"><button type="button" onClick={() => setOperationLogOpen((value) => !value)}>操作日志{operationLogs.length > 0 ? ` · ${operationLogs.length}` : ""}</button><span className={activityClosed ? "closed" : activityStarted ? "" : "pending"}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "订货中" : activityStatus === "closed" ? "订货已截止" : "活动已结束"}</span>{activityPublished && <span className="locked">商品和白名单已锁定</span>}<div className="admin-identity-summary"><div><b>{adminIdentity?.displayName || adminIdentity?.username || "管理员"}</b><small>{adminIdentity?.roleCode === "SUPER_ADMIN" ? "超级管理员" : "部门账号"} · {adminIdentity?.departmentName || "全部部门"}</small></div><button type="button" className="admin-logout-button" onClick={() => void adminSession?.logout()} disabled={!adminSession || adminSession.busy}>退出登录</button></div>{adminSession?.error && <span className="admin-logout-error" role="alert">{adminSession.error}</span>}{operationLogOpen && <div className="operation-log-popover"><div><b>操作日志</b><button type="button" onClick={() => setOperationLogOpen(false)}>×</button></div>{operationLogs.length === 0 ? <p>暂无操作记录</p> : operationLogs.slice(0, 8).map((entry) => <article key={entry.id}><b>{entry.action}</b><span>{entry.target}</span><small>{entry.detail}</small><em>{entry.operator} · {entry.time}</em></article>)}</div>}</div>
         </header>
+        {tab === "部门与账号" && adminIdentity?.roleCode === "SUPER_ADMIN" && <DepartmentAdminPanel />}
         {tab === "活动概览" && (
           <>
             <div className="admin-stats">
@@ -1139,9 +1177,16 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
                 <div className="activity-config-grid"><label><span>活动名称 *</span><input value={activityNameDraft} disabled={activityClosed} onChange={(event) => setActivityNameDraft(event.target.value)} placeholder="例如：2026 年中秋订货会" /></label><label><span>活动编号</span><input value={activityCode} readOnly aria-label="活动编号，只读" /></label><label><span>订货开始时间</span><input type="datetime-local" min={activityStatus === "draft" || activityStatus === "scheduled" ? minimumFutureAt : undefined} value={activityStartDraft} disabled={activityStarted} onChange={(event) => setActivityStartDraft(event.target.value)} /></label><label><span>订货截止时间</span><input type="datetime-local" min={activityStatus === "running" ? activityEndAt : activityStartDraft || minimumFutureAt} value={activityEndDraft} disabled={activityClosed} onChange={(event) => setActivityEndDraft(event.target.value)} /></label><label><span>整场活动结束时间</span><input type="datetime-local" min={activityStatus === "running" || activityStatus === "closed" ? activityEventEndAt : activityEndDraft || minimumFutureAt} value={activityEventEndDraft} disabled={activityFinished} onChange={(event) => setActivityEventEndDraft(event.target.value)} /></label><label><span>活动状态</span><div className={`activity-status-display ${activityStatus}`}>{activityStatus === "draft" ? "草稿" : activityStatus === "scheduled" ? "待开始" : activityStatus === "running" ? "订货中" : activityStatus === "closed" ? "订货已截止" : "活动已结束"}</div></label></div>
                 <p><span>当前状态</span><b className={activityClosed ? "closed-text" : activityStarted ? "green" : "pending-text"}>{activityStatus === "draft" ? "草稿 · H5 未发布" : activityStatus === "scheduled" ? `待开始 · ${activityStartDraft.replace("T", " ")} 自动开放` : activityStatus === "running" ? "订货中 · H5 可下单" : activityStatus === "closed" ? "订货已截止 · 抽奖和实时看板可继续" : "活动已结束 · 历史看板和战报只读"}</b></p><p><span>基础数据</span><b className={activityPublished ? "closed-text" : "green"}>{activityPublished ? "商品和白名单已锁定" : "可导入和替换"}</b></p><p><span>运行规则</span><small>{activityFinished ? "抽奖和实时推送已关闭；最终看板与战报可回看" : activityStatus === "closed" ? "订单只读；可继续抽奖，也可延长或立即结束整场活动" : activityStatus === "running" ? "开始时间不可修改；两个结束时间只能延长" : activityStatus === "scheduled" ? "可调整未来时间；修改基础数据请先撤回发布" : "保存设置不会发布活动"}</small></p><div className="activity-card-actions">{!activityFinished && <button className="admin-primary" onClick={() => void saveActivityConfig()}>{activityStatus === "closed" ? "保存延长活动时间" : activityStatus === "running" ? "保存延长时间" : activityStatus === "scheduled" ? "保存时间调整" : "保存活动设置"}</button>}{activityStatus === "draft" && <button onClick={() => void publishCurrentActivity()}>发布活动</button>}{activityStatus === "scheduled" && <button onClick={() => void withdrawCurrentActivity()}>撤回发布</button>}{activityStatus === "running" && <button className="danger-action" onClick={() => void closeCurrentActivity()}>立即截止订货</button>}{activityStatus === "closed" && <button className="danger-action" onClick={() => void finishCurrentActivity()}>结束整场活动</button>}{activityFinished && <button type="button" onClick={() => setTab("订单管理")}>查看最终数据</button>}</div>
               </article>
-            </div>
-          </>
-        )}
+             </div>
+             <ActivityEntryLinksCard
+               key={activityCode}
+               activityCode={activityCode}
+               activityName={activityName}
+               activityStatus={activityStatus}
+               departmentName={currentActivity?.departmentName || adminIdentity?.departmentName}
+             />
+           </>
+         )}
         {tab === "商品导入" && (
           <div className="admin-panel">
             <div className="panel-title"><div><h2>{productImportCompleted ? "当前活动商品" : "活动商品导入"}</h2><p>{productImportCompleted ? "当前数据来自最近一次确认的完整 Excel；发布活动后锁定" : "上传完整商品 Excel，浏览器解析后替换当前商品目录"}</p></div><div className="panel-actions"><button className="secondary-button" disabled={baseDataReadOnly || (!productImportCompleted && (!productFileName || Boolean(productImportError)))} onClick={openProductForm}>＋ 手动添加商品</button>{productImportCompleted && <button className="admin-primary" disabled={activityPublished} onClick={beginProductImport}>重新导入 Excel</button>}</div></div>
@@ -1182,7 +1227,7 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
       {(productFormOpen || editingProductRow) && <ProductFormDrawer key={editingProductRow?.id ?? "new-product"} rows={productRows} initialRow={editingProductRow ?? undefined} activityStarted={activityStarted} onClose={() => { setProductFormOpen(false); setEditingProductRow(null); }} onSave={saveProductRow} />}
       {(whitelistFormOpen || editingWhitelistRow) && <WhitelistFormDrawer key={editingWhitelistRow?.id ?? "new-whitelist"} rows={whitelistRows} initialRow={editingWhitelistRow ?? undefined} activityStarted={activityStarted} onClose={() => { setWhitelistFormOpen(false); setEditingWhitelistRow(null); }} onSave={saveWhitelistRow} />}
       {(attendanceFormOpen || editingAttendanceRow) && !activityClosed && <AttendanceFormDrawer key={editingAttendanceRow?.id ?? "new-attendance"} rows={pendingAttendanceImport?.rows ?? attendanceRows} initialRow={editingAttendanceRow ?? undefined} onClose={() => { setAttendanceFormOpen(false); setEditingAttendanceRow(null); }} onSave={saveAttendanceRow} />}
-      {newActivityOpen && <div className="drawer-backdrop" onClick={() => !creatingActivity && setNewActivityOpen(false)}><aside className="form-drawer compact-drawer" onClick={(event) => event.stopPropagation()}><header><div><span>多活动管理</span><h2>新建活动</h2></div><button type="button" disabled={creatingActivity} onClick={() => setNewActivityOpen(false)}>×</button></header><div className="drawer-body"><div className="new-activity-note"><b>创建后为草稿状态</b><span>订货截止后仍可现场抽奖；整场活动结束后冻结看板与战报。</span></div><label><span>活动名称 *</span><input value={newActivity.name} onChange={(event) => setNewActivity((value) => ({ ...value, name: event.target.value }))} placeholder="例如：2027 年春节订货会" /></label><div className="generated-activity-no"><span>活动编号</span><b>创建后自动生成</b><small>用于后台识别、报表和数据关联，创建后不可修改</small></div><label><span>订货开始时间 *</span><input type="datetime-local" min={minimumFutureAt} value={newActivity.startsAt} onChange={(event) => setNewActivity((value) => ({ ...value, startsAt: event.target.value }))} /></label><label><span>订货截止时间 *</span><input type="datetime-local" min={newActivity.startsAt || minimumFutureAt} value={newActivity.endsAt} onChange={(event) => setNewActivity((value) => ({ ...value, endsAt: event.target.value }))} /></label><label><span>整场活动结束时间 *</span><input type="datetime-local" min={newActivity.endsAt || minimumFutureAt} value={newActivity.eventEndsAt} onChange={(event) => setNewActivity((value) => ({ ...value, eventEndsAt: event.target.value }))} /></label></div><footer><button type="button" disabled={creatingActivity} onClick={() => setNewActivityOpen(false)}>取消</button><button type="button" className="admin-primary" disabled={creatingActivity} onClick={() => void submitNewActivity()}>{creatingActivity ? "正在创建…" : "创建草稿活动"}</button></footer></aside></div>}
+      {newActivityOpen && <div className="drawer-backdrop" onClick={() => !creatingActivity && setNewActivityOpen(false)}><aside className="form-drawer compact-drawer" onClick={(event) => event.stopPropagation()}><header><div><span>多活动管理</span><h2>新建活动</h2></div><button type="button" disabled={creatingActivity} onClick={() => setNewActivityOpen(false)}>×</button></header><div className="drawer-body"><div className="new-activity-note"><b>创建后为草稿状态</b><span>订货截止后仍可现场抽奖；整场活动结束后冻结看板与战报。</span></div>{adminIdentity?.roleCode === "SUPER_ADMIN" && <label><span>所属部门 *</span><select value={newActivity.departmentId} onChange={(event) => setNewActivity((value) => ({ ...value, departmentId: event.target.value }))}><option value="">请选择部门</option>{departments.filter((item) => item.status === "ACTIVE").map((item) => <option key={item.id} value={item.id}>{item.name}（{item.code}）</option>)}</select></label>}<label><span>活动名称 *</span><input value={newActivity.name} onChange={(event) => setNewActivity((value) => ({ ...value, name: event.target.value }))} placeholder="例如：2027 年春节订货会" /></label><div className="generated-activity-no"><span>活动编号</span><b>创建后自动生成</b><small>用于后台识别、报表和数据关联，创建后不可修改</small></div><label><span>订货开始时间 *</span><input type="datetime-local" min={minimumFutureAt} value={newActivity.startsAt} onChange={(event) => setNewActivity((value) => ({ ...value, startsAt: event.target.value }))} /></label><label><span>订货截止时间 *</span><input type="datetime-local" min={newActivity.startsAt || minimumFutureAt} value={newActivity.endsAt} onChange={(event) => setNewActivity((value) => ({ ...value, endsAt: event.target.value }))} /></label><label><span>整场活动结束时间 *</span><input type="datetime-local" min={newActivity.endsAt || minimumFutureAt} value={newActivity.eventEndsAt} onChange={(event) => setNewActivity((value) => ({ ...value, eventEndsAt: event.target.value }))} /></label></div><footer><button type="button" disabled={creatingActivity} onClick={() => setNewActivityOpen(false)}>取消</button><button type="button" className="admin-primary" disabled={creatingActivity} onClick={() => void submitNewActivity()}>{creatingActivity ? "正在创建…" : "创建草稿活动"}</button></footer></aside></div>}
       {actionNotice && <div className="admin-toast" role="status"><span>✓</span>{actionNotice}<button aria-label="关闭提示" onClick={() => setActionNotice("")}>×</button></div>}
     </section>
   );

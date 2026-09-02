@@ -43,7 +43,7 @@ public class ActivityController {
 
   @GetMapping("/admin/activities")
   ApiResponse<List<ActivityService.ActivityView>> activities(HttpServletRequest request) {
-    return ApiResponse.of(service.list(), TraceFilter.id(request));
+    return ApiResponse.of(service.list(auth.requireAdmin(request)), TraceFilter.id(request));
   }
 
   @PostMapping("/admin/activities")
@@ -97,11 +97,12 @@ public class ActivityController {
       @Size(max = 2000) String description, @NotBlank String timezone, @NotNull Instant startsAt, @NotNull Instant endsAt,
       @NotNull Instant eventEndsAt,
       @NotBlank String customerScope, int companyRankingTopN, int branchRankingTopN, int tonDisplayScale,
-      List<RegionRequest> regions) {
+      List<RegionRequest> regions, Long departmentId) {
     ActivityService.ActivityWrite toWrite() {
       return new ActivityService.ActivityWrite(code, name, description, timezone, startsAt, endsAt, eventEndsAt, customerScope,
           companyRankingTopN, branchRankingTopN, tonDisplayScale,
-          regions == null ? List.of() : regions.stream().map(r -> new ActivityService.RegionWrite(r.code(), r.name(), r.sortNo())).toList());
+          regions == null ? List.of() : regions.stream().map(r -> new ActivityService.RegionWrite(r.code(), r.name(), r.sortNo())).toList(),
+          departmentId);
     }
   }
   public record CloseRequest(@NotBlank @Size(max = 500) String reason) {}

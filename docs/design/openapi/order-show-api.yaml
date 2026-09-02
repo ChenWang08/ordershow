@@ -348,12 +348,84 @@ paths:
                 newPassword:
                   type: string
                   format: password
-                  minLength: 12
+                  minLength: 8
                   maxLength: 200
       responses:
         '204':
           description: 修改成功
         '400':
+          $ref: '#/components/responses/Problem'
+  /admin/departments:
+    get:
+      operationId: listDepartments
+      tags: [AdminAuth]
+      summary: 部门列表及账号绑定状态
+      description: 仅超级管理员可访问。
+      security:
+        - adminCookie: []
+      responses:
+        '200':
+          description: 部门列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentListResponse'
+    post:
+      operationId: createDepartment
+      tags: [AdminAuth]
+      summary: 创建部门
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepartmentWriteRequest'
+      responses:
+        '200':
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponse'
+  /admin/departments/{departmentId}:
+    patch:
+      operationId: updateDepartment
+      tags: [AdminAuth]
+      summary: 修改或停用部门
+      security:
+        - adminCookie: []
+      parameters:
+        - name: departmentId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                status:
+                  type: string
+                  enum: [ACTIVE, DISABLED]
+      responses:
+        '200':
+          description: 修改成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentResponse'
+        '409':
           $ref: '#/components/responses/Problem'
   /admin/users:
     get:
@@ -368,11 +440,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenericListResponse'
+                $ref: '#/components/schemas/AdminUserListResponse'
     post:
       operationId: createAdminUser
       tags: [AdminAuth]
-      summary: 创建同角色管理员账号
+      summary: 创建部门共享管理员账号
       security:
         - adminCookie: []
       parameters:
@@ -384,12 +456,12 @@ paths:
             schema:
               $ref: '#/components/schemas/AdminUserWriteRequest'
       responses:
-        '201':
+        '200':
           description: 创建成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SingleObjectResponse'
+                $ref: '#/components/schemas/AdminUserResponse'
   /admin/users/{adminUserId}:
     patch:
       operationId: updateAdminUser
@@ -403,37 +475,20 @@ paths:
           required: true
           schema:
             $ref: '#/components/schemas/Id'
-        - $ref: '#/components/parameters/IfMatch'
         - $ref: '#/components/parameters/CsrfToken'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [reason, changes]
-              properties:
-                reason:
-                  type: string
-                  minLength: 1
-                  maxLength: 500
-                changes:
-                  type: object
-                  properties:
-                    displayName:
-                      type: string
-                    status:
-                      type: string
-                      enum: [ACTIVE, DISABLED]
-                    resetPassword:
-                      type: boolean
+              $ref: '#/components/schemas/AdminUserPatchRequest'
       responses:
         '200':
           description: 修改成功
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SingleObjectResponse'
+                $ref: '#/components/schemas/AdminUserResponse'
   /admin/activities:
     get:
       operationId: listActivities
@@ -2594,7 +2649,7 @@ components:
       properties:
         data:
           type: object
-          required: [id, username, displayName, roleCode, mustChangePassword, csrfToken]
+          required: [id, username, displayName, roleCode, departmentId, mustChangePassword, csrfToken]
           properties:
             id:
               $ref: '#/components/schemas/Id'
@@ -2604,7 +2659,13 @@ components:
               type: string
             roleCode:
               type: string
-              enum: [ADMIN]
+              enum: [SUPER_ADMIN, DEPARTMENT_ADMIN]
+            departmentId:
+              oneOf:
+                - $ref: '#/components/schemas/Id'
+                - type: 'null'
+            departmentName:
+              type: [string, 'null']
             mustChangePassword:
               type: boolean
             csrfToken:
@@ -2613,7 +2674,7 @@ components:
           type: string
     AdminUserWriteRequest:
       type: object
-      required: [username, displayName, initialPassword]
+      required: [username, displayName, initialPassword, departmentId]
       properties:
         username:
           type: string
@@ -2626,8 +2687,130 @@ components:
         initialPassword:
           type: string
           format: password
-          minLength: 12
-          maxLength: 200
+          minLength: 8
+          maxLength: 100
+        departmentId:
+          $ref: '#/components/schemas/Id'
+    AdminUserPatchRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+          maxLength: 100
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+        initialPassword:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 100
+    AdminAccount:
+      type: object
+      required: [id, username, displayName, roleCode, status, mustChangePassword, lockVersion]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        username:
+          type: string
+        displayName:
+          type: string
+        roleCode:
+          type: string
+          enum: [SUPER_ADMIN, DEPARTMENT_ADMIN]
+        departmentId:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        departmentName:
+          type: [string, 'null']
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+        mustChangePassword:
+          type: boolean
+        lastLoginAt:
+          type: [string, 'null']
+          format: date-time
+        lockVersion:
+          type: integer
+    AdminUserResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          $ref: '#/components/schemas/AdminAccount'
+        traceId:
+          type: string
+    AdminUserListResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AdminAccount'
+        traceId:
+          type: string
+    Department:
+      type: object
+      required: [id, code, name, status, activityCount]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        code:
+          type: string
+          readOnly: true
+          description: 创建部门时由系统根据名称生成；创建后不可修改。
+        name:
+          type: string
+        status:
+          type: string
+          enum: [ACTIVE, DISABLED]
+        accountId:
+          oneOf:
+            - $ref: '#/components/schemas/Id'
+            - type: 'null'
+        accountUsername:
+          type: [string, 'null']
+        accountDisplayName:
+          type: [string, 'null']
+        accountStatus:
+          type: [string, 'null']
+          enum: [ACTIVE, DISABLED, null]
+        lastLoginAt:
+          type: [string, 'null']
+          format: date-time
+        activityCount:
+          type: integer
+          format: int64
+    DepartmentWriteRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 部门名称；部门编码由服务端根据名称生成。
+    DepartmentResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          $ref: '#/components/schemas/Department'
+        traceId:
+          type: string
+    DepartmentListResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Department'
+        traceId:
+          type: string
     AttendanceWriteRequest:
       type: object
       required: [dealerName]
@@ -2727,10 +2910,14 @@ components:
       allOf:
         - $ref: '#/components/schemas/PublicActivity'
         - type: object
-          required: [id, version, companyRankingTopN, branchRankingTopN, tonDisplayScale, createdAt, updatedAt]
+          required: [id, departmentId, departmentName, version, companyRankingTopN, branchRankingTopN, tonDisplayScale, createdAt, updatedAt]
           properties:
             id:
               $ref: '#/components/schemas/Id'
+            departmentId:
+              $ref: '#/components/schemas/Id'
+            departmentName:
+              type: string
             version:
               type: integer
             companyRankingTopN:
@@ -2802,6 +2989,8 @@ components:
           minimum: 0
           maximum: 6
           default: 4
+        departmentId:
+          $ref: '#/components/schemas/Id'
     ActivityResponse:
       type: object
       required: [data, traceId]

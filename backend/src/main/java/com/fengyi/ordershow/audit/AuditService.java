@@ -4,6 +4,7 @@ import com.fengyi.ordershow.common.PageResponse;
 import com.fengyi.ordershow.common.TraceFilter;
 import com.fengyi.ordershow.security.AdminPrincipal;
 import com.fengyi.ordershow.security.AuthService;
+import com.fengyi.ordershow.security.DepartmentAccessService;
 import com.fengyi.ordershow.security.H5Principal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -27,8 +28,12 @@ public class AuditService {
   private static final Pattern ACTIVITY_ID = Pattern.compile("/activities/(\\d+)");
   private static final Pattern LAST_ID = Pattern.compile("/(\\d+)(?:/[^/]*)?$");
   private final JdbcTemplate jdbc;
+  private final DepartmentAccessService departmentAccess;
 
-  public AuditService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
+  public AuditService(JdbcTemplate jdbc, DepartmentAccessService departmentAccess) {
+    this.jdbc = jdbc;
+    this.departmentAccess = departmentAccess;
+  }
 
   public void record(HttpServletRequest request, HttpServletResponse response, Exception exception) {
     if (isRead(request.getMethod())) return;
@@ -58,9 +63,25 @@ public class AuditService {
   }
 
   public PageResponse<AuditView> list(Long activityId, String actionCode, String objectType, int page, int size, String traceId) {
+    return listScoped(activityId, actionCode, objectType, page, size, traceId, null);
+  }
+
+  public PageResponse<AuditView> listForAdmin(AdminPrincipal admin, Long activityId, String actionCode, String objectType,
+                                               int page, int size, String traceId) {
+    if (admin.isSuperAdmin()) return list(activityId, actionCode, objectType, page, size, traceId);
+    if (activityId != null) departmentAccess.requireActivityAccess(admin, activityId);
+    return listScoped(activityId, actionCode, objectType, page, size, traceId, admin.departmentId());
+  }
+
+  private PageResponse<AuditView> listScoped(Long activityId, String actionCode, String objectType, int page, int size,
+                                              String traceId, Long departmentId) {
     int safePage = Math.max(1, page); int safeSize = Math.min(200, Math.max(1, size));
-    String where = " WHERE (? IS NULL OR l.activity_id = ?) AND (? IS NULL OR ? = '' OR l.action_code = ?) AND (? IS NULL OR ? = '' OR l.object_type = ?) ";
-    Object[] args = {activityId, activityId, actionCode, actionCode, actionCode, objectType, objectType, objectType};
+    String where = " WHERE (? IS NULL OR l.activity_id = ?) "
+        + (departmentId == null ? "" : " AND EXISTS (SELECT 1 FROM activity scoped_a WHERE scoped_a.id = l.activity_id AND scoped_a.department_id = ?) ")
+        + " AND (? IS NULL OR ? = '' OR l.action_code = ?) AND (? IS NULL OR ? = '' OR l.object_type = ?) ";
+    Object[] args = departmentId == null
+        ? new Object[]{activityId, activityId, actionCode, actionCode, actionCode, objectType, objectType, objectType}
+        : new Object[]{activityId, activityId, departmentId, actionCode, actionCode, actionCode, objectType, objectType, objectType};
     Long total = jdbc.queryForObject("SELECT COUNT(*) FROM audit_log l" + where, Long.class, args);
     List<Object> paged = new ArrayList<>(Arrays.asList(args)); paged.add(safeSize); paged.add((safePage - 1) * safeSize);
     List<AuditView> rows = jdbc.query("""
@@ -82,9 +103,18 @@ public class AuditService {
     if (uri.contains("/orders")) return "ORDER"; if (uri.contains("/products")) return "PRODUCT";
     if (uri.contains("/customers")) return "CUSTOMER"; if (uri.contains("/attendees")) return "ATTENDEE";
     if (uri.contains("/imports")) return "IMPORT"; if (uri.contains("/lottery")) return "LOTTERY";
+    if (uri.contains("/admin/users")) return "ADMIN_USER";
+    if (uri.contains("/admin/departments")) return "DEPARTMENT";
     if (uri.contains("/activities")) return "ACTIVITY"; return "SESSION";
   }
   private static String action(String method, String uri) {
+    if (uri.endsWith("/admin/auth/login")) return "ADMIN_LOGIN";
+    if (uri.endsWith("/admin/auth/change-password")) return "ADMIN_PASSWORD_CHANGED";
+    if (uri.endsWith("/admin/auth/logout")) return "ADMIN_LOGOUT";
+    if (uri.endsWith("/admin/departments")) return "DEPARTMENT_CREATED";
+    if (uri.contains("/admin/departments/")) return "DEPARTMENT_UPDATED";
+    if (uri.endsWith("/admin/users")) return "ADMIN_USER_CREATED";
+    if (uri.contains("/admin/users/")) return "ADMIN_USER_UPDATED";
     String suffix = uri.contains("/withdraw") ? "WITHDRAW" : uri.contains("/confirm") ? "CONFIRM"
         : uri.contains("/publish") ? "PUBLISH" : uri.contains("/draw") ? "DRAW"
         : uri.contains("/close") ? "CLOSE"

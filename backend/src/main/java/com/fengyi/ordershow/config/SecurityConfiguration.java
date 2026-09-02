@@ -2,9 +2,12 @@ package com.fengyi.ordershow.config;
 
 import com.fengyi.ordershow.audit.AuditService;
 import com.fengyi.ordershow.security.AuthService;
+import com.fengyi.ordershow.security.DepartmentAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -25,11 +28,14 @@ public class SecurityConfiguration implements WebMvcConfigurer {
   private final AuthService authService;
   private final OrderShowProperties properties;
   private final AuditService auditService;
+  private final DepartmentAccessService departmentAccess;
 
-  public SecurityConfiguration(AuthService authService, OrderShowProperties properties, AuditService auditService) {
+  public SecurityConfiguration(AuthService authService, OrderShowProperties properties, AuditService auditService,
+      DepartmentAccessService departmentAccess) {
     this.authService = authService;
     this.properties = properties;
     this.auditService = auditService;
+    this.departmentAccess = departmentAccess;
   }
 
   @Bean
@@ -80,6 +86,16 @@ public class SecurityConfiguration implements WebMvcConfigurer {
     registry.addInterceptor(new HandlerInterceptor() {
       @Override
       public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        var admin = authService.requireAdmin(request);
+        Matcher matcher = ACTIVITY_ID.matcher(request.getRequestURI());
+        if (matcher.find()) departmentAccess.requireActivityAccess(admin, Long.parseLong(matcher.group(1)));
+        return true;
+      }
+    }).addPathPatterns("/admin/activities/**");
+
+    registry.addInterceptor(new HandlerInterceptor() {
+      @Override
+      public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         authService.requireH5(request);
         if (isWrite(request)) authService.requireCsrf(request, false);
         return true;
@@ -91,11 +107,13 @@ public class SecurityConfiguration implements WebMvcConfigurer {
       public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
         auditService.record(request, response, ex);
       }
-    }).addPathPatterns("/admin/**", "/h5/**").excludePathPatterns("/admin/auth/login");
+    }).addPathPatterns("/admin/**", "/h5/**");
   }
 
   private static boolean isWrite(HttpServletRequest request) {
     return !(HttpMethod.GET.matches(request.getMethod()) || HttpMethod.HEAD.matches(request.getMethod())
         || HttpMethod.OPTIONS.matches(request.getMethod()));
   }
+
+  private static final Pattern ACTIVITY_ID = Pattern.compile("/activities/(\\d+)(?:/|$)");
 }

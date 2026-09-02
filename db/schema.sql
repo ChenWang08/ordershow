@@ -4,12 +4,31 @@
 SET NAMES utf8mb4;
 SET time_zone = '+00:00';
 
+CREATE TABLE department (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  -- 服务端创建时生成；创建后作为稳定标识不可修改。
+  department_code VARCHAR(64) NOT NULL,
+  department_name VARCHAR(100) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+  lock_version INT UNSIGNED NOT NULL DEFAULT 0,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_department_code (department_code),
+  CONSTRAINT ck_department_status CHECK (status IN ('ACTIVE', 'DISABLED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+INSERT INTO department(department_code, department_name, status)
+VALUES ('DEFAULT', '默认业务部门', 'ACTIVE')
+ON DUPLICATE KEY UPDATE department_name = VALUES(department_name);
+
 CREATE TABLE admin_user (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   username VARCHAR(64) NOT NULL,
   display_name VARCHAR(100) NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
-  role_code VARCHAR(32) NOT NULL DEFAULT 'ADMIN',
+  role_code VARCHAR(32) NOT NULL DEFAULT 'SUPER_ADMIN',
+  department_id BIGINT UNSIGNED NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
   must_change_password BOOLEAN NOT NULL DEFAULT TRUE,
   password_changed_at DATETIME(3) NULL,
@@ -19,7 +38,10 @@ CREATE TABLE admin_user (
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   UNIQUE KEY uk_admin_user_username (username),
-  CONSTRAINT ck_admin_user_role CHECK (role_code IN ('ADMIN')),
+  UNIQUE KEY uk_admin_user_department (department_id),
+  CONSTRAINT fk_admin_user_department FOREIGN KEY (department_id) REFERENCES department (id),
+  CONSTRAINT ck_admin_user_role CHECK (role_code IN ('SUPER_ADMIN', 'DEPARTMENT_ADMIN')),
+  CONSTRAINT ck_admin_user_department_role CHECK ((role_code = 'SUPER_ADMIN' AND department_id IS NULL) OR (role_code = 'DEPARTMENT_ADMIN' AND department_id IS NOT NULL)),
   CONSTRAINT ck_admin_user_status CHECK (status IN ('ACTIVE', 'DISABLED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -43,6 +65,7 @@ CREATE TABLE admin_session (
 
 CREATE TABLE activity (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  department_id BIGINT UNSIGNED NOT NULL,
   activity_code VARCHAR(64) NOT NULL,
   name VARCHAR(200) NOT NULL,
   description TEXT NULL,
@@ -68,6 +91,9 @@ CREATE TABLE activity (
   PRIMARY KEY (id),
   UNIQUE KEY uk_activity_code (activity_code),
   KEY idx_activity_status_time (status, starts_at, ends_at),
+  KEY idx_activity_department_status_time (department_id, status, starts_at, ends_at),
+  KEY idx_activity_department_publication_time (department_id, status, published_at, starts_at, event_ends_at, ends_at),
+  CONSTRAINT fk_activity_department FOREIGN KEY (department_id) REFERENCES department (id),
   CONSTRAINT fk_activity_created_by FOREIGN KEY (created_by) REFERENCES admin_user (id),
   CONSTRAINT fk_activity_updated_by FOREIGN KEY (updated_by) REFERENCES admin_user (id),
   CONSTRAINT ck_activity_status CHECK (status IN ('DRAFT', 'SCHEDULED', 'ACTIVE', 'CLOSED', 'FINISHED', 'ARCHIVED')),

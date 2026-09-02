@@ -47,8 +47,12 @@ public class AuthService {
   @Transactional
   public LoginResult login(String username, String password, HttpServletRequest request, HttpServletResponse response) {
     List<Map<String, Object>> users = jdbc.queryForList("""
-        SELECT id, username, display_name, password_hash, must_change_password
-        FROM admin_user WHERE username = ? AND status = 'ACTIVE'
+        SELECT u.id, u.username, u.display_name, u.password_hash, u.role_code, u.department_id,
+               d.department_name, u.must_change_password
+        FROM admin_user u
+        LEFT JOIN department d ON d.id = u.department_id
+        WHERE u.username = ? AND u.status = 'ACTIVE'
+          AND (u.role_code = 'SUPER_ADMIN' OR d.status = 'ACTIVE')
         """, username.trim());
     if (users.size() != 1 || !passwordEncoder.matches(password, users.getFirst().get("password_hash").toString())) {
       throw DomainException.unauthorized("用户名或密码不正确");
@@ -65,7 +69,14 @@ public class AuthService {
     jdbc.update("UPDATE admin_user SET last_login_at = UTC_TIMESTAMP(3) WHERE id = ?", id);
     addCookie(response, ADMIN_COOKIE, token, true, Duration.ofHours(properties.adminSessionHours()));
     addCookie(response, ADMIN_CSRF_COOKIE, csrf, false, Duration.ofHours(properties.adminSessionHours()));
+    AdminPrincipal principal = new AdminPrincipal(id, user.get("username").toString(), user.get("display_name").toString(),
+        user.get("role_code").toString(), nullableLong(user.get("department_id")),
+        user.get("department_name") == null ? null : user.get("department_name").toString(),
+        (Boolean) user.get("must_change_password"));
+    request.setAttribute(ADMIN_REQUEST_ATTRIBUTE, principal);
     return new LoginResult(id, user.get("username").toString(), user.get("display_name").toString(),
+        user.get("role_code").toString(), nullableLong(user.get("department_id")),
+        user.get("department_name") == null ? null : user.get("department_name").toString(),
         (Boolean) user.get("must_change_password"), csrf);
   }
 
@@ -83,11 +94,15 @@ public class AuthService {
     String token = cookie(request, ADMIN_COOKIE);
     if (token == null) throw DomainException.unauthorized("请先登录管理后台");
     List<AdminPrincipal> rows = jdbc.query("""
-        SELECT u.id, u.username, u.display_name, u.must_change_password
+        SELECT u.id, u.username, u.display_name, u.role_code, u.department_id, d.department_name, u.must_change_password
         FROM admin_session s JOIN admin_user u ON u.id = s.admin_user_id
+        LEFT JOIN department d ON d.id = u.department_id
         WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > UTC_TIMESTAMP(3) AND u.status = 'ACTIVE'
+          AND (u.role_code = 'SUPER_ADMIN' OR d.status = 'ACTIVE')
         """, (rs, rowNum) -> new AdminPrincipal(rs.getLong("id"), rs.getString("username"),
-        rs.getString("display_name"), rs.getBoolean("must_change_password")), crypto.sha256(token));
+        rs.getString("display_name"), rs.getString("role_code"),
+        rs.getObject("department_id", Long.class), rs.getString("department_name"),
+        rs.getBoolean("must_change_password")), crypto.sha256(token));
     if (rows.size() != 1) throw DomainException.unauthorized("登录已失效，请重新登录");
     AdminPrincipal principal = rows.getFirst();
     request.setAttribute(ADMIN_REQUEST_ATTRIBUTE, principal);
@@ -104,6 +119,7 @@ public class AuthService {
                c.customer_type, c.region_code, c.branch_name, c.dealer_short_name, c.dealer_full_name, c.phone_masked
         FROM h5_session s
         JOIN activity a ON a.id = s.activity_id
+        JOIN department d ON d.id = a.department_id AND d.status = 'ACTIVE'
         JOIN activity_customer c ON c.id = s.activity_customer_id
         LEFT JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
         WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > UTC_TIMESTAMP(3)
@@ -131,6 +147,7 @@ public class AuthService {
                c.customer_type, c.region_code, c.branch_name, c.dealer_short_name, c.dealer_full_name, c.phone_masked
         FROM activity_customer c
         JOIN activity a ON a.id = c.activity_id
+        JOIN department d ON d.id = a.department_id AND d.status = 'ACTIVE'
         LEFT JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
         WHERE a.activity_code = ? AND a.archived_at IS NULL
           AND (a.status = 'CLOSED' OR (a.status IN ('SCHEDULED', 'ACTIVE') AND a.starts_at <= UTC_TIMESTAMP(3)))
@@ -184,6 +201,16 @@ public class AuthService {
     if (matches == null || matches != 1) throw DomainException.forbidden("CSRF_INVALID", "安全令牌无效，请重新登录");
   }
 
+  @Transactional
+  public void revokeOtherAdminSessions(HttpServletRequest request, long adminUserId, String reason) {
+    String token = cookie(request, ADMIN_COOKIE);
+    if (token == null) return;
+    jdbc.update("""
+        UPDATE admin_session SET revoked_at = UTC_TIMESTAMP(3), revoke_reason = ?
+        WHERE admin_user_id = ? AND token_hash <> ? AND revoked_at IS NULL
+        """, reason, adminUserId, crypto.sha256(token));
+  }
+
   public String csrfFromCookie(HttpServletRequest request) {
     return cookie(request, ADMIN_CSRF_COOKIE);
   }
@@ -220,6 +247,11 @@ public class AuthService {
     return value == null ? "" : value.substring(0, Math.min(value.length(), 500));
   }
 
-  public record LoginResult(long id, String username, String displayName, boolean mustChangePassword, String csrfToken) {}
+  private static Long nullableLong(Object value) {
+    return value == null ? null : ((Number) value).longValue();
+  }
+
+  public record LoginResult(long id, String username, String displayName, String roleCode,
+                            Long departmentId, String departmentName, boolean mustChangePassword, String csrfToken) {}
   public record H5LoginResult(H5Principal customer, String csrfToken) {}
 }

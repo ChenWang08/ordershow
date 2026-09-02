@@ -2,13 +2,14 @@
 
 ## 1. 权限模型
 
-一期后台只有一个 `ADMIN` 角色，但必须支持多个独立管理员账号。数据库保留 `role_code`，暂不建设复杂 RBAC 表和权限配置页面；未来出现只读、抽奖操作员等角色时再追加迁移。
+当前基线使用 `SUPER_ADMIN` 和 `DEPARTMENT_ADMIN` 两类角色，每个部门使用一个共享后台账号。数据库保留 `role_code`，暂不建设部门内部复杂 RBAC；未来需要个人审计或更细操作权限时再追加迁移。
 
 系统调用主体：
 
 - `ANONYMOUS`：未验证 H5 访问者；
 - `H5_CUSTOMER`：已匹配某一活动白名单身份的客户；
-- `ADMIN`：拥有全部后台配置权限的具名管理员；
+- `SUPER_ADMIN`：拥有全部后台配置、部门和账号管理权限的具名管理员；
+- `DEPARTMENT_ADMIN`：绑定一个部门的共享账号，只能访问该部门活动及其业务数据；
 - `SCREEN`：现场只读大屏；
 - `SYSTEM`：调度、导入执行器、outbox 发布器。
 
@@ -34,7 +35,7 @@
 
 ## 3. 管理员认证
 
-- 密码长度至少 12，允许密码管理器生成的长密码；
+- 密码长度至少 8，允许密码管理器生成的更长密码；
 - 使用 Argon2id，无法部署时使用 BCrypt 高成本因子；
 - 初始管理员密码通过部署密钥注入，第一次登录强制修改；
 - 会话 Cookie：`Secure; HttpOnly; SameSite=Lax; Path=/api/v1/admin`；
@@ -42,7 +43,7 @@
 - 会话空闲 2 小时失效，最长 12 小时，活动现场可通过配置调整；
 - 5 次错误登录后进行渐进延迟或短期限制，不泄露用户名是否存在；
 - 禁用账号、修改密码和管理员主动退出撤销现有会话；
-- 正式环境禁止使用默认密码和共享账号。
+- 正式环境禁止使用默认密码。部门共享账号是一期已确认的业务方案，必须由超级管理员创建、首次登录改密，并在人员变动时重置密码；审计明确记录其无法定位到部门内个人。
 
 ## 4. H5 手机号验证安全边界
 
@@ -205,7 +206,7 @@ WHERE id = ? AND lock_version = ? AND current_version_no = ?;
 
 | 操作码 | 内容 |
 | --- | --- |
-| `ADMIN_LOGIN_SUCCESS/FAILURE` | 登录结果，不记录密码 |
+| `ADMIN_LOGIN` | 登录成功或失败，不记录密码 |
 | `ADMIN_PASSWORD_CHANGED` | 修改密码和会话撤销 |
 | `ACTIVITY_CREATED/UPDATED` | 活动配置前后值 |
 | `ACTIVITY_STATUS_CHANGED` | 状态、原因和时间 |
@@ -218,7 +219,7 @@ WHERE id = ? AND lock_version = ? AND current_version_no = ?;
 | `LOTTERY_DRAWN` | 轮次、候选数、结果哈希 |
 | `LOTTERY_COMPLETED` | 现场完成时间 |
 | `LOTTERY_RESET` | 原结果、原因和管理员 |
-| `ADMIN_USER_CREATED/DISABLED` | 管理员账号生命周期 |
+| `ADMIN_USER_CREATED/UPDATED` | 管理员账号生命周期（含重置密码、启停） |
 
 审计日志只追加，普通业务接口无删除能力。`before_json`、`after_json` 中手机号仅保存脱敏值或 HMAC 摘要。
 

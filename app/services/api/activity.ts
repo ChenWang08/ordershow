@@ -17,6 +17,7 @@ export type CreateActivityInput = {
   startsAt: string;
   endsAt: string;
   eventEndsAt: string;
+  departmentId?: number;
 };
 
 export async function createActivity(input: CreateActivityInput) {
@@ -33,6 +34,7 @@ export async function createActivity(input: CreateActivityInput) {
       companyRankingTopN: 20,
       branchRankingTopN: 20,
       tonDisplayScale: 3,
+      ...(input.departmentId ? { departmentId: input.departmentId } : {}),
     }),
   }, "admin")).data;
 }

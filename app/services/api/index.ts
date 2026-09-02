@@ -4,6 +4,7 @@ export * from "./types";
 export * from "./activity";
 export * from "./h5-orders";
 export * from "./auth";
+export * from "./admin";
 export * from "./imports";
 export * from "./orders";
 export * from "./dashboard";
