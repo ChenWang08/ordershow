@@ -114,7 +114,7 @@ public class ActivityService {
         INSERT INTO activity(department_id, activity_code, name, description, status, timezone, starts_at, ends_at, event_ends_at,
                              customer_scope, company_ranking_top_n, branch_ranking_top_n, ton_display_scale,
                              created_by, updated_by)
-        VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, departmentId, temporaryCode, request.name(), request.description(), request.timezone(), Timestamp.from(request.startsAt()),
         Timestamp.from(request.endsAt()), Timestamp.from(request.eventEndsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
         request.tonDisplayScale(), admin.id(), admin.id());
