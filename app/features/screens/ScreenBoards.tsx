@@ -17,18 +17,26 @@ const reports = [
   "综合客户区域金额与产品线金额同屏展示",
 ];
 
+function isUnspecifiedCustomerTypeActivity(activity: RuntimeActivity | null) {
+  return activity?.whitelistCustomerTypeMode === "UNSPECIFIED";
+}
+
 export function RankingBoard({ activity }: { activity: RuntimeActivity | null }) {
-  const [channel, setChannel] = useState("SPECIAL");
+  const [channel, setChannel] = useState("ALL");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [error, setError] = useState("");
   const historical = activity?.status === "FINISHED" || activity?.status === "ARCHIVED";
+  const unspecifiedCustomerType = isUnspecifiedCustomerTypeActivity(activity);
   const options = useMemo(() => [
-    { value: "SPECIAL", label: "特渠专业客户" },
-    ...(activity?.regions?.length
-      ? activity.regions.map((region) => ({ value: `GENERAL:${region.code}`, label: `综合${region.name}` }))
-      : [{ value: "GENERAL", label: "综合客户" }]),
-  ], [activity]);
-  const effectiveChannel = options.some((option) => option.value === channel) ? channel : options[0]?.value ?? "SPECIAL";
+    { value: "ALL", label: "全部客户" },
+    ...(unspecifiedCustomerType ? [] : [
+      { value: "SPECIAL", label: "特渠专业客户" },
+      ...(activity?.regions?.length
+        ? activity.regions.map((region) => ({ value: `GENERAL:${region.code}`, label: `综合${region.name}` }))
+        : [{ value: "GENERAL", label: "综合客户" }]),
+    ]),
+  ], [activity, unspecifiedCustomerType]);
+  const effectiveChannel = options.some((option) => option.value === channel) ? channel : options[0]?.value ?? "ALL";
   useEffect(() => {
     let active = true;
     const refresh = async () => {
@@ -44,7 +52,7 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
     const events = new EventSource(`${apiBase()}/screen/activities/${encodeURIComponent(getActiveActivityCode())}/events`);
     events.addEventListener("invalidate", () => void refresh());
     return () => { active = false; window.clearInterval(timer); events.close(); };
-  }, [effectiveChannel, historical]);
+  }, [effectiveChannel, historical, unspecifiedCustomerType]);
   const ranking = dashboard?.companies ?? [];
   const branchRanking = dashboard?.branches ?? [];
   const chunkSize = Math.max(1, Math.ceil(ranking.length / 3));
@@ -194,6 +202,7 @@ export function OrderDashboard({ activity }: { activity: RuntimeActivity | null 
   const trendScrollRef = useRef<HTMLDivElement>(null);
   const trendDragRef = useRef({ active: false, startX: 0, scrollLeft: 0 });
   const historical = activity?.status === "FINISHED" || activity?.status === "ARCHIVED";
+  const unspecifiedCustomerType = isUnspecifiedCustomerTypeActivity(activity);
   const refresh = useCallback(async () => {
     setRefreshing(true);
     try { setData(await loadOrderDashboard()); setError(""); }
@@ -292,13 +301,13 @@ export function OrderDashboard({ activity }: { activity: RuntimeActivity | null 
     {error && <div className="order-dashboard-error">{error}</div>}
     <div className="order-dashboard-kpis">{cards.map((card) => <article className={card.tone} key={card.label}><span>{card.icon}</span><div><small>{card.label}</small><strong>{card.value}<i>{card.unit}</i></strong></div></article>)}</div>
     <div className="order-dashboard-grid order-dashboard-grid-top">
-      <article className="order-dashboard-panel"><h2><i className="mint" />渠道订单额占比</h2><div className="channel-donut-wrap"><div className="channel-donut" style={{ background: `conic-gradient(#1fbaa1 0 ${generalShare}%, #ed8618 ${generalShare}% 100%)` }}><b>{dashboardCompactAmount(amount)}<small>订单总额</small></b></div><div className="channel-legend"><span><i className="general" />综合客户 <b>{dashboardCompactAmount(generalAmount)}</b></span><span><i className="special" />特渠专业客户 <b>{dashboardCompactAmount(specialAmount)}</b></span></div></div></article>
-      {generalRegions.length > 0 && <article className="order-dashboard-panel"><h2><i className="orange" />综合客户 · 片区订单额分布</h2><DashboardBars rows={regions} /></article>}
-      <article className="order-dashboard-panel"><h2><i className="brown" />产线订单额排名（全渠道）</h2><DashboardBars rows={productLineRows} /></article>
+      <article className="order-dashboard-panel"><h2><i className="mint" />{unspecifiedCustomerType ? "订单额占比" : "渠道订单额占比"}</h2><div className="channel-donut-wrap"><div className="channel-donut" style={{ background: unspecifiedCustomerType ? amount > 0 ? "#1fbaa1" : "#e8edf0" : `conic-gradient(#1fbaa1 0 ${generalShare}%, #ed8618 ${generalShare}% 100%)` }}><b>{dashboardCompactAmount(amount)}<small>订单总额</small></b></div>{unspecifiedCustomerType ? <div className="channel-legend"><span><i className="general" />全部客户 <b>{dashboardCompactAmount(amount)} · {amount > 0 ? "100%" : "0%"}</b></span></div> : <div className="channel-legend"><span><i className="general" />综合客户 <b>{dashboardCompactAmount(generalAmount)}</b></span><span><i className="special" />特渠专业客户 <b>{dashboardCompactAmount(specialAmount)}</b></span></div>}</div></article>
+      {!unspecifiedCustomerType && generalRegions.length > 0 && <article className="order-dashboard-panel"><h2><i className="orange" />综合客户 · 片区订单额分布</h2><DashboardBars rows={regions} /></article>}
+      <article className="order-dashboard-panel"><h2><i className="brown" />产线订单额排名（{unspecifiedCustomerType ? "全部客户" : "全渠道"}）</h2><DashboardBars rows={productLineRows} /></article>
       <article className="order-dashboard-panel"><h2><i className="purple" />下单时间趋势（按小时）<small className="order-trend-hint">按住图表左右拖动 · {trend.length} 个小时 · {trend.filter((item) => Number(item.amount) === 0).length} 个零值</small></h2><div className="order-trend"><div className="order-trend-y-axis">{[1, .75, .5, .25, 0].map((ratio) => <span key={ratio}>{(trendMax * ratio / 10000).toFixed(0)}万</span>)}</div><div ref={trendScrollRef} className="order-trend-scroll" onPointerDown={beginTrendDrag} onPointerMove={moveTrendDrag} onPointerUp={endTrendDrag} onPointerCancel={endTrendDrag} onPointerLeave={(event) => { if (trendDragRef.current.active) endTrendDrag(event); }}><div className="order-trend-canvas" style={{ width: trendChartWidth }}><svg width={trendChartWidth} height="132" viewBox={`0 0 ${trendChartWidth} 132`} role="img" aria-label="下单时间趋势"><defs><linearGradient id="orderTrendArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#33bf7b" stopOpacity=".24"/><stop offset="100%" stopColor="#33bf7b" stopOpacity=".03"/></linearGradient></defs>{trendAreaPath && <path className="order-trend-area" d={trendAreaPath}/>}<path className="order-trend-line" d={trendLinePath}/></svg>{trendPoints.map((point, index) => <button type="button" className={`order-trend-point${selectedTrendIndex === index ? " active" : ""}`} key={`${point.x}-${index}`} style={{ left: point.x, top: point.y }} aria-label={`查看 ${formatTrendTime(trend[index].bucket)} 的下单数据`} onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setSelectedTrendBucket(trend[index].bucket); }} />)}{selectedTrendIndex >= 0 && <div className="order-trend-detail" style={{ left: Math.min(Math.max(trendPoints[selectedTrendIndex].x, 92), trendChartWidth - 92), top: trendPoints[selectedTrendIndex].y < 62 ? trendPoints[selectedTrendIndex].y + 13 : trendPoints[selectedTrendIndex].y - 58 }}><button type="button" aria-label="关闭时间点详情" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); setSelectedTrendBucket(null); }}>×</button><b>{formatTrendTime(trend[selectedTrendIndex].bucket)}</b><span>订单金额 <strong>{Number(trend[selectedTrendIndex].amount).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 元</strong></span><span>订单笔数 <strong>{trend[selectedTrendIndex].orders} 笔</strong></span></div>}<div className="order-trend-x-axis">{trend.map((item, index) => <span key={item.bucket} style={{ left: 36 + index * 62 }}>{formatTrendTime(item.bucket, true).replaceAll("/", "-")}</span>)}</div></div></div></div></article>
     </div>
-    <article className="order-dashboard-panel order-dashboard-products"><h2><i className="purple" />各渠道产线订单额对比</h2><div><section><h3 className="special">特渠专业客户</h3><DashboardBars rows={specialChannelProductRows} /></section><section><h3 className="general">综合客户</h3><DashboardBars rows={generalChannelProductRows} /></section></div></article>
-    {regionProductCards.length > 0 && <article className="order-dashboard-panel order-dashboard-region-products"><h2><i className="blue" />综合渠道 · 各片区产线订单额明细</h2><div className="order-dashboard-region-grid">{regionProductCards.map((region) => <section key={region.code}><h3 style={{ background: region.color }}>{region.name}<small>{dashboardCompactAmount(region.rows.reduce((sum, row) => sum + row.amount, 0))}</small></h3><DashboardBars rows={region.rows} maxAmount={regionProductMax} /></section>)}</div></article>}
+    {!unspecifiedCustomerType && <article className="order-dashboard-panel order-dashboard-products"><h2><i className="purple" />各渠道产线订单额对比</h2><div><section><h3 className="special">特渠专业客户</h3><DashboardBars rows={specialChannelProductRows} /></section><section><h3 className="general">综合客户</h3><DashboardBars rows={generalChannelProductRows} /></section></div></article>}
+    {!unspecifiedCustomerType && regionProductCards.length > 0 && <article className="order-dashboard-panel order-dashboard-region-products"><h2><i className="blue" />综合渠道 · 各片区产线订单额明细</h2><div className="order-dashboard-region-grid">{regionProductCards.map((region) => <section key={region.code}><h3 style={{ background: region.color }}>{region.name}<small>{dashboardCompactAmount(region.rows.reduce((sum, row) => sum + row.amount, 0))}</small></h3><DashboardBars rows={region.rows} maxAmount={regionProductMax} /></section>)}</div></article>}
     <div className="order-dashboard-grid order-dashboard-rankings">
       <article className="order-dashboard-panel"><h2><i className="red" />分公司订单额排名 TOP 15</h2><DashboardTopRanking rows={branchRankingRows} type="branch" /></article>
       <article className="order-dashboard-panel"><h2><i className="orange" />经销商订单额排名 TOP 15</h2><DashboardTopRanking rows={dealerRankingRows} type="dealer" /></article>
@@ -323,8 +332,12 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
   const [data, setData] = useState<DashboardReport | null>(null);
   const [error, setError] = useState("");
   const historical = activity?.status === "FINISHED" || activity?.status === "ARCHIVED";
+  const unspecifiedCustomerType = isUnspecifiedCustomerTypeActivity(activity);
   useEffect(() => {
     let active = true;
+    if (unspecifiedCustomerType) {
+      return () => { active = false; };
+    }
     const refresh = async () => {
       try { const next = await loadDashboardReport(report); if (active) { setData(next); setError(""); } }
       catch (reason) { if (active) setError(reason instanceof ApiError ? reason.message : "战报数据加载失败"); }
@@ -335,7 +348,7 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
     const events = new EventSource(`${apiBase()}/screen/activities/${encodeURIComponent(getActiveActivityCode())}/events`);
     events.addEventListener("invalidate", () => void refresh());
     return () => { active = false; window.clearInterval(timer); events.close(); };
-  }, [report, historical]);
+  }, [report, historical, unspecifiedCustomerType]);
   const isTop = report.includes("TOP5");
   const isTotal = report === "总战绩";
   const isDual = report === reports[8];
@@ -365,13 +378,13 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
         <span>调味品事业部新品发布及旺季动员会</span>
         <h1>月满家圆 · 味启新程{historical && <small> · 历史回看</small>}</h1>
         <label>当前看板：
-          <select value={report} onChange={(e) => setReport(e.target.value)}>
+          <select value={report} disabled={unspecifiedCustomerType} onChange={(e) => setReport(e.target.value)}>
             {reports.map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>
       </header>
-      {error && <div className="warning-box"><b>{historical ? "历史战报加载异常" : "实时数据连接异常"}</b><span>{error}</span></div>}
-      <div className={`report-content ${isDual ? "dual" : ""}`}>
+      {error && !unspecifiedCustomerType && <div className="warning-box"><b>{historical ? "历史战报加载异常" : "实时数据连接异常"}</b><span>{error}</span></div>}
+      {unspecifiedCustomerType ? <div className="screen-data-unavailable" role="status"><strong>当前活动未区分客户类型</strong><span>白名单客户类型全部为空，暂不展示专题战报数据。</span></div> : <div className={`report-content ${isDual ? "dual" : ""}`}>
         {isTotal ? (
           <div className="total-performance"><span>总战绩</span><strong>{totalAmount >= 100000000 ? (totalAmount / 100000000).toFixed(2) : totalAmount.toLocaleString()}<small>{totalAmount >= 100000000 ? "亿" : "元"}</small></strong></div>
         ) : isTop ? (
@@ -393,7 +406,7 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
         ) : (
           <MetricTable title={displayTitle} labels={["特渠专业客户", "综合客户"]} values={[typeAmount("SPECIAL"), typeAmount("GENERAL")]} />
         )}
-      </div>
+      </div>}
     </section>
   );
 }

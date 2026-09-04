@@ -1938,7 +1938,8 @@ paths:
           required: false
           schema:
             type: string
-            enum: [SPECIAL, GENERAL]
+            enum: [ALL, SPECIAL, GENERAL]
+          description: 客户类型筛选；ALL 表示不限制客户类型，包含综合、特渠及系统内代表空客户类型的 ALL 订单。
         - name: regionCode
           in: query
           required: false

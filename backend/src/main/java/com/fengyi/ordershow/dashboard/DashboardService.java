@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.context.event.EventListener;
@@ -31,11 +32,18 @@ public class DashboardService {
 
   public Dashboard ranking(String activityCode, String customerType, String regionCode) {
     var activity = activities.byCode(activityCode);
+    String normalizedCustomerType = normalizeRankingCustomerType(customerType);
     if (isHistorical(activity.status())) {
-      return snapshot(rankingKey(customerType, regionCode), activity.id(), Dashboard.class,
-          () -> liveRanking(activity, customerType, regionCode));
+      return snapshot(rankingKey(normalizedCustomerType, regionCode), activity.id(), Dashboard.class,
+          () -> liveRanking(activity, normalizedCustomerType, regionCode));
     }
-    return liveRanking(activity, customerType, regionCode);
+    return liveRanking(activity, normalizedCustomerType, regionCode);
+  }
+
+  static String normalizeRankingCustomerType(String customerType) {
+    if (customerType == null) return null;
+    String normalized = customerType.trim().toUpperCase(Locale.ROOT);
+    return normalized.isEmpty() || "ALL".equals(normalized) ? null : normalized;
   }
 
   private Dashboard liveRanking(ActivityService.ActivityView activity, String customerType, String regionCode) {

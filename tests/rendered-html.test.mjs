@@ -257,6 +257,15 @@ test("derives H5 and dashboard regions from the current whitelist", async () => 
   assert.match(prototype, /regionProductCards\.length > 0/);
   assert.match(prototype, /maxAmount=\{regionProductMax\}/);
   assert.match(prototype, /setStep\(regionalized \? "region" : "verify"\)/);
+  assert.match(prototype, /whitelistCustomerTypeMode === "UNSPECIFIED"/);
+  assert.match(prototype, /value: "ALL", label: "全部客户"/);
+  assert.match(prototype, /loadDashboard\(\{ customerType, regionCode \}\)/);
+  assert.match(prototype, /订单额占比/);
+  assert.match(prototype, /全部客户 <b>\{dashboardCompactAmount\(amount\)\} · \{amount > 0 \? "100%" : "0%"\}<\/b>/);
+  assert.doesNotMatch(prototype, /暂不展示订货排行数据/);
+  assert.match(prototype, /暂不展示专题战报数据/);
+  assert.match(prototype, /全部客户.*综合客户.*特渠专业客户/s);
+  assert.match(prototype, /customerTypeMode=\{whitelistMode\}/);
   assert.match(styles, /repeat\(auto-fit,minmax\(max\(220px,calc\(\(100% - 30px\)\/4\)\),1fr\)\)/);
   assert.match(dashboardService, /record GeneralRegion/);
   assert.match(dashboardService, /"未分片区"/);
