@@ -27,5 +27,5 @@ public class H5AuthController {
         TraceFilter.id(request));
   }
 
-  public record VerifyRequest(@NotBlank String customerType, String regionCode, @NotBlank String phone) {}
+  public record VerifyRequest(String customerType, String regionCode, @NotBlank String phone) {}
 }

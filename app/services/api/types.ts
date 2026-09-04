@@ -7,18 +7,20 @@ export type RuntimeActivity = {
   branchRankingTopN: number; tonDisplayScale: number; version: number;
   regions: Array<{ code: string; name: string; sortNo: number }>;
   hasUnassignedGeneralCustomers?: boolean;
+  whitelistCustomerTypeMode?: "TYPED" | "UNSPECIFIED";
+  availableCustomerTypes?: Array<"GENERAL" | "SPECIAL">;
   eventEndsAt?: string; publishedAt?: string; actualStartedAt?: string; closedAt?: string; finishedAt?: string;
 };
 
 export type RuntimeIdentity = {
-  sessionId: number; activityId: number; customerId: number; activityCode: string; customerType: "GENERAL" | "SPECIAL";
+  sessionId: number; activityId: number; customerId: number; activityCode: string; customerType: "GENERAL" | "SPECIAL" | "ALL";
   regionCode?: string; branchName?: string; dealerShortName?: string; dealerFullName: string; phoneMasked: string;
 };
 
 export type RuntimeProduct = {
-  id: number; materialCode?: string; materialName: string; categoryName?: string; productLine?: string; brandName?: string;
+  id: number; materialCode?: string; materialName: string; description?: string; categoryName?: string; productLine?: string; brandName?: string;
   varietyName?: string; specification?: string; casePack?: string; bottlePrice?: number; casePrice?: number;
-  tonCaseFactor?: number; customerType: "GENERAL" | "SPECIAL"; rebateStatus: "PARTICIPATING" | "NOT_PARTICIPATING";
+  tonCaseFactor?: number; customerType: "GENERAL" | "SPECIAL" | "ALL"; rebateStatus: "PARTICIPATING" | "NOT_PARTICIPATING" | "ALL";
   giftBox: boolean; visible: boolean; orderable: boolean; dataStatus: string; sortNo: number; version: number; branchScope: string[];
   priceTier?: { minQuantity: number; casePrice: number; pricingMode: "WHOLE_ORDER" | "INCREMENTAL" };
   images: Array<{ id: number; fileId: number; url: string; primary: boolean; sortNo: number;
@@ -26,7 +28,7 @@ export type RuntimeProduct = {
 };
 
 export type ProductImageReview = {
-  id: number; fileId: number; url: string; archivePath: string; materialCode: string; materialName: string; status: "PENDING";
+  id: number; fileId: number; url: string; archivePath: string; materialCode?: string; materialName: string; status: "PENDING";
 };
 
 export type RuntimeOrder = {
@@ -119,7 +121,7 @@ export type LotteryCandidatePreview = { calculatedAt: string; candidateCount: nu
 export type LotteryWinnerStatistics = { validWinnerRecords: number; validWinnerCustomers: number; invalidatedWinnerRecords: number };
 
 export type AdminCustomer = {
-  id: number; customerType: "GENERAL" | "SPECIAL"; regionCode?: string; branchName?: string; dealerShortName?: string;
+  id: number; customerType: "GENERAL" | "SPECIAL" | "ALL"; regionCode?: string; branchName?: string; dealerShortName?: string;
   dealerFullName: string; dealerCategory?: string; contactName?: string; phone: string; phoneMasked: string; confirmerName?: string;
   confirmerPhone?: string; confirmerPhoneMasked?: string; excelSequence?: number; active: boolean; lockVersion: number; updatedAt: string;
 };

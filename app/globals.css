@@ -139,6 +139,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .h5-draft-status { margin: -4px 14px 8px; color: #8b6c59; text-align: right; font-size: 8px; }
 .product-toolbar { padding: 0 13px; }
 .segment { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 10px; background: #e9dfd2; }
+.segment.single { grid-template-columns: 1fr; }
 .segment button { padding: 8px; border: 0; border-radius: 8px; color: #8b776c; background: transparent; font-size: 11px; font-weight: 700; }
 .segment button.active { color: #a4201e; background: #fff; box-shadow: 0 3px 8px rgba(64,30,18,.09); }
 .search-box { display: flex; gap: 5px; margin-top: 9px; padding: 8px 11px; border: 1px solid #e4d9cd; border-radius: 9px; color: #9d8d82; background: #fff; }
@@ -148,7 +149,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .line-tabs button.active { color: #af211f; border-color: #af211f; font-weight: 700; }
 .product-list { display: grid; gap: 8px; padding: 0 13px; }
 .order-page .product-list { min-height: 0; flex: 1; overflow-y: auto; align-content: start; }
-.product-card { display: grid; grid-template-columns: 96px 1fr; gap: 11px; min-height: 112px; padding: 9px; border: 1px solid #eee3d8; border-radius: 13px; background: #fff; box-shadow: 0 4px 13px rgba(69,35,20,.04); }
+.product-card { display: grid; grid-template-columns: 96px minmax(0,1fr); gap: 11px; min-height: 128px; padding: 9px; border: 1px solid #eee3d8; border-radius: 13px; background: #fff; box-shadow: 0 4px 13px rgba(69,35,20,.04); }
 .product-image { position: relative; overflow: hidden; border-radius: 9px; background: #faeee0; }
 .product-image-button { display: block; width: 100%; padding: 0; color: inherit; border: 0; text-align: left; }
 .product-image-button:hover:not(:disabled) { box-shadow: inset 0 0 0 2px rgba(169,35,33,.36); }
@@ -157,15 +158,15 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .product-photo { object-fit: contain; background-color: #fffaf5; background-image: none; }
 .atlas-0 { background-position: 0 0; }.atlas-1 { background-position: 100% 0; }.atlas-2 { background-position: 0 100%; }.atlas-3 { background-position: 100% 100%; }
 .gift-badge { position: absolute; top: 5px; left: 5px; padding: 2px 5px; color: #fff; border-radius: 5px; background: #b82422; font-size: 8px; }
-.product-info { display: flex; min-width: 0; flex-direction: column; }
+.product-info { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
 .material-code { color: #b39f92; font-size: 8px; }
 .product-info h3 { margin: 0 0 2px; overflow: hidden; font-size: 12px; line-height: 1.35; white-space: nowrap; text-overflow: ellipsis; }
-.product-info p { margin: 0; color: #8f7d72; font-size: 9px; }
-.product-action { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; margin-top: auto; }
+.product-info p { min-height: 0; max-height: 3.9em; margin: 0; overflow-y: auto; color: #8f7d72; font-size: 9px; line-height: 1.3; overscroll-behavior: contain; scrollbar-color: #c9b3a5 transparent; scrollbar-width: thin; }
+.product-action { display: flex; flex: 0 0 auto; align-items: flex-end; justify-content: space-between; gap: 6px; min-height: 30px; margin-top: auto; }
 .product-action strong { color: #c02724; font-size: 14px; white-space: nowrap; }
 .product-action strong small { margin-left: 2px; font-size: 8px; font-weight: 400; }
 .product-price-block { display: flex; min-width: 0; flex-direction: column; gap: 2px; }.product-price-block > small { color: #b06d32; font-size: 7px; line-height: 1.3; }
-.stepper { display: flex; align-items: center; overflow: hidden; border: 1px solid #d8c9bf; border-radius: 7px; background: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,.7); }
+.stepper { display: flex; flex: 0 0 auto; align-items: center; overflow: hidden; border: 1px solid #d8c9bf; border-radius: 7px; background: #fff; box-shadow: inset 0 0 0 1px rgba(255,255,255,.7); }
 .stepper button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: #ad211f; border: 0; background: #faf6f2; font-size: 15px; }
 .stepper input { width: 37px; height: 28px; padding: 0 2px; color: #3c2a24; border: 0; border-right: 1px solid #e2d7d0; border-left: 1px solid #e2d7d0; outline: 0; background: #fff; text-align: center; font-size: 11px; font-weight: 800; }
 .stepper input:focus { color: #a91f1d; background: #fff4f1; box-shadow: inset 0 0 0 2px #c83a34; }
@@ -549,10 +550,10 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .status-cell { display: flex; flex-direction: column; gap: 3px; color: #25805a; font-weight: 700; }.status-cell b { font-size: 9px; }.status-cell small { color: #9b897f; font-size: 8px; font-weight: 400; }.status-cell.withdrawn { color: #9b6b2d; }
 .order-pagination { display: flex; align-items: center; justify-content: space-between; padding: 13px 2px 0; color: #8c7a71; font-size: 9px; }.order-pagination > div { display: flex; gap: 7px; }.order-pagination button { padding: 6px 11px; color: #6f5a51; border: 1px solid #ddd1ca; border-radius: 6px; background: #fff; }.order-pagination button:disabled { cursor: not-allowed; opacity: .45; }
 .table-scroll { width: 100%; overflow-x: auto; }
-.product-import-table { min-width: 2060px; }
-.product-import-table .table-row { grid-template-columns: 58px 78px 78px 112px 90px 115px 220px 98px 90px 90px 138px 100px 82px 82px 125px 82px 110px 82px 100px; }
-.product-import-table.with-selection { min-width: 2102px; }
-.product-import-table.with-selection .table-row { grid-template-columns: 42px 58px 78px 78px 112px 90px 115px 220px 98px 90px 90px 138px 100px 82px 82px 125px 82px 110px 82px 100px; }
+.product-import-table { min-width: 2280px; }
+.product-import-table .table-row { grid-template-columns: 58px 78px 78px 112px 90px 115px 220px 220px 98px 90px 90px 138px 100px 82px 82px 125px 82px 110px 82px 100px; }
+.product-import-table.with-selection { min-width: 2322px; }
+.product-import-table.with-selection .table-row { grid-template-columns: 42px 58px 78px 78px 112px 90px 115px 220px 220px 98px 90px 90px 138px 100px 82px 82px 125px 82px 110px 82px 100px; }
 .whitelist-table { min-width: 1760px; }
 .whitelist-table .table-row { grid-template-columns: 58px 110px 76px 105px 130px 245px 130px 110px 125px 145px 145px 82px 80px; }
 .whitelist-table.with-selection { min-width: 1802px; }

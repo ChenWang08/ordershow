@@ -13,6 +13,7 @@ import { maskPhone, money, normalizePhone } from "../shared/utils";
 type H5Step = "channel" | "region" | "verify" | "order" | "confirm" | "success" | "submitted";
 type H5OrderStatus = "none" | "submitted" | "withdrawn";
 type H5Channel = "综合客户" | "特渠专业客户" | "";
+type RebateFilter = "ALL" | "PARTICIPATING" | "NOT_PARTICIPATING";
 type Product = {
   id: string;
   name: string;
@@ -22,7 +23,7 @@ type Product = {
   tierMinQuantity?: number;
   tierCasePrice?: number;
   tierPricingMode?: "WHOLE_ORDER" | "INCREMENTAL";
-  rebate: boolean;
+  rebate: boolean | "全部";
   gift: boolean;
   atlas: number;
   customerType: "综合" | "特渠" | "全部";
@@ -31,6 +32,7 @@ type Product = {
   isOrderable: boolean;
   materialCode?: string;
   casePack?: string;
+  description?: string;
   imageUrl?: string;
   imageUrls?: string[];
 };
@@ -53,15 +55,16 @@ function productRowToProduct(row: ProductImportRow): Product {
     tierMinQuantity: row.priceTierMinQuantity ? Number(row.priceTierMinQuantity) : undefined,
     tierCasePrice: row.priceTierCasePrice ? Number(row.priceTierCasePrice) : undefined,
     tierPricingMode: row.priceTierPricingMode,
-    rebate: row.rebate === "参与",
+    rebate: row.rebate === "" ? "全部" : row.rebate === "参与",
     gift: row.gift === "是",
     atlas: lineAtlas,
-    customerType: row.customerType,
+    customerType: row.customerType || "全部",
     branchScope: splitBranchScope(row.branchScope),
     status: row.status,
     isOrderable: Number(row.casePrice) > 0,
     materialCode: row.materialCode,
     casePack: row.casePack,
+    description: row.description,
     imageUrl: imageUrls?.[0],
     imageUrls,
   };
@@ -79,15 +82,16 @@ function runtimeProductToProduct(row: RuntimeProduct): Product {
     tierMinQuantity: row.priceTier?.minQuantity,
     tierCasePrice: row.priceTier?.casePrice,
     tierPricingMode: row.priceTier?.pricingMode,
-    rebate: row.rebateStatus === "PARTICIPATING",
+    rebate: row.rebateStatus === "ALL" ? "全部" : row.rebateStatus === "PARTICIPATING",
     gift: row.giftBox,
     atlas: row.productLine === "酱油" ? 1 : row.productLine === "食醋" ? 2 : row.giftBox ? 3 : 0,
-    customerType: row.customerType === "GENERAL" ? "综合" : "特渠",
+    customerType: row.customerType === "GENERAL" ? "综合" : row.customerType === "SPECIAL" ? "特渠" : "全部",
     branchScope: row.branchScope ?? [],
     status: row.dataStatus === "INCOMPLETE" ? "待完善" : "有效",
     isOrderable: row.orderable,
     materialCode: row.materialCode,
     casePack: row.casePack,
+    description: row.description,
     imageUrl: imageUrls[0],
     imageUrls,
   };
@@ -145,13 +149,15 @@ function h5OrderItems(order: RuntimeOrder | null) {
 export function H5Prototype({ activityStatus, importedRows, importedWhitelistRows, runtimeActivity }: { activityStatus: ActivityStatus; importedRows: ProductImportRow[] | null; importedWhitelistRows: WhitelistRow[] | null; runtimeActivity: RuntimeActivity | null }) {
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
   const activityNotStarted = activityStatus === "draft" || activityStatus === "scheduled";
+  const importedWhitelistIsUnspecified = Boolean(importedWhitelistRows?.length && importedWhitelistRows.every((row) => row.customerType === ""));
+  const unspecifiedWhitelist = runtimeActivity?.whitelistCustomerTypeMode === "UNSPECIFIED" || (!runtimeActivity && importedWhitelistIsUnspecified);
   const [runtimeProducts, setRuntimeProducts] = useState<RuntimeProduct[] | null>(null);
   const [runtimeIdentity, setRuntimeIdentity] = useState<RuntimeIdentity | null>(null);
   const [runtimeOrder, setRuntimeOrder] = useState<RuntimeOrder | null>(null);
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("");
   const catalog = useMemo(() => runtimeProducts ? runtimeProducts.map(runtimeProductToProduct) : importedRows ? importedRows.map(productRowToProduct) : [], [runtimeProducts, importedRows]);
-  const [step, setStep] = useState<H5Step>("channel");
+  const [step, setStep] = useState<H5Step>(() => unspecifiedWhitelist ? "verify" : "channel");
   const [channel, setChannel] = useState<H5Channel>("");
   const [region, setRegion] = useState("");
   const [verifiedBranch, setVerifiedBranch] = useState("");
@@ -159,7 +165,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
   const [submittedIdentity, setSubmittedIdentity] = useState<WhitelistRow | null>(null);
   const [phone, setPhone] = useState("");
   const [verifyError, setVerifyError] = useState("");
-  const [rebate, setRebate] = useState(true);
+  const [rebateFilter, setRebateFilter] = useState<RebateFilter>("PARTICIPATING");
   const [line, setLine] = useState("全部");
   const [search, setSearch] = useState("");
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
@@ -181,6 +187,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
   const latestDraftSnapshotRef = useRef<H5DraftSnapshot | null>(null);
   const draftSaveTimerRef = useRef<number | null>(null);
   const draftSaveChainRef = useRef<Promise<void>>(Promise.resolve());
+  const visibleStep = unspecifiedWhitelist && step === "channel" ? "verify" : step;
   const whitelistRegions = runtimeActivity?.regions ?? [];
   const regionOptions = [
     ...whitelistRegions.map((item) => ({ value: item.code, name: item.name, detail: `${item.name}综合经销商` })),
@@ -194,10 +201,19 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
   const effectiveLine = lineOptions.includes(line) ? line : "全部";
   const h5CustomerType = channel === "综合客户" ? "综合" : "特渠";
   const normalizedProductSearch = search.trim().toLocaleLowerCase("zh-CN");
+  const hasRebateSplit = useMemo(() => {
+    const hasParticipating = catalog.some((product) => product.rebate === true);
+    const hasNotParticipating = catalog.some((product) => product.rebate === false);
+    return hasParticipating && hasNotParticipating;
+  }, [catalog]);
+  let effectiveRebateFilter: RebateFilter = "ALL";
+  if (hasRebateSplit) effectiveRebateFilter = rebateFilter === "NOT_PARTICIPATING" ? "NOT_PARTICIPATING" : "PARTICIPATING";
   const visibleProducts = catalog.filter(
     (p) => (p.status === "有效" || p.status === "待完善")
-      && (p.customerType === "全部" || p.customerType === h5CustomerType)
-      && p.rebate === rebate
+      && (unspecifiedWhitelist || p.customerType === "全部" || p.customerType === h5CustomerType)
+      && (effectiveRebateFilter === "ALL"
+        || p.rebate === "全部"
+        || (effectiveRebateFilter === "PARTICIPATING" ? p.rebate === true : p.rebate === false))
       && (p.branchScope.length === 0 || p.branchScope.includes(verifiedBranch))
       && (effectiveLine === "全部" || p.line === effectiveLine)
       && (!normalizedProductSearch
@@ -216,8 +232,8 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
   const identityRegion = regionOptions.find((item) => item.value === identityRegionCode)?.name || identityRegionCode;
   const identityBranch = runtimeIdentity?.branchName || importedIdentity?.branch || verifiedBranch;
   const identityLabel = runtimeIdentity
-    ? `${runtimeIdentity.customerType === "GENERAL" ? "综合客户" : "特渠专业客户"}${identityRegion ? ` · ${identityRegion}` : ""}`
-    : importedIdentity ? `${importedIdentity.customerType}${identityRegion ? ` · ${identityRegion}` : ""}` : channel === "综合客户" ? `综合客户${selectedRegionName ? ` · ${selectedRegionName}` : ""}` : "特渠专业客户";
+    ? `${runtimeIdentity.customerType === "GENERAL" ? "综合客户" : runtimeIdentity.customerType === "SPECIAL" ? "特渠专业客户" : "不区分客户类型"}${runtimeIdentity.customerType === "ALL" ? "" : identityRegion ? ` · ${identityRegion}` : ""}`
+    : importedIdentity ? `${importedIdentity.customerType || "不区分客户类型"}${importedIdentity.customerType === "" ? "" : identityRegion ? ` · ${identityRegion}` : ""}` : unspecifiedWhitelist ? "不区分客户类型" : channel === "综合客户" ? `综合客户${selectedRegionName ? ` · ${selectedRegionName}` : ""}` : "特渠专业客户";
   const dealerName = runtimeIdentity?.dealerFullName || importedIdentity?.dealerFull || "—";
   const displayBranch = runtimeIdentity?.branchName || identityBranch;
   const displayPhone = runtimeIdentity?.phoneMasked || (importedIdentity ? maskPhone(importedIdentity.dealerPhone) : "—");
@@ -326,7 +342,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
         if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
         if (latestDraftSnapshotRef.current) await queueDraftSync(latestDraftSnapshotRef.current, false);
         setDraftReady(false);
-        const identity = await verifyPhone(channel === "综合客户" ? "GENERAL" : "SPECIAL", region, normalizedPhone);
+        const identity = await verifyPhone(unspecifiedWhitelist ? "ALL" : channel === "综合客户" ? "GENERAL" : "SPECIAL", unspecifiedWhitelist ? "" : region, normalizedPhone);
         const preserveDraft = runtimeIdentity?.activityId === identity.activityId
           && runtimeIdentity.customerId === identity.customerId;
         const liveRows = await loadH5Products();
@@ -362,14 +378,14 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
       return;
     }
     if (importedWhitelistRows) {
-      const expectedType: WhitelistRow["customerType"] = channel === "综合客户" ? "综合客户" : "特渠专业客户";
+      const expectedType: WhitelistRow["customerType"] = unspecifiedWhitelist ? "" : channel === "综合客户" ? "综合客户" : "特渠专业客户";
       const identity = importedWhitelistRows.find((item) => item.status === "有效" && item.customerType === expectedType && normalizePhone(item.dealerPhone) === normalizedPhone);
       if (!identity) {
         const otherChannelIdentity = importedWhitelistRows.find((item) => item.status === "有效" && normalizePhone(item.dealerPhone) === normalizedPhone);
-        setVerifyError(otherChannelIdentity ? `该手机号登记在${otherChannelIdentity.customerType}白名单中，请返回选择对应订货通道。` : "该手机号不在本次活动白名单中，请核对后重新输入。");
+        setVerifyError(otherChannelIdentity && !unspecifiedWhitelist ? `该手机号登记在${otherChannelIdentity.customerType}白名单中，请返回选择对应订货通道。` : "该手机号不在本次活动白名单中，请核对后重新输入。");
         return;
       }
-      if (expectedType === "综合客户" && identity.region !== region) {
+      if (!unspecifiedWhitelist && expectedType === "综合客户" && identity.region !== region) {
         setVerifyError(`该手机号登记为综合客户 · ${identity.region}，请重新选择订货大区。`);
         return;
       }
@@ -431,7 +447,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
       <div className="phone-shell">
         <div className="phone-screen">
           <FestivalDecor />
-          {step === "channel" && (
+          {visibleStep === "channel" && !unspecifiedWhitelist && (
             <section className="h5-page verify-page entry-page">
               <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
               <div className="h5-hero-copy entry-hero">
@@ -460,7 +476,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
             </section>
           )}
 
-          {step === "region" && (
+          {visibleStep === "region" && (
             <section className="h5-page verify-page entry-page">
               <div className="entry-nav"><button onClick={() => setStep("channel")}>‹</button><span>综合客户订货</span></div>
               <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
@@ -484,9 +500,9 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
             </section>
           )}
 
-          {step === "verify" && (
+          {visibleStep === "verify" && (
             <section className="h5-page verify-page">
-              <div className="entry-nav"><button onClick={() => setStep(channel === "综合客户" && regionalized ? "region" : "channel")}>‹</button><span>{identityLabel}</span></div>
+              <div className="entry-nav">{!unspecifiedWhitelist && <button onClick={() => setStep(channel === "综合客户" && regionalized ? "region" : "channel")}>‹</button>}<span>{identityLabel}</span></div>
               <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
               <div className="h5-hero-copy">
                 <span className="eyebrow">订货会</span>
@@ -494,9 +510,9 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                 <p>新品发布及旺季动员会</p>
               </div>
               <div className="verify-card">
-                <div className="verify-context"><span className="step-tag">{identityLabel}</span><button onClick={() => setStep("channel")}>重新选择</button></div>
+                <div className="verify-context"><span className="step-tag">{identityLabel}</span>{!unspecifiedWhitelist && <button onClick={() => setStep("channel")}>重新选择</button>}</div>
                 <h2>输入白名单手机号</h2>
-                <p>验证通过后，将为您展示{channel === "综合客户" ? `${selectedRegionName ? `${selectedRegionName}综合客户` : "综合客户"}` : "特渠专业客户"}的订货商品。</p>
+                <p>验证通过后，将为您展示{unspecifiedWhitelist ? "本次白名单客户" : channel === "综合客户" ? `${selectedRegionName ? `${selectedRegionName}综合客户` : "综合客户"}` : "特渠专业客户"}的订货商品。</p>
                 <label>
                   <span>手机号</span>
                   <input value={phone} onChange={(e) => { setPhone(e.target.value); setVerifyError(""); }} inputMode="tel" />
@@ -509,7 +525,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
             </section>
           )}
 
-          {step === "order" && (
+          {visibleStep === "order" && (
             <section className="h5-page order-page">
               <header className="order-header">
                 <button className="text-btn" onClick={() => setStep(orderStatus === "none" ? "verify" : "submitted")}>‹</button>
@@ -524,9 +540,11 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
               <div className="policy-note"><b>订货提示</b><span>{activityClosed ? "活动已截止，当前订单仅可查看。" : "所有商品按箱订购，提交后可在截止时间前修改或取消本次订货。"}</span></div>
               {draftMessage && <div className="h5-draft-status" role="status">{draftMessage}</div>}
               <div className="product-toolbar">
-                <div className="segment">
-                  <button className={rebate ? "active" : ""} onClick={() => setRebate(true)}>返利产品</button>
-                  <button className={!rebate ? "active" : ""} onClick={() => setRebate(false)}>非返利产品</button>
+                <div className={`segment${hasRebateSplit ? "" : " single"}`} role="tablist" aria-label="商品返利类型">
+                  {hasRebateSplit ? <>
+                    <button role="tab" aria-selected={effectiveRebateFilter === "PARTICIPATING"} className={effectiveRebateFilter === "PARTICIPATING" ? "active" : ""} onClick={() => setRebateFilter("PARTICIPATING")}>返利产品</button>
+                    <button role="tab" aria-selected={effectiveRebateFilter === "NOT_PARTICIPATING"} className={effectiveRebateFilter === "NOT_PARTICIPATING" ? "active" : ""} onClick={() => setRebateFilter("NOT_PARTICIPATING")}>非返利产品</button>
+                  </> : <button role="tab" aria-selected="true" className="active" onClick={() => setRebateFilter("ALL")}>全部商品</button>}
                 </div>
                 <label className="search-box">⌕<input placeholder="搜索商品" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
               </div>
@@ -541,6 +559,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                     <button type="button" className="product-image product-image-button" disabled={!product.imageUrls?.length} aria-label={`查看${product.name}商品图片`} onClick={() => product.imageUrls?.length && setPreviewProduct(product)}><ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} /></button>
                     <div className="product-info">
                       <h3>{product.name}</h3>
+                      {product.description && <p className="product-description" title={product.description}>{product.description}</p>}
                       <div className="product-action">
                         <div className="product-price-block"><strong>{product.isOrderable ? <>¥{money(priceBreakdown(product, quantities[product.id] || 0).displayPrice)}<small>/箱</small></> : "价格待完善"}</strong>{product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small>{tierPriceLabel(product, quantities[product.id] || 0)}</small>}</div>
                         <div className="stepper">
@@ -563,7 +582,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
             </section>
           )}
 
-          {step === "order" && cartOpen && (
+          {visibleStep === "order" && cartOpen && (
             <div className="cart-sheet-layer">
               <button className="cart-sheet-backdrop" aria-label="关闭购物明细" onClick={() => setCartOpen(false)} />
               <section className="cart-sheet" aria-label="已选商品明细">
@@ -594,7 +613,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
             </div>
           )}
 
-          {step === "confirm" && (
+          {visibleStep === "confirm" && (
             <section className="h5-page confirm-page">
               <header className="simple-header"><button onClick={() => setStep("order")}>‹</button><b>确认订单</b><span /></header>
               <div className="confirm-hero"><span>请核对订货信息</span><h2>{dealerName}</h2><small>{identityLabel}{identityBranch ? ` · ${identityBranch}` : ""}</small></div>
@@ -616,7 +635,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
             </section>
           )}
 
-          {step === "submitted" && (
+          {visibleStep === "submitted" && (
             <section className="h5-page submitted-page">
               <header className="simple-header"><button onClick={() => setStep("verify")}>‹</button><b>我的订单</b><span /></header>
               <div className={`submitted-state-card ${orderStatus === "withdrawn" ? "withdrawn" : ""}`}>
@@ -654,7 +673,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
             </section>
           )}
 
-          {step === "success" && (
+          {visibleStep === "success" && (
             <section className="h5-page success-page">
               <div className="success-mark">✓</div>
               <span>{submitMode === "first" ? "提交成功" : "修改成功"}</span>

@@ -50,6 +50,9 @@ next-env.d.ts
 /*.zip
 ~$*
 
+# Local product image source packages
+/特渠中秋订货会系统上架产品信息及效果图-贵阳0624/
+
 # Local requirement and design reference files
 /订购会PRD*.md
 /数据看板背景.png

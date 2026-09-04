@@ -630,33 +630,29 @@ class IsolatedApiE2ETest {
   }
 
   private byte[] productWorkbook() throws Exception {
-    List<String> headers = List.of("产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品");
+    List<String> headers = List.of("客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明");
     try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-      Sheet generalRebate = sheet(workbook, "综合参与返利", headers);
-      row(generalRebate, "调味品", "酱油", "P001", "AUTOTEST_综合商品一", "测试品牌", "原味", "500ml", "12瓶", "8.00", "100.00", "10", "否", "");
-      row(generalRebate, "调味品", "酱油", "P002", "AUTOTEST_综合缺吨数", "测试品牌", "原味", "500ml", "12瓶", "4.00", "50.00", "", "否", "");
-      Sheet generalNoRebate = sheet(workbook, "综合不参与返利", headers);
-      row(generalNoRebate, "调味品", "醋", "P003", "AUTOTEST_综合商品三", "测试品牌", "陈醋", "500ml", "12瓶", "2.50", "30.00", "5", "是", "");
-      Sheet specialRebate = sheet(workbook, "特渠参与返利", headers);
-      row(specialRebate, "定制品", "礼盒", "S001", "AUTOTEST_特渠商品一", "测试品牌", "礼盒", "1套", "1箱", "200.00", "200.00", "20", "是", "");
-      Sheet specialNoRebate = sheet(workbook, "特渠不参与返利", headers);
-      row(specialNoRebate, "定制品", "调味油", "S002", "AUTOTEST_特渠商品二", "测试品牌", "油", "1L", "6瓶", "13.00", "80.00", "8", "否", "");
+      Sheet product = sheet(workbook, "商品目录", headers);
+      row(product, "综合", "是", "调味品", "酱油", "P001", "AUTOTEST_综合商品一", "测试品牌", "原味", "500ml", "12瓶", "8.00", "100.00", "10", "否", "", "综合返利商品说明");
+      row(product, "综合", "是", "调味品", "酱油", "P002", "AUTOTEST_综合缺吨数", "测试品牌", "原味", "500ml", "12瓶", "4.00", "50.00", "", "否", "", "");
+      row(product, "综合", "否", "调味品", "醋", "P003", "AUTOTEST_综合商品三", "测试品牌", "陈醋", "500ml", "12瓶", "2.50", "30.00", "5", "是", "", "");
+      row(product, "特渠", "是", "定制品", "礼盒", "S001", "AUTOTEST_特渠商品一", "测试品牌", "礼盒", "1套", "1箱", "200.00", "200.00", "20", "是", "", "");
+      row(product, "特渠", "否", "定制品", "调味油", "S002", "AUTOTEST_特渠商品二", "测试品牌", "油", "1L", "6瓶", "13.00", "80.00", "8", "否", "", "");
       workbook.write(out);
       return out.toByteArray();
     }
   }
 
   private byte[] whitelistWorkbook() throws Exception {
-    List<String> headers = List.of("序号", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商类型", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话");
+    List<String> headers = List.of("客户类型", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话");
     try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
-      Sheet general = sheet(workbook, "综合客户白名单", headers);
-      row(general, "1", "东区", "上海分", "测试综合一", "AUTOTEST_综合经销商一", "综合", "测试甲", GENERAL_PHONE, "确认甲", "13800000001");
-      row(general, "2", "东区", "上海分", "测试综合二", "AUTOTEST_综合经销商二", "综合", "测试乙", "13900000002", "确认甲", "13800000001");
-      row(general, "3", "南区", "广州分", "测试综合三", "AUTOTEST_综合经销商三", "综合", "测试丙", "13900000003", "确认乙", "13800000002");
-      row(general, "4", "北1区", "北京分", "测试综合四", "AUTOTEST_综合经销商四", "综合", "测试丁", "13900000004", "确认丙", "13800000003");
-      Sheet special = sheet(workbook, "特渠客户白名单", headers);
-      row(special, "1", "", "特渠分", "测试特渠一", "AUTOTEST_特渠经销商一", "特渠", "测试戊", SPECIAL_PHONE, "确认丁", "13800000004");
-      row(special, "2", "", "特渠分", "测试特渠二", "AUTOTEST_特渠经销商二", "特渠", "测试己", "13900000005", "确认丁", "13800000004");
+      Sheet whitelist = sheet(workbook, "白名单", headers);
+      row(whitelist, "综合客户", "东区", "上海分", "测试综合一", "AUTOTEST_综合经销商一", "测试甲", GENERAL_PHONE, "确认甲", "13800000001");
+      row(whitelist, "综合客户", "东区", "上海分", "测试综合二", "AUTOTEST_综合经销商二", "测试乙", "13900000002", "确认甲", "13800000001");
+      row(whitelist, "综合客户", "南区", "广州分", "测试综合三", "AUTOTEST_综合经销商三", "测试丙", "13900000003", "确认乙", "13800000002");
+      row(whitelist, "综合客户", "北1区", "北京分", "测试综合四", "AUTOTEST_综合经销商四", "测试丁", "13900000004", "确认丙", "13800000003");
+      row(whitelist, "特渠专业客户", "", "特渠分", "测试特渠一", "AUTOTEST_特渠经销商一", "测试戊", SPECIAL_PHONE, "确认丁", "13800000004");
+      row(whitelist, "特渠专业客户", "", "特渠分", "测试特渠二", "AUTOTEST_特渠经销商二", "测试己", "13900000005", "确认丁", "13800000004");
       workbook.write(out);
       return out.toByteArray();
     }

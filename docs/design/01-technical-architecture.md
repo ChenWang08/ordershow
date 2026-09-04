@@ -152,6 +152,8 @@ activities/{activityId}/exports/{exportTaskId}.xlsx
 
 数据库保存对象键、内容摘要、大小、MIME 类型和引用关系。仍被商品或订单快照引用的图片不能物理删除。
 
+商品图片二进制不写入 MySQL：原始 ZIP、Excel 和图片文件保存到 MinIO/S3 兼容对象存储，MySQL 只保存导入任务、商品说明、图片文件元数据及商品图片关联。图片匹配只使用完整标准化物料名称；商品名称中的 `/` 属于名称内容，ZIP 目录路径单独解析，不能截断商品名称。
+
 ## 6. 认证和访问边界
 
 ### 6.1 管理员
@@ -165,8 +167,8 @@ activities/{activityId}/exports/{exportTaskId}.xlsx
 
 ### 6.2 H5 客户
 
-- 用户先选择活动入口和客户类型，再提交手机号；
-- 后端按 `activity_id + customer_type + normalized_phone` 精确匹配有效白名单；
+- 当前白名单存在客户类型时，用户先选择活动入口和客户类型，再提交手机号；客户类型全部为空时隐藏通道和大区选择，直接提交手机号；
+- 有类型时后端按 `activity_id + customer_type + normalized_phone` 精确匹配有效白名单；无类型时使用内部 `ALL`，按 `activity_id + ALL + normalized_phone` 匹配；
 - 验证成功设置只允许访问当前活动和当前活动客户的短期不透明会话 Cookie；
 - 凭证过期时间不晚于活动结束时间；
 - Cookie 使用 `Secure; HttpOnly; SameSite=Lax`，并限制到 H5 API 路径；H5 写操作同时校验 CSRF Token 和 Origin。浏览器不在 `localStorage`、`sessionStorage` 或 URL 中保存凭证；

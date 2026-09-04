@@ -1,6 +1,6 @@
 import readXlsxFile, { readSheetNames } from "read-excel-file";
 import { apiAssetUrl, type ImportStagingRow, type ProductImageReview, type RuntimeProduct } from "../../api";
-import { attendanceCustomerType, createImportRowId, normalizeWhitelistName, productMaterialCodeKey, type AttendanceRow, type ProductImageAsset, type ProductImportRow, type WhitelistRow } from "../../domain/import-domain";
+import { attendanceCustomerType, createImportRowId, productImportIdentityKey, productMaterialNameKey, whitelistCustomerTypeLabel, type AttendanceRow, type ProductImageAsset, type ProductImportRow, type WhitelistRow } from "../../domain/import-domain";
 import { normalizeProductImageName, productImageBaseName } from "../../domain/product-images";
 import { normalizePhone, normalizeSearchText } from "../shared/utils";
 
@@ -12,10 +12,10 @@ export function runtimeProductToImportRow(product: RuntimeProduct): ProductImpor
   const selectedImage = [...product.images].sort((a, b) => Number(b.primary) - Number(a.primary) || a.sortNo - b.sortNo)[0];
   return {
     id: String(product.id), serverVersion: product.version, sequence: product.sortNo,
-    customerType: product.customerType === "GENERAL" ? "综合" : "特渠",
-    rebate: product.rebateStatus === "PARTICIPATING" ? "参与" : "不参与",
+    customerType: product.customerType === "GENERAL" ? "综合" : product.customerType === "SPECIAL" ? "特渠" : "",
+    rebate: product.rebateStatus === "PARTICIPATING" ? "参与" : product.rebateStatus === "NOT_PARTICIPATING" ? "不参与" : "",
     category: product.categoryName || "", line: product.productLine || "", materialCode: product.materialCode || "",
-    materialName: product.materialName, brand: product.brandName || "", variety: product.varietyName || "",
+    materialName: product.materialName, description: product.description || "", brand: product.brandName || "", variety: product.varietyName || "",
     spec: product.specification || "", casePack: product.casePack || "",
     unitPrice: product.bottlePrice == null ? "" : String(product.bottlePrice),
     casePrice: product.casePrice == null ? "" : String(product.casePrice),
@@ -49,10 +49,10 @@ export function restoreProductPreview(rows: ImportStagingRow[]): ProductImportRo
     const data = stagingData(row);
     return {
       id: createImportRowId("product-preview"), sequence: index + 1,
-      customerType: data.customerType === "SPECIAL" ? "特渠" : "综合",
-      rebate: data.rebateStatus === "NOT_PARTICIPATING" ? "不参与" : "参与",
+      customerType: data.customerType === "SPECIAL" ? "特渠" : data.customerType === "GENERAL" ? "综合" : "",
+      rebate: data.rebateStatus === "NOT_PARTICIPATING" ? "不参与" : data.rebateStatus === "PARTICIPATING" ? "参与" : "",
       category: String(data.categoryName ?? ""), line: String(data.productLine ?? ""),
-      materialCode: String(data.materialCode ?? ""), materialName: String(data.materialName ?? ""),
+      materialCode: String(data.materialCode ?? ""), materialName: String(data.materialName ?? ""), description: String(data.description ?? ""),
       brand: String(data.brandName ?? ""), variety: String(data.varietyName ?? ""),
       spec: String(data.specification ?? ""), casePack: String(data.casePack ?? ""),
       unitPrice: String(data.bottlePrice ?? ""), casePrice: String(data.casePrice ?? ""),
@@ -72,7 +72,8 @@ export function restoreWhitelistPreview(rows: ImportStagingRow[]): WhitelistRow[
     const data = stagingData(row);
     return {
       id: createImportRowId("whitelist-preview"), sequence: Number(data.sequence ?? index + 1),
-      customerType: data.customerType === "SPECIAL" ? "特渠专业客户" : "综合客户",
+      customerType: whitelistCustomerTypeLabel(String(data.customerType ?? "")),
+      customerTypeInvalid: Boolean(data.customerTypeInvalid),
       region: String(data.regionName ?? ""), branch: String(data.branchName ?? ""),
       dealerShort: String(data.dealerShortName ?? ""), dealerFull: String(data.dealerFullName ?? ""),
       dealerType: String(data.dealerCategory ?? ""), dealerName: String(data.contactName ?? ""),
@@ -100,14 +101,14 @@ export function restoreAttendancePreview(rows: ImportStagingRow[]): AttendanceRo
 }
 
 export function mergeProductImageReviews(rows: ProductImportRow[], reviews: ProductImageReview[]): ProductImportRow[] {
-  const reviewsByCode = new Map<string, ProductImageReview[]>();
+  const reviewsByName = new Map<string, ProductImageReview[]>();
   reviews.forEach((review) => {
-    const code = productMaterialCodeKey(review.materialCode);
-    if (code) reviewsByCode.set(code, [...(reviewsByCode.get(code) ?? []), review]);
+    const name = productMaterialNameKey(review.materialName);
+    if (name) reviewsByName.set(name, [...(reviewsByName.get(name) ?? []), review]);
   });
   return rows.map((row) => {
     if (row.images?.length) return row;
-    const candidates = reviewsByCode.get(productMaterialCodeKey(row.materialCode)) ?? [];
+    const candidates = reviewsByName.get(productMaterialNameKey(row.materialName)) ?? [];
     if (!candidates.length) return row;
     const images: ProductImageAsset[] = candidates.map((candidate) => ({
       id: `review-${candidate.id}`, reviewCandidateId: candidate.id, fileName: productImageBaseName(candidate.archivePath),
@@ -117,18 +118,6 @@ export function mergeProductImageReviews(rows: ProductImportRow[], reviews: Prod
     return { ...row, images, imageStatus: "待确认" };
   });
 }
-
-export const productSheetConfig = [
-  { name: "综合参与返利", customerType: "综合" as const, rebate: "参与" as const },
-  { name: "综合不参与返利", customerType: "综合" as const, rebate: "不参与" as const },
-  { name: "特渠参与返利", customerType: "特渠" as const, rebate: "参与" as const },
-  { name: "特渠不参与返利", customerType: "特渠" as const, rebate: "不参与" as const },
-];
-
-export const whitelistSheetConfig = [
-  { name: "综合客户白名单", customerType: "综合客户" as const },
-  { name: "特渠客户白名单", customerType: "特渠专业客户" as const },
-];
 
 type ProductImportParseResult = {
   rows: ProductImportRow[];
@@ -143,69 +132,65 @@ export function textCell(value: unknown) {
 export async function parseProductWorkbook(file: File): Promise<ProductImportParseResult> {
   const sheetNames = await readSheetNames(file);
   const warnings: string[] = [];
-  const rows: ProductImportRow[] = [];
-  const sheetCounts: Array<{ name: string; count: number }> = [];
-  const expectedHeaders = ["产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品"];
-  const unknownSheets = sheetNames.filter((name) => !productSheetConfig.some((item) => item.name === name));
-  if (unknownSheets.length > 0) warnings.push(`已忽略未识别的 Sheet：${unknownSheets.join("、")}`);
-
-  for (const config of productSheetConfig) {
-    if (!sheetNames.includes(config.name)) throw new Error(`缺少必要的 Sheet：${config.name}`);
-    const matrix = await readXlsxFile(file, { sheet: config.name });
-    const header = (matrix[0] ?? []).map(textCell);
-    const missingHeaders = expectedHeaders.filter((name) => !header.includes(name));
-    if (missingHeaders.length > 0) throw new Error(`${config.name} 缺少字段：${missingHeaders.join("、")}`);
-    const indexes = Object.fromEntries(expectedHeaders.map((name) => [name, header.indexOf(name)]));
-    let sequence = 0;
-    let blankCodeCount = 0;
-    const codeRows = new Map<string, number[]>();
-    for (let index = 1; index < matrix.length; index += 1) {
-      const values = matrix[index] ?? [];
-      if (values.every((value) => textCell(value) === "")) continue;
-      const get = (name: string) => textCell(values[indexes[name]]);
-      const materialCode = get("物料代码");
-      const conversion = get("吨箱转换系数");
-      const conversionNumber = Number(conversion);
-      const casePrice = get("元/箱");
-      sequence += 1;
-      if (!materialCode) blankCodeCount += 1;
-      if (materialCode) {
-        const key = materialCode.replace(/\s+/g, "").toUpperCase();
-        codeRows.set(key, [...(codeRows.get(key) ?? []), index + 1]);
-      }
-      rows.push({
-        id: createImportRowId("product"),
-        sequence,
-        customerType: config.customerType,
-        rebate: config.rebate,
-        category: get("产品大类"),
-        line: get("产品线"),
-        materialCode,
-        materialName: get("物料名称"),
-        brand: get("品牌"),
-        variety: get("品种"),
-        spec: get("规格"),
-        casePack: get("箱规"),
-        unitPrice: get("元/瓶"),
-        casePrice,
-        priceTierMinQuantity: "",
-        priceTierCasePrice: "",
-        priceTierPricingMode: "WHOLE_ORDER",
-        conversion,
-        gift: get("是否为标品礼盒") === "是" ? "是" : "否",
-        branchScope: get("分公司定制品"),
-        source: "excel",
-        sourceSheet: config.name,
-        sourceRowNumber: index + 1,
-        status: !materialCode || !casePrice || !conversion || !Number.isFinite(conversionNumber) || conversionNumber <= 0 ? "待完善" : "有效",
-      });
-    }
-    const duplicateGroups = [...codeRows.values()].filter((rowNumbers) => rowNumbers.length > 1);
-    if (duplicateGroups.length > 0) warnings.push(`${config.name} 有 ${duplicateGroups.length} 组重复物料代码，请在确认导入前检查。`);
-    if (blankCodeCount > 0) warnings.push(`${config.name} 有 ${blankCodeCount} 条商品没有物料代码，已标记为待完善。`);
-    sheetCounts.push({ name: config.name, count: sequence });
+  const sheets = await Promise.all(sheetNames.map(async (name) => ({ name, matrix: await readXlsxFile(file, { sheet: name }) })));
+  const nonEmptySheets = sheets.filter(({ matrix }) => matrix.some((values) => values.some((value) => textCell(value) !== "")));
+  if (nonEmptySheets.length === 0) throw new Error("Excel 中没有找到商品信息 Sheet。");
+  if (nonEmptySheets.length > 1) throw new Error(`商品 Excel 只允许一个非空 Sheet，当前发现：${nonEmptySheets.map(({ name }) => name).join("、")}`);
+  const { name: sheetName, matrix } = nonEmptySheets[0];
+  const headerIndex = matrix.findIndex((values) => values.some((value) => normalizedHeader(value) === "物料名称"));
+  if (headerIndex < 0) throw new Error(`${sheetName} 未找到“物料名称”表头。`);
+  const expectedHeaders = ["客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明"];
+  const header = (matrix[headerIndex] ?? []).map(textCell);
+  const missingHeaders = expectedHeaders.filter((field) => findHeaderIndex(header, [field]) < 0);
+  if (missingHeaders.length > 0) throw new Error(`${sheetName} 缺少字段：${missingHeaders.join("、")}`);
+  const indexes = Object.fromEntries(expectedHeaders.map((field) => [field, findHeaderIndex(header, [field])]));
+  const parsed: ProductImportRow[] = [];
+  for (let index = headerIndex + 1; index < matrix.length; index += 1) {
+    const values = matrix[index] ?? [];
+    if (values.every((value) => textCell(value) === "")) continue;
+    const get = (field: string) => textCell(values[indexes[field]]);
+    const customerTypeRaw = get("客户类型");
+    const rebateRaw = get("是否返利");
+    const customerType = customerTypeRaw === "综合" || customerTypeRaw === "特渠" ? customerTypeRaw : "";
+    const rebate = rebateRaw === "是" ? "参与" : rebateRaw === "否" ? "不参与" : "";
+    if (customerTypeRaw && !customerType) warnings.push(`${sheetName} 第 ${index + 1} 行客户类型“${customerTypeRaw}”无效，只允许“综合”“特渠”或空。`);
+    if (rebateRaw && !rebate) warnings.push(`${sheetName} 第 ${index + 1} 行是否返利“${rebateRaw}”无效，只允许“是”“否”或空。`);
+    parsed.push({
+      id: createImportRowId("product"), sequence: parsed.length + 1, customerType, rebate,
+      category: get("产品大类"), line: get("产品线"), materialCode: get("物料代码"), materialName: get("物料名称"),
+      description: get("产品说明"), brand: get("品牌"), variety: get("品种"), spec: get("规格"), casePack: get("箱规"),
+      unitPrice: get("元/瓶"), casePrice: get("元/箱"), priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER",
+      conversion: get("吨箱转换系数"), gift: get("是否为标品礼盒") === "是" ? "是" : "否", branchScope: get("分公司定制品"),
+      source: "excel", sourceSheet: sheetName, sourceRowNumber: index + 1, status: "有效",
+    });
   }
-  return { rows, warnings, sheetCounts };
+  if (parsed.length === 0) throw new Error("Excel 中没有找到可展示的商品数据行，请检查文件内容。");
+  const identityCounts = new Map<string, number>();
+  parsed.forEach((row) => {
+    const key = productImportIdentityKey(row);
+    if (key) identityCounts.set(key, (identityCounts.get(key) ?? 0) + 1);
+  });
+  const duplicateRows = parsed.filter((row) => {
+    const key = productImportIdentityKey(row);
+    return Boolean(key && (identityCounts.get(key) ?? 0) > 1);
+  });
+  const invalidRows = parsed.filter((row) => {
+    const customerTypeRaw = textCell(matrix[(row.sourceRowNumber ?? 1) - 1]?.[indexes["客户类型"]]);
+    const rebateRaw = textCell(matrix[(row.sourceRowNumber ?? 1) - 1]?.[indexes["是否返利"]]);
+    return !row.materialName.trim() || (customerTypeRaw !== "" && !row.customerType) || (rebateRaw !== "" && !row.rebate);
+  });
+  const duplicateRowIds = new Set(duplicateRows.map((row) => row.id));
+  const invalidRowIds = new Set(invalidRows.map((row) => row.id));
+  parsed.forEach((row) => {
+    const conversion = Number(row.conversion);
+    row.status = invalidRowIds.has(row.id) || duplicateRowIds.has(row.id) ? "待核对"
+      : !row.casePrice || !row.conversion || !Number.isFinite(conversion) || conversion <= 0 ? "待完善" : "有效";
+  });
+  if (duplicateRows.length > 0) warnings.push(`${sheetName} 有 ${duplicateRows.length} 条商品在同一客户类型、同一返利类型下商品名称重复，已标记为待核对；物料代码不参与判重。`);
+  const missingNames = parsed.filter((row) => !row.materialName.trim()).length;
+  if (missingNames > 0) warnings.push(`${sheetName} 有 ${missingNames} 条商品缺少物料名称，已标记为待核对。`);
+  if (parsed.some((row) => row.status === "待完善")) warnings.push(`${sheetName} 有商品的元/箱或吨箱转换系数为空或无效，已标记为待完善。`);
+  return { rows: parsed, warnings, sheetCounts: [{ name: sheetName, count: parsed.length }] };
 }
 
 type WhitelistImportParseResult = {
@@ -213,6 +198,7 @@ type WhitelistImportParseResult = {
   warnings: string[];
   sheetCounts: Array<{ name: string; count: number }>;
   crossSheetPhoneCount: number;
+  customerTypeMode: "TYPED" | "UNSPECIFIED";
 };
 
 export function normalizedHeader(value: unknown) {
@@ -229,79 +215,69 @@ export async function parseWhitelistWorkbook(file: File): Promise<WhitelistImpor
   const warnings: string[] = [];
   const rows: WhitelistRow[] = [];
   const sheetCounts: Array<{ name: string; count: number }> = [];
-  const unknownSheets = sheetNames.filter((name) => !whitelistSheetConfig.some((item) => item.name === name));
-  if (unknownSheets.length > 0) warnings.push(`已忽略未识别的 Sheet：${unknownSheets.join("、")}`);
+  const sheets = await Promise.all(sheetNames.map(async (name) => ({ name, matrix: await readXlsxFile(file, { sheet: name }) })));
+  const nonEmptySheets = sheets.filter(({ matrix }) => matrix.some((values) => values.some((value) => textCell(value) !== "")));
+  if (nonEmptySheets.length === 0) throw new Error("白名单 Excel 中没有找到非空 Sheet。");
+  if (nonEmptySheets.length > 1) throw new Error(`白名单 Excel 只允许一个非空 Sheet，当前发现：${nonEmptySheets.map(({ name }) => name).join("、")}`);
+  const { name: sheetName, matrix } = nonEmptySheets[0];
 
   const requiredColumns = [
-    ["序号", ["序号"]],
+    ["客户类型", ["客户类型", "客户类型（综合客户/特渠专业客户）"]],
     ["大区", ["大区"]],
     ["分公司名称", ["分公司名称", "分公司"]],
     ["经销商名称（简）", ["经销商名称（简）", "经销商简称"]],
     ["经销商名称（全）", ["经销商名称（全）", "经销商全称"]],
-    ["经销商类型", ["经销商类型", "综合经销商特渠专业经销商"]],
     ["经销商姓名", ["经销商姓名"]],
     ["经销商电话", ["经销商电话"]],
-    ["分公司确认人姓名", ["分公司确认人姓名"]],
-    ["分公司确认人电话", ["分公司确认人电话"]],
   ] as const;
-
-  for (const config of whitelistSheetConfig) {
-    if (!sheetNames.includes(config.name)) throw new Error(`缺少必要的 Sheet：${config.name}`);
-    const matrix = await readXlsxFile(file, { sheet: config.name });
-    const headerIndex = matrix.findIndex((row) => row.some((value) => normalizedHeader(value).includes("经销商电话")));
-    if (headerIndex < 0) throw new Error(`${config.name} 未找到包含“经销商电话”的表头行`);
-    const header = (matrix[headerIndex] ?? []).map(textCell);
-    const indexes = Object.fromEntries(requiredColumns.map(([label, aliases]) => [label, findHeaderIndex(header, aliases)]));
-    const missingHeaders = requiredColumns.filter(([label]) => indexes[label] < 0).map(([label]) => label);
-    if (missingHeaders.length > 0) throw new Error(`${config.name} 缺少字段：${missingHeaders.join("、")}`);
-    const get = (values: unknown[], label: string) => textCell(values[indexes[label]]);
-    const sourceRows = matrix.slice(headerIndex + 1).filter((values) => values.some((value) => textCell(value) !== ""));
-    const phoneRows = new Map<string, number[]>();
-    const parsedRows = sourceRows.map((values, offset) => {
-      const dealerPhone = normalizePhone(get(values, "经销商电话"));
-      const rowNumber = headerIndex + offset + 2;
-      if (dealerPhone) phoneRows.set(dealerPhone, [...(phoneRows.get(dealerPhone) ?? []), rowNumber]);
-      return { values, dealerPhone, rowNumber };
+  const optionalColumns = [
+    ["序号", ["序号"]], ["经销商类型", ["经销商类型", "综合经销商特渠专业经销商"]],
+    ["分公司确认人姓名", ["分公司确认人姓名"]], ["分公司确认人电话", ["分公司确认人电话"]],
+  ] as const;
+  const headerIndex = matrix.findIndex((row) => {
+    const header = row.map(textCell);
+    return findHeaderIndex(header, ["客户类型"]) >= 0 && findHeaderIndex(header, ["经销商电话"]) >= 0;
+  });
+  if (headerIndex < 0) throw new Error(`${sheetName} 未找到包含“客户类型”和“经销商电话”的表头行。`);
+  const header = (matrix[headerIndex] ?? []).map(textCell);
+  const indexes = Object.fromEntries([...requiredColumns, ...optionalColumns].map(([label, aliases]) => [label, findHeaderIndex(header, aliases)]));
+  const missingHeaders = requiredColumns.filter(([label]) => indexes[label] < 0).map(([label]) => label);
+  if (missingHeaders.length > 0) throw new Error(`${sheetName} 缺少字段：${missingHeaders.join("、")}`);
+  if (indexes["客户类型"] !== 0) throw new Error(`${sheetName} 的“客户类型”必须是第一列`);
+  const get = (values: unknown[], label: string) => indexes[label] >= 0 ? textCell(values[indexes[label]]) : "";
+  const sourceRows = matrix.slice(headerIndex + 1).filter((values) => values.some((value) => textCell(value) !== ""));
+  if (sourceRows.length === 0) throw new Error(`${sheetName} 中没有找到白名单数据行。`);
+  const rawTypes = sourceRows.map((values) => get(values, "客户类型"));
+  const hasTypedRows = rawTypes.some(Boolean);
+  const hasUnspecifiedRows = rawTypes.some((value) => !value);
+  if (hasTypedRows && hasUnspecifiedRows) throw new Error(`${sheetName} 的客户类型不能部分填写、部分为空；请保证整张表全部填写或全部留空。`);
+  const customerTypeMode: WhitelistImportParseResult["customerTypeMode"] = hasTypedRows ? "TYPED" : "UNSPECIFIED";
+  if (customerTypeMode === "UNSPECIFIED" && sourceRows.some((values) => get(values, "大区") !== "")) {
+    throw new Error(`${sheetName} 的客户类型全部为空时，大区也必须全部为空。`);
+  }
+  let invalidCustomerTypeCount = 0;
+  let invalidPhoneCount = 0;
+  sourceRows.forEach((values, offset) => {
+    const rawType = get(values, "客户类型").replace(/\s+/g, "");
+    const customerType: WhitelistRow["customerType"] = rawType === "" ? ""
+      : rawType.includes("特渠") ? "特渠专业客户" : rawType.includes("综合") ? "综合客户" : "";
+    const customerTypeInvalid = Boolean(rawType && !customerType);
+    const dealerPhone = normalizePhone(get(values, "经销商电话"));
+    const phoneInvalid = !/^1\d{10}$/.test(dealerPhone);
+    if (customerTypeInvalid) invalidCustomerTypeCount += 1;
+    if (phoneInvalid) invalidPhoneCount += 1;
+    rows.push({
+      id: createImportRowId("whitelist"), sequence: Number(get(values, "序号")) || rows.length + 1,
+      customerType, customerTypeInvalid, region: get(values, "大区"), branch: get(values, "分公司名称"),
+      dealerShort: get(values, "经销商名称（简）"), dealerFull: get(values, "经销商名称（全）"),
+      dealerType: get(values, "经销商类型"), dealerName: get(values, "经销商姓名"), dealerPhone,
+      confirmerName: get(values, "分公司确认人姓名"), confirmerPhone: normalizePhone(get(values, "分公司确认人电话")),
+      status: customerTypeInvalid || phoneInvalid ? "待处理" : "有效", source: "excel", sourceSheet: sheetName,
+      sourceRowNumber: headerIndex + offset + 2,
     });
-    const duplicatePhones = new Set([...phoneRows.entries()].filter(([, rowNumbers]) => rowNumbers.length > 1).map(([phone]) => phone));
-    if (duplicatePhones.size > 0) warnings.push(`${config.name} 有 ${duplicatePhones.size} 个手机号重复，已标记为待处理。`);
-
-    for (const { values, dealerPhone, rowNumber } of parsedRows) {
-      const phoneValid = /^1\d{10}$/.test(dealerPhone);
-      const status: WhitelistRow["status"] = phoneValid && !duplicatePhones.has(dealerPhone) ? "有效" : "待处理";
-      rows.push({
-        id: createImportRowId("whitelist"),
-        sequence: Number(get(values, "序号")) || rows.length + 1,
-        customerType: config.customerType,
-        region: get(values, "大区"),
-        branch: get(values, "分公司名称"),
-        dealerShort: get(values, "经销商名称（简）"),
-        dealerFull: get(values, "经销商名称（全）"),
-        dealerType: get(values, "经销商类型"),
-        dealerName: get(values, "经销商姓名"),
-        dealerPhone,
-        confirmerName: get(values, "分公司确认人姓名"),
-        confirmerPhone: normalizePhone(get(values, "分公司确认人电话")),
-        status,
-        source: "excel",
-        sourceSheet: config.name,
-        sourceRowNumber: rowNumber,
-        identityKey: `${config.customerType}:${normalizeWhitelistName(get(values, "经销商名称（全）"))}`,
-      });
-    }
-    const blankOrInvalidCount = parsedRows.filter(({ dealerPhone }) => !/^1\d{10}$/.test(dealerPhone)).length;
-    if (blankOrInvalidCount > 0) warnings.push(`${config.name} 有 ${blankOrInvalidCount} 条手机号为空或格式异常，已标记为待处理。`);
-    sheetCounts.push({ name: config.name, count: sourceRows.length });
-  }
-
-  const phonesByType = new Map<string, Set<string>>();
-  for (const row of rows) {
-    if (row.status !== "有效" || !row.dealerPhone) continue;
-    const phones = phonesByType.get(row.dealerPhone) ?? new Set<string>();
-    phones.add(row.customerType);
-    phonesByType.set(row.dealerPhone, phones);
-  }
-  const crossSheetPhoneCount = [...phonesByType.values()].filter((types) => types.size > 1).length;
-  if (crossSheetPhoneCount > 0) warnings.push(`检测到 ${crossSheetPhoneCount} 个手机号同时存在于综合和特渠白名单，已按客户类型分别保留。`);
-  return { rows, warnings, sheetCounts, crossSheetPhoneCount };
+  });
+  if (invalidCustomerTypeCount > 0) warnings.push(`${sheetName} 有 ${invalidCustomerTypeCount} 条客户类型无效，只允许“综合客户”“特渠专业客户”或空。`);
+  if (invalidPhoneCount > 0) warnings.push(`${sheetName} 有 ${invalidPhoneCount} 条手机号为空或格式异常，已标记为待处理。`);
+  sheetCounts.push({ name: sheetName, count: sourceRows.length });
+  return { rows, warnings, sheetCounts, crossSheetPhoneCount: 0, customerTypeMode };
 }

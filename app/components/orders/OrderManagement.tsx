@@ -11,7 +11,7 @@ import {
 } from "../../api";
 
 type OrderStatus = "已提交" | "已撤回";
-type CustomerType = "特渠" | "综合";
+type CustomerType = "特渠" | "综合" | "不区分客户类型";
 
 type OrderVersionItem = {
   line: string;
@@ -80,7 +80,7 @@ function maskPhone(phone: string) {
 
 function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRecord {
   const detail = order as RuntimeOrder;
-  const customerType: CustomerType = order.customerType === "SPECIAL" ? "特渠" : "综合";
+  const customerType: CustomerType = order.customerType === "SPECIAL" ? "特渠" : order.customerType === "GENERAL" ? "综合" : "不区分客户类型";
   const versions: OrderVersion[] = [...(detail.versions ?? [])]
     .sort((left, right) => left.version - right.version)
     .map((version) => ({
@@ -160,7 +160,7 @@ export function OrderManagement({ activityClosed, activityId, activityName }: { 
       setLoading(true);
       try {
         const status = orderFilter === "已提交" ? "SUBMITTED" : orderFilter === "已撤回" ? "WITHDRAWN" : undefined;
-        const runtimeCustomerType = customerType === "综合" ? "GENERAL" : customerType === "特渠" ? "SPECIAL" : undefined;
+        const runtimeCustomerType = customerType === "综合" ? "GENERAL" : customerType === "特渠" ? "SPECIAL" : customerType === "不区分客户类型" ? "ALL" : undefined;
         const [current, all, submitted, withdrawn] = await Promise.all([
           loadAdminOrders(activityId, { status, customerType: runtimeCustomerType, keyword: search, page, size: 50 }),
           loadAdminOrders(activityId, { page: 1, size: 1 }),
@@ -207,7 +207,7 @@ export function OrderManagement({ activityClosed, activityId, activityName }: { 
 
   const exportOrders = () => exportAdminOrders(activityId, {
     status: orderFilter === "已提交" ? "SUBMITTED" : orderFilter === "已撤回" ? "WITHDRAWN" : undefined,
-    customerType: customerType === "综合" ? "GENERAL" : customerType === "特渠" ? "SPECIAL" : undefined,
+    customerType: customerType === "综合" ? "GENERAL" : customerType === "特渠" ? "SPECIAL" : customerType === "不区分客户类型" ? "ALL" : undefined,
     keyword: search,
   }, activityName);
 
@@ -222,7 +222,7 @@ export function OrderManagement({ activityClosed, activityId, activityName }: { 
       {loadError && <div className="warning-box"><b>订单数据加载失败</b><span>{loadError}</span></div>}
       <div className="filter-row">
         {([["全部", `全部 ${orderCounts.all}`], ["已提交", `已提交 ${orderCounts.submitted}`], ["已撤回", `已撤回 ${orderCounts.withdrawn}`]] as const).map(([value, label]) => <button key={value} className={orderFilter === value ? "active" : ""} onClick={() => { setOrderFilter(value); setPage(1); }}>{label}</button>)}
-        <label className="order-type-filter"><span>客户类型</span><select value={customerType} onChange={(event) => { setCustomerType(event.target.value as typeof customerType); setPage(1); }}><option>全部</option><option>综合</option><option>特渠</option></select></label>
+        <label className="order-type-filter"><span>客户类型</span><select value={customerType} onChange={(event) => { setCustomerType(event.target.value as typeof customerType); setPage(1); }}><option>全部</option><option>综合</option><option>特渠</option><option>不区分客户类型</option></select></label>
         <input placeholder="搜索订单号、经销商名称或手机号后四位" value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} />
       </div>
       <div className="data-table order-table">

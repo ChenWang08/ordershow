@@ -24,14 +24,18 @@ public class AttendanceMatchingService {
   public MatchResult match(long activityId, Long whitelistVersionId, String participantType,
       String branchName, String dealerName) {
     if (whitelistVersionId == null) return MatchResult.unmatched("WHITELIST_NOT_PUBLISHED");
-    String customerType = customerType(participantType);
+    boolean unspecified = Boolean.TRUE.equals(jdbc.queryForObject("""
+        SELECT COUNT(*) > 0 FROM activity_customer
+        WHERE activity_id = ? AND data_version_id = ? AND customer_type = 'ALL' AND is_active = TRUE
+        """, Boolean.class, activityId, whitelistVersionId));
+    String customerType = unspecified ? "ALL" : customerType(participantType);
     if (customerType == null) return MatchResult.unmatched("CUSTOMER_TYPE_UNKNOWN");
 
     String normalizedDealer = normalize(dealerName);
     List<Long> fullNameMatches = normalizedDealer.isEmpty() ? List.of() : jdbc.queryForList("""
         SELECT id FROM activity_customer
         WHERE activity_id = ? AND data_version_id = ? AND customer_type = ?
-          AND REPLACE(REPLACE(LOWER(dealer_full_name), ' ', ''), '　', '') = ? AND is_active = TRUE
+          AND normalized_dealer_full_name = ? AND is_active = TRUE
         ORDER BY id
         """, Long.class, activityId, whitelistVersionId, customerType, normalizedDealer);
 

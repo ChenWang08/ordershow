@@ -327,10 +327,20 @@ public class ActivityService {
         WHERE c.activity_id = ? AND c.is_active = TRUE AND c.customer_type = 'GENERAL'
           AND (c.region_code IS NULL OR TRIM(c.region_code) = '')
         """, Boolean.class, value.id());
+    List<String> whitelistTypes = jdbc.queryForList("""
+        SELECT DISTINCT c.customer_type
+        FROM activity_customer c
+        JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
+          AND b.current_version_id = c.data_version_id
+        WHERE c.activity_id = ? AND c.is_active = TRUE
+        ORDER BY c.customer_type
+        """, String.class, value.id());
+    List<String> availableCustomerTypes = whitelistTypes.stream().filter(type -> List.of("GENERAL", "SPECIAL").contains(type)).toList();
+    String whitelistCustomerTypeMode = whitelistTypes.contains("ALL") ? "UNSPECIFIED" : "TYPED";
     return new ActivityView(value.id(), value.departmentId(), value.departmentName(), value.code(), value.name(), value.description(), effectiveStatus(value),
         value.configuredStatus(), value.timezone(), value.startsAt(), value.endsAt(), value.eventEndsAt(), value.customerScope(),
         value.companyRankingTopN(), value.branchRankingTopN(), value.tonDisplayScale(), value.version(), regions,
-        Boolean.TRUE.equals(hasUnassigned),
+        Boolean.TRUE.equals(hasUnassigned), whitelistCustomerTypeMode, availableCustomerTypes,
         value.publishedAt(), value.actualStartedAt(), value.closedAt(), value.finishedAt());
   }
 
@@ -363,7 +373,7 @@ public class ActivityService {
         rs.getString("description"), configured, configured, rs.getString("timezone"),
         rs.getTimestamp("starts_at").toInstant(), rs.getTimestamp("ends_at").toInstant(), instant(rs.getTimestamp("event_ends_at")),
         rs.getString("customer_scope"), rs.getInt("company_ranking_top_n"),
-        rs.getInt("branch_ranking_top_n"), rs.getInt("ton_display_scale"), rs.getInt("version"), List.of(), false,
+        rs.getInt("branch_ranking_top_n"), rs.getInt("ton_display_scale"), rs.getInt("version"), List.of(), false, "TYPED", List.of(),
         instant(rs.getTimestamp("published_at")), instant(rs.getTimestamp("actual_started_at")), instant(rs.getTimestamp("closed_at")),
         instant(rs.getTimestamp("finished_at")));
   }
@@ -493,7 +503,8 @@ public class ActivityService {
   public record ActivityView(long id, long departmentId, String departmentName, String code, String name, String description, String status,
                              String configuredStatus, String timezone, Instant startsAt, Instant endsAt,
                              Instant eventEndsAt, String customerScope, int companyRankingTopN, int branchRankingTopN,
-                             int tonDisplayScale, int version, List<RegionView> regions, boolean hasUnassignedGeneralCustomers,
+                              int tonDisplayScale, int version, List<RegionView> regions, boolean hasUnassignedGeneralCustomers,
+                              String whitelistCustomerTypeMode, List<String> availableCustomerTypes,
                              Instant publishedAt,
                              Instant actualStartedAt, Instant closedAt, Instant finishedAt) {}
 }

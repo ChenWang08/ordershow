@@ -4,7 +4,7 @@
 
 import { useMemo, useState } from "react";
 import type { AdminAttendee, AttendanceMatchPreview } from "../../api";
-import { attendanceCustomerType, compareProductRows, compareWhitelistRows, createImportRowId, normalizeWhitelistName, whitelistIdentityKey, whitelistPhoneIsValid, type AttendanceFieldKey, type AttendanceImportDraft, type AttendanceRow, type DeleteTarget, type ProductImageAsset, type ProductImageStats, type ProductImageStatus, type ProductImportRow, type WhitelistRow } from "../../domain/import-domain";
+import { attendanceCustomerType, compareProductRows, compareWhitelistRows, createImportRowId, normalizeWhitelistName, productImportIdentityKey, whitelistIdentityKey, whitelistPhoneIsValid, type AttendanceFieldKey, type AttendanceImportDraft, type AttendanceRow, type DeleteTarget, type ProductImageAsset, type ProductImageStats, type ProductImageStatus, type ProductImportRow, type WhitelistCustomerTypeMode, type WhitelistRow } from "../../domain/import-domain";
 import { createManualProductImageAssets, productImageRelationStatus, productImageStatusForAssets } from "../../domain/product-images";
 import { ProductImageViewer } from "../shared/components/ProductImageViewer";
 import { normalizePhone, normalizeSearchText } from "../shared/utils";
@@ -99,7 +99,7 @@ export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [imagePreview, setImagePreview] = useState<{ productName: string; images: ProductImageAsset[]; status: string } | null>(null);
-  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "商品图片", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "每吨箱数（箱/吨）", "是否礼盒", "分公司限制", "状态", "操作"];
+  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "产品说明", "商品图片", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "每吨箱数（箱/吨）", "是否礼盒", "分公司限制", "状态", "操作"];
   const filteredRows = useMemo(() => {
     const normalizedKeyword = normalizeSearchText(searchKeyword);
     const normalizedCodeKeyword = normalizeMaterialCode(searchKeyword);
@@ -113,8 +113,11 @@ export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false
       const matchesPrice = priceFilter === "全部"
         || (priceFilter === "价格有效" && hasValidPrice)
         || (priceFilter === "价格待完善" && !hasValidPrice);
-      const matchesFilters = (customerType === "全部" || row.customerType === customerType)
-        && (rebate === "全部" || row.rebate === rebate)
+      const matchesCustomerType = customerType === "全部"
+        || (customerType === "未指定" ? row.customerType === "" : row.customerType === customerType);
+      const matchesRebate = rebate === "全部"
+        || (rebate === "未指定" ? row.rebate === "" : row.rebate === rebate);
+      const matchesFilters = matchesCustomerType && matchesRebate
         && (statusFilter === "全部" || row.status === statusFilter) && matchesImage && matchesPrice;
       const matchesSearch = !normalizedKeyword
         || normalizeSearchText(row.materialName).includes(normalizedKeyword)
@@ -175,8 +178,8 @@ export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false
   return (
     <>
       <div className="data-filters product-data-filters">
-        <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>特渠</option><option>综合</option></select></label>
-        <label><span>是否参与返利</span><select value={rebate} onChange={(e) => { setRebate(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>参与</option><option>不参与</option></select></label>
+        <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>特渠</option><option>综合</option><option>未指定</option></select></label>
+        <label><span>是否参与返利</span><select value={rebate} onChange={(e) => { setRebate(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>参与</option><option>不参与</option><option>未指定</option></select></label>
         <label><span>商品状态</span><select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>有效</option><option>待核对</option><option>待完善</option></select></label>
         <label><span>价格状态</span><select value={priceFilter} onChange={(e) => { setPriceFilter(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>价格有效</option><option>价格待完善</option></select></label>
         <label><span>商品图片</span><select value={imageFilter} onChange={(e) => { setImageFilter(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>已匹配</option><option>待确认</option><option>未匹配</option></select></label>
@@ -189,12 +192,14 @@ export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false
         <div className={`data-table product-import-table ${allowDelete ? "with-selection" : ""}`}>
           <div className="table-row table-head">{allowDelete && <b className="select-cell"><input type="checkbox" aria-label="全选当前页商品" checked={allPageSelected} onChange={togglePageRows} /></b>}{heads.map((x) => <b key={x}>{x}</b>)}</div>
           {pageRows.map((row, index) => {
-            const values = [pageStart + index + 1, row.customerType, row.rebate, row.category, row.line, row.materialCode, row.materialName, null, row.brand, row.variety, row.spec, row.casePack, row.unitPrice, row.casePrice, row.conversion, row.gift, row.branchScope || "全部分公司", row.status];
+            const values = [pageStart + index + 1, row.customerType, row.rebate, row.category, row.line, row.materialCode, row.materialName, row.description, null, row.brand, row.variety, row.spec, row.casePack, row.unitPrice, row.casePrice, row.conversion, row.gift, row.branchScope || "全部分公司", row.status];
             const imageStatus = row.imageStatus ?? "未匹配";
-            const imageLabel = imageStatus === "待确认" || imageStatus === "未匹配"
-              ? imageStatus
-              : row.images?.length ? `${row.images.length} 张` : "未匹配";
-            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择商品 ${row.materialName}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => index === 7 ? <button type="button" key={index} className={`product-image-cell product-image-button-cell ${imageStatus === "待确认" ? "pending" : row.images?.length ? "matched" : "unmatched"}`} disabled={!row.images?.length} aria-label={`查看${row.materialName}商品图片`} onClick={() => row.images?.length && setImagePreview({ productName: row.materialName, images: row.images, status: imageLabel })}>{row.images?.[0]?.url ? <img src={row.images[0].url} alt={row.materialName} /> : <i>—</i>}<small>{imageLabel}</small></button> : <span key={index} className={index === 17 ? `status-cell ${row.status !== "有效" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" disabled={readOnly} onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
+            const imageLabel = imageStatus === "待确认"
+              ? String(row.images?.length ?? 0)
+              : imageStatus === "未匹配"
+                ? imageStatus
+                : row.images?.length ? `${row.images.length} 张` : "未匹配";
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择商品 ${row.materialName}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => index === 8 ? <button type="button" key={index} className={`product-image-cell product-image-button-cell ${imageStatus === "待确认" ? "pending" : row.images?.length ? "matched" : "unmatched"}`} disabled={!row.images?.length} aria-label={`查看${row.materialName}商品图片`} onClick={() => row.images?.length && setImagePreview({ productName: row.materialName, images: row.images, status: imageLabel })}>{row.images?.[0]?.url ? <img src={row.images[0].url} alt={row.materialName} /> : <i>—</i>}<small>{imageLabel}</small></button> : <span key={index} title={index === 7 ? String(value || "") : undefined} className={`${index === 7 ? "description-cell" : ""} ${index === 18 ? `status-cell ${row.status !== "有效" ? "pending" : ""}` : ""}`}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" disabled={readOnly} onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
           {sortedRows.length === 0 && <div className="table-empty">{searchKeyword.trim() ? "当前搜索和筛选条件下没有商品" : "当前筛选条件下没有商品"}</div>}
         </div>
@@ -229,12 +234,14 @@ export function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = f
   const [pageSize, setPageSize] = useState(50);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
-  const heads = ["序号", "客户类型", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商类型", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话", "状态", "操作"];
+  const heads = ["序号", "客户类型", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话", "状态", "操作"];
   const filteredRows = useMemo(() => {
     const normalizedKeyword = normalizeSearchText(searchKeyword);
     const phoneKeyword = normalizePhone(searchKeyword);
     return rows.filter((row) => {
-      const matchesType = customerType === "全部" || row.customerType === customerType;
+      const matchesType = customerType === "全部"
+        || (customerType === "不区分客户类型" && row.customerType === "")
+        || row.customerType === customerType;
       const matchesStatus = statusFilter === "全部" || row.status === statusFilter;
       const matchesSearch = !normalizedKeyword
         || [row.dealerShort, row.dealerFull, row.dealerName].some((value) => normalizeSearchText(value).includes(normalizedKeyword))
@@ -290,7 +297,7 @@ export function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = f
   return (
     <>
       <div className="data-filters">
-        <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>综合客户</option><option>特渠专业客户</option></select></label>
+        <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>综合客户</option><option>特渠专业客户</option><option>不区分客户类型</option></select></label>
         <label><span>状态</span><select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>有效</option><option>待处理</option></select></label>
         <label className="data-filter-search"><span>搜索白名单</span><input type="search" value={searchKeyword} onChange={(e) => { setSearchKeyword(e.target.value); setPage(1); setSelectedIds([]); }} placeholder="经销商名称 / 姓名 / 电话" aria-label="搜索经销商名称、经销商姓名或电话" /></label>
         <small>当前显示 {sortedRows.length} 名客户 · 第 {currentPage}/{totalPages} 页{readOnly ? "，活动已截止只读" : allowDelete ? "，可勾选删除" : "，可编辑"}</small>
@@ -301,8 +308,8 @@ export function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = f
         <div className={`data-table whitelist-table ${allowDelete ? "with-selection" : ""}`}>
           <div className="table-row table-head">{allowDelete && <b className="select-cell"><input type="checkbox" aria-label="全选当前页白名单" checked={allPageSelected} onChange={togglePageRows} /></b>}{heads.map((x) => <b key={x}>{x}</b>)}</div>
           {pageRows.map((row, index) => {
-            const values = [pageStart + index + 1, row.customerType, row.region, row.branch, row.dealerShort, row.dealerFull, row.dealerType, row.dealerName, row.dealerPhone, row.confirmerName, row.confirmerPhone, row.status];
-            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择白名单客户 ${row.dealerShort}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index} className={index === 11 ? `status-cell ${row.status === "待处理" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" disabled={readOnly} onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
+            const values = [pageStart + index + 1, row.customerType || "不区分客户类型", row.region, row.branch, row.dealerShort, row.dealerFull, row.dealerName, row.dealerPhone, row.confirmerName, row.confirmerPhone, row.status];
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择白名单客户 ${row.dealerShort}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => <span key={index} className={index === 10 ? `status-cell ${row.status === "待处理" ? "pending" : ""}` : ""}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" disabled={readOnly} onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
           {sortedRows.length === 0 && <div className="table-empty">{searchKeyword.trim() ? "当前搜索和筛选条件下没有白名单客户" : "当前筛选条件下没有白名单客户"}</div>}
         </div>
@@ -315,13 +322,13 @@ export function CustomerWhitelistTable({ rows, onEdit, onDelete, allowDelete = f
 
 export function ProductFormDrawer({ rows, initialRow, activityStarted = false, onClose, onSave }: { rows: ProductImportRow[]; initialRow?: ProductImportRow; activityStarted?: boolean; onClose: () => void; onSave: (row: ProductImportRow, reason?: string) => Promise<boolean> }) {
   const isEditing = Boolean(initialRow);
-  const [form, setForm] = useState<ProductImportRow>(() => initialRow ? { ...initialRow, priceTierMinQuantity: initialRow.priceTierMinQuantity ?? "", priceTierCasePrice: initialRow.priceTierCasePrice ?? "", priceTierPricingMode: initialRow.priceTierPricingMode ?? "WHOLE_ORDER" } : { id: createImportRowId("product"), sequence: 0, customerType: "特渠", rebate: "参与", category: "", line: "", materialCode: "", materialName: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER", conversion: "", gift: "否", branchScope: "", status: "有效", source: "manual" });
+  const [form, setForm] = useState<ProductImportRow>(() => initialRow ? { ...initialRow, priceTierMinQuantity: initialRow.priceTierMinQuantity ?? "", priceTierCasePrice: initialRow.priceTierCasePrice ?? "", priceTierPricingMode: initialRow.priceTierPricingMode ?? "WHOLE_ORDER" } : { id: createImportRowId("product"), sequence: 0, customerType: "", rebate: "", category: "", line: "", materialCode: "", materialName: "", description: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER", conversion: "", gift: "否", branchScope: "", status: "有效", source: "manual" });
   const [tierEnabled, setTierEnabled] = useState(() => Boolean(initialRow?.priceTierMinQuantity || initialRow?.priceTierCasePrice));
   const [editReason, setEditReason] = useState("");
   const [saving, setSaving] = useState(false);
   const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
-  const duplicateMaterialCode = form.materialCode.trim() !== "" && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && row.rebate === form.rebate && row.materialCode.trim().toLowerCase() === form.materialCode.trim().toLowerCase());
+  const duplicateMaterialName = form.materialName.trim() !== "" && rows.some((row) => row.id !== form.id && productImportIdentityKey(row) === productImportIdentityKey(form));
   const conversionValue = Number(form.conversion);
   const conversionValid = form.conversion.trim() !== "" && Number.isFinite(conversionValue) && conversionValue > 0;
   const basePrice = Number(form.casePrice);
@@ -329,19 +336,21 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, o
   const tierCasePrice = Number(form.priceTierCasePrice);
   const tierValid = !tierEnabled || (Number.isInteger(tierMinQuantity) && tierMinQuantity >= 2 && tierMinQuantity <= 999999
     && Number.isFinite(tierCasePrice) && tierCasePrice > 0 && tierCasePrice < basePrice);
-  const canSave = form.materialCode.trim() !== "" && form.materialName.trim() !== "" && form.casePrice.trim() !== "" && (conversionValid || form.status === "待完善") && tierValid && !duplicateMaterialCode && (!activityStarted || editReason.trim() !== "");
+  const canSave = form.materialName.trim() !== "" && form.casePrice.trim() !== "" && (conversionValid || form.status === "待完善") && tierValid && !duplicateMaterialName && (!activityStarted || editReason.trim() !== "");
   return (
     <div className="order-drawer-backdrop" onClick={() => { if (!saving) onClose(); }}>
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
         <header><div><span>活动商品</span><h2>{isEditing ? "编辑商品" : "手动添加商品"}</h2></div><button aria-label="关闭" onClick={onClose}>×</button></header>
-        <div className="auto-sequence-note"><span>{isEditing ? "当前商品" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>{form.customerType} · {form.rebate}返利分组</small></div>
+        <div className="auto-sequence-note"><span>{isEditing ? "当前商品" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>{form.customerType || "未指定客户类型"} · {form.rebate || "未指定返利"}</small></div>
         <div className="drawer-form-body"><div className="drawer-form-grid">
-          <label><span>客户类型</span><select value={form.customerType} onChange={(e) => update("customerType", e.target.value)}><option>特渠</option><option>综合</option></select></label>
-          <label><span>是否参与返利</span><select value={form.rebate} onChange={(e) => update("rebate", e.target.value)}><option>参与</option><option>不参与</option></select></label>
+          <label><span>客户类型</span><select value={form.customerType} onChange={(e) => update("customerType", e.target.value)}><option value="">未指定</option><option>特渠</option><option>综合</option></select></label>
+          <label><span>是否参与返利</span><select value={form.rebate} onChange={(e) => update("rebate", e.target.value)}><option value="">未指定</option><option>参与</option><option>不参与</option></select></label>
           <label><span>产品大类</span><input value={form.category} onChange={(e) => update("category", e.target.value)} placeholder="例如：特渠定制产品" /></label>
           <label><span>产品线</span><input value={form.line} onChange={(e) => update("line", e.target.value)} placeholder="例如：调味油" /></label>
-          <label><span>物料代码 *</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /><small className={duplicateMaterialCode ? "field-error" : ""}>{duplicateMaterialCode ? "同客户类型、同返利分组内已存在，请检查解析结果" : "跨 Sheet 可重复；用于识别同一商品"}</small></label>
+          <label><span>物料代码</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /><small>允许为空，不参与商品名称判重</small></label>
           <label className="wide-field"><span>物料名称 *</span><input value={form.materialName} onChange={(e) => update("materialName", e.target.value)} /></label>
+          <label className="wide-field"><span>产品说明</span><textarea value={form.description ?? ""} onChange={(e) => update("description", e.target.value)} placeholder="填写后可在 H5 商品详情展示" rows={3} /></label>
+          {duplicateMaterialName && <p className="field-error wide-field">同一客户类型、同一返利类型下商品名称已存在，请修改或删除重复行。</p>}
           <div className="product-form-image-field wide-field"><span>商品图片</span><ProductImageEditor materialName={form.materialName} images={form.images} imageStatus={form.imageStatus} onChange={(images, status) => setForm((current) => ({ ...current, images, imageStatus: status }))} /></div>
           <label><span>品牌</span><input value={form.brand} onChange={(e) => update("brand", e.target.value)} /></label>
           <label><span>品种</span><input value={form.variety} onChange={(e) => update("variety", e.target.value)} /></label>
@@ -369,9 +378,9 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, o
   );
 }
 
-export function WhitelistFormDrawer({ rows, initialRow, activityStarted = false, onClose, onSave }: { rows: WhitelistRow[]; initialRow?: WhitelistRow; activityStarted?: boolean; onClose: () => void; onSave: (row: WhitelistRow, reason?: string) => Promise<boolean> }) {
+export function WhitelistFormDrawer({ rows, initialRow, customerTypeMode = "TYPED", activityStarted = false, onClose, onSave }: { rows: WhitelistRow[]; initialRow?: WhitelistRow; customerTypeMode?: WhitelistCustomerTypeMode; activityStarted?: boolean; onClose: () => void; onSave: (row: WhitelistRow, reason?: string) => Promise<boolean> }) {
   const isEditing = Boolean(initialRow);
-  const [form, setForm] = useState<WhitelistRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("whitelist"), sequence: 0, customerType: "综合客户", region: "", branch: "", dealerShort: "", dealerFull: "", dealerType: "综合经销商", dealerName: "", dealerPhone: "", confirmerName: "", confirmerPhone: "", status: "有效", source: "manual" });
+  const [form, setForm] = useState<WhitelistRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("whitelist"), sequence: 0, customerType: customerTypeMode === "UNSPECIFIED" ? "" : "综合客户", region: "", branch: "", dealerShort: "", dealerFull: "", dealerType: "", dealerName: "", dealerPhone: "", confirmerName: "", confirmerPhone: "", status: "有效", source: "manual" });
   const [editReason, setEditReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -380,26 +389,27 @@ export function WhitelistFormDrawer({ rows, initialRow, activityStarted = false,
   const phoneValid = (isEditing && form.dealerPhone.includes("*")) || whitelistPhoneIsValid(form.dealerPhone);
   const duplicateDealerName = normalizeWhitelistName(form.dealerFull) !== "" && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && whitelistIdentityKey(row) === whitelistIdentityKey(form));
   const duplicateDealerPhone = whitelistPhoneIsValid(form.dealerPhone) && rows.some((row) => row.id !== form.id && row.customerType === form.customerType && normalizePhone(row.dealerPhone) === normalizePhone(form.dealerPhone));
-  const canSave = form.branch.trim() !== "" && form.dealerShort.trim() !== "" && form.dealerFull.trim() !== "" && phoneValid && !duplicateDealerName && !duplicateDealerPhone && (!activityStarted || editReason.trim() !== "");
+  const canSave = (customerTypeMode === "UNSPECIFIED" ? form.customerType === "" : form.customerType !== "") && form.branch.trim() !== "" && form.dealerShort.trim() !== "" && form.dealerFull.trim() !== "" && phoneValid && !duplicateDealerName && !duplicateDealerPhone && (!activityStarted || editReason.trim() !== "");
   return (
     <div className="order-drawer-backdrop" onClick={() => { if (!saving) onClose(); }}>
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
         <header><div><span>客户身份</span><h2>{isEditing ? "编辑白名单" : "手动添加白名单客户"}</h2></div><button aria-label="关闭" disabled={saving} onClick={onClose}>×</button></header>
-        <div className="auto-sequence-note"><span>{isEditing ? "当前客户" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>{form.customerType}分组</small></div>
+        <div className="auto-sequence-note"><span>{isEditing ? "当前客户" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>{form.customerType || "不区分客户类型"}分组</small></div>
         <div className="drawer-form-body"><div className="drawer-form-grid">
-          <label><span>客户类型</span><select value={form.customerType} onChange={(e) => { const type = e.target.value as WhitelistRow["customerType"]; setForm((current) => ({ ...current, customerType: type, dealerType: type === "综合客户" ? "综合经销商" : "特渠专业经销商" })); }}><option>综合客户</option><option>特渠专业客户</option></select></label>
+          <label><span>客户类型</span><select value={form.customerType} disabled={customerTypeMode === "UNSPECIFIED"} onChange={(e) => { const type = e.target.value as WhitelistRow["customerType"]; setForm((current) => ({ ...current, customerType: type })); }}>
+            {customerTypeMode === "UNSPECIFIED" ? <option value="">不区分客户类型</option> : <><option>综合客户</option><option>特渠专业客户</option></>}
+          </select></label>
           <label><span>大区（选填）</span><input value={form.region} onChange={(e) => update("region", e.target.value)} placeholder="可自行填写；不分大区请留空" /></label>
           <label><span>分公司名称 *</span><input value={form.branch} onChange={(e) => update("branch", e.target.value)} placeholder="例如：长沙分" /></label>
           <label><span>经销商名称（简）*</span><input value={form.dealerShort} onChange={(e) => update("dealerShort", e.target.value)} /><small>{form.dealerShort.length}/10 字</small></label>
-          <label className="wide-field"><span>经销商名称（全）*</span><input value={form.dealerFull} onChange={(e) => update("dealerFull", e.target.value)} /><small className={duplicateDealerName ? "field-error" : ""}>{duplicateDealerName ? "同客户类型下已存在，请直接编辑原客户" : "客户身份匹配使用客户类型 + 名称全称；电话变化时会更新原客户"}</small></label>
-          <label><span>经销商类型</span><input value={form.dealerType} onChange={(e) => update("dealerType", e.target.value)} /></label>
+          <label className="wide-field"><span>经销商名称（全）*</span><input value={form.dealerFull} onChange={(e) => update("dealerFull", e.target.value)} /><small className={duplicateDealerName ? "field-error" : ""}>{duplicateDealerName ? "同客户类型、同一分公司下已存在，请直接编辑原客户" : "客户身份匹配使用客户类型 + 名称全称 + 分公司；电话变化时会更新原客户"}</small></label>
           <label><span>经销商姓名</span><input value={form.dealerName} onChange={(e) => update("dealerName", e.target.value)} /></label>
           <label><span>经销商电话 *</span><input inputMode="tel" maxLength={11} value={form.dealerPhone} onChange={(e) => update("dealerPhone", e.target.value.replace(/\D/g, ""))} placeholder="11 位手机号" /><small className={duplicateDealerPhone || (form.dealerPhone !== "" && !phoneValid) ? "field-error" : ""}>{duplicateDealerPhone ? "同客户类型内手机号已存在；综合和特渠可以同号" : form.dealerPhone && !phoneValid ? "请输入正确的 11 位手机号" : "用于 H5 身份验证；请输入完整的 11 位手机号"}</small></label>
           <label><span>分公司确认人姓名</span><input value={form.confirmerName} onChange={(e) => update("confirmerName", e.target.value)} /></label>
           <label><span>分公司确认人电话</span><input inputMode="tel" maxLength={11} value={form.confirmerPhone} onChange={(e) => update("confirmerPhone", e.target.value.replace(/\D/g, ""))} /></label>
           {activityStarted && <label className="wide-field"><span>紧急修改原因 *</span><input value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="请填写本次改单原因，保存后写入操作日志" /></label>}
         </div>
-        <p className="drawer-form-note">客户类型在 Excel 导入时由 Sheet 自动确定；{activityStarted ? "活动已开始，本次手动调整会记录操作日志。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
+        <p className="drawer-form-note">{customerTypeMode === "UNSPECIFIED" ? "当前白名单不区分客户类型，H5 将直接验证手机号。" : "当前白名单按客户类型区分，综合客户进入 H5 后还需选择大区。"} {activityStarted ? "活动已开始，本次手动调整会记录操作日志。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
         <footer><div className="drawer-save-error">{saveError && <small className="field-error">{saveError}</small>}</div><button disabled={saving} onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave || saving} onClick={async () => {
           setSaving(true); setSaveError("");
           try {

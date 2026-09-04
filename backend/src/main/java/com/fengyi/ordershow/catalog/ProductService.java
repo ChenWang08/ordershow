@@ -47,14 +47,14 @@ public class ProductService {
     if (version == null) return List.of();
     String sql = """
         SELECT p.* FROM activity_product p
-        WHERE p.activity_id = ? AND p.data_version_id = ? AND p.customer_type = ? AND p.is_visible = TRUE
-          AND (? IS NULL OR ? = '' OR p.rebate_status = ?)
+        WHERE p.activity_id = ? AND p.data_version_id = ? AND (? = 'ALL' OR p.customer_type = ? OR p.customer_type = 'ALL') AND p.is_visible = TRUE
+          AND (? IS NULL OR ? = '' OR p.rebate_status = ? OR p.rebate_status = 'ALL')
           AND (? IS NULL OR ? = '' OR p.material_name LIKE CONCAT('%', ?, '%') OR p.material_code LIKE CONCAT('%', ?, '%'))
           AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id)
                OR EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id AND s.normalized_branch_name = ?))
         ORDER BY p.sort_no, p.id
         """;
-    return jdbc.query(sql, this::map, activity.id(), version, customer.customerType(), rebateStatus, rebateStatus, rebateStatus,
+    return jdbc.query(sql, this::map, activity.id(), version, customer.customerType(), customer.customerType(), rebateStatus, rebateStatus, rebateStatus,
         keyword, keyword, keyword, keyword, normalize(customer.branchName())).stream().map(this::withImages).toList();
   }
 
@@ -63,7 +63,7 @@ public class ProductService {
     if (version == null) return List.of();
     return jdbc.query("""
         SELECT p.* FROM activity_product p WHERE p.activity_id = ? AND p.data_version_id = ? AND p.is_visible = TRUE
-          AND (? IS NULL OR ? = '' OR p.customer_type = ?)
+          AND (? IS NULL OR ? = '' OR p.customer_type = ? OR p.customer_type = 'ALL')
           AND (? IS NULL OR ? = '' OR p.data_status = ?)
           AND (? IS NULL OR ? = '' OR p.material_name LIKE CONCAT('%', ?, '%') OR p.material_code LIKE CONCAT('%', ?, '%'))
         ORDER BY p.sort_no, p.id
@@ -87,8 +87,8 @@ public class ProductService {
             current.priceTier() == null ? null : current.priceTier().casePrice(),
             current.priceTier() == null ? null : current.priceTier().pricingMode());
     BigDecimal factor = patch.tonCaseFactorSet() ? patch.tonCaseFactor() : current.tonCaseFactor();
-    String customerType = value(patch.customerType(), current.customerType());
-    String rebateStatus = value(patch.rebateStatus(), current.rebateStatus());
+    String customerType = normalizeCustomerType(patch.customerType(), current.customerType());
+    String rebateStatus = normalizeRebateStatus(patch.rebateStatus(), current.rebateStatus());
     validateTypes(customerType, rebateStatus);
     boolean visible = patch.visible() == null ? current.visible() : patch.visible();
     boolean orderable = patch.orderable() == null ? current.orderable() : patch.orderable();
@@ -97,17 +97,17 @@ public class ProductService {
     }
     try {
       int changed = jdbc.update("""
-        UPDATE activity_product SET customer_type = ?, rebate_status = ?, business_key = ?, material_code = ?, material_name = ?, category_name = ?, product_line = ?, brand_name = ?,
+        UPDATE activity_product SET customer_type = ?, rebate_status = ?, business_key = ?, material_code = ?, material_name = ?, description = ?, category_name = ?, product_line = ?, brand_name = ?,
           variety_name = ?, specification = ?, case_pack = ?, bottle_price = ?, case_price = ?, ton_case_factor = ?,
           is_gift_box = ?, is_branch_customized = ?, is_visible = ?, is_orderable = ?, data_status = ?, lock_version = lock_version + 1
         WHERE id = ? AND activity_id = ? AND lock_version = ?
-        """, customerType, rebateStatus, businessKey(customerType, rebateStatus, choose(patch.materialCode(), current.materialCode()), name),
-        choose(patch.materialCode(), current.materialCode()), name, choose(patch.categoryName(), current.categoryName()),
+        """, customerType, rebateStatus, businessKey(customerType, rebateStatus, name),
+        choose(patch.materialCode(), current.materialCode()), name, choose(patch.description(), current.description()), choose(patch.categoryName(), current.categoryName()),
         choose(patch.productLine(), current.productLine()), choose(patch.brandName(), current.brandName()),
         choose(patch.varietyName(), current.varietyName()), choose(patch.specification(), current.specification()),
         choose(patch.casePack(), current.casePack()), patch.bottlePriceSet() ? patch.bottlePrice() : current.bottlePrice(),
         casePrice, factor, patch.giftBox() == null ? current.giftBox() : patch.giftBox(), !branchScopes.isEmpty(), visible, orderable,
-        incomplete(name, casePrice, factor, patch.materialCode() == null ? current.materialCode() : patch.materialCode(),
+        incomplete(name, casePrice, factor,
             patch.specification() == null ? current.specification() : patch.specification(),
             patch.casePack() == null ? current.casePack() : patch.casePack()) ? "INCOMPLETE" : "ACTIVE",
         productId, activityId, expectedVersion);
@@ -115,7 +115,7 @@ public class ProductService {
       replaceBranchScopes(productId, branchScopes);
       if (patch.priceTierSet()) replacePriceTier(productId, priceTier);
     } catch (DuplicateKeyException exception) {
-      throw DomainException.conflict("PRODUCT_EXISTS", "当前商品目录已存在相同物料代码或同名商品");
+      throw DomainException.conflict("PRODUCT_EXISTS", "当前商品目录已存在相同客户类型、返利类型和商品名称");
     }
     return product(activityId, productId);
   }
@@ -125,8 +125,8 @@ public class ProductService {
     var activity = activities.byId(activityId);
     if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(activity.status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后商品只读");
     if ("SCHEDULED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品已锁定，请先撤回发布");
-    String customerType = value(request.customerType(), "GENERAL");
-    String rebateStatus = value(request.rebateStatus(), "NOT_PARTICIPATING");
+    String customerType = normalizeCustomerType(request.customerType(), "ALL");
+    String rebateStatus = normalizeRebateStatus(request.rebateStatus(), "ALL");
     validateTypes(customerType, rebateStatus);
     String name = value(request.materialName(), "");
     if (name.isBlank()) throw DomainException.badRequest("PRODUCT_NAME_REQUIRED", "物料名称不能为空");
@@ -142,26 +142,26 @@ public class ProductService {
     String code = choose(request.materialCode(), null);
     try {
       jdbc.update("""
-          INSERT INTO activity_product(activity_id, customer_type, rebate_status, business_key, material_code, material_name,
+          INSERT INTO activity_product(activity_id, customer_type, rebate_status, business_key, material_code, material_name, description,
             category_name, product_line, brand_name, variety_name, specification, case_pack, bottle_price, case_price,
             ton_case_factor, is_gift_box, is_branch_customized, is_visible, is_orderable, sort_no, data_status,
             source_import_task_id, data_version_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             (SELECT COALESCE(MAX(p.sort_no), 0) + 1 FROM activity_product p WHERE p.activity_id = ? AND p.data_version_id = ?),
             ?, ?, ?)
-          """, activityId, customerType, rebateStatus, businessKey(customerType, rebateStatus, code, name), code, name,
+          """, activityId, customerType, rebateStatus, businessKey(customerType, rebateStatus, name), code, name, choose(request.description(), null),
           choose(request.categoryName(), null), choose(request.productLine(), null), choose(request.brandName(), null),
           choose(request.varietyName(), null), choose(request.specification(), null), choose(request.casePack(), null),
           request.bottlePrice(), request.casePrice(), request.tonCaseFactor(), Boolean.TRUE.equals(request.giftBox()), !branchScopes.isEmpty(), visible, orderable,
-          activityId, source.versionId(), incomplete(name, request.casePrice(), request.tonCaseFactor(), code,
+          activityId, source.versionId(), incomplete(name, request.casePrice(), request.tonCaseFactor(),
           request.specification(), request.casePack()) ? "INCOMPLETE" : "ACTIVE", source.taskId(), source.versionId());
       Long id = jdbc.queryForObject("SELECT id FROM activity_product WHERE activity_id = ? AND data_version_id = ? AND business_key = ?",
-          Long.class, activityId, source.versionId(), businessKey(customerType, rebateStatus, code, name));
+          Long.class, activityId, source.versionId(), businessKey(customerType, rebateStatus, name));
       if (id != null) replaceBranchScopes(id, branchScopes);
       if (id != null) replacePriceTier(id, priceTier);
       return product(activityId, id);
     } catch (DuplicateKeyException exception) {
-      throw DomainException.conflict("PRODUCT_EXISTS", "当前商品目录已存在相同物料代码或同名商品");
+      throw DomainException.conflict("PRODUCT_EXISTS", "当前商品目录已存在相同客户类型、返利类型和商品名称");
     }
   }
 
@@ -184,15 +184,15 @@ public class ProductService {
     requireImageWritable(activityId);
     ProductView product = product(activityId, productId);
     validateImage(file.getOriginalFilename(), file.getSize());
-    List<ProductView> targets = sameMaterialCodeProducts(activityId, product);
-    String materialCode = materialCodeKey(product.materialCode());
-    if (!materialCode.isBlank()) {
+    List<ProductView> targets = sameMaterialNameProducts(activityId, product);
+    String materialName = materialNameKey(product.materialName());
+    if (!materialName.isBlank()) {
       VersionSource source = currentSource(activityId);
       jdbc.update("""
           UPDATE product_image_review_candidate
           SET status = 'EXCLUDED', resolved_by = ?, resolved_at = UTC_TIMESTAMP(3)
-          WHERE activity_id = ? AND data_version_id = ? AND normalized_material_code = ? AND status = 'PENDING'
-          """, adminId, activityId, source.versionId(), materialCode);
+          WHERE activity_id = ? AND data_version_id = ? AND normalized_material_name = ? AND status = 'PENDING'
+          """, adminId, activityId, source.versionId(), materialName);
     }
     StorageService.StoredFile stored = storage.save(activityId, file, "PRODUCT_IMAGE", adminId);
     for (ProductView target : targets) {
@@ -224,21 +224,17 @@ public class ProductService {
     ProductView current = product(activityId, productId);
     int changed = jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE id = ? AND activity_product_id = ? AND deleted_at IS NULL", imageId, productId);
     if (changed != 1) throw DomainException.notFound("PRODUCT_IMAGE_NOT_FOUND", "商品图片不存在");
-    for (ProductView target : sameMaterialCodeProducts(activityId, current)) {
+    for (ProductView target : sameMaterialNameProducts(activityId, current)) {
       jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", target.id());
     }
   }
 
-  private List<ProductView> sameMaterialCodeProducts(long activityId, ProductView product) {
-    String code = materialCodeKey(product.materialCode());
-    if (code.isBlank()) return List.of(product);
+  private List<ProductView> sameMaterialNameProducts(long activityId, ProductView product) {
+    String name = materialNameKey(product.materialName());
+    if (name.isBlank()) return List.of(product);
     VersionSource source = currentSource(activityId);
-    List<ProductView> group = productsForVersion(activityId, source.versionId()).stream()
-        .filter(candidate -> materialCodeKey(candidate.materialCode()).equals(code)).toList();
-    if (group.stream().map(ProductView::materialName).map(ProductService::normalize).distinct().count() > 1) {
-      throw DomainException.conflict("PRODUCT_MATERIAL_NAME_CONFLICT", "同一物料代码存在不同商品名称，请先核对商品数据");
-    }
-    return group;
+    return productsForVersion(activityId, source.versionId()).stream()
+        .filter(candidate -> materialNameKey(candidate.materialName()).equals(name)).toList();
   }
 
   public List<ImageReviewView> pendingImageReviews(long activityId) {
@@ -247,7 +243,7 @@ public class ProductService {
         FROM product_image_review_candidate c
         JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'PRODUCT' AND b.current_version_id = c.data_version_id
         WHERE c.activity_id = ? AND c.status = 'PENDING'
-        ORDER BY c.normalized_material_code, c.id
+        ORDER BY c.normalized_material_name, c.id
         """, (rs, rowNum) -> new ImageReviewView(rs.getLong("id"), rs.getLong("stored_file_id"),
         "/api/v1/public/files/" + rs.getLong("stored_file_id"), rs.getString("archive_path"),
         rs.getString("material_code"), rs.getString("material_name"), rs.getString("status")), activityId);
@@ -258,15 +254,12 @@ public class ProductService {
     requireImageWritable(activityId);
     ImageReviewRow candidate = currentImageReview(activityId, candidateId);
     List<ProductView> targets = productsForVersion(activityId, candidate.versionId()).stream()
-        .filter(product -> materialCodeKey(product.materialCode()).equals(candidate.materialCodeKey())).toList();
-    if (targets.isEmpty()) throw DomainException.conflict("IMAGE_REVIEW_PRODUCT_MISSING", "当前商品版本中已不存在该物料代码");
-    if (targets.stream().map(ProductView::materialName).map(ProductService::normalize).distinct().count() > 1) {
-      throw DomainException.conflict("PRODUCT_MATERIAL_NAME_CONFLICT", "同一物料代码存在不同商品名称，请先核对商品数据");
-    }
+        .filter(product -> materialNameKey(product.materialName()).equals(candidate.materialNameKey())).toList();
+    if (targets.isEmpty()) throw DomainException.conflict("IMAGE_REVIEW_PRODUCT_MISSING", "当前商品版本中已不存在该商品名称");
     jdbc.update("""
         UPDATE product_image_review_candidate SET status = 'EXCLUDED', resolved_by = ?, resolved_at = UTC_TIMESTAMP(3)
-        WHERE data_version_id = ? AND (normalized_material_code = ? OR stored_file_id = ?) AND status = 'PENDING'
-        """, adminId, candidate.versionId(), candidate.materialCodeKey(), candidate.storedFileId());
+        WHERE data_version_id = ? AND (normalized_material_name = ? OR stored_file_id = ?) AND status = 'PENDING'
+        """, adminId, candidate.versionId(), candidate.materialNameKey(), candidate.storedFileId());
     jdbc.update("UPDATE product_image_review_candidate SET status = 'SELECTED' WHERE id = ?", candidateId);
     for (ProductView target : targets) {
       jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", target.id());
@@ -291,12 +284,12 @@ public class ProductService {
 
   private ImageReviewRow currentImageReview(long activityId, long candidateId) {
     List<ImageReviewRow> rows = jdbc.query("""
-        SELECT c.id, c.data_version_id, c.stored_file_id, c.normalized_material_code
+        SELECT c.id, c.data_version_id, c.stored_file_id, c.normalized_material_name
         FROM product_image_review_candidate c
         JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'PRODUCT' AND b.current_version_id = c.data_version_id
         WHERE c.activity_id = ? AND c.id = ? AND c.status = 'PENDING' FOR UPDATE
         """, (rs, rowNum) -> new ImageReviewRow(rs.getLong("id"), rs.getLong("data_version_id"),
-        rs.getLong("stored_file_id"), rs.getString("normalized_material_code")), activityId, candidateId);
+        rs.getLong("stored_file_id"), rs.getString("normalized_material_name")), activityId, candidateId);
     if (rows.size() != 1) throw DomainException.notFound("IMAGE_REVIEW_NOT_FOUND", "待确认图片不存在或已经处理");
     return rows.getFirst();
   }
@@ -359,8 +352,8 @@ public class ProductService {
         ImageCandidates match = decision == null && !explicitDecisionMode
             ? imageCandidates(entry.getName(), products) : new ImageCandidates(List.of(), false);
         List<ProductView> candidates = decision != null && "CONFIRMED".equals(decision.status())
-            ? products.stream().filter(product -> decision.targetMaterialCodes().stream()
-                .map(ProductService::materialCodeKey).anyMatch(code -> code.equals(materialCodeKey(product.materialCode())))).toList()
+            ? products.stream().filter(product -> decision.targetMaterialNames().stream()
+                .map(ProductService::materialNameKey).anyMatch(name -> name.equals(materialNameKey(product.materialName())))).toList()
             : match.products();
         String status;
         Long productId = null;
@@ -388,16 +381,21 @@ public class ProductService {
         }
         if (confirm && decision != null && "PENDING".equals(decision.status()) && versionId != null && importTaskId != null) {
           long storedId = storeZipImage(activityId, entry.getName(), content, digest, adminId);
-          for (String targetCode : decision.targetMaterialCodes().stream().map(ProductService::materialCodeKey).filter(code -> !code.isBlank()).distinct().toList()) {
-            String candidateMaterialName = products.stream().filter(product -> materialCodeKey(product.materialCode()).equals(targetCode))
+          for (String targetName : decision.targetMaterialNames().stream().map(ProductService::materialNameKey).filter(name -> !name.isBlank()).distinct().toList()) {
+            List<ProductView> targetProducts = products.stream().filter(product -> materialNameKey(product.materialName()).equals(targetName)).toList();
+            String candidateMaterialName = targetProducts.stream()
                 .map(ProductView::materialName).findFirst().orElse("");
+            String candidateMaterialCode = targetProducts.stream().map(ProductView::materialCode).filter(code -> code != null && !code.isBlank()).findFirst().orElse("");
             jdbc.update("""
                 INSERT INTO product_image_review_candidate(activity_id, data_version_id, import_task_id, stored_file_id,
-                  archive_path, material_code, normalized_material_code, material_name, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
-                ON DUPLICATE KEY UPDATE archive_path = VALUES(archive_path), material_name = VALUES(material_name), status = 'PENDING',
+                  archive_path, material_code, normalized_material_code, material_name, normalized_material_name, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING')
+                ON DUPLICATE KEY UPDATE archive_path = VALUES(archive_path), material_code = VALUES(material_code),
+                  normalized_material_code = VALUES(normalized_material_code), material_name = VALUES(material_name),
+                  normalized_material_name = VALUES(normalized_material_name), status = 'PENDING',
                   resolved_by = NULL, resolved_at = NULL
-                """, activityId, versionId, importTaskId, storedId, normalizeArchivePath(entry.getName()), targetCode, targetCode, candidateMaterialName);
+                """, activityId, versionId, importTaskId, storedId, normalizeArchivePath(entry.getName()), candidateMaterialCode,
+                materialCodeKey(candidateMaterialCode), candidateMaterialName, targetName);
           }
         }
         matches.add(new ZipMatch(entry.getName(), materialName, productId, status));
@@ -425,6 +423,10 @@ public class ProductService {
 
   private static String materialCodeKey(String value) {
     return value == null ? "" : value.replaceAll("\\s+", "").toLowerCase(Locale.CHINA);
+  }
+
+  private static String materialNameKey(String value) {
+    return imageMatchName(value);
   }
 
   private void ensurePrimaryImages(List<ProductView> products) {
@@ -625,14 +627,14 @@ public class ProductService {
         SELECT min_quantity, case_price, pricing_mode FROM activity_product_price_tier WHERE activity_product_id = ?
         """, (rs, rowNum) -> new PriceTierView(rs.getLong(1), rs.getBigDecimal(2), rs.getString(3)), product.id())
         .stream().findFirst().orElse(null);
-    return new ProductView(product.id(), product.materialCode(), product.materialName(), product.categoryName(), product.productLine(),
+    return new ProductView(product.id(), product.materialCode(), product.materialName(), product.description(), product.categoryName(), product.productLine(),
         product.brandName(), product.varietyName(), product.specification(), product.casePack(), product.bottlePrice(), product.casePrice(),
         product.tonCaseFactor(), product.customerType(), product.rebateStatus(), product.giftBox(), product.visible(), product.orderable(),
         product.dataStatus(), product.sortNo(), product.version(), images, branchScope, priceTier);
   }
 
   private ProductView map(ResultSet rs, int rowNum) throws SQLException {
-    return new ProductView(rs.getLong("id"), rs.getString("material_code"), rs.getString("material_name"),
+    return new ProductView(rs.getLong("id"), rs.getString("material_code"), rs.getString("material_name"), rs.getString("description"),
         rs.getString("category_name"), rs.getString("product_line"), rs.getString("brand_name"), rs.getString("variety_name"),
         rs.getString("specification"), rs.getString("case_pack"), rs.getBigDecimal("bottle_price"), rs.getBigDecimal("case_price"),
         rs.getBigDecimal("ton_case_factor"), rs.getString("customer_type"), rs.getString("rebate_status"),
@@ -707,39 +709,44 @@ public class ProductService {
     if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品图片已锁定，请先撤回发布");
   }
 
-  private static String normalize(String value) { return value == null ? "" : value.toLowerCase(Locale.CHINA).replaceAll("[\\s　_\\-（）()]+", ""); }
+  private static String normalize(String value) { return value == null ? "" : value.toLowerCase(Locale.CHINA).replaceAll("[\\s　_\\-（）()\\[\\]【】{}：:，,。·/\\\\]+", ""); }
   private static String value(String requested, String current) { return requested == null ? current : requested.trim(); }
   private static String choose(String requested, String current) { return requested == null ? current : requested.isBlank() ? null : requested.trim(); }
-  private static String businessKey(String customerType, String rebateStatus, String code, String name) {
-    String identity = code == null || code.isBlank() ? normalize(name) : code.trim().toLowerCase(Locale.CHINA);
-    return customerType + "|" + rebateStatus + "|" + identity;
+  private static String businessKey(String customerType, String rebateStatus, String name) {
+    return customerType + "|" + rebateStatus + "|" + normalize(name);
   }
   private static void validateTypes(String customerType, String rebateStatus) {
-    if (!Set.of("GENERAL", "SPECIAL").contains(customerType)) throw DomainException.badRequest("PRODUCT_CUSTOMER_TYPE_INVALID", "商品客户类型不正确");
-    if (!Set.of("PARTICIPATING", "NOT_PARTICIPATING").contains(rebateStatus)) throw DomainException.badRequest("PRODUCT_REBATE_INVALID", "商品返利类型不正确");
+    if (!Set.of("GENERAL", "SPECIAL", "ALL").contains(customerType)) throw DomainException.badRequest("PRODUCT_CUSTOMER_TYPE_INVALID", "商品客户类型不正确");
+    if (!Set.of("PARTICIPATING", "NOT_PARTICIPATING", "ALL").contains(rebateStatus)) throw DomainException.badRequest("PRODUCT_REBATE_INVALID", "商品返利类型不正确");
   }
-  private static boolean incomplete(String name, BigDecimal price, BigDecimal factor, String code, String spec, String pack) { return name == null || name.isBlank() || price == null || factor == null || code == null || code.isBlank() || spec == null || spec.isBlank() || pack == null || pack.isBlank(); }
+  private static String normalizeCustomerType(String requested, String current) {
+    return requested == null || requested.isBlank() ? current : requested.trim();
+  }
+  private static String normalizeRebateStatus(String requested, String current) {
+    return requested == null || requested.isBlank() ? current : requested.trim();
+  }
+  private static boolean incomplete(String name, BigDecimal price, BigDecimal factor, String spec, String pack) { return name == null || name.isBlank() || price == null || factor == null || spec == null || spec.isBlank() || pack == null || pack.isBlank(); }
 
-  public record ProductView(long id, String materialCode, String materialName, String categoryName, String productLine,
+  public record ProductView(long id, String materialCode, String materialName, String description, String categoryName, String productLine,
       String brandName, String varietyName, String specification, String casePack, BigDecimal bottlePrice, BigDecimal casePrice,
       BigDecimal tonCaseFactor, String customerType, String rebateStatus, boolean giftBox, boolean visible, boolean orderable,
       String dataStatus, int sortNo, int version, List<ImageView> images, List<String> branchScope, PriceTierView priceTier) {}
   public record PriceTierView(long minQuantity, BigDecimal casePrice, String pricingMode) {}
   public record ImageView(long id, long fileId, String url, boolean primary, int sortNo, String sourceType, String matchStatus) {}
-  public record ProductPatch(String customerType, String rebateStatus, String materialCode, String materialName, String categoryName, String productLine, String brandName,
+  public record ProductPatch(String customerType, String rebateStatus, String materialCode, String materialName, String description, String categoryName, String productLine, String brandName,
       String varietyName, String specification, String casePack, BigDecimal bottlePrice, boolean bottlePriceSet,
       BigDecimal casePrice, boolean casePriceSet, BigDecimal tonCaseFactor, boolean tonCaseFactorSet,
       Boolean giftBox, Boolean visible, Boolean orderable, String branchScope, String reason,
       Long priceTierMinQuantity, BigDecimal priceTierCasePrice, String priceTierPricingMode, boolean priceTierSet) {}
-  public record ProductCreate(String customerType, String rebateStatus, String materialCode, String materialName,
+  public record ProductCreate(String customerType, String rebateStatus, String materialCode, String materialName, String description,
       String categoryName, String productLine, String brandName, String varietyName, String specification, String casePack,
       BigDecimal bottlePrice, BigDecimal casePrice, BigDecimal tonCaseFactor, Boolean giftBox, Boolean visible, Boolean orderable,
       String branchScope, String reason, Long priceTierMinQuantity, BigDecimal priceTierCasePrice, String priceTierPricingMode) {}
   public record ZipMatch(String filename, String materialName, Long productId, String status) {}
   public record ZipPreview(int imageCount, int matchedCount, int ambiguousCount, int unmatchedCount, List<ZipMatch> matches, boolean committed) {}
-  public record ZipDecision(String entryPath, String status, List<String> targetMaterialCodes) {}
+  public record ZipDecision(String entryPath, String status, List<String> targetMaterialNames) {}
   public record ImageReviewView(long id, long fileId, String url, String archivePath, String materialCode, String materialName, String status) {}
-  private record ImageReviewRow(long id, long versionId, long storedFileId, String materialCodeKey) {}
+  private record ImageReviewRow(long id, long versionId, long storedFileId, String materialNameKey) {}
   private record ImageCandidates(List<ProductView> products, boolean ambiguous) {}
   private record ImageSignature(Set<String> volumes, Set<String> packCounts, String brand, String category, String variety, String grade,
                                 Set<String> containerMaterial, Set<String> containerShape, Set<String> outerPackaging) {}

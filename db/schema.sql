@@ -296,11 +296,13 @@ CREATE TABLE customer (
   customer_type VARCHAR(16) NOT NULL,
   dealer_full_name VARCHAR(255) NOT NULL,
   normalized_dealer_full_name VARCHAR(255) NOT NULL,
+  branch_name VARCHAR(200) NOT NULL DEFAULT '',
+  normalized_branch_name VARCHAR(200) NOT NULL DEFAULT '',
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
-  UNIQUE KEY uk_customer_type_full_name (customer_type, normalized_dealer_full_name),
-  CONSTRAINT ck_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL'))
+  UNIQUE KEY uk_customer_type_full_name_branch (customer_type, normalized_dealer_full_name, normalized_branch_name),
+  CONSTRAINT ck_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL', 'ALL'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE activity_customer (
@@ -313,6 +315,7 @@ CREATE TABLE activity_customer (
   normalized_branch_name VARCHAR(200) NULL,
   dealer_short_name VARCHAR(200) NULL,
   dealer_full_name VARCHAR(255) NOT NULL,
+  normalized_dealer_full_name VARCHAR(255) NOT NULL DEFAULT '',
   dealer_category VARCHAR(100) NULL,
   contact_name VARCHAR(100) NULL,
   phone_ciphertext VARBINARY(512) NOT NULL,
@@ -332,6 +335,7 @@ CREATE TABLE activity_customer (
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   UNIQUE KEY uk_activity_customer_identity (activity_id, data_version_id, customer_id),
+  UNIQUE KEY uk_activity_customer_name_branch (activity_id, data_version_id, customer_type, normalized_dealer_full_name, normalized_branch_name),
   UNIQUE KEY uk_activity_customer_phone (activity_id, data_version_id, customer_type, phone_lookup_hash),
   KEY idx_activity_customer_filter (activity_id, customer_type, is_active, region_code, branch_name),
   KEY idx_activity_customer_dealer_name (activity_id, dealer_full_name),
@@ -339,7 +343,7 @@ CREATE TABLE activity_customer (
   CONSTRAINT fk_activity_customer_customer FOREIGN KEY (customer_id) REFERENCES customer (id),
   CONSTRAINT fk_activity_customer_import FOREIGN KEY (source_import_task_id) REFERENCES import_task (id),
   CONSTRAINT fk_activity_customer_version FOREIGN KEY (data_version_id) REFERENCES import_publish_version (id),
-  CONSTRAINT ck_activity_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL'))
+  CONSTRAINT ck_activity_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL', 'ALL'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE h5_session (
@@ -403,6 +407,7 @@ CREATE TABLE activity_product (
   business_key VARCHAR(320) NOT NULL,
   material_code VARCHAR(100) NULL,
   material_name VARCHAR(255) NOT NULL,
+  description TEXT NULL,
   category_name VARCHAR(200) NULL,
   product_line VARCHAR(200) NULL,
   brand_name VARCHAR(100) NULL,
@@ -431,8 +436,8 @@ CREATE TABLE activity_product (
   CONSTRAINT fk_product_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_product_import FOREIGN KEY (source_import_task_id) REFERENCES import_task (id),
   CONSTRAINT fk_product_version FOREIGN KEY (data_version_id) REFERENCES import_publish_version (id),
-  CONSTRAINT ck_product_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
-  CONSTRAINT ck_product_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING')),
+  CONSTRAINT ck_product_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL', 'ALL')),
+  CONSTRAINT ck_product_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING', 'ALL')),
   CONSTRAINT ck_product_status CHECK (data_status IN ('ACTIVE', 'INCOMPLETE', 'INACTIVE')),
   CONSTRAINT ck_product_price CHECK ((case_price IS NULL OR case_price >= 0) AND (ton_case_factor IS NULL OR ton_case_factor > 0)),
   CONSTRAINT ck_product_orderable CHECK (is_orderable = FALSE OR (is_visible = TRUE AND case_price IS NOT NULL AND case_price > 0))
@@ -485,6 +490,32 @@ CREATE TABLE product_image (
   CONSTRAINT ck_product_image_match CHECK (match_status IN ('MATCHED', 'PENDING', 'UNMATCHED', 'CONFIRMED'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE product_image_review_candidate (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  activity_id BIGINT UNSIGNED NOT NULL,
+  data_version_id BIGINT UNSIGNED NOT NULL,
+  import_task_id BIGINT UNSIGNED NOT NULL,
+  stored_file_id BIGINT UNSIGNED NOT NULL,
+  archive_path VARCHAR(1000) NOT NULL,
+  material_code VARCHAR(128) NOT NULL,
+  normalized_material_code VARCHAR(128) NOT NULL,
+  material_name VARCHAR(500) NOT NULL,
+  normalized_material_name VARCHAR(512) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+  resolved_by BIGINT UNSIGNED NULL,
+  resolved_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_image_review_version_file_name (data_version_id, stored_file_id, normalized_material_name),
+  KEY idx_image_review_activity_version_status (activity_id, data_version_id, status, normalized_material_name),
+  CONSTRAINT fk_image_review_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
+  CONSTRAINT fk_image_review_version FOREIGN KEY (data_version_id) REFERENCES import_publish_version (id),
+  CONSTRAINT fk_image_review_task FOREIGN KEY (import_task_id) REFERENCES import_task (id),
+  CONSTRAINT fk_image_review_file FOREIGN KEY (stored_file_id) REFERENCES stored_file (id),
+  CONSTRAINT fk_image_review_resolver FOREIGN KEY (resolved_by) REFERENCES admin_user (id),
+  CONSTRAINT ck_image_review_status CHECK (status IN ('PENDING', 'SELECTED', 'EXCLUDED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
 CREATE TABLE customer_order (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   activity_id BIGINT UNSIGNED NOT NULL,
@@ -517,7 +548,7 @@ CREATE TABLE customer_order (
   CONSTRAINT fk_order_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_order_customer FOREIGN KEY (activity_customer_id) REFERENCES activity_customer (id),
   CONSTRAINT ck_order_status CHECK (status IN ('SUBMITTED', 'WITHDRAWN')),
-  CONSTRAINT ck_order_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
+  CONSTRAINT ck_order_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL', 'ALL')),
   CONSTRAINT ck_order_source CHECK (last_modified_source IN ('H5', 'SYSTEM')),
   CONSTRAINT ck_order_totals CHECK (total_quantity > 0 AND (total_tons IS NULL OR total_tons >= 0) AND total_amount >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -556,7 +587,7 @@ CREATE TABLE order_item (
   UNIQUE KEY uk_order_item_line (order_id, line_no),
   CONSTRAINT fk_order_item_order FOREIGN KEY (order_id) REFERENCES customer_order (id),
   CONSTRAINT fk_order_item_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
-  CONSTRAINT ck_order_item_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING')),
+  CONSTRAINT ck_order_item_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING', 'ALL')),
   CONSTRAINT ck_order_item_values CHECK (quantity > 0 AND case_price > 0 AND line_amount >= 0 AND (ton_case_factor IS NULL OR ton_case_factor > 0) AND (line_tons IS NULL OR line_tons >= 0)),
   CONSTRAINT ck_order_item_applied_tier CHECK (applied_tier_min_quantity IS NULL OR applied_tier_min_quantity >= 2),
   CONSTRAINT ck_order_item_pricing_mode CHECK (pricing_mode IS NULL OR pricing_mode IN ('WHOLE_ORDER', 'INCREMENTAL'))
@@ -585,7 +616,7 @@ CREATE TABLE order_version (
   KEY idx_order_version_activity_time (activity_id, submitted_at),
   CONSTRAINT fk_order_version_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_order_version_order FOREIGN KEY (order_id) REFERENCES customer_order (id),
-  CONSTRAINT ck_order_version_customer CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
+  CONSTRAINT ck_order_version_customer CHECK (customer_type IN ('GENERAL', 'SPECIAL', 'ALL')),
   CONSTRAINT ck_order_version_source CHECK (submitted_source IN ('H5')),
   CONSTRAINT ck_order_version_totals CHECK (total_quantity > 0 AND (total_tons IS NULL OR total_tons >= 0) AND total_amount >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -625,8 +656,8 @@ CREATE TABLE order_version_item (
   KEY idx_order_version_item_product_line (order_version_id, product_line),
   CONSTRAINT fk_version_item_version FOREIGN KEY (order_version_id) REFERENCES order_version (id),
   CONSTRAINT fk_version_item_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
-  CONSTRAINT ck_version_item_customer CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
-  CONSTRAINT ck_version_item_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING')),
+  CONSTRAINT ck_version_item_customer CHECK (customer_type IN ('GENERAL', 'SPECIAL', 'ALL')),
+  CONSTRAINT ck_version_item_rebate CHECK (rebate_status IN ('PARTICIPATING', 'NOT_PARTICIPATING', 'ALL')),
   CONSTRAINT ck_version_item_values CHECK (quantity > 0 AND case_price > 0 AND line_amount >= 0 AND (ton_case_factor IS NULL OR ton_case_factor > 0) AND (line_tons IS NULL OR line_tons >= 0)),
   CONSTRAINT ck_order_version_item_applied_tier CHECK (applied_tier_min_quantity IS NULL OR applied_tier_min_quantity >= 2),
   CONSTRAINT ck_order_version_item_pricing_mode CHECK (pricing_mode IS NULL OR pricing_mode IN ('WHOLE_ORDER', 'INCREMENTAL'))
@@ -695,7 +726,7 @@ CREATE TABLE visit_event (
   CONSTRAINT fk_visit_event_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_visit_event_customer FOREIGN KEY (activity_customer_id) REFERENCES activity_customer (id),
   CONSTRAINT ck_visit_event_type CHECK (event_type IN ('H5_OPEN', 'PHONE_VERIFY', 'PRODUCT_VIEW', 'ORDER_SUBMIT_ATTEMPT', 'ORDER_SUBMIT_SUCCESS', 'ORDER_SUBMIT_FAILURE')),
-  CONSTRAINT ck_visit_event_customer_type CHECK (customer_type IS NULL OR customer_type IN ('GENERAL', 'SPECIAL'))
+  CONSTRAINT ck_visit_event_customer_type CHECK (customer_type IS NULL OR customer_type IN ('GENERAL', 'SPECIAL', 'ALL'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE lottery_rule (
@@ -808,7 +839,7 @@ CREATE TABLE lottery_candidate_snapshot (
   CONSTRAINT fk_lottery_candidate_attempt FOREIGN KEY (draw_attempt_id) REFERENCES lottery_draw_attempt (id),
   CONSTRAINT fk_lottery_candidate_customer FOREIGN KEY (activity_customer_id) REFERENCES activity_customer (id),
   CONSTRAINT fk_lottery_candidate_order FOREIGN KEY (qualifying_order_id) REFERENCES customer_order (id),
-  CONSTRAINT ck_lottery_candidate_customer CHECK (customer_type IN ('GENERAL', 'SPECIAL')),
+  CONSTRAINT ck_lottery_candidate_customer CHECK (customer_type IN ('GENERAL', 'SPECIAL', 'ALL')),
   CONSTRAINT ck_lottery_candidate_source CHECK (qualification_source IN ('ALL_CUSTOMERS', 'ATTENDEES', 'VALID_ORDERS'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 

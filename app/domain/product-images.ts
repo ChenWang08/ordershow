@@ -1,7 +1,6 @@
 import JSZip from "jszip";
 import {
   createImportRowId,
-  productMaterialCodeKey,
   type ProductImageAsset,
   type ProductImageRelationStatus,
   type ProductImageStats,
@@ -24,7 +23,9 @@ export function productImagePathCandidates(path: string) {
 }
 
 export function normalizeProductImageName(value: string) {
-  return productImageBaseName(value)
+  // 商品名称本身可能包含 `/`（例如“品牌/规格”），不能按图片路径取 basename，
+  // 否则会丢掉 `/` 前的品牌和品种，导致同规格的不同商品被归成同一个名称。
+  return String(value ?? "")
     .replace(productImageExtensions, "")
     .replace(/^20\d{6,8}/, "")
     .replace(/[-_](?:o|ok)$/i, "")
@@ -158,12 +159,12 @@ export function matchProductImages(rows: ProductImportRow[], assets: ProductImag
     } satisfies ProductImageStats };
   }
 
-  const groupsByCode = new Map<string, ProductImportRow[]>();
+  const groupsByName = new Map<string, ProductImportRow[]>();
   rows.forEach((row) => {
-    const code = productMaterialCodeKey(row.materialCode);
-    if (code) groupsByCode.set(code, [...(groupsByCode.get(code) ?? []), row]);
+    const name = normalizeProductImageName(row.materialName);
+    if (name) groupsByName.set(name, [...(groupsByName.get(name) ?? []), row]);
   });
-  const groups = [...groupsByCode.values()];
+  const groups = [...groupsByName.values()];
   const proposedByRow = new Map<string, Array<{ asset: ProductImageAsset; autoConfirmed: boolean }>>();
   const baseAssets = assets.map((asset) => {
     const names = asset.matchingNames?.length ? asset.matchingNames : [asset.fileName];
@@ -188,7 +189,7 @@ export function matchProductImages(rows: ProductImportRow[], assets: ProductImag
   const nextRows = rows.map((row) => {
     const manualImage = row.images?.find((asset) => asset.source === "manual");
     const proposed = [...new Map((proposedByRow.get(row.id) ?? []).map((item) => [item.asset.id, item])).values()];
-    // 一个物料代码只能有一张图；同一代码命中多图时全部降级为候选，必须人工选择一张。
+    // 一个商品名称只能有一张图；同一名称命中多图时全部降级为候选，必须人工选择一张。
     const images = manualImage ? [{ ...manualImage, relationStatus: "CONFIRMED" as const }]
       : proposed.map(({ asset, autoConfirmed }) => ({
         ...asset,
@@ -218,7 +219,7 @@ export async function parseProductImageZip(file: File) {
   const assets = await Promise.all(entries.map(async (entry, index) => {
     const blob = await entry.async("blob");
     const matchingNames = productImagePathCandidates(entry.name);
-    return { id: `product-image-${Date.now()}-${index}`, fileName: productImageBaseName(entry.name), archivePath: entry.name.replace(/\\/g, "/"), url: URL.createObjectURL(blob), normalizedName: normalizeProductImageName(matchingNames[0] ?? entry.name), matchingNames, source: "zip" } satisfies ProductImageAsset;
+    return { id: `product-image-${Date.now()}-${index}`, fileName: productImageBaseName(entry.name), archivePath: entry.name.replace(/\\/g, "/"), url: URL.createObjectURL(blob), normalizedName: normalizeProductImageName(matchingNames[0] ?? productImageBaseName(entry.name)), matchingNames, source: "zip" } satisfies ProductImageAsset;
   }));
   return assets;
 }

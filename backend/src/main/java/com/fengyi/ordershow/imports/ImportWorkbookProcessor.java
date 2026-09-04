@@ -10,14 +10,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
@@ -30,15 +28,6 @@ import org.springframework.stereotype.Component;
 
 @Component
 final class ImportWorkbookProcessor {
-  private static final List<SheetConfig> PRODUCT_SHEETS = List.of(
-      new SheetConfig("综合参与返利", "GENERAL", "PARTICIPATING"),
-      new SheetConfig("综合不参与返利", "GENERAL", "NOT_PARTICIPATING"),
-      new SheetConfig("特渠参与返利", "SPECIAL", "PARTICIPATING"),
-      new SheetConfig("特渠不参与返利", "SPECIAL", "NOT_PARTICIPATING"));
-  private static final List<SheetConfig> WHITELIST_SHEETS = List.of(
-      new SheetConfig("综合客户白名单", "GENERAL", null),
-      new SheetConfig("特渠客户白名单", "SPECIAL", null));
-
   private final JdbcTemplate jdbc;
   private final CryptoService crypto;
   private final ObjectMapper json;
@@ -65,26 +54,30 @@ final class ImportWorkbookProcessor {
 
     Map<String, Integer> whitelistPhones = new HashMap<>();
     Map<String, Integer> whitelistNames = new HashMap<>();
+    boolean whitelistHasAll = false;
+    boolean whitelistHasTyped = false;
     if ("WHITELIST".equals(importType)) {
       for (ReviewRow row : rows) {
         if (row.deleted()) continue;
         String phone = text(row.sensitive().get("dealerPhone"));
-        if (!phone.isBlank()) whitelistPhones.merge(text(row.data().get("customerType")) + "|" + phone, 1, Integer::sum);
+        String customerType = text(row.data().get("customerType"));
+        if ("ALL".equals(customerType)) whitelistHasAll = true;
+        else if ("GENERAL".equals(customerType) || "SPECIAL".equals(customerType)) whitelistHasTyped = true;
+        if (!phone.isBlank()) whitelistPhones.merge(customerType + "|" + phone, 1, Integer::sum);
         String name = normalize(text(row.data().get("dealerFullName")));
-        if (!name.isBlank()) whitelistNames.merge(text(row.data().get("customerType")) + "|" + name, 1, Integer::sum);
+        String branch = normalize(text(row.data().get("branchName")));
+        if (!name.isBlank()) whitelistNames.merge(customerType + "|" + name + "|" + branch, 1, Integer::sum);
       }
     }
-    Map<String, Integer> productCodes = new HashMap<>();
-    Map<String, Set<String>> productNameCodes = new HashMap<>();
+    boolean whitelistTypeMixed = whitelistHasAll && whitelistHasTyped;
+    Map<String, Integer> productNameCounts = new HashMap<>();
     if ("PRODUCT".equals(importType)) {
       for (ReviewRow row : rows) {
         if (row.deleted()) continue;
-        productCodes.merge(productMatchKey(row.data()), 1, Integer::sum);
-        productNameCodes.computeIfAbsent(productNameMatchKey(row.data()), ignored -> new HashSet<>())
-            .add(normalize(text(row.data().get("materialCode"))));
+        String nameKey = productNameMatchKey(row.data());
+        if (!nameKey.endsWith(":")) productNameCounts.merge(nameKey, 1, Integer::sum);
       }
     }
-    Map<String, String> primaryProductNameCode = new HashMap<>();
 
     jdbc.update("UPDATE import_error SET resolved_at = UTC_TIMESTAMP(3) WHERE import_task_id = ? AND resolved_at IS NULL", taskId);
     int warnings = 0;
@@ -97,23 +90,25 @@ final class ImportWorkbookProcessor {
       if (!row.deleted()) {
         if ("PRODUCT".equals(importType)) {
           rowKey = productKey(row.data());
-          String code = normalize(text(row.data().get("materialCode")));
           String nameKey = productNameMatchKey(row.data());
-          String primaryCode = primaryProductNameCode.computeIfAbsent(nameKey, ignored -> code);
-          boolean repeatedCode = productCodes.getOrDefault(productMatchKey(row.data()), 0) > 1;
-          boolean possibleDuplicate = !repeatedCode && productNameCodes.getOrDefault(nameKey, Set.of()).size() > 1
-              && !Objects.equals(primaryCode, code) && !bool(row.data().get("duplicateConfirmed"));
+          boolean duplicateName = !nameKey.endsWith(":") && productNameCounts.getOrDefault(nameKey, 0) > 1;
+          boolean invalidCustomerType = bool(row.data().get("customerTypeInvalid"));
+          boolean invalidRebateStatus = bool(row.data().get("rebateStatusInvalid"));
           if (text(row.data().get("materialName")).isBlank()) {
             validation = "BLOCKED"; blocking++;
             issue(taskId, "BLOCKING", "MATERIAL_NAME_REQUIRED", row.sheet(), row.rowNo(), "materialName", null, "物料名称不能为空");
-          } else if (repeatedCode) {
+          } else if (invalidCustomerType) {
+            validation = "BLOCKED"; blocking++;
+            issue(taskId, "BLOCKING", "PRODUCT_CUSTOMER_TYPE_INVALID", row.sheet(), row.rowNo(), "customerType", null,
+                "客户类型只允许“综合”“特渠”或空");
+          } else if (invalidRebateStatus) {
+            validation = "BLOCKED"; blocking++;
+            issue(taskId, "BLOCKING", "PRODUCT_REBATE_INVALID", row.sheet(), row.rowNo(), "rebateStatus", null,
+                "是否返利只允许“是”“否”或空");
+          } else if (duplicateName) {
             validation = "BLOCKED"; diffType = "PENDING_CONFIRMATION"; blocking++;
-            issue(taskId, "BLOCKING", "PRODUCT_CODE_MULTIPLE_MATCH", row.sheet(), row.rowNo(), "materialCode", code,
-                "同一客户通道和返利类型下物料代码重复，且商品信息存在冲突；请编辑或删除重复行");
-          } else if (possibleDuplicate) {
-            validation = "BLOCKED"; diffType = "POSSIBLE_DUPLICATE"; blocking++;
-            issue(taskId, "BLOCKING", "PRODUCT_NAME_POSSIBLE_DUPLICATE", row.sheet(), row.rowNo(), "materialName",
-                text(row.data().get("materialName")), "商品名称相同但物料代码不同；请确认后保留或删除");
+            issue(taskId, "BLOCKING", "PRODUCT_NAME_DUPLICATE", row.sheet(), row.rowNo(), "materialName",
+                text(row.data().get("materialName")), "同一客户类型、同一返利类型下商品名称重复，请编辑或删除重复行");
           } else if (priceTierError(row.data()) != null) {
             validation = "BLOCKED"; blocking++;
             issue(taskId, "BLOCKING", "PRODUCT_PRICE_TIER_INVALID", row.sheet(), row.rowNo(), "priceTier",
@@ -125,16 +120,21 @@ final class ImportWorkbookProcessor {
           }
         } else if ("WHITELIST".equals(importType)) {
           String phone = text(row.sensitive().get("dealerPhone"));
+          String customerType = text(row.data().get("customerType"));
+          boolean invalidCustomerType = bool(row.data().get("customerTypeInvalid")) || !Set.of("GENERAL", "SPECIAL", "ALL").contains(customerType);
           boolean invalid = !phone.matches("1\\d{10}") || text(row.data().get("dealerFullName")).isBlank();
-          boolean duplicatePhone = !phone.isBlank() && whitelistPhones.getOrDefault(text(row.data().get("customerType")) + "|" + phone, 0) > 1;
-          boolean duplicateName = whitelistNames.getOrDefault(text(row.data().get("customerType")) + "|" + normalize(text(row.data().get("dealerFullName"))), 0) > 1;
-          if (invalid || duplicatePhone || duplicateName) {
+          boolean duplicatePhone = !phone.isBlank() && whitelistPhones.getOrDefault(customerType + "|" + phone, 0) > 1;
+          boolean duplicateName = whitelistNames.getOrDefault(customerType + "|" + normalize(text(row.data().get("dealerFullName"))) + "|" + normalize(text(row.data().get("branchName"))), 0) > 1;
+          if (invalidCustomerType || whitelistTypeMixed || invalid || duplicatePhone || duplicateName) {
             validation = "BLOCKED"; blocking++;
             if (duplicateName) diffType = "PENDING_CONFIRMATION";
-            String code = duplicateName ? "DUPLICATE_DEALER_NAME" : duplicatePhone ? "DUPLICATE_PHONE" : "WHITELIST_ROW_INVALID";
-            String message = duplicateName ? "同一客户类型下经销商全称重复；请核实后编辑或删除重复行"
-                : duplicatePhone ? "同一客户通道内手机号重复" : "经销商全称或手机号无效";
-            issue(taskId, "BLOCKING", code, row.sheet(), row.rowNo(), invalid ? "dealerPhone" : duplicateName ? "dealerFullName" : null,
+            String code = whitelistTypeMixed ? "WHITELIST_CUSTOMER_TYPE_MIXED" : invalidCustomerType ? "WHITELIST_CUSTOMER_TYPE_INVALID"
+                : duplicateName ? "DUPLICATE_DEALER_NAME" : duplicatePhone ? "DUPLICATE_PHONE" : "WHITELIST_ROW_INVALID";
+            String message = whitelistTypeMixed ? "客户类型不能部分填写、部分为空；请保证整张表全部填写或全部留空"
+                : invalidCustomerType ? "客户类型只允许“综合客户”“特渠专业客户”或空"
+                : duplicateName ? "同一客户类型、同一分公司下经销商全称重复；请核实后编辑或删除重复行"
+                : duplicatePhone ? "同一客户类型下手机号重复；不同客户类型可以使用相同手机号" : "经销商全称或手机号无效";
+            issue(taskId, "BLOCKING", code, row.sheet(), row.rowNo(), whitelistTypeMixed || invalidCustomerType ? "customerType" : invalid ? "dealerPhone" : duplicateName ? "dealerFullName" : null,
                 invalid || duplicatePhone ? CryptoService.maskPhone(phone) : text(row.data().get("dealerFullName")), message);
           }
         } else if ("ATTENDANCE".equals(importType)) {
@@ -173,69 +173,80 @@ final class ImportWorkbookProcessor {
   }
 
   private ParseSummary parseProducts(long taskId, Workbook workbook) {
-    List<String> headers = List.of("产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品");
+    List<String> headers = List.of("客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明");
     List<ParsedProductRow> parsed = new ArrayList<>();
-    for (SheetConfig config : PRODUCT_SHEETS) {
-      Sheet sheet = workbook.getSheet(config.name());
-      if (sheet == null) throw DomainException.unprocessable("PRODUCT_SHEET_MISSING", "缺少必要 Sheet：" + config.name());
-      int headerRow = findHeader(sheet, "物料名称", 20);
-      Map<String, Integer> indexes = indexes(sheet.getRow(headerRow), headers);
-      requireHeaders(config.name(), indexes, headers);
-      for (int rowNo = headerRow + 1; rowNo <= sheet.getLastRowNum(); rowNo++) {
-        Row row = sheet.getRow(rowNo);
-        if (blank(row)) continue;
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("customerType", config.customerType());
-        data.put("rebateStatus", config.rebateStatus());
-        data.put("categoryName", cell(row, indexes.get("产品大类")));
-        data.put("productLine", cell(row, indexes.get("产品线")));
-        data.put("materialCode", cell(row, indexes.get("物料代码")));
-        data.put("materialName", cell(row, indexes.get("物料名称")));
-        data.put("brandName", cell(row, indexes.get("品牌")));
-        data.put("varietyName", cell(row, indexes.get("品种")));
-        data.put("specification", cell(row, indexes.get("规格")));
-        data.put("casePack", cell(row, indexes.get("箱规")));
-        data.put("bottlePrice", decimalText(cell(row, indexes.get("元/瓶"))));
-        data.put("casePrice", decimalText(cell(row, indexes.get("元/箱"))));
-        data.put("tonCaseFactor", positiveDecimalText(cell(row, indexes.get("吨箱转换系数"))));
-        data.put("giftBox", "是".equals(cell(row, indexes.get("是否为标品礼盒"))));
-        data.put("branchScope", cell(row, indexes.get("分公司定制品")));
-        parsed.add(new ParsedProductRow(config.name(), rowNo + 1, data));
-      }
+    List<Sheet> nonEmptySheets = new ArrayList<>();
+    for (int index = 0; index < workbook.getNumberOfSheets(); index++) {
+      Sheet candidate = workbook.getSheetAt(index);
+      if (hasData(candidate)) nonEmptySheets.add(candidate);
     }
+    if (nonEmptySheets.isEmpty()) throw DomainException.unprocessable("PRODUCT_SHEET_EMPTY", "商品 Excel 中没有找到非空 Sheet");
+    if (nonEmptySheets.size() > 1) {
+      throw DomainException.unprocessable("PRODUCT_SHEET_COUNT_INVALID", "商品 Excel 只允许一个非空 Sheet，当前发现：" +
+          nonEmptySheets.stream().map(Sheet::getSheetName).collect(Collectors.joining("、")));
+    }
+    Sheet sheet = nonEmptySheets.getFirst();
+    int headerRow = findHeader(sheet, "物料名称", 30);
+    Map<String, Integer> indexes = indexes(sheet.getRow(headerRow), headers);
+    requireHeaders(sheet.getSheetName(), indexes, headers);
+    for (int rowNo = headerRow + 1; rowNo <= Math.min(sheet.getLastRowNum(), headerRow + 20_000); rowNo++) {
+      Row row = sheet.getRow(rowNo);
+      if (blank(row)) continue;
+      String customerTypeRaw = cell(row, indexes.get("客户类型"));
+      String rebateRaw = cell(row, indexes.get("是否返利"));
+      String customerType = productCustomerType(customerTypeRaw);
+      String rebateStatus = productRebateStatus(rebateRaw);
+      Map<String, Object> data = new LinkedHashMap<>();
+      data.put("customerType", customerType);
+      data.put("rebateStatus", rebateStatus);
+      data.put("customerTypeInvalid", !customerTypeRaw.isBlank() && "ALL".equals(customerType));
+      data.put("rebateStatusInvalid", !rebateRaw.isBlank() && "ALL".equals(rebateStatus));
+      data.put("categoryName", cell(row, indexes.get("产品大类")));
+      data.put("productLine", cell(row, indexes.get("产品线")));
+      data.put("materialCode", cell(row, indexes.get("物料代码")));
+      data.put("materialName", cell(row, indexes.get("物料名称")));
+      data.put("description", cell(row, indexes.get("产品说明")));
+      data.put("brandName", cell(row, indexes.get("品牌")));
+      data.put("varietyName", cell(row, indexes.get("品种")));
+      data.put("specification", cell(row, indexes.get("规格")));
+      data.put("casePack", cell(row, indexes.get("箱规")));
+      data.put("bottlePrice", decimalText(cell(row, indexes.get("元/瓶"))));
+      data.put("casePrice", decimalText(cell(row, indexes.get("元/箱"))));
+      data.put("tonCaseFactor", positiveDecimalText(cell(row, indexes.get("吨箱转换系数"))));
+      data.put("giftBox", "是".equals(cell(row, indexes.get("是否为标品礼盒"))));
+      data.put("branchScope", cell(row, indexes.get("分公司定制品")));
+      parsed.add(new ParsedProductRow(sheet.getSheetName(), rowNo + 1, data));
+    }
+    if (parsed.isEmpty()) throw DomainException.unprocessable("PRODUCT_EMPTY", "Excel 中没有找到商品数据行");
 
-    Map<String, Integer> codeCounts = new HashMap<>();
-    Map<String, Set<String>> nameCodes = new HashMap<>();
+    Map<String, Integer> nameCounts = new HashMap<>();
     for (ParsedProductRow row : parsed) {
-      String codeKey = productMatchKey(row.data());
-      codeCounts.merge(codeKey, 1, Integer::sum);
-      nameCodes.computeIfAbsent(productNameMatchKey(row.data()), ignored -> new HashSet<>())
-          .add(normalize(text(row.data().get("materialCode"))));
+      String nameKey = productNameMatchKey(row.data());
+      if (!nameKey.endsWith(":")) nameCounts.merge(nameKey, 1, Integer::sum);
     }
-    Map<String, String> primaryNameCode = new HashMap<>();
     int warnings = 0, blocking = 0, added = 0;
     for (ParsedProductRow row : parsed) {
       Map<String, Object> data = row.data();
       String materialName = text(data.get("materialName"));
-      String codeKey = productMatchKey(data);
       String nameKey = productNameMatchKey(data);
-      String code = normalize(text(data.get("materialCode")));
-      String primaryCode = primaryNameCode.computeIfAbsent(nameKey, ignored -> code);
-      boolean repeatedCode = codeCounts.getOrDefault(codeKey, 0) > 1;
-      boolean possibleDuplicate = !repeatedCode && nameCodes.getOrDefault(nameKey, Set.of()).size() > 1 && !Objects.equals(primaryCode, code);
+      boolean duplicateName = !nameKey.endsWith(":") && nameCounts.getOrDefault(nameKey, 0) > 1;
       String validation;
       String diffType;
       if (materialName.isBlank()) {
         validation = "BLOCKED"; diffType = "ADDED"; blocking++;
         issue(taskId, "BLOCKING", "MATERIAL_NAME_REQUIRED", row.sheet(), row.rowNo(), "materialName", null, "物料名称不能为空");
-      } else if (repeatedCode) {
+      } else if (bool(data.get("customerTypeInvalid"))) {
+        validation = "BLOCKED"; diffType = "ADDED"; blocking++;
+        issue(taskId, "BLOCKING", "PRODUCT_CUSTOMER_TYPE_INVALID", row.sheet(), row.rowNo(), "customerType", null,
+            "客户类型只允许“综合”“特渠”或空");
+      } else if (bool(data.get("rebateStatusInvalid"))) {
+        validation = "BLOCKED"; diffType = "ADDED"; blocking++;
+        issue(taskId, "BLOCKING", "PRODUCT_REBATE_INVALID", row.sheet(), row.rowNo(), "rebateStatus", null,
+            "是否返利只允许“是”“否”或空");
+      } else if (duplicateName) {
         validation = "BLOCKED"; diffType = "PENDING_CONFIRMATION"; blocking++;
-        issue(taskId, "BLOCKING", "PRODUCT_CODE_MULTIPLE_MATCH", row.sheet(), row.rowNo(), "materialCode", code,
-            "同一客户通道和返利类型下物料代码重复，且商品信息存在冲突；请编辑或删除重复行");
-      } else if (possibleDuplicate) {
-        validation = "BLOCKED"; diffType = "POSSIBLE_DUPLICATE"; blocking++;
-        issue(taskId, "BLOCKING", "PRODUCT_NAME_POSSIBLE_DUPLICATE", row.sheet(), row.rowNo(), "materialName", materialName,
-            "商品名称相同但物料代码不同；请确认后保留或删除");
+        issue(taskId, "BLOCKING", "PRODUCT_NAME_DUPLICATE", row.sheet(), row.rowNo(), "materialName", materialName,
+            "同一客户类型、同一返利类型下商品名称重复，请编辑或删除重复行");
       } else if (optionalProductMissing(data)) {
         validation = "WARNING"; diffType = "ADDED"; warnings++; added++;
         issue(taskId, "WARNING", "PRODUCT_INCOMPLETE", row.sheet(), row.rowNo(), null, null,
@@ -250,57 +261,87 @@ final class ImportWorkbookProcessor {
 
   private ParseSummary parseWhitelist(long taskId, Workbook workbook) {
     Map<String, List<String>> aliases = whitelistAliases();
-    int count = 0, warnings = 0, blocking = 0;
-    for (SheetConfig config : WHITELIST_SHEETS) {
-      Sheet sheet = workbook.getSheet(config.name());
-      if (sheet == null) throw DomainException.unprocessable("WHITELIST_SHEET_MISSING", "缺少必要 Sheet：" + config.name());
-      int headerRow = findHeader(sheet, "经销商电话", 30);
-      Map<String, Integer> indexes = aliasIndexes(sheet.getRow(headerRow), aliases);
-      requireHeaders(config.name(), indexes, aliases.keySet().stream().toList());
-      List<ParsedSensitiveRow> parsed = new ArrayList<>();
-      Map<String, Integer> phones = new HashMap<>();
-      Map<String, Integer> names = new HashMap<>();
-      for (int rowNo = headerRow + 1; rowNo <= Math.min(sheet.getLastRowNum(), headerRow + 20_000); rowNo++) {
-        Row row = sheet.getRow(rowNo);
-        if (blank(row)) continue;
-        Map<String, Object> data = new LinkedHashMap<>();
-        data.put("sequence", intText(cell(row, indexes.get("sequence")), count + 1));
-        data.put("customerType", config.customerType());
-        data.put("regionName", cell(row, indexes.get("regionName")));
-        data.put("branchName", cell(row, indexes.get("branchName")));
-        data.put("dealerShortName", cell(row, indexes.get("dealerShortName")));
-        data.put("dealerFullName", cell(row, indexes.get("dealerFullName")));
-        data.put("dealerCategory", cell(row, indexes.get("dealerCategory")));
-        data.put("contactName", cell(row, indexes.get("contactName")));
-        data.put("confirmerName", cell(row, indexes.get("confirmerName")));
-        String phone = CryptoService.normalizePhone(cell(row, indexes.get("dealerPhone")));
-        String confirmerPhone = CryptoService.normalizePhone(cell(row, indexes.get("confirmerPhone")));
-        data.put("phoneMasked", CryptoService.maskPhone(phone));
-        data.put("confirmerPhoneMasked", confirmerPhone.isBlank() ? "" : CryptoService.maskPhone(confirmerPhone));
-        Map<String, Object> sensitive = Map.of("dealerPhone", phone, "confirmerPhone", confirmerPhone);
-        phones.merge(phone, 1, Integer::sum);
-        String nameKey = normalize(text(data.get("dealerFullName")));
-        if (!nameKey.isBlank()) names.merge(nameKey, 1, Integer::sum);
-        parsed.add(new ParsedSensitiveRow(config.name(), rowNo + 1, data, sensitive));
-      }
-      for (ParsedSensitiveRow row : parsed) {
-        String phone = text(row.sensitive().get("dealerPhone"));
-        boolean invalid = !phone.matches("1\\d{10}") || text(row.data().get("dealerFullName")).isBlank();
-        boolean duplicatePhone = !phone.isBlank() && phones.getOrDefault(phone, 0) > 1;
-        boolean duplicateName = names.getOrDefault(normalize(text(row.data().get("dealerFullName"))), 0) > 1;
-        String validation = invalid || duplicatePhone || duplicateName ? "BLOCKED" : "VALID";
-        String diffType = duplicateName ? "PENDING_CONFIRMATION" : "ADDED";
-        insertStaging(taskId, row.sheet(), row.rowNo(), config.customerType() + ":" + normalize(text(row.data().get("dealerFullName"))),
-            diffType, validation, row.data(), crypto.encrypt(writeJson(row.sensitive())));
-        if (!"VALID".equals(validation)) {
-          blocking++;
-          String code = duplicateName ? "DUPLICATE_DEALER_NAME" : duplicatePhone ? "DUPLICATE_PHONE" : "WHITELIST_ROW_INVALID";
-          String message = duplicateName ? "同一客户类型下经销商全称重复；请核实后编辑或删除重复行"
-              : duplicatePhone ? "同一客户通道内手机号重复" : "经销商全称或手机号无效";
-          issue(taskId, "BLOCKING", code, row.sheet(), row.rowNo(), invalid ? "dealerPhone" : duplicateName ? "dealerFullName" : null,
-              invalid || duplicatePhone ? row.data().get("phoneMasked").toString() : text(row.data().get("dealerFullName")), message);
-        }
-        count++;
+    List<Sheet> nonEmptySheets = new ArrayList<>();
+    for (int index = 0; index < workbook.getNumberOfSheets(); index++) {
+      Sheet candidate = workbook.getSheetAt(index);
+      if (hasData(candidate)) nonEmptySheets.add(candidate);
+    }
+    if (nonEmptySheets.isEmpty()) throw DomainException.unprocessable("WHITELIST_SHEET_EMPTY", "白名单 Excel 中没有找到非空 Sheet");
+    if (nonEmptySheets.size() > 1) {
+      throw DomainException.unprocessable("WHITELIST_SHEET_COUNT_INVALID", "白名单 Excel 只允许一个非空 Sheet，当前发现：" +
+          nonEmptySheets.stream().map(Sheet::getSheetName).collect(Collectors.joining("、")));
+    }
+    Sheet sheet = nonEmptySheets.getFirst();
+    int headerRow = findHeader(sheet, "经销商电话", 30);
+    Map<String, Integer> indexes = aliasIndexes(sheet.getRow(headerRow), aliases);
+    requireHeaders(sheet.getSheetName(), indexes, List.of("customerType", "regionName", "branchName", "dealerShortName", "dealerFullName", "contactName", "dealerPhone"));
+    if (indexes.get("customerType") != 0) {
+      throw DomainException.unprocessable("WHITELIST_CUSTOMER_TYPE_COLUMN_INVALID", sheet.getSheetName() + " 的“客户类型”必须是第一列");
+    }
+    List<ParsedSensitiveRow> parsed = new ArrayList<>();
+    Map<String, Integer> phones = new HashMap<>();
+    Map<String, Integer> names = new HashMap<>();
+    boolean hasTypedRows = false;
+    boolean hasUnspecifiedRows = false;
+    int count = 0;
+    for (int rowNo = headerRow + 1; rowNo <= Math.min(sheet.getLastRowNum(), headerRow + 20_000); rowNo++) {
+      Row row = sheet.getRow(rowNo);
+      if (blank(row)) continue;
+      Map<String, Object> data = new LinkedHashMap<>();
+      data.put("sequence", intText(cell(row, indexes.get("sequence")), count + 1));
+      String rawCustomerType = cell(row, indexes.get("customerType"));
+      String customerType = whitelistCustomerType(rawCustomerType);
+      boolean invalidCustomerType = !rawCustomerType.isBlank() && "ALL".equals(customerType);
+      data.put("customerType", customerType);
+      data.put("customerTypeInvalid", invalidCustomerType);
+      if (rawCustomerType.isBlank()) hasUnspecifiedRows = true; else hasTypedRows = true;
+      data.put("regionName", cell(row, indexes.get("regionName")));
+      data.put("branchName", cell(row, indexes.get("branchName")));
+      data.put("dealerShortName", cell(row, indexes.get("dealerShortName")));
+      data.put("dealerFullName", cell(row, indexes.get("dealerFullName")));
+      data.put("dealerCategory", cell(row, indexes.get("dealerCategory")));
+      data.put("contactName", cell(row, indexes.get("contactName")));
+      data.put("confirmerName", cell(row, indexes.get("confirmerName")));
+      String phone = CryptoService.normalizePhone(cell(row, indexes.get("dealerPhone")));
+      String confirmerPhone = CryptoService.normalizePhone(cell(row, indexes.get("confirmerPhone")));
+      data.put("phoneMasked", phone.isBlank() ? "" : CryptoService.maskPhone(phone));
+      data.put("confirmerPhoneMasked", confirmerPhone.isBlank() ? "" : CryptoService.maskPhone(confirmerPhone));
+      Map<String, Object> sensitive = Map.of("dealerPhone", phone, "confirmerPhone", confirmerPhone);
+      if (!phone.isBlank()) phones.merge(customerType + "|" + phone, 1, Integer::sum);
+      String nameKey = normalize(text(data.get("dealerFullName")));
+      String branchKey = normalize(text(data.get("branchName")));
+      if (!nameKey.isBlank()) names.merge(customerType + "|" + nameKey + "|" + branchKey, 1, Integer::sum);
+      parsed.add(new ParsedSensitiveRow(sheet.getSheetName(), rowNo + 1, data, sensitive));
+      count++;
+    }
+    if (parsed.isEmpty()) throw DomainException.unprocessable("WHITELIST_EMPTY", "Excel 中没有找到白名单数据行");
+    boolean mixedCustomerType = hasTypedRows && hasUnspecifiedRows;
+    if (!mixedCustomerType && !hasTypedRows && parsed.stream().anyMatch(row -> !text(row.data().get("regionName")).isBlank())) {
+      throw DomainException.unprocessable("WHITELIST_REGION_MODE_INVALID", "客户类型全部为空时，大区也必须全部为空");
+    }
+    int warnings = 0, blocking = 0;
+    for (ParsedSensitiveRow row : parsed) {
+      String phone = text(row.sensitive().get("dealerPhone"));
+      String customerType = text(row.data().get("customerType"));
+      boolean invalidCustomerType = bool(row.data().get("customerTypeInvalid"));
+      boolean invalid = !phone.matches("1\\d{10}") || text(row.data().get("dealerFullName")).isBlank();
+      boolean duplicatePhone = !phone.isBlank() && phones.getOrDefault(customerType + "|" + phone, 0) > 1;
+      boolean duplicateName = names.getOrDefault(customerType + "|" + normalize(text(row.data().get("dealerFullName"))) + "|" + normalize(text(row.data().get("branchName"))), 0) > 1;
+      boolean blocked = invalidCustomerType || mixedCustomerType || invalid || duplicatePhone || duplicateName;
+      String validation = blocked ? "BLOCKED" : "VALID";
+      String diffType = duplicateName ? "PENDING_CONFIRMATION" : "ADDED";
+      insertStaging(taskId, row.sheet(), row.rowNo(), customerType + ":" + normalize(text(row.data().get("dealerFullName"))) + ":" + normalize(text(row.data().get("branchName"))),
+          diffType, validation, row.data(), crypto.encrypt(writeJson(row.sensitive())));
+      if (blocked) {
+        blocking++;
+        String code = mixedCustomerType ? "WHITELIST_CUSTOMER_TYPE_MIXED" : invalidCustomerType ? "WHITELIST_CUSTOMER_TYPE_INVALID"
+            : duplicateName ? "DUPLICATE_DEALER_NAME" : duplicatePhone ? "DUPLICATE_PHONE" : "WHITELIST_ROW_INVALID";
+        String message = mixedCustomerType ? "客户类型不能部分填写、部分为空；请保证整张表全部填写或全部留空"
+            : invalidCustomerType ? "客户类型只允许“综合客户”“特渠专业客户”或空"
+            : duplicateName ? "同一客户类型、同一分公司下经销商全称重复；请核实后编辑或删除重复行"
+            : duplicatePhone ? "同一客户类型下手机号重复；不同客户类型可以使用相同手机号" : "经销商全称或手机号无效";
+        issue(taskId, "BLOCKING", code, row.sheet(), row.rowNo(), mixedCustomerType || invalidCustomerType ? "customerType" : invalid ? "dealerPhone" : duplicateName ? "dealerFullName" : null,
+            invalid || duplicatePhone ? text(row.data().get("phoneMasked")) : text(row.data().get("dealerFullName")), message);
       }
     }
     return new ParseSummary(count, count - blocking, warnings, blocking);
@@ -419,14 +460,27 @@ final class ImportWorkbookProcessor {
     return true;
   }
 
+  private boolean hasData(Sheet sheet) {
+    for (Row row : sheet) if (!blank(row)) return true;
+    return false;
+  }
+
   private static Map<String, List<String>> whitelistAliases() {
     Map<String, List<String>> map = new LinkedHashMap<>();
-    map.put("sequence", List.of("序号")); map.put("regionName", List.of("大区"));
+    map.put("sequence", List.of("序号")); map.put("customerType", List.of("客户类型", "客户类型（综合客户/特渠专业客户）")); map.put("regionName", List.of("大区"));
     map.put("branchName", List.of("分公司名称", "分公司")); map.put("dealerShortName", List.of("经销商名称（简）", "经销商简称"));
     map.put("dealerFullName", List.of("经销商名称（全）", "经销商全称")); map.put("dealerCategory", List.of("经销商类型", "综合经销商特渠专业经销商"));
     map.put("contactName", List.of("经销商姓名")); map.put("dealerPhone", List.of("经销商电话"));
     map.put("confirmerName", List.of("分公司确认人姓名")); map.put("confirmerPhone", List.of("分公司确认人电话"));
     return map;
+  }
+
+  static String whitelistCustomerType(String value) {
+    String normalized = text(value).replaceAll("\\s+", "");
+    if (normalized.isBlank()) return "ALL";
+    if (normalized.contains("特渠")) return "SPECIAL";
+    if (normalized.contains("综合")) return "GENERAL";
+    return "ALL";
   }
 
   private static Map<String, List<String>> attendanceAliases() {
@@ -440,7 +494,7 @@ final class ImportWorkbookProcessor {
   }
 
   private static boolean optionalProductMissing(Map<String, Object> data) {
-    return List.of("materialCode", "productLine", "specification", "casePack", "casePrice", "tonCaseFactor")
+    return List.of("productLine", "specification", "casePack", "casePrice", "tonCaseFactor")
         .stream().anyMatch(key -> text(data.get(key)).isBlank());
   }
 
@@ -469,18 +523,28 @@ final class ImportWorkbookProcessor {
   }
 
   private static String productKey(Map<String, Object> data) {
-    String prefix = text(data.get("customerType")) + ":" + text(data.get("rebateStatus")) + ":";
-    String code = normalize(text(data.get("materialCode")));
-    return prefix + (!code.isBlank() ? code : normalize(text(data.get("materialName"))));
+    return productNameMatchKey(data);
   }
 
-  private static String productMatchKey(Map<String, Object> data) {
-    String code = normalize(text(data.get("materialCode")));
-    String identity = !code.isBlank() ? "code:" + code : "name:" + normalize(text(data.get("materialName")));
-    return text(data.get("customerType")) + ":" + text(data.get("rebateStatus")) + ":" + identity;
+  static String productCustomerType(String value) {
+    return switch (text(value)) {
+      case "综合" -> "GENERAL";
+      case "特渠" -> "SPECIAL";
+      case "" -> "ALL";
+      default -> "ALL";
+    };
   }
 
-  private static String productNameMatchKey(Map<String, Object> data) {
+  static String productRebateStatus(String value) {
+    return switch (text(value)) {
+      case "是" -> "PARTICIPATING";
+      case "否" -> "NOT_PARTICIPATING";
+      case "" -> "ALL";
+      default -> "ALL";
+    };
+  }
+
+  static String productNameMatchKey(Map<String, Object> data) {
     return text(data.get("customerType")) + ":" + text(data.get("rebateStatus")) + ":" + normalize(text(data.get("materialName")));
   }
 
@@ -507,7 +571,7 @@ final class ImportWorkbookProcessor {
   private static boolean bool(Object value) { return value instanceof Boolean b ? b : Boolean.parseBoolean(text(value)); }
   private static String nullableText(Object value) { String text = text(value); return text.isBlank() ? null : text; }
   private static String text(Object value) { return value == null ? "" : value.toString().trim(); }
-  private static String normalize(String value) { return text(value).toLowerCase(Locale.CHINA).replaceAll("[\\s　_-]+", ""); }
+  private static String normalize(String value) { return text(value).toLowerCase(Locale.CHINA).replaceAll("[\\s　_\\-（）()\\[\\]【】{}：:，,。·/\\\\]+", ""); }
   private static String truncate(String value, int max) { String safe = Objects.requireNonNullElse(value, ""); return safe.length() <= max ? safe : safe.substring(0, max); }
 
   private String writeJson(Object value) {
@@ -519,7 +583,6 @@ final class ImportWorkbookProcessor {
   }
 
   record ParseSummary(int inputCount, int addedCount, int warnings, int blocking) {}
-  private record SheetConfig(String name, String customerType, String rebateStatus) {}
   private record ParsedProductRow(String sheet, int rowNo, Map<String, Object> data) {}
   private record ParsedSensitiveRow(String sheet, int rowNo, Map<String, Object> data, Map<String, Object> sensitive) {}
   private record ReviewRow(long id, String sheet, int rowNo, Map<String, Object> data,

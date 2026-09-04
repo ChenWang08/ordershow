@@ -141,6 +141,22 @@ public class AuthService {
                                 HttpServletRequest request, HttpServletResponse response) {
     String normalized = CryptoService.normalizePhone(phone);
     if (!normalized.matches("1\\d{10}")) throw DomainException.badRequest("INVALID_PHONE", "请输入有效的 11 位手机号");
+    String requestedType = customerType == null || customerType.isBlank() ? "ALL" : customerType.trim();
+    if (!List.of("GENERAL", "SPECIAL", "ALL").contains(requestedType)) {
+      throw DomainException.badRequest("CUSTOMER_TYPE_INVALID", "客户类型不正确");
+    }
+    List<String> whitelistTypes = jdbc.queryForList("""
+        SELECT DISTINCT c.customer_type
+        FROM activity_customer c
+        JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
+          AND b.current_version_id = c.data_version_id
+        JOIN activity a ON a.id = c.activity_id
+        WHERE a.activity_code = ? AND c.is_active = TRUE
+        """, String.class, activityCode);
+    boolean unspecifiedWhitelist = whitelistTypes.contains("ALL");
+    if (unspecifiedWhitelist != "ALL".equals(requestedType)) {
+      throw DomainException.notFound("WHITELIST_MODE_MISMATCH", "当前白名单的客户类型模式与本次选择不一致");
+    }
     String requestedRegion = regionCode == null || regionCode.isBlank() ? null : regionCode.trim();
     List<H5Principal> customers = jdbc.query("""
         SELECT 0 session_id, c.activity_id, c.id activity_customer_id, a.activity_code,
@@ -171,7 +187,7 @@ public class AuthService {
         """, (rs, rowNum) -> new H5Principal(0, rs.getLong("activity_id"), rs.getLong("activity_customer_id"),
         rs.getString("activity_code"), rs.getString("customer_type"), rs.getString("region_code"),
         rs.getString("branch_name"), rs.getString("dealer_short_name"), rs.getString("dealer_full_name"),
-        rs.getString("phone_masked")), activityCode, customerType, crypto.lookupHash(normalized),
+        rs.getString("phone_masked")), activityCode, requestedType, crypto.lookupHash(normalized),
         requestedRegion, requestedRegion, requestedRegion, requestedRegion, requestedRegion);
     if (customers.size() != 1) throw DomainException.notFound("WHITELIST_IDENTITY_NOT_FOUND", "该手机号不在所选通道或大区的有效白名单中");
     H5Principal customer = customers.getFirst();

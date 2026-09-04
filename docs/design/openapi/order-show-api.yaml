@@ -59,7 +59,7 @@ paths:
     post:
       operationId: verifyActivityPhone
       tags: [Public]
-      summary: 按活动、客户类型和手机号验证 H5 身份
+      summary: 按活动客户类型模式和手机号验证 H5 身份
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
       requestBody:
@@ -937,7 +937,7 @@ paths:
                   description: 仅商品导入可传；上传阶段只在浏览器预览，确认时才随任务保存
                 imageDecisions:
                   type: string
-                  description: 仅商品导入可传；JSON 数组。每项包含 ZIP 内 entryPath、CONFIRMED/PENDING/UNMATCHED 状态和 targetRowIds。CONFIRMED 与 PENDING 均须携带当前任务中的候选 staging 行，UNMATCHED 不得携带目标；一个物料代码最多确认一张图片，同代码的重复行共享。PENDING 会随商品版本发布并保留为后台待确认候选，不会作为 H5 商品图。
+                  description: 仅商品导入可传；JSON 数组。每项包含 ZIP 内 entryPath、CONFIRMED/PENDING/UNMATCHED 状态和 targetRowIds。商品图片只按完整标准化物料名称匹配，物料代码不参与判重或图片匹配；商品名称中的 `/` 不是 ZIP 路径分隔符。CONFIRMED 与 PENDING 均须携带当前任务中的候选 staging 行，UNMATCHED 不得携带目标；一个商品名称最多确认一张图片，同名商品行共享，一张最终图片不能确认给多个不同名称。PENDING 会随商品版本发布并保留为后台待确认候选，不会作为 H5 商品图。
                 attendanceWhitelistVersionId:
                   $ref: '#/components/schemas/Id'
                   description: 仅现场到场导入传入；必须等于最近一次关联试算返回的 whitelistVersionId。若当前无已发布白名单则不传。
@@ -1000,6 +1000,9 @@ paths:
               properties:
                 materialName:
                   type: string
+                description:
+                  type: [string, 'null']
+                  description: 商品说明，H5 商品详情展示；可为空
                 branchScope:
                   type: string
                   description: 分公司限制，多个分公司用顿号或逗号分隔；留空表示全部分公司可订
@@ -1045,6 +1048,9 @@ paths:
                 changes:
                   type: object
                   properties:
+                    description:
+                      type: [string, 'null']
+                      description: 商品说明，H5 商品详情展示；可为空
                     branchScope:
                       type: string
                       description: 分公司限制，多个分公司用顿号或逗号分隔；留空表示全部分公司可订
@@ -1078,7 +1084,7 @@ paths:
     post:
       operationId: addProductImage
       tags: [Catalog]
-      summary: 上传或替换物料代码当前单图
+      summary: 上传或替换商品名称当前单图
       security:
         - adminCookie: []
       parameters:
@@ -1107,7 +1113,7 @@ paths:
                   type: boolean
       responses:
         '201':
-          description: 图片已保存，并同步同物料代码商品行；原当前图片转为历史记录
+          description: 图片已保存，并同步同商品名称商品行；原当前图片转为历史记录
           content:
             application/json:
               schema:
@@ -1132,7 +1138,7 @@ paths:
     post:
       operationId: selectProductImageReview
       tags: [Catalog]
-      summary: 选择一张候选作为该物料代码的当前单图
+      summary: 选择一张候选作为该商品名称的当前单图
       security:
         - adminCookie: []
       parameters:
@@ -1145,7 +1151,7 @@ paths:
         - $ref: '#/components/parameters/CsrfToken'
       responses:
         '200':
-          description: 已同步同物料代码商品行，并排除该代码的其他候选及该文件在其他代码下的候选
+          description: 已同步同商品名称商品行，并排除该名称的其他候选及该文件在其他名称下的候选
         '404':
           $ref: '#/components/responses/Problem'
         '409':
@@ -2120,7 +2126,12 @@ components:
       examples: ['19457005.28']
     CustomerType:
       type: string
-      enum: [GENERAL, SPECIAL]
+      enum: [GENERAL, SPECIAL, ALL]
+      description: 白名单/身份使用的客户类型；ALL 表示白名单不区分综合或特渠，客户可直接输入手机号。
+    ProductCustomerType:
+      type: string
+      enum: [GENERAL, SPECIAL, ALL]
+      description: 商品适用客户类型；ALL 表示不区分综合或特渠。
     RegionCode:
       type: string
       minLength: 1
@@ -2129,6 +2140,10 @@ components:
     RebateStatus:
       type: string
       enum: [PARTICIPATING, NOT_PARTICIPATING]
+    ProductRebateStatus:
+      type: string
+      enum: [PARTICIPATING, NOT_PARTICIPATING, ALL]
+      description: 商品返利类型；ALL 表示不区分是否返利。
     ActivityStatus:
       type: string
       enum: [DRAFT, SCHEDULED, ACTIVE, CLOSED, FINISHED, ARCHIVED]
@@ -2264,6 +2279,16 @@ components:
         hasUnassignedGeneralCustomers:
           type: boolean
           description: 当前生效白名单是否存在未填写大区的综合客户；与非空 regions 同时存在时 H5 显示“不分大区”入口。
+        whitelistCustomerTypeMode:
+          type: string
+          enum: [TYPED, UNSPECIFIED]
+          description: 当前白名单客户类型模式；UNSPECIFIED 表示所有客户类型为空，H5 不显示通道和大区选择。
+        availableCustomerTypes:
+          type: array
+          description: 当前白名单实际存在的有类型通道；UNSPECIFIED 模式下为空数组。
+          items:
+            type: string
+            enum: [GENERAL, SPECIAL]
     PublicActivityResponse:
       type: object
       required: [data, traceId]
@@ -2274,10 +2299,11 @@ components:
           type: string
     PhoneVerificationRequest:
       type: object
-      required: [customerType, phone]
+      required: [phone]
       properties:
         customerType:
           $ref: '#/components/schemas/CustomerType'
+          description: 有类型白名单时传 GENERAL 或 SPECIAL；白名单全为空时传 ALL 或省略。
         regionCode:
           oneOf:
             - $ref: '#/components/schemas/RegionCode'
@@ -2347,7 +2373,7 @@ components:
           enum: [MATCHED, PENDING, UNMATCHED, CONFIRMED]
     ProductImageReview:
       type: object
-      required: [id, fileId, url, archivePath, materialCode, materialName, status]
+      required: [id, fileId, url, archivePath, materialName, status]
       properties:
         id:
           $ref: '#/components/schemas/Id'
@@ -2359,7 +2385,7 @@ components:
         archivePath:
           type: string
         materialCode:
-          type: string
+          type: [string, 'null']
         materialName:
           type: string
         status:
@@ -2375,6 +2401,9 @@ components:
           type: [string, 'null']
         materialName:
           type: string
+        description:
+          type: [string, 'null']
+          description: 商品说明，H5 商品详情展示；可为空
         categoryName:
           type: [string, 'null']
         productLine:
@@ -2388,9 +2417,9 @@ components:
         casePack:
           type: [string, 'null']
         customerType:
-          $ref: '#/components/schemas/CustomerType'
+          $ref: '#/components/schemas/ProductCustomerType'
         rebateStatus:
-          $ref: '#/components/schemas/RebateStatus'
+          $ref: '#/components/schemas/ProductRebateStatus'
         giftBox:
           type: boolean
         casePrice:

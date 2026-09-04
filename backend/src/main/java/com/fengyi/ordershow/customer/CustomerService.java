@@ -71,14 +71,14 @@ public class CustomerService {
     try {
       int changed = jdbc.update("""
           UPDATE activity_customer SET region_code = ?, branch_name = ?, normalized_branch_name = ?, dealer_short_name = ?,
-            dealer_full_name = ?, dealer_category = ?, contact_name = ?,
+            dealer_full_name = ?, normalized_dealer_full_name = ?, dealer_category = ?, contact_name = ?,
             phone_ciphertext = IF(?, ?, phone_ciphertext), phone_lookup_hash = IF(?, ?, phone_lookup_hash),
             phone_masked = IF(?, ?, phone_masked), confirmer_name = ?,
             confirmer_phone_ciphertext = IF(?, ?, confirmer_phone_ciphertext),
             confirmer_phone_masked = IF(?, ?, confirmer_phone_masked), lock_version = lock_version + 1
           WHERE id = ? AND activity_id = ? AND lock_version = ?
           """, regionCode, blankToNull(request.branchName()), normalize(request.branchName()),
-          blankToNull(request.dealerShortName()), required(request.dealerFullName(), "经销商名称不能为空"),
+          blankToNull(request.dealerShortName()), required(request.dealerFullName(), "经销商名称不能为空"), normalize(required(request.dealerFullName(), "经销商名称不能为空")),
           blankToNull(request.dealerCategory()), blankToNull(request.contactName()), replacePhone, replacePhone ? crypto.encrypt(phone) : null,
           replacePhone, replacePhone ? crypto.lookupHash(phone) : null, replacePhone, replacePhone ? CryptoService.maskPhone(phone) : null,
           blankToNull(request.confirmerName()), replaceConfirmerPhone,
@@ -96,7 +96,7 @@ public class CustomerService {
   public CustomerView addCustomer(long activityId, CustomerWrite request) {
     requireCustomerWritable(activityId, request.reason());
     String customerType = required(request.customerType(), "客户类型不能为空");
-    if (!List.of("GENERAL", "SPECIAL").contains(customerType)) throw DomainException.badRequest("CUSTOMER_TYPE_INVALID", "客户类型不正确");
+    if (!List.of("GENERAL", "SPECIAL", "ALL").contains(customerType)) throw DomainException.badRequest("CUSTOMER_TYPE_INVALID", "客户类型不正确");
     String fullName = required(request.dealerFullName(), "经销商名称不能为空");
     String phone = CryptoService.normalizePhone(request.phone());
     if (phone.length() != 11) throw DomainException.badRequest("PHONE_INVALID", "手机号必须为 11 位");
@@ -107,21 +107,24 @@ public class CustomerService {
     String regionCode = "GENERAL".equals(customerType) ? regions.resolveCode(activityId, request.regionCode()) : null;
     VersionSource source = currentSource(activityId, "WHITELIST");
     try {
+      String branchName = request.branchName() == null ? "" : request.branchName().trim();
+      String normalizedBranch = normalize(branchName);
       jdbc.update("""
-          INSERT INTO customer(customer_type, dealer_full_name, normalized_dealer_full_name) VALUES (?, ?, ?)
-          ON DUPLICATE KEY UPDATE dealer_full_name = VALUES(dealer_full_name), updated_at = UTC_TIMESTAMP(3)
-          """, customerType, fullName, normalize(fullName));
-      Long customerId = jdbc.queryForObject("SELECT id FROM customer WHERE customer_type = ? AND normalized_dealer_full_name = ?",
-          Long.class, customerType, normalize(fullName));
+          INSERT INTO customer(customer_type, dealer_full_name, normalized_dealer_full_name, branch_name, normalized_branch_name) VALUES (?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE dealer_full_name = VALUES(dealer_full_name), branch_name = VALUES(branch_name),
+            normalized_branch_name = VALUES(normalized_branch_name), updated_at = UTC_TIMESTAMP(3)
+          """, customerType, fullName, normalize(fullName), branchName, normalizedBranch);
+      Long customerId = jdbc.queryForObject("SELECT id FROM customer WHERE customer_type = ? AND normalized_dealer_full_name = ? AND normalized_branch_name = ?",
+          Long.class, customerType, normalize(fullName), normalizedBranch);
       jdbc.update("""
           INSERT INTO activity_customer(activity_id, customer_id, customer_type, region_code, branch_name, normalized_branch_name,
-            dealer_short_name, dealer_full_name, dealer_category, contact_name, phone_ciphertext, phone_lookup_hash, phone_masked,
+            dealer_short_name, dealer_full_name, normalized_dealer_full_name, dealer_category, contact_name, phone_ciphertext, phone_lookup_hash, phone_masked,
             confirmer_name, confirmer_phone_ciphertext, confirmer_phone_masked, excel_sequence, is_active, source_import_task_id, data_version_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             (SELECT COALESCE(MAX(c.excel_sequence), 0) + 1 FROM activity_customer c WHERE c.activity_id = ? AND c.data_version_id = ?),
             TRUE, ?, ?)
           """, activityId, customerId, customerType, regionCode, blankToNull(request.branchName()),
-          normalize(request.branchName()), blankToNull(request.dealerShortName()), fullName, blankToNull(request.dealerCategory()),
+          normalizedBranch, blankToNull(request.dealerShortName()), fullName, normalize(fullName), blankToNull(request.dealerCategory()),
           blankToNull(request.contactName()), crypto.encrypt(phone), crypto.lookupHash(phone), CryptoService.maskPhone(phone),
           blankToNull(request.confirmerName()), confirmerPhone.isEmpty() ? null : crypto.encrypt(confirmerPhone),
           confirmerPhone.isEmpty() ? null : CryptoService.maskPhone(confirmerPhone),

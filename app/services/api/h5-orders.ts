@@ -2,9 +2,9 @@ import { api, ApiError } from "./client";
 import { activeActivityPath } from "./context";
 import type { Envelope, RuntimeIdentity, RuntimeOrder, RuntimeOrderDraft, RuntimeProduct } from "./types";
 
-export async function verifyPhone(customerType: "GENERAL" | "SPECIAL", regionCode: string, phone: string) {
+export async function verifyPhone(customerType: "GENERAL" | "SPECIAL" | "ALL" | "", regionCode: string, phone: string) {
   return (await api<Envelope<{ customer: RuntimeIdentity; csrfToken: string }>>(`/public/activities/${activeActivityPath()}/verify-phone`, {
-    method: "POST", body: JSON.stringify({ customerType, regionCode: regionCode || null, phone }),
+    method: "POST", body: JSON.stringify({ customerType: customerType || null, regionCode: regionCode || null, phone }),
   })).data.customer;
 }
 
@@ -45,4 +45,3 @@ export async function withdrawH5Order(expectedVersion: number) {
     method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ expectedVersion }),
   }, "h5")).data;
 }
-

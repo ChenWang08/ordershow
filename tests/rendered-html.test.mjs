@@ -99,6 +99,13 @@ test("keeps production assets and source wired", async () => {
   assert.match(prototype, /function DashboardTopRanking/);
   assert.match(prototype, /\(p\.status === "有效" \|\| p\.status === "待完善"\)/);
   assert.match(prototype, /p\.materialCode.*includes\(normalizedProductSearch\)/s);
+  assert.match(prototype, /type RebateFilter = "ALL" \| "PARTICIPATING" \| "NOT_PARTICIPATING"/);
+  assert.match(prototype, /const hasRebateSplit = useMemo/);
+  assert.match(prototype, /全部商品/);
+  assert.match(prototype, /商品返利类型/);
+  assert.match(css, /\.product-info p \{ min-height: 0; max-height: 3\.9em; margin: 0; overflow-y: auto/);
+  assert.match(css, /\.product-action \{ display: flex; flex: 0 0 auto/);
+  assert.match(css, /\.stepper \{ display: flex; flex: 0 0 auto/);
   assert.match(prototype, /function RankingBoard/);
   assert.match(prototype, /function ReportBoard/);
   assert.match(prototype, /function LotteryBoard/);
@@ -113,7 +120,7 @@ test("keeps production assets and source wired", async () => {
 });
 
 test("keeps product imports as independent full-replacement batches", async () => {
-  const [prototype, domain, productImages, api, importService, importController, productService] = await Promise.all([
+  const [prototype, domain, productImages, api, importService, importController, productService, workbookProcessor] = await Promise.all([
     readFrontendSource(),
     readFile(new URL("../app/domain/import-domain.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/domain/product-images.ts", import.meta.url), "utf8"),
@@ -121,6 +128,7 @@ test("keeps product imports as independent full-replacement batches", async () =
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportService.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportController.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/catalog/ProductService.java", import.meta.url), "utf8"),
+    readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/imports/ImportWorkbookProcessor.java", import.meta.url), "utf8"),
   ]);
 
   assert.doesNotMatch(domain, /ProductImportAction|"未上传"/);
@@ -137,18 +145,29 @@ test("keeps product imports as independent full-replacement batches", async () =
   assert.match(api, /loadProductImageReviews/);
   assert.match(prototype, /mergeProductImageReviews/);
   assert.match(prototype, /fileName: productImageBaseName\(candidate\.archivePath\)/);
+  assert.match(prototype, /读取 1 个商品 Sheet/);
+  assert.match(prototype, /客户类型：综合 \/ 特渠 \/ 空/);
+  assert.match(prototype, /是否返利：是 \/ 否 \/ 空/);
+  assert.match(prototype, /const matchesCustomerType = customerType === "全部"/);
+  assert.match(prototype, /const matchesRebate = rebate === "全部"/);
+  assert.doesNotMatch(prototype, /customerType === "全部" \|\| customerType === "未指定" \?/);
+  assert.match(domain, /productImportIdentityKey/);
+  assert.match(workbookProcessor, /PRODUCT_NAME_DUPLICATE/);
+  assert.match(importService, /description/);
   assert.match(productService, /product_image_review_candidate/);
   assert.match(domain, /ProductImageRelationStatus = "CONFIRMED" \| "CANDIDATE"/);
   assert.match(productImages, /缺少状态时必须待确认/);
   assert.match(productImages, /productImageRelationStatus\(image\) === "CONFIRMED"/);
+  assert.match(productImages, /export function normalizeProductImageName\(value: string\) \{\s+\/\/ 商品名称本身可能包含/);
+  assert.doesNotMatch(productImages, /export function normalizeProductImageName\(value: string\) \{\s+return productImageBaseName\(value\)/);
   assert.match(prototype, /synchronizeProductImageAssetStatuses\(productImageAssets, productRows\)/);
   assert.doesNotMatch(prototype, /confirmedZipIds|savedProductKey|sameProduct/);
   assert.match(prototype, /选择此图/);
   assert.match(prototype, /排除候选/);
   assert.match(prototype, /每个商品只保留一张图片/);
-  assert.match(productImages, /一个物料代码只能有一张图/);
+  assert.match(productImages, /一个商品名称只能有一张图/);
   assert.match(importService, /IMAGE_DECISION_MULTIPLE_IMAGES/);
-  assert.match(productService, /sameMaterialCodeProducts/);
+  assert.match(productService, /sameMaterialNameProducts/);
   assert.match(prototype, /await deleteAdminProductImage/);
   assert.match(prototype, /const saved = await onSave/);
   assert.match(importController, /MultipartFile imageZip/);

@@ -292,10 +292,10 @@ public class ImportService {
       if (row.deleted()) continue;
       Map<String, Object> effective = new LinkedHashMap<>(row.normalizedData());
       if (row.editedData() != null) effective.putAll(row.editedData());
-      products.put(row.id(), new ProductImageIdentity(text(effective.get("materialCode")), text(effective.get("materialName"))));
+      products.put(row.id(), new ProductImageIdentity(text(effective.get("materialName"))));
     }
     Set<String> paths = new java.util.HashSet<>();
-    Set<String> confirmedCodes = new java.util.HashSet<>();
+    Set<String> confirmedNames = new java.util.HashSet<>();
     for (ProductImageDecision decision : decisions) {
       String path = normalizeArchivePath(decision.entryPath());
       if (path.isBlank() || !paths.add(path)) throw DomainException.badRequest("IMAGE_DECISION_PATH_INVALID", "图片路径为空或重复");
@@ -315,23 +315,16 @@ public class ImportService {
       if (targetIds.stream().anyMatch(id -> !products.containsKey(id))) {
         throw DomainException.badRequest("IMAGE_DECISION_TARGET_INVALID", "图片匹配目标不属于当前导入任务");
       }
-      Set<String> codes = targetIds.stream().map(products::get).map(ProductImageIdentity::materialCode).map(ImportService::normalizeCode)
-          .filter(code -> !code.isBlank()).collect(java.util.stream.Collectors.toSet());
-      if ("CONFIRMED".equals(decision.status()) && codes.isEmpty()) {
-        throw DomainException.badRequest("IMAGE_DECISION_MATERIAL_CODE_REQUIRED", "商品缺少物料代码，不能确认图片");
+      Set<String> names = targetIds.stream().map(products::get).map(ProductImageIdentity::materialName).map(ImportService::normalize)
+          .filter(name -> !name.isBlank()).collect(java.util.stream.Collectors.toSet());
+      if ("CONFIRMED".equals(decision.status()) && names.isEmpty()) {
+        throw DomainException.badRequest("IMAGE_DECISION_MATERIAL_NAME_REQUIRED", "商品缺少物料名称，不能确认图片");
       }
-      if ("CONFIRMED".equals(decision.status()) && codes.size() > 1) {
-        throw DomainException.badRequest("IMAGE_DECISION_MULTIPLE_PRODUCTS", "一张图片不能确认给多个不同物料代码");
+      if ("CONFIRMED".equals(decision.status()) && names.size() > 1) {
+        throw DomainException.badRequest("IMAGE_DECISION_MULTIPLE_PRODUCTS", "一张图片不能确认给多个不同商品名称");
       }
-      for (String code : codes) {
-        Set<String> names = targetIds.stream().map(products::get)
-            .filter(product -> normalizeCode(product.materialCode()).equals(code))
-            .map(ProductImageIdentity::materialName).map(ImportService::normalize).filter(name -> !name.isBlank())
-            .collect(java.util.stream.Collectors.toSet());
-        if (names.size() > 1) throw DomainException.badRequest("IMAGE_DECISION_PRODUCT_NAME_CONFLICT", "同一物料代码存在不同商品名称，请先核对商品数据");
-      }
-      if ("CONFIRMED".equals(decision.status()) && codes.size() == 1 && !confirmedCodes.add(codes.iterator().next())) {
-        throw DomainException.badRequest("IMAGE_DECISION_MULTIPLE_IMAGES", "一个物料代码只能确认一张图片");
+      if ("CONFIRMED".equals(decision.status()) && names.size() == 1 && !confirmedNames.add(names.iterator().next())) {
+        throw DomainException.badRequest("IMAGE_DECISION_MULTIPLE_IMAGES", "一个商品名称只能确认一张图片");
       }
     }
     return decisions.stream().map(decision -> new ProductImageDecision(normalizeArchivePath(decision.entryPath()), decision.status(),
@@ -341,11 +334,6 @@ public class ImportService {
   private static String normalizeArchivePath(String value) {
     return Objects.requireNonNullElse(value, "").replace('\\', '/').replaceAll("^/+", "").trim();
   }
-
-  private static String normalizeCode(String value) {
-    return Objects.requireNonNullElse(value, "").replaceAll("\\s+", "").toLowerCase(Locale.CHINA);
-  }
-
 
   public void cancel(long taskId) {
     int changed = jdbc.update("UPDATE import_task SET status = 'CANCELLED' WHERE id = ? AND status IN ('UPLOADED','PARSING','PREVIEW_READY')", taskId);
@@ -446,7 +434,7 @@ public class ImportService {
     Map<Long, MaterializeRow> byId = rows.stream().collect(java.util.stream.Collectors.toMap(MaterializeRow::id, row -> row));
     return decisions.stream().map(decision -> new ProductService.ZipDecision(decision.entryPath(), decision.status(),
         decision.targetRowIds().stream().map(byId::get).filter(Objects::nonNull)
-            .map(row -> text(row.effective().get("materialCode"))).filter(code -> !code.isBlank()).distinct().toList())).toList();
+            .map(row -> text(row.effective().get("materialName"))).filter(name -> !name.isBlank()).distinct().toList())).toList();
   }
 
   private void materializeProducts(long activityId, long taskId, long versionId, List<MaterializeRow> rows) {
@@ -461,13 +449,13 @@ public class ImportService {
       String status = optionalProductMissing(data) ? "INCOMPLETE" : "ACTIVE";
       String businessKey = productKey(data);
       jdbc.update("""
-          INSERT INTO activity_product(activity_id, customer_type, rebate_status, business_key, material_code, material_name,
+          INSERT INTO activity_product(activity_id, customer_type, rebate_status, business_key, material_code, material_name, description,
             category_name, product_line, brand_name, variety_name, specification, case_pack, bottle_price, case_price,
             ton_case_factor, is_gift_box, is_branch_customized, is_visible, is_orderable, sort_no, data_status,
             source_import_task_id, data_version_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           """, activityId, text(data.get("customerType")), text(data.get("rebateStatus")), businessKey,
-          nullableText(data.get("materialCode")), name, nullableText(data.get("categoryName")), nullableText(data.get("productLine")),
+          nullableText(data.get("materialCode")), name, nullableText(data.get("description")), nullableText(data.get("categoryName")), nullableText(data.get("productLine")),
           nullableText(data.get("brandName")), nullableText(data.get("varietyName")), nullableText(data.get("specification")),
           nullableText(data.get("casePack")), decimal(data.get("bottlePrice")), casePrice, factor, bool(data.get("giftBox")),
           !text(data.get("branchScope")).isBlank(), visible, orderable, ++sort, status, taskId, versionId);
@@ -493,23 +481,25 @@ public class ImportService {
       String customerType = text(data.get("customerType"));
       String fullName = text(data.get("dealerFullName"));
       String normalizedName = normalize(fullName);
+      String branchName = text(data.get("branchName"));
+      String normalizedBranch = normalize(branchName);
       jdbc.update("""
-          INSERT INTO customer(customer_type, dealer_full_name, normalized_dealer_full_name) VALUES (?, ?, ?)
-          ON DUPLICATE KEY UPDATE dealer_full_name = VALUES(dealer_full_name), updated_at = UTC_TIMESTAMP(3)
-          """, customerType, fullName, normalizedName);
-      Long customerId = jdbc.queryForObject("SELECT id FROM customer WHERE customer_type = ? AND normalized_dealer_full_name = ?", Long.class, customerType, normalizedName);
+          INSERT INTO customer(customer_type, dealer_full_name, normalized_dealer_full_name, branch_name, normalized_branch_name) VALUES (?, ?, ?, ?, ?)
+          ON DUPLICATE KEY UPDATE dealer_full_name = VALUES(dealer_full_name), branch_name = VALUES(branch_name),
+            normalized_branch_name = VALUES(normalized_branch_name), updated_at = UTC_TIMESTAMP(3)
+          """, customerType, fullName, normalizedName, branchName, normalizedBranch);
+      Long customerId = jdbc.queryForObject("SELECT id FROM customer WHERE customer_type = ? AND normalized_dealer_full_name = ? AND normalized_branch_name = ?", Long.class, customerType, normalizedName, normalizedBranch);
       String phone = text(sensitive.get("dealerPhone"));
       String confirmerPhone = text(sensitive.get("confirmerPhone"));
       jdbc.update("""
           INSERT INTO activity_customer(activity_id, customer_id, customer_type, region_code, branch_name, normalized_branch_name,
-            dealer_short_name, dealer_full_name, dealer_category, contact_name, phone_ciphertext, phone_lookup_hash, phone_masked,
+            dealer_short_name, dealer_full_name, normalized_dealer_full_name, dealer_category, contact_name, phone_ciphertext, phone_lookup_hash, phone_masked,
             confirmer_name, confirmer_phone_ciphertext, confirmer_phone_masked, excel_sequence, is_active,
             source_import_task_id, data_version_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?)
           """, activityId, customerId, customerType,
           "GENERAL".equals(customerType) ? regions.resolveCode(activityId, text(data.get("regionName"))) : null,
-          nullableText(data.get("branchName")),
-          normalize(text(data.get("branchName"))), nullableText(data.get("dealerShortName")), fullName, nullableText(data.get("dealerCategory")),
+          nullableText(data.get("branchName")), normalizedBranch, nullableText(data.get("dealerShortName")), fullName, normalizedName, nullableText(data.get("dealerCategory")),
           nullableText(data.get("contactName")), crypto.encrypt(phone), crypto.lookupHash(phone), CryptoService.maskPhone(phone),
           nullableText(data.get("confirmerName")), confirmerPhone.isBlank() ? null : crypto.encrypt(confirmerPhone),
           confirmerPhone.isBlank() ? null : CryptoService.maskPhone(confirmerPhone), intValue(data.get("sequence"), 0), taskId, versionId);
@@ -552,14 +542,12 @@ public class ImportService {
 
 
   private static boolean optionalProductMissing(Map<String, Object> data) {
-    return List.of("materialCode", "productLine", "specification", "casePack", "casePrice", "tonCaseFactor")
+    return List.of("productLine", "specification", "casePack", "casePrice", "tonCaseFactor")
         .stream().anyMatch(key -> text(data.get(key)).isBlank());
   }
 
   private static String productKey(Map<String, Object> data) {
-    String prefix = text(data.get("customerType")) + ":" + text(data.get("rebateStatus")) + ":";
-    String code = normalize(text(data.get("materialCode")));
-    return prefix + (!code.isBlank() ? code : normalize(text(data.get("materialName"))));
+    return text(data.get("customerType")) + ":" + text(data.get("rebateStatus")) + ":" + normalize(text(data.get("materialName")));
   }
 
   private static BigDecimal decimal(Object value) {
@@ -578,7 +566,7 @@ public class ImportService {
   private static boolean bool(Object value) { return value instanceof Boolean b ? b : Boolean.parseBoolean(text(value)); }
   private static String nullableText(Object value) { String text = text(value); return text.isBlank() ? null : text; }
   private static String text(Object value) { return value == null ? "" : value.toString().trim(); }
-  private static String normalize(String value) { return text(value).toLowerCase(Locale.CHINA).replaceAll("[\\s　_-]+", ""); }
+  private static String normalize(String value) { return text(value).toLowerCase(Locale.CHINA).replaceAll("[\\s　_\\-（）()\\[\\]【】{}：:，,。·/\\\\]+", ""); }
   private static String truncate(String value, int max) { String safe = Objects.requireNonNullElse(value, ""); return safe.length() <= max ? safe : safe.substring(0, max); }
 
   private String writeJson(Object value) {
@@ -623,6 +611,6 @@ public class ImportService {
                                           String matchMethod, String matchReasonCode, String matchedDealerName,
                                           boolean lotteryEligible) {}
   public record ProductImageDecision(String entryPath, String status, List<Long> targetRowIds) {}
-  private record ProductImageIdentity(String materialCode, String materialName) {}
+  private record ProductImageIdentity(String materialName) {}
   private record AttendancePreviewDraft(long stagingRowId, AttendanceMatchingService.MatchResult match) {}
 }

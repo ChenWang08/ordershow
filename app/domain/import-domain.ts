@@ -21,28 +21,17 @@ function attendanceCompanyKey(value: string) {
   return normalizeSearchText(value).replace(/[()（）\[\]【】{}：:，,。·\-_/\\]/g, "");
 }
 
-const productSheetConfig = [
-  { name: "综合参与返利" },
-  { name: "综合不参与返利" },
-  { name: "特渠参与返利" },
-  { name: "特渠不参与返利" },
-];
-
-const whitelistSheetConfig = [
-  { name: "综合客户白名单" },
-  { name: "特渠客户白名单" },
-];
-
 export type ProductImportRow = {
   id: string;
   serverVersion?: number;
   sequence: number;
-  customerType: "特渠" | "综合";
-  rebate: "参与" | "不参与";
+  customerType: "特渠" | "综合" | "";
+  rebate: "参与" | "不参与" | "";
   category: string;
   line: string;
   materialCode: string;
   materialName: string;
+  description?: string;
   brand: string;
   variety: string;
   spec: string;
@@ -84,6 +73,15 @@ export function productMaterialCodeKey(value: string) {
   return value.trim().replace(/\s+/g, "").toLocaleLowerCase("zh-CN");
 }
 
+export function productMaterialNameKey(value: string) {
+  return normalizeSearchText(value).replace(/[()（）\[\]【】{}：:，,。·\-_/\\]+/g, "");
+}
+
+export function productImportIdentityKey(row: Pick<ProductImportRow, "customerType" | "rebate" | "materialName">) {
+  const name = productMaterialNameKey(row.materialName);
+  return name ? `${row.customerType}:${row.rebate}:${name}` : "";
+}
+
 export type ProductImageAsset = {
   id: string;
   fileName: string;
@@ -110,7 +108,8 @@ export type WhitelistRow = {
   id: string;
   serverVersion?: number;
   sequence: number;
-  customerType: "综合客户" | "特渠专业客户";
+  customerType: "综合客户" | "特渠专业客户" | "";
+  customerTypeInvalid?: boolean;
   region: string;
   branch: string;
   dealerShort: string;
@@ -134,6 +133,20 @@ export type WhitelistImportStats = {
   valid: number;
   pending: number;
 };
+
+export type WhitelistCustomerTypeMode = "TYPED" | "UNSPECIFIED";
+
+export function whitelistCustomerTypeCode(value: WhitelistRow["customerType"]): "GENERAL" | "SPECIAL" | "ALL" {
+  return value === "综合客户" ? "GENERAL" : value === "特渠专业客户" ? "SPECIAL" : "ALL";
+}
+
+export function whitelistCustomerTypeLabel(value: string | null | undefined) {
+  return value === "GENERAL" ? "综合客户" : value === "SPECIAL" ? "特渠专业客户" : "";
+}
+
+export function whitelistCustomerTypeMode(rows: WhitelistRow[]): WhitelistCustomerTypeMode {
+  return rows.length > 0 && rows.every((row) => row.customerType === "") ? "UNSPECIFIED" : "TYPED";
+}
 
 export type AttendanceRow = {
   id: string;
@@ -169,7 +182,12 @@ export function bindProductStaging(rows: ProductImportRow[], staging: ImportStag
     const status: ProductImportRow["status"] = server.validationStatus === "BLOCKED" ? "待核对"
       : server.validationStatus === "WARNING" ? "待完善" : "有效";
     const edited = server.editedData ?? {};
-    return { ...row, serverRowId: server.id, status,
+    const customerType = edited.customerType === "GENERAL" ? "综合" : edited.customerType === "SPECIAL" ? "特渠" : edited.customerType === "ALL" ? "" : row.customerType;
+    const rebate = edited.rebateStatus === "PARTICIPATING" ? "参与" : edited.rebateStatus === "NOT_PARTICIPATING" ? "不参与" : edited.rebateStatus === "ALL" ? "" : row.rebate;
+    return { ...row, serverRowId: server.id, status, customerType, rebate,
+      materialName: String(edited.materialName ?? row.materialName ?? ""),
+      materialCode: String(edited.materialCode ?? row.materialCode ?? ""),
+      description: String(edited.description ?? row.description ?? ""),
       priceTierMinQuantity: String(edited.priceTierMinQuantity ?? row.priceTierMinQuantity ?? ""),
       priceTierCasePrice: String(edited.priceTierCasePrice ?? row.priceTierCasePrice ?? ""),
       priceTierPricingMode: edited.priceTierPricingMode === "INCREMENTAL" ? "INCREMENTAL" : row.priceTierPricingMode ?? "WHOLE_ORDER" };
@@ -182,8 +200,8 @@ export function bindWhitelistStaging(rows: WhitelistRow[], staging: ImportStagin
     const server = bySource.get(stagingRowKey(row.sourceSheet, row.sourceRowNumber));
     if (!server) return row;
     const edited = server.editedData ?? {};
-    const customerType = edited.customerType === "GENERAL" ? "综合客户" : edited.customerType === "SPECIAL" ? "特渠专业客户" : row.customerType;
-    return { ...row, serverRowId: server.id, customerType,
+    const customerType = edited.customerType === "GENERAL" ? "综合客户" : edited.customerType === "SPECIAL" ? "特渠专业客户" : edited.customerType === "ALL" ? "" : row.customerType;
+    return { ...row, serverRowId: server.id, customerType, customerTypeInvalid: Boolean(edited.customerTypeInvalid),
       region: String(edited.regionName ?? row.region), branch: String(edited.branchName ?? row.branch),
       dealerShort: String(edited.dealerShortName ?? row.dealerShort), dealerFull: String(edited.dealerFullName ?? row.dealerFull),
       dealerType: String(edited.dealerCategory ?? row.dealerType), dealerName: String(edited.contactName ?? row.dealerName),
@@ -211,7 +229,8 @@ export function normalizeWhitelistName(value: string) {
 
 export function whitelistIdentityKey(row: WhitelistRow) {
   const name = normalizeWhitelistName(row.dealerFull);
-  return name ? `${row.customerType}:${name}` : "";
+  const branch = normalizeWhitelistName(row.branch);
+  return name ? `${whitelistCustomerTypeCode(row.customerType)}:${name}:${branch}` : "";
 }
 
 export function whitelistPhoneIsValid(value: string) {
@@ -239,7 +258,7 @@ export function prepareWhitelistImportRows(incomingRows: WhitelistRow[]) {
     if (key) incomingNameCounts.set(key, (incomingNameCounts.get(key) ?? 0) + 1);
     const phone = normalizePhone(row.dealerPhone);
     if (phone) {
-      const phoneKey = `${row.customerType}:${phone}`;
+      const phoneKey = `${whitelistCustomerTypeCode(row.customerType)}:${phone}`;
       incomingPhoneCounts.set(phoneKey, (incomingPhoneCounts.get(phoneKey) ?? 0) + 1);
     }
   });
@@ -247,25 +266,29 @@ export function prepareWhitelistImportRows(incomingRows: WhitelistRow[]) {
   let duplicateNames = 0;
   let invalidPhones = 0;
   let duplicatePhones = 0;
+  let invalidCustomerTypes = 0;
   const rows = incomingRows.map((row) => {
     const identityKey = whitelistIdentityKey(row);
     const phone = normalizePhone(row.dealerPhone);
-    const phoneKey = `${row.customerType}:${phone}`;
+    const phoneKey = `${whitelistCustomerTypeCode(row.customerType)}:${phone}`;
     const missingName = !identityKey;
     const duplicateName = Boolean(identityKey && (incomingNameCounts.get(identityKey) ?? 0) > 1);
     const invalidPhone = !whitelistPhoneIsValid(phone);
     const duplicatePhone = Boolean(phone && (incomingPhoneCounts.get(phoneKey) ?? 0) > 1);
+    const invalidCustomerType = Boolean(row.customerTypeInvalid);
     if (missingName) missingNames += 1;
     if (duplicateName) duplicateNames += 1;
     if (invalidPhone) invalidPhones += 1;
     if (duplicatePhone) duplicatePhones += 1;
+    if (invalidCustomerType) invalidCustomerTypes += 1;
     return { ...row, source: "excel" as const, identityKey: identityKey || undefined,
-      status: missingName || duplicateName || invalidPhone || duplicatePhone ? "待处理" as const : "有效" as const };
+      status: missingName || duplicateName || invalidPhone || duplicatePhone || invalidCustomerType ? "待处理" as const : "有效" as const };
   });
   if (missingNames > 0) warnings.push(`有 ${missingNames} 条白名单缺少经销商名称全称，已标记为待处理。`);
-  if (duplicateNames > 0) warnings.push(`有 ${duplicateNames} 条白名单在同一客户类型下名称全称重复，已标记为待处理。`);
+  if (duplicateNames > 0) warnings.push(`有 ${duplicateNames} 条白名单在同一客户类型、同一分公司下经销商名称全称重复，已标记为待处理。`);
   if (invalidPhones > 0) warnings.push(`有 ${invalidPhones} 条白名单手机号为空或格式异常，已标记为待处理。`);
-  if (duplicatePhones > 0) warnings.push(`有 ${duplicatePhones} 条白名单在同一客户类型下手机号重复，已标记为待处理。`);
+  if (duplicatePhones > 0) warnings.push(`有 ${duplicatePhones} 条白名单在同一客户类型下手机号重复，已标记为待处理；不同客户类型可以使用相同手机号。`);
+  if (invalidCustomerTypes > 0) warnings.push(`有 ${invalidCustomerTypes} 条白名单客户类型无效，只允许综合客户、特渠专业客户或空。`);
   return { rows, stats: summarizeWhitelistRows(rows), warnings };
 }
 
@@ -389,12 +412,11 @@ export type DeleteTarget = {
   summary?: string;
 };
 
-export const productSheetOrder = new Map(productSheetConfig.map((item, index) => [item.name, index]));
-export const whitelistSheetOrder = new Map(whitelistSheetConfig.map((item, index) => [item.name, index]));
+export const productSheetOrder = new Map<string, number>();
+export const whitelistSheetOrder = new Map<string, number>();
 
 export function compareProductRows(a: ProductImportRow, b: ProductImportRow) {
-  return (productSheetOrder.get(a.sourceSheet ?? "") ?? 99) - (productSheetOrder.get(b.sourceSheet ?? "") ?? 99)
-    || a.sequence - b.sequence
+  return (a.sequence - b.sequence)
     || a.customerType.localeCompare(b.customerType, "zh-CN")
     || a.rebate.localeCompare(b.rebate, "zh-CN")
     || a.id.localeCompare(b.id);
