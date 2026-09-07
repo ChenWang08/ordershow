@@ -643,6 +643,7 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
           const saved = await updateAdminProduct(Number(activityId), Number(editingProductRow.id), editingProductRow.serverVersion, {
             ...productBody, bottlePriceSet: true, casePriceSet: true, tonCaseFactorSet: true, priceTierSet: true,
           });
+          if (!saved) return false;
           savedRow = { ...savedRow, id: String(saved.id), serverVersion: saved.version,
             status: saved.dataStatus === "INCOMPLETE" ? "待完善" : "有效" };
           const desiredImages = savedRow.images ?? [];
@@ -705,7 +706,7 @@ export function AdminPrototype({ lotteryRounds, onLotteryChange, activityCode, a
         await refreshServerImportPreview("PRODUCT");
       }
       if (activityStarted) recordOperation("活动开始后改单条商品", nextRow.materialName, `修改前：物料代码 ${editingProductRow.materialCode || "—"}、名称 ${editingProductRow.materialName || "—"}、元/箱 ${editingProductRow.casePrice || "—"}、分公司 ${editingProductRow.branchScope || "全部"}、状态 ${editingProductRow.status}；修改后：物料代码 ${nextRow.materialCode || "—"}、名称 ${nextRow.materialName || "—"}、元/箱 ${nextRow.casePrice || "—"}、分公司 ${nextRow.branchScope || "全部"}、状态 ${nextRow.status}；原因：${reason || "—"}。`);
-      setActionNotice(`${activityStarted ? "已记录并保存" : "已保存"}商品修改：${nextRow.materialName}`);
+      setActionNotice("保存成功");
       return true;
     }
     if (!productImportCompleted && productFileName) {

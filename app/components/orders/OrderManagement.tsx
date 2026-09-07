@@ -90,6 +90,7 @@ type OrderRecord = {
   currentVersion: number;
   lockVersion: number;
   versions: OrderVersion[];
+  items: OrderVersionItem[];
   permission: "可修改" | "可重新提交" | "已作废";
   status: OrderStatus;
   operationRecords: Array<{ time: string; title: string; detail: string }>;
@@ -200,6 +201,24 @@ function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRecord {
     currentVersion: order.currentVersion,
     lockVersion: order.lockVersion,
     versions,
+    items: (detail.items ?? []).map((item) => ({
+        productId: item.productId,
+        line: item.productLine || "未分类",
+        materialCode: item.materialCode || "—",
+        materialName: item.materialName,
+        spec: item.specification || "—",
+        casePack: item.casePack || "—",
+        casePrice: Number(item.casePrice).toFixed(2),
+        appliedTierMinQuantity: item.appliedTierMinQuantity,
+        baseCasePrice: item.baseCasePrice == null ? undefined : Number(item.baseCasePrice).toFixed(2),
+        basePriceQuantity: item.basePriceQuantity,
+        tierCasePrice: item.tierCasePrice == null ? undefined : Number(item.tierCasePrice).toFixed(2),
+        tierMinQuantity: item.tierMinQuantity,
+        tierPriceQuantity: item.tierPriceQuantity,
+        pricingMode: item.pricingMode,
+        quantity: Number(item.quantity),
+        subtotal: Number(item.lineAmount).toFixed(2),
+      })),
     permission: order.status === "WITHDRAWN" ? "可重新提交" : order.status === "VOIDED" ? "已作废" : "可修改",
     status,
     operationRecords: (detail.operations ?? []).map((operation) => ({
@@ -309,8 +328,9 @@ export function OrderManagement({ activityClosed, activityStarted, activityId, a
     for (const item of editorItems) {
       const product = products.find((candidate) => candidate.id === item.productId);
       const snapshot = editorExistingItems.find((candidate) => candidate.productId === item.productId);
-      if (!product && !snapshot) return null;
-      const amount = estimateLineAmount(product ?? snapshot, item.quantity);
+      const pricedProduct = product ?? snapshot;
+      if (!pricedProduct) return null;
+      const amount = estimateLineAmount(pricedProduct, item.quantity);
       if (amount == null) return null;
       total += amount;
     }
@@ -396,7 +416,7 @@ export function OrderManagement({ activityClosed, activityStarted, activityId, a
       const record = toOrderRecord(detail);
       const quantities = Object.fromEntries((detail.items || []).filter((item) => item.productId).map((item) => [item.productId, Number(item.quantity)]));
       setEditorMode("adjust"); setEditorOrder(record); setEditorCustomerId(String(detail.activityCustomerId)); setEditorCustomerSnapshot(editorCustomerFromOrder(detail)); setCustomers([]); setEditorCustomerSearch(""); setCustomerSearchBusy(false);
-      setEditorExistingItems(record.versions.at(-1)?.items ?? []);
+      setEditorExistingItems(record.items);
       setEditorQuantities(quantities); setEditorProductSearch(""); setEditorReason(""); setEditorPreview(null); setEditorPreviewBusy(false);
       setOrders((current) => current.map((item) => item.no === record.no ? record : item));
     } catch (reason) {
@@ -451,14 +471,14 @@ export function OrderManagement({ activityClosed, activityStarted, activityId, a
     } finally { setEditorBusy(false); }
   };
 
+
   const exportOrders = () => exportAdminOrders(activityId, {
     status: orderFilter === "已提交" ? "SUBMITTED" : orderFilter === "已撤回" ? "WITHDRAWN" : orderFilter === "已作废" ? "VOIDED" : undefined,
     customerType: customerType === "综合" ? "GENERAL" : customerType === "特渠" ? "SPECIAL" : customerType === "不区分客户类型" ? "ALL" : undefined,
     keyword: search,
   }, activityName);
 
-  const currentVersion = selected?.versions.at(-1) ?? null;
-  const currentVersionId = currentVersion?.version;
+
   const operationRecords = selected?.operationRecords ?? [];
   const editorAmountLabel = editorPreview
     ? formatMoney(editorPreview.totalAmount)
@@ -499,8 +519,8 @@ export function OrderManagement({ activityClosed, activityStarted, activityId, a
           {selected.status === "已撤回" && <p><span>撤回时间</span><b>{selected.withdrawnAt}</b><small>{selected.withdrawReason} · 明细和订单号保留</small></p>}
           {selected.status === "已作废" && <p><span>作废时间</span><b>{selected.voidedAt}</b><small>{selected.voidedReason} · 明细和订单号保留</small></p>}
         </div>
-        <section className="drawer-section"><h3>商品明细 <small>{currentVersion?.version} 商品快照</small></h3><div className="drawer-items order-snapshot-items">{currentVersion?.items.map((item) => <article key={`${selected.no}-${item.materialCode}`}><div className="order-item-primary"><span><small>产品线</small>{item.line}</span><span><small>物料代码</small>{item.materialCode}</span><b><small>物料名称</small>{item.materialName}</b><span><small>规格</small>{item.spec}</span><span><small>箱规</small>{item.casePack}</span><em><small>{item.pricingMode === "INCREMENTAL" ? "分段计价" : "成交元/箱"}</small>{item.pricingMode === "INCREMENTAL" ? <>{item.basePriceQuantity ?? 0}箱×¥{item.baseCasePrice}；{item.tierPriceQuantity ?? 0}箱×¥{item.tierCasePrice}<small>第 {item.tierMinQuantity} 箱起超出部分优惠</small></> : <>¥{item.casePrice}{item.appliedTierMinQuantity && <small>满 {item.appliedTierMinQuantity} 箱整批优惠</small>}</>}</em><span><small>订货箱数</small>{item.quantity} 箱</span><strong><small>金额</small>¥{item.subtotal}</strong></div></article>)}</div><p className="order-snapshot-note">商品明细为 {currentVersion?.version} 提交时的价格快照；历史金额不随商品调价变化。</p></section>
-        <section className="drawer-section"><h3>版本记录 <small>共 {selected.versions.length} 个版本</small></h3><div className="order-version-list">{selected.versions.map((version) => { const current = version.version === currentVersionId; return <div className="order-version-record" key={`${selected.no}-${version.version}`}><div className="order-version-summary"><span>{version.version}</span><div><b>{version.action}{current && <em className="version-current-badge">当前版本</em>}</b><small>{version.at} · {version.operator}</small><p>{version.detail}{version.reason ? ` · ${version.reason}` : ""}</p></div><strong>{version.amount}</strong>{current ? <span className="version-current-note">商品明细见上方</span> : <button type="button" onClick={() => setExpandedVersion(expandedVersion === version.version ? null : version.version)}>{expandedVersion === version.version ? "收起明细" : "查看商品明细"}</button>}</div>{expandedVersion === version.version && !current && <div className="order-version-detail"><div className="order-version-detail-head"><b>{version.version} 商品快照</b><span>{version.items.length} 种商品 · {version.amount}</span></div><div className="order-version-items"><div className="order-version-item-head"><span>产品线</span><span>物料代码</span><b>物料名称</b><span>规格</span><span>箱规</span><span>元/箱</span><span>订货箱数</span><strong>金额</strong></div>{version.items.map((item) => <div className="order-version-item" key={`${version.version}-${item.materialCode}`}><div className="order-version-item-main"><span>{item.line}</span><span>{item.materialCode}</span><b>{item.materialName}</b><span>{item.spec}</span><span>{item.casePack}</span><span>¥{item.casePrice}</span><span>{item.quantity} 箱</span><strong>¥{item.subtotal}</strong></div></div>)}</div></div>}</div>; })}</div></section>
+        <section className="drawer-section"><h3>商品明细 <small>当前成交明细</small></h3><div className="drawer-items order-snapshot-items">{selected.items.map((item) => <article key={`${selected.no}-${item.materialCode}`}><div className="order-item-primary"><span><small>产品线</small>{item.line}</span><span><small>物料代码</small>{item.materialCode}</span><b><small>物料名称</small>{item.materialName}</b><span><small>规格</small>{item.spec}</span><span><small>箱规</small>{item.casePack}</span><em><small>{item.pricingMode === "INCREMENTAL" ? "分段计价" : "成交元/箱"}</small>{item.pricingMode === "INCREMENTAL" ? <>{item.basePriceQuantity ?? 0}箱×¥{item.baseCasePrice}；{item.tierPriceQuantity ?? 0}箱×¥{item.tierCasePrice}<small>第 {item.tierMinQuantity} 箱起超出部分优惠</small></> : <>¥{item.casePrice}{item.appliedTierMinQuantity && <small>满 {item.appliedTierMinQuantity} 箱整批优惠</small>}</>}</em><span><small>订货箱数</small>{item.quantity} 箱</span><strong><small>金额</small>¥{item.subtotal}</strong></div></article>)}</div><p className="order-snapshot-note">商品价格随当前活动商品价格自动更新。</p></section>
+        <section className="drawer-section"><h3>版本记录 <small>共 {selected.versions.length} 个版本</small></h3><div className="order-version-list">{selected.versions.map((version) => { const current = false; return <div className="order-version-record" key={`${selected.no}-${version.version}`}><div className="order-version-summary"><span>{version.version}</span><div><b>{version.action}{current && <em className="version-current-badge">当前版本</em>}</b><small>{version.at} · {version.operator}</small><p>{version.detail}{version.reason ? ` · ${version.reason}` : ""}</p></div><strong>{version.amount}</strong>{current ? <span className="version-current-note">商品明细见上方</span> : <button type="button" onClick={() => setExpandedVersion(expandedVersion === version.version ? null : version.version)}>{expandedVersion === version.version ? "收起明细" : "查看商品明细"}</button>}</div>{expandedVersion === version.version && !current && <div className="order-version-detail"><div className="order-version-detail-head"><b>{version.version} 商品快照</b><span>{version.items.length} 种商品 · {version.amount}</span></div><div className="order-version-items"><div className="order-version-item-head"><span>产品线</span><span>物料代码</span><b>物料名称</b><span>规格</span><span>箱规</span><span>元/箱</span><span>订货箱数</span><strong>金额</strong></div>{version.items.map((item) => <div className="order-version-item" key={`${version.version}-${item.materialCode}`}><div className="order-version-item-main"><span>{item.line}</span><span>{item.materialCode}</span><b>{item.materialName}</b><span>{item.spec}</span><span>{item.casePack}</span><span>¥{item.casePrice}</span><span>{item.quantity} 箱</span><strong>¥{item.subtotal}</strong></div></div>)}</div></div>}</div>; })}</div></section>
         <section className="drawer-section"><h3>操作记录</h3><div className="order-timeline">{operationRecords.map((record, index) => <p key={`${record.time}-${record.title}-${index}`}><b>{record.time} {record.title}</b><span>{record.detail}</span></p>)}</div></section>
         <footer><button type="button" disabled={!activityStarted} onClick={() => void openAdjustEditor(selected)}>{selected.status === "已作废" || selected.status === "已撤回" ? "调整并恢复订单" : "调整订单"}</button>{selected.status !== "已作废" && <button type="button" className="danger-action" disabled={editorBusy || !activityStarted} onClick={() => void voidSelected()}>作废订单</button>}<button className="admin-primary" onClick={() => setSelectedNo(null)}>关闭详情</button></footer>
       </aside></div>}

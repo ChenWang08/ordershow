@@ -147,6 +147,13 @@ WHERE id = ? AND lock_version = ? AND current_version_no = ?;
 - 自动截止任务延迟不影响判断，因为 H5 写接口同时校验 `ends_at`；
 - 已在截止前完成事务提交的 H5 订单有效，截止后才提交事务的 H5 请求拒绝；管理员订单写请求按角色和活动状态校验，可在 `CLOSED`、`FINISHED` 继续维护。
 
+### 7.4 商品价格自动同步
+
+- 商品保存和当前活动有效订单价格更新先锁定同一活动行，保证商品最新规则与订单计价读取顺序一致；
+- 只处理同活动、同商品 ID、状态为 `SUBMITTED` 的订单；撤回、作废和其他活动订单不处理；
+- 更新 `order_item` 当前价格、小计和 `customer_order.total_amount`，不修改数量、吨数、当前版本号，不新增 `order_version` 或 `order_operation`；
+- 更新事务提交后写 `ORDER_PRICE_UPDATED` outbox，缓存失效和 SSE 只在提交成功后发生；失败时商品和订单一起回滚。
+
 ## 8. 幂等实现
 
 ### 8.1 请求指纹
@@ -215,7 +222,7 @@ WHERE id = ? AND lock_version = ? AND current_version_no = ?;
 | `ACTIVITY_CREATED/UPDATED` | 活动配置前后值 |
 | `ACTIVITY_STATUS_CHANGED` | 状态、原因和时间 |
 | `IMPORT_UPLOADED/CONFIRMED/FAILED` | 文件摘要、统计和错误 |
-| `PRODUCT_UPDATED/DEACTIVATED` | 单条紧急变更前后值和原因 |
+| `PRODUCT_UPDATED/DEACTIVATED` | 单条紧急变更前后值和原因；价格变更的相关当前订单金额由同一商品变更事务更新，不另写订单操作 |
 | `CUSTOMER_UPDATED/DEACTIVATED` | 白名单变更前后值和原因 |
 | `ORDER_WITHDRAWN` | 客户在 H5 撤回订单的订单号、原状态和操作时间 |
 | `EXPORT_CREATED/DOWNLOADED` | 导出类型、筛选和文件，不记录下载内容 |

@@ -33,11 +33,13 @@ public class ProductService {
   private final JdbcTemplate jdbc;
   private final ActivityService activities;
   private final StorageService storage;
+  private final com.fengyi.ordershow.order.PriceSyncService prices;
 
-  public ProductService(JdbcTemplate jdbc, ActivityService activities, StorageService storage) {
+  public ProductService(JdbcTemplate jdbc, ActivityService activities, StorageService storage, com.fengyi.ordershow.order.PriceSyncService prices) {
     this.jdbc = jdbc;
     this.activities = activities;
     this.storage = storage;
+    this.prices = prices;
   }
 
   public List<ProductView> h5Products(String activityCode, H5Principal customer, String rebateStatus, String keyword) {
@@ -86,10 +88,10 @@ public class ProductService {
 
   @Transactional
   public ProductView update(long activityId, long productId, int expectedVersion, ProductPatch patch) {
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     var activity = activities.byId(activityId);
     if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(activity.status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后商品只读");
     if ("SCHEDULED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品已锁定，请先撤回发布");
-    requireEditReason(activity.status(), patch.reason());
     ProductView current = product(activityId, productId);
     List<String> branchScopes = patch.branchScope() == null ? current.branchScope() : splitBranchScope(patch.branchScope());
     String name = value(patch.materialName(), current.materialName());
@@ -127,6 +129,9 @@ public class ProductService {
       if (changed != 1) throw DomainException.conflict("PRODUCT_VERSION_CONFLICT", "商品已被其他页面修改，请刷新后重试");
       replaceBranchScopes(productId, branchScopes);
       if (patch.priceTierSet()) replacePriceTier(productId, priceTier);
+      if (!samePrice(casePrice,current.casePrice()) || !sameTier(priceTier,current.priceTier())) {
+        prices.sync(activityId,productId,casePrice,priceTier==null?null:priceTier.minQuantity(),priceTier==null?null:priceTier.casePrice(),priceTier==null?null:priceTier.pricingMode());
+      }
     } catch (DuplicateKeyException exception) {
       throw DomainException.conflict("PRODUCT_EXISTS", "当前商品目录已存在相同客户类型、返利类型和商品名称");
     }
@@ -683,7 +688,7 @@ public class ProductService {
         """, productId, priceTier.minQuantity(), priceTier.casePrice(), priceTier.pricingMode());
   }
 
-  private static PriceTierView validatePriceTier(BigDecimal basePrice, Long minQuantity, BigDecimal tierPrice, String pricingMode) {
+  public static PriceTierView validatePriceTier(BigDecimal basePrice, Long minQuantity, BigDecimal tierPrice, String pricingMode) {
     if (minQuantity == null && tierPrice == null) return null;
     if (minQuantity == null || tierPrice == null) {
       throw DomainException.unprocessable("PRODUCT_PRICE_TIER_INCOMPLETE", "请同时填写阶梯起订箱数和阶梯箱价");
@@ -699,6 +704,14 @@ public class ProductService {
       throw DomainException.unprocessable("PRODUCT_PRICE_TIER_MODE_INVALID", "阶梯计价模式不正确");
     }
     return new PriceTierView(minQuantity, tierPrice, mode);
+  }
+
+  private static boolean samePrice(BigDecimal a, BigDecimal b) {
+    return a == null || b == null ? a == b : a.compareTo(b) == 0;
+  }
+  private static boolean sameTier(PriceTierView a, PriceTierView b) {
+    return a == null || b == null ? a == b : a.minQuantity() == b.minQuantity()
+        && samePrice(a.casePrice(), b.casePrice()) && a.pricingMode().equals(b.pricingMode());
   }
 
   private static byte[] readLimited(ZipInputStream input, int max) throws Exception {

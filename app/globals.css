@@ -88,7 +88,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .mini-brand b { font-family: serif; color: var(--gold-400); letter-spacing: .12em; }
 .mini-brand span { padding-left: 9px; border-left: 1px solid rgba(255,255,255,.4); font-size: 9px; opacity: .7; }
 .h5-hero-copy { position: relative; z-index: 2; margin: 66px 7px 42px; }
-.h5-hero-copy .eyebrow { color: #ffd886; font-size: 11px; letter-spacing: .16em; }
+.h5-hero-copy .eyebrow { color: #ffd886; font-size: 15px; font-weight: 700; letter-spacing: .16em; }
 .h5-hero-copy h1 { margin: 12px 0 7px; font-family: "STKaiti", "KaiTi", serif; font-size: 49px; line-height: 1.06; letter-spacing: .04em; text-shadow: 0 4px 20px rgba(66,0,0,.25); }
 .h5-hero-copy h1 em { color: var(--gold-400); font-style: normal; }
 .h5-hero-copy p { font-size: 12px; letter-spacing: .2em; opacity: .8; }
@@ -198,7 +198,7 @@ button:disabled { cursor: not-allowed; opacity: .45; }
 .cart-sheet > footer div { display: grid; grid-template-columns: auto 1fr; align-items: baseline; column-gap: 6px; }.cart-sheet > footer span { color: #7f6d63; font-size: 9px; }.cart-sheet > footer b { color: #ba2723; font-size: 18px; }.cart-sheet > footer small { grid-column: 1 / -1; color: #9b887d; font-size: 8px; }
 .cart-sheet > footer > button { color: #fff; border: 0; border-radius: 10px; background: linear-gradient(135deg,#d33730,#a51e1e); font-size: 11px; font-weight: 700; }
 .empty-state { padding: 50px 0; color: #9c8c82; text-align: center; font-size: 11px; }
-.confirm-page { padding-bottom: 28px; background: linear-gradient(#8f1518 0 158px, #f7f1e8 158px); }
+.confirm-page { padding-bottom: 28px; background: linear-gradient(#8f1518 0 158px, #f7f1e8 158px); background-attachment: local; }
 .simple-header { display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; padding: 11px 12px; color: #fff; text-align: center; }
 .simple-header button { border: 0; color: #fff; background: transparent; font-size: 26px; }
 .simple-header b { font-size: 14px; }

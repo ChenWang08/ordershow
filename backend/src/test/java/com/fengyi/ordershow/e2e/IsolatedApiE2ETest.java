@@ -763,6 +763,56 @@ class IsolatedApiE2ETest {
     return count;
   }
 
+  @Test
+  @Order(9)
+  void automaticPriceUpdatesOnlyCurrentOrders() throws Exception {
+    h5=client();
+    createDraftAndRejectPrematurePublication();
+    importAndPublishProductAndWhitelistFixtures();
+    publishActivityAndVerifyH5IdentityAndCatalogIsolation();
+    var submitted=send(h5,"PUT","/h5/activities/"+activityCode+"/order",mixedOrderBody(0,productId,200,productWithoutTonsId,1),h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,submitted.statusCode(),submitted.body());
+    JsonNode original=data(submitted);
+    String base="/admin/activities/"+activityId;
+    ObjectNode patch=JSON.createObjectNode().put("casePriceSet",true).put("casePrice",100)
+        .put("priceTierSet",true).put("priceTierMinQuantity",100).put("priceTierCasePrice",80)
+        .put("priceTierPricingMode","WHOLE_ORDER");
+    JsonNode updated=original;
+    for(String mode:List.of("WHOLE_ORDER","INCREMENTAL","REMOVE","REPEAT")) {
+      if(mode.equals("INCREMENTAL")) patch.put("priceTierPricingMode","INCREMENTAL");
+      if(mode.equals("REMOVE")) { patch.put("casePrice",110).putNull("priceTierMinQuantity").putNull("priceTierCasePrice"); }
+      JsonNode product=findProduct(data(send(admin,"GET",base+"/products",null,null,null)),"P001");
+      var saved=send(admin,"PATCH",base+"/products/"+productId,patch,adminCsrf,product.path("version").asText());
+      assertEquals(200,saved.statusCode(),saved.body());
+      JsonNode current=data(send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null));
+      String amount=mode.equals("WHOLE_ORDER")?"16000":mode.equals("INCREMENTAL")?"17980":"22000";
+      assertEquals(0,new java.math.BigDecimal(amount).compareTo(current.path("items").get(0).path("lineAmount").decimalValue()));
+      assertEquals(original.path("versions"),current.path("versions"));
+      assertEquals(original.path("operations"),current.path("operations"));
+      assertEquals(original.path("currentVersion"),current.path("currentVersion"));
+      assertEquals(original.path("totalQuantity"),current.path("totalQuantity"));
+      assertEquals(original.path("totalTons"),current.path("totalTons"));
+      assertEquals(original.path("items").get(1),current.path("items").get(1));
+      if(mode.equals("REPEAT")) assertEquals(updated,current);
+      updated=current;
+      JsonNode ranking=data(send(client(),"GET","/screen/activities/"+activityCode+"/ranking",null,null,null));
+      assertEquals(0,current.path("totalAmount").decimalValue().compareTo(ranking.path("totals").path("total_amount").decimalValue()));
+      JsonNode adminOrder=data(send(admin,"GET",base+"/orders/"+original.path("id").asLong(),null,null,null));
+      assertEquals(current.path("items"),adminOrder.path("items"));
+    }
+    JsonNode product=findProduct(data(send(admin,"GET",base+"/products",null,null,null)),"P001");
+    patch.put("casePrice",0).put("orderable",false);
+    var invalid=send(admin,"PATCH",base+"/products/"+productId,patch,adminCsrf,product.path("version").asText());
+    assertEquals(422,invalid.statusCode(),invalid.body());
+    assertEquals(product,findProduct(data(send(admin,"GET",base+"/products",null,null,null)),"P001"));
+    assertEquals(updated,data(send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null)));
+    var withdrawn=send(h5,"POST","/h5/activities/"+activityCode+"/order/withdraw",JSON.createObjectNode().put("expectedVersion",1),h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,withdrawn.statusCode(),withdrawn.body());
+    patch.put("casePrice",120).put("orderable",true);
+    assertEquals(200,send(admin,"PATCH",base+"/products/"+productId,patch,adminCsrf,product.path("version").asText()).statusCode());
+    assertEquals(data(withdrawn),data(send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null)));
+  }
+
   private HttpClient client() {
     CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
     return HttpClient.newBuilder().cookieHandler(cookies).connectTimeout(Duration.ofSeconds(5)).build();

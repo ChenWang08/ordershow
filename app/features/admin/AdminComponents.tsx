@@ -336,7 +336,7 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, o
   const tierCasePrice = Number(form.priceTierCasePrice);
   const tierValid = !tierEnabled || (Number.isInteger(tierMinQuantity) && tierMinQuantity >= 2 && tierMinQuantity <= 999999
     && Number.isFinite(tierCasePrice) && tierCasePrice > 0 && tierCasePrice < basePrice);
-  const canSave = form.materialName.trim() !== "" && form.casePrice.trim() !== "" && (conversionValid || form.status === "待完善") && tierValid && !duplicateMaterialName && (!activityStarted || editReason.trim() !== "");
+  const canSave = form.materialName.trim() !== "" && form.casePrice.trim() !== "" && (conversionValid || form.status === "待完善") && tierValid && !duplicateMaterialName && (isEditing || !activityStarted || editReason.trim() !== "");
   return (
     <div className="order-drawer-backdrop" onClick={() => { if (!saving) onClose(); }}>
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
@@ -364,9 +364,9 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, o
           <label><span>是否礼盒</span><select value={form.gift} onChange={(e) => update("gift", e.target.value)}><option>否</option><option>是</option></select></label>
           <label><span>分公司限制</span><input value={form.branchScope} onChange={(e) => update("branchScope", e.target.value)} placeholder="留空表示全部分公司" /><small>多个分公司用顿号或逗号分隔</small></label>
           <label><span>数据状态</span><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>有效</option><option>待完善</option></select></label>
-          {activityStarted && <label className="wide-field"><span>紧急修改原因 *</span><input value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="请填写本次改单原因，保存后写入操作日志" /></label>}
         </div>
-        <p className="drawer-form-note">带 * 的字段为必填项；{activityStarted ? "活动已开始，本次手动调整会记录操作日志。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
+        {activityStarted && !isEditing && <label>新增商品原因<input value={editReason} onChange={e => setEditReason(e.target.value)} /></label>}
+        <p className="drawer-form-note">带 * 的字段为必填项；{activityStarted ? "价格修改保存后，相关有效订单自动更新。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
         <footer><button disabled={saving} onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave || saving} onClick={async () => {
           setSaving(true);
           const saved = await onSave({ ...form, sequence: nextSequence, manuallyEdited: true }, editReason.trim());

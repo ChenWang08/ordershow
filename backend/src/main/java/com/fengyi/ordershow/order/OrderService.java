@@ -63,10 +63,12 @@ public class OrderService {
     return findByCustomer(activity.id(), customer.customerId());
   }
 
-  @Transactional
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public OrderView submit(String activityCode, H5Principal customer, SubmitRequest request, String idempotencyKey, String traceId) {
     var activity = activities.byCode(activityCode);
     requireIdentity(activity.id(), customer);
+    activities.requireWritable(activity.id());
+    lockPricing(activity.id());
     activities.requireWritable(activity.id());
     if (request.items() == null || request.items().isEmpty()) throw DomainException.unprocessable("ORDER_EMPTY", "请至少选择一种商品");
     if (request.items().size() > 1000) throw DomainException.unprocessable("ORDER_TOO_MANY_ITEMS", "订单商品种类过多");
@@ -159,11 +161,12 @@ public class OrderService {
     return order(orderId);
   }
 
-  @Transactional
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public OrderView withdraw(String activityCode, H5Principal customer, int expectedVersion, String idempotencyKey, String traceId) {
     var activity = activities.byCode(activityCode);
     requireIdentity(activity.id(), customer);
     activities.requireWritable(activity.id());
+    lockPricing(activity.id());
     byte[] requestHash = hash(Map.of("expectedVersion", expectedVersion));
     IdempotencyResult replay = beginIdempotency(activity.id(), customer.customerId(), "ORDER_WITHDRAW", idempotencyKey, requestHash);
     if (replay.replay()) {
@@ -200,10 +203,11 @@ public class OrderService {
     return preview(calculate(activityId, customer, request.items()));
   }
 
-  @Transactional
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public AdminOrderView adminCreate(long activityId, AdminCreateRequest request, AdminPrincipal admin,
                                     String idempotencyKey, String traceId) {
     ActivityService.ActivityView activity = requireAdminOrderWritable(activityId);
+    lockPricing(activityId);
     String reason = requireReason(request.reason());
     CustomerSnapshot customer = adminCustomer(activityId, request.activityCustomerId());
     Map<Long, Long> quantities = quantities(request.items());
@@ -228,10 +232,11 @@ public class OrderService {
     return adminOrder(activityId, orderId);
   }
 
-  @Transactional
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public AdminOrderView adminAdjust(long activityId, long orderId, AdminAdjustRequest request, AdminPrincipal admin,
                                     String idempotencyKey, String traceId) {
     ActivityService.ActivityView activity = requireAdminOrderWritable(activityId);
+    lockPricing(activityId);
     String reason = requireReason(request.reason());
     IdempotencyResult replay = beginIdempotency(activityId, "ADMIN", admin.id(), "ADMIN_ORDER_ADJUST",
         idempotencyKey, hash(Map.of("orderId", orderId, "request", request)));
@@ -243,6 +248,23 @@ public class OrderService {
     }
     Map<Long, Long> quantities = quantities(request.items());
     if ("SUBMITTED".equals(current.status()) && sameItems(orderId, quantities)) {
+      CalculatedOrder repriced = calculate(activityId, orderCustomer(activityId, current.customerId()), quantities);
+      Map<Long, PricingResult> changedPrices = new LinkedHashMap<>();
+      for (var item : repriced.items()) {
+        var stored = jdbc.queryForMap("SELECT * FROM order_item WHERE order_id=? AND activity_product_id=?", orderId, item.product().id());
+        var p = item.pricing();
+        if (!PriceSyncService.same(p.baseCasePrice(), stored.get("base_case_price") == null ? stored.get("case_price") : stored.get("base_case_price"))
+            || !PriceSyncService.same(p.tierCasePrice(), stored.get("tier_case_price"))
+            || !PriceSyncService.same(p.tierMinQuantity(), stored.get("tier_min_quantity"))
+            || !java.util.Objects.equals(p.pricingMode(), stored.get("pricing_mode"))
+            || !PriceSyncService.same(p.lineAmount(), stored.get("line_amount"))) {
+          changedPrices.put(item.product().id(), p);
+        }
+      }
+      if (!changedPrices.isEmpty()) {
+        saveRepriced(activityId, orderId, changedPrices, admin.id(), "价格同步：" + reason, idempotencyKey);
+        dashboards.refreshFinalSnapshots(activityId);
+      }
       completeIdempotency(activityId, "ADMIN", admin.id(), "ADMIN_ORDER_ADJUST", idempotencyKey, orderId);
       return adminOrder(activityId, orderId);
     }
@@ -270,10 +292,11 @@ public class OrderService {
     return adminOrder(activityId, orderId);
   }
 
-  @Transactional
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public AdminOrderView adminVoid(long activityId, long orderId, AdminVoidRequest request, AdminPrincipal admin,
                                   String idempotencyKey, String traceId) {
     ActivityService.ActivityView activity = requireAdminOrderWritable(activityId);
+    lockPricing(activityId);
     String reason = requireReason(request.reason());
     IdempotencyResult replay = beginIdempotency(activityId, "ADMIN", admin.id(), "ADMIN_ORDER_VOID",
         idempotencyKey, hash(Map.of("orderId", orderId, "request", request)));
@@ -591,6 +614,57 @@ public class OrderService {
     return current.equals(expected);
   }
 
+  // All order writers take this lock before reading catalog prices or locking orders.
+  void lockPricing(long activityId) {
+    jdbc.queryForList("SELECT id FROM activity WHERE id = ? FOR UPDATE", activityId);
+  }
+
+  void saveRepriced(long activityId, long orderId, Map<Long, PricingResult> prices, long adminId,
+                    String reason, String batchId) {
+    for (var entry : prices.entrySet()) {
+      var p = entry.getValue();
+      jdbc.update("""
+          UPDATE order_item SET case_price=?, base_case_price=?, base_price_quantity=?, tier_case_price=?,
+            tier_min_quantity=?, tier_price_quantity=?, pricing_mode=?, applied_tier_min_quantity=?, line_amount=?
+          WHERE order_id=? AND activity_product_id=?
+          """, p.casePriceSnapshot(), p.baseCasePrice(), p.baseQuantity(), p.tierCasePrice(), p.tierMinQuantity(),
+          p.tierQuantity(), p.pricingMode(), p.appliedTierMinQuantity(), p.lineAmount(), orderId, entry.getKey());
+    }
+    jdbc.update("""
+        UPDATE customer_order SET total_amount=(SELECT SUM(line_amount) FROM order_item WHERE order_id=?),
+          current_version_no=current_version_no+1, lock_version=lock_version+1,
+          last_modified_at=UTC_TIMESTAMP(3), last_modified_source='ADMIN', last_modified_admin_id=?
+        WHERE id=? AND activity_id=? AND status='SUBMITTED'
+        """, orderId, adminId, orderId, activityId);
+    jdbc.update("""
+        INSERT INTO order_version(activity_id,order_id,version_no,customer_type,region_code,branch_name_snapshot,
+          dealer_short_name_snapshot,dealer_full_name_snapshot,total_quantity,total_tons,total_amount,
+          submitted_source,submitted_by_admin_id,reason,submitted_at,request_idempotency_key)
+        SELECT activity_id,id,current_version_no,customer_type,region_code,branch_name_snapshot,
+          dealer_short_name_snapshot,dealer_full_name_snapshot,total_quantity,total_tons,total_amount,
+          'ADMIN',?,?,UTC_TIMESTAMP(3),? FROM customer_order WHERE id=?
+        """, adminId, reason, batchId, orderId);
+    long versionId = jdbc.queryForObject("SELECT id FROM order_version WHERE order_id=? AND request_idempotency_key=?", Long.class, orderId, batchId);
+    jdbc.update("""
+        INSERT INTO order_version_item(order_version_id,line_no,activity_product_id,material_code,material_name,
+          category_name,product_line,brand_name,variety_name,specification,case_pack,customer_type,rebate_status,
+          is_gift_box,primary_image_object_key,quantity,case_price,applied_tier_min_quantity,base_case_price,
+          base_price_quantity,tier_case_price,tier_min_quantity,tier_price_quantity,pricing_mode,line_amount,ton_case_factor,line_tons)
+        SELECT ?,i.line_no,i.activity_product_id,i.material_code,i.material_name,i.category_name,i.product_line,
+          i.brand_name,i.variety_name,i.specification,i.case_pack,old.customer_type,i.rebate_status,i.is_gift_box,
+          i.primary_image_object_key,i.quantity,i.case_price,i.applied_tier_min_quantity,i.base_case_price,
+          i.base_price_quantity,i.tier_case_price,i.tier_min_quantity,i.tier_price_quantity,i.pricing_mode,
+          i.line_amount,i.ton_case_factor,i.line_tons FROM order_item i
+        JOIN customer_order o ON o.id=i.order_id
+        JOIN order_version v ON v.order_id=o.id AND v.version_no=o.current_version_no-1
+        JOIN order_version_item old ON old.order_version_id=v.id AND old.line_no=i.line_no
+        WHERE i.order_id=?
+        """, versionId, orderId);
+    int version = jdbc.queryForObject("SELECT current_version_no FROM customer_order WHERE id=?", Integer.class, orderId);
+    insertOperation(activityId, orderId, "ADMIN_ADJUST", "ADMIN", adminId, version, reason, batchId.substring(0, Math.min(64, batchId.length())));
+    writeOutbox(activityId, orderId, "ORDER_ADMIN_ADJUSTED", Map.of("orderId", orderId, "version", version));
+  }
+
   private void insertCurrentItems(long orderId, List<CalculatedItem> items) {
     for (CalculatedItem item : items) jdbc.update("""
         INSERT INTO order_item(order_id, activity_product_id, line_no, material_code, material_name, category_name,
@@ -756,7 +830,7 @@ public class OrderService {
         """, orderId, orderId, activityId, actorType, actorId, endpoint, key);
   }
 
-  private void writeOutbox(long activityId, long orderId, String event, Object payload) {
+  void writeOutbox(long activityId, long orderId, String event, Object payload) {
     try {
       jdbc.update("""
           INSERT INTO domain_event_outbox(activity_id, aggregate_type, aggregate_id, event_type, payload_json, available_at)

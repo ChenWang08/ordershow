@@ -679,6 +679,15 @@ CREATE TABLE order_version_item (
   CONSTRAINT ck_order_version_item_pricing_mode CHECK (pricing_mode IS NULL OR pricing_mode IN ('WHOLE_ORDER', 'INCREMENTAL'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
+CREATE TABLE price_sync_batch (
+  batch_key VARCHAR(128) PRIMARY KEY,
+  activity_id BIGINT UNSIGNED NOT NULL,
+  admin_id BIGINT UNSIGNED NOT NULL,
+  request_hash VARCHAR(64) NOT NULL,
+  result_json JSON NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+);
+
 CREATE TABLE order_operation (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   activity_id BIGINT UNSIGNED NOT NULL,

@@ -156,6 +156,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
   const [runtimeOrder, setRuntimeOrder] = useState<RuntimeOrder | null>(null);
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("");
+  const [orderNeedsRefresh, setOrderNeedsRefresh] = useState(false);
   const catalog = useMemo(() => runtimeProducts ? runtimeProducts.map(runtimeProductToProduct) : importedRows ? importedRows.map(productRowToProduct) : [], [runtimeProducts, importedRows]);
   const [step, setStep] = useState<H5Step>(() => unspecifiedWhitelist ? "verify" : "channel");
   const [channel, setChannel] = useState<H5Channel>("");
@@ -293,6 +294,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
   }, []);
 
   const applyRuntimeOrder = (order: RuntimeOrder | null, liveCatalog: Product[], preserveDraft = false) => {
+    setOrderNeedsRefresh(false);
     setRuntimeOrder(order);
     if (!order) {
       if (!preserveDraft) setQuantities({});
@@ -319,15 +321,41 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
     setOrderUpdatedAt(new Date(order.lastModifiedAt).toLocaleString("zh-CN", { hour12: false }));
     setOrderWithdrawnAt(order.withdrawnAt ? new Date(order.withdrawnAt).toLocaleString("zh-CN", { hour12: false }) : "");
     setOrderEvents(order.operations.map((event) => ({
-      time: new Date(event.occurredAt).toLocaleString("zh-CN", { hour12: false }),
+      time: new Date(event.occurredAt).toLocaleTimeString("zh-CN", {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
       title: event.type === "WITHDRAW" ? "客户撤回订单" : event.type === "SUBMIT" ? "客户首次提交" : event.type === "ADMIN_CREATE" ? "管理员创建订单" : event.type === "ADMIN_VOID" ? "管理员作废订单" : event.type === "ADMIN_RESTORE" ? "管理员调整并恢复订单" : event.type === "ADMIN_ADJUST" ? "管理员调整订单" : "客户修改并重新提交",
-      detail: `${event.source === "ADMIN" ? event.adminName || "管理员" : "经销商手机端"} · ${event.orderVersion ? `版本 V${event.orderVersion}` : "订单状态变更"}`,
+      detail: `${event.source === "ADMIN" ? event.adminName || "管理员" : "经销商手机端"} · ${event.orderVersion ? `版本 V${event.orderVersion}` : "订单状态变更"}${event.reason ? ` · ${event.reason}` : ""}`,
     })));
   };
 
   const changeQty = (id: string, delta: number) => {
     setQuantities((old) => ({ ...old, [id]: Math.min(999999, Math.max(0, (old[id] || 0) + delta)) }));
   };
+
+  useEffect(() => {
+    if (!runtimeIdentity || runtimeBusy || (step !== "submitted" && step !== "success")) return;
+    let active = true;
+    let loading = false;
+    const refresh = async () => {
+      if (loading || document.hidden) return;
+      loading = true;
+      try {
+        const order = await loadH5Order();
+        if (active && order && (order.currentVersion !== runtimeOrder?.currentVersion || order.lockVersion !== runtimeOrder?.lockVersion)) {
+          applyRuntimeOrder(order, catalog);
+
+        }
+      } catch { /* Preserve the last confirmed order when offline. */ }
+      finally { loading = false; }
+    };
+    const timer = window.setInterval(() => void refresh(), 15000);
+    window.addEventListener("focus", refresh);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [runtimeIdentity, runtimeBusy, step, runtimeOrder, catalog]);
 
   const startEditingOrder = () => {
     if (orderStatus === "withdrawn") setQuantities({ ...submittedQuantities });
@@ -416,6 +444,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
         setStep("success");
       } catch (error) {
         setRuntimeMessage(error instanceof ApiError ? error.message : "订单提交失败，请稍后重试。");
+        if (error instanceof ApiError && error.code === "ORDER_VERSION_CONFLICT") setOrderNeedsRefresh(true);
       } finally { setRuntimeBusy(false); }
       return;
     }
@@ -450,11 +479,9 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
           <FestivalDecor />
           {visibleStep === "channel" && !unspecifiedWhitelist && (
             <section className="h5-page verify-page entry-page">
-              <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
+              <div className="mini-brand"><b>金龙鱼</b></div>
               <div className="h5-hero-copy entry-hero">
                 <span className="eyebrow">订货会</span>
-                <h1>月满家圆<br /><em>味启新程</em></h1>
-                <p>新品发布及旺季动员会</p>
               </div>
               <div className="verify-card entry-card">
                 <span className="step-tag">订货通道</span>
@@ -480,7 +507,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
           {visibleStep === "region" && (
             <section className="h5-page verify-page entry-page">
               <div className="entry-nav"><button onClick={() => setStep("channel")}>‹</button><span>综合客户订货</span></div>
-              <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
+              <div className="mini-brand"><b>金龙鱼</b></div>
               <div className="h5-hero-copy region-hero">
                 <span className="eyebrow">订货会</span>
                 <h1>选择所属<br /><em>经营大区</em></h1>
@@ -504,11 +531,9 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
           {visibleStep === "verify" && (
             <section className="h5-page verify-page">
               <div className="entry-nav">{!unspecifiedWhitelist && <button onClick={() => setStep(channel === "综合客户" && regionalized ? "region" : "channel")}>‹</button>}<span>{identityLabel}</span></div>
-              <div className="mini-brand"><b>金龙鱼</b><span>调味品事业部</span></div>
+              <div className="mini-brand"><b>金龙鱼</b></div>
               <div className="h5-hero-copy">
                 <span className="eyebrow">订货会</span>
-                <h1>月满家圆<br /><em>味启新程</em></h1>
-                <p>新品发布及旺季动员会</p>
               </div>
               <div className="verify-card">
                 <div className="verify-context"><span className="step-tag">{identityLabel}</span>{!unspecifiedWhitelist && <button onClick={() => setStep("channel")}>重新选择</button>}</div>
@@ -631,6 +656,18 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                 <p className="grand-total"><span>订单总金额</span><b>¥{money(totalAmount)}</b></p>
               </div>
               <label className="agreement"><input type="checkbox" defaultChecked /> 我已核对商品与订货数量</label>
+              {orderNeedsRefresh && <button disabled={runtimeBusy} onClick={async () => {
+                setRuntimeBusy(true);
+                try {
+                  const rows = await loadH5Products();
+                  const current = await loadH5Order();
+                  setRuntimeProducts(rows);
+                  applyRuntimeOrder(current, rows.map(runtimeProductToProduct));
+                  setRuntimeMessage("已加载最新订单，请重新核对后修改。此前未提交的修改已清除。");
+                  setStep("submitted");
+                } catch { setRuntimeMessage("最新订单加载失败，请重试。"); }
+                finally { setRuntimeBusy(false); }
+              }}>加载最新订单并重新核对（放弃本次未提交修改）</button>}
               {runtimeMessage && <div className="verify-error" role="alert">{runtimeMessage}</div>}
               <button className="submit-order" disabled={customerOrderReadOnly || runtimeBusy} onClick={() => void submitOrder()}>{runtimeBusy ? "正在提交…" : orderStatus === "none" ? "确认提交订单" : orderStatus === "withdrawn" ? "重新提交订单" : "确认修改并提交"}</button>
             </section>
@@ -638,6 +675,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
 
           {visibleStep === "submitted" && (
             <section className="h5-page submitted-page">
+              {runtimeMessage && <div className="verify-error" role="status">{runtimeMessage}</div>}
               <header className="simple-header"><button onClick={() => setStep("verify")}>‹</button><b>我的订单</b><span /></header>
               <div className={`submitted-state-card ${orderStatus === "withdrawn" || orderStatus === "voided" ? "withdrawn" : ""}`}>
                 <span className="submitted-status">{orderStatus === "withdrawn" ? "已撤回" : orderStatus === "voided" ? "已作废" : "已提交"}</span>
@@ -662,11 +700,11 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                 ))}
               </div>
               <div className="summary-card">
-                <p className="grand-total"><span>订单总金额</span><b>¥{money(orderViewAmount)}</b></p>
+                <p className="grand-total"><span>订单总金额</span><b>¥{money(runtimeOrder?.totalAmount ?? orderViewAmount)}</b></p>
                 <p><span>订货数量</span><b>{orderViewBoxes} 箱 · {orderViewSelected.length} 种商品</b></p>
               </div>
               <div className="submitted-note">{orderStatus === "voided" ? "该订单已由管理员作废，不计入有效订单、金额统计和抽奖资格；客户侧仅可查看。" : activityClosed ? "活动已截止，当前订单仅可查看，不能修改、取消或重新提交。" : orderStatus === "withdrawn" ? "该订单当前不计入有效订单、金额统计和抽奖资格；截止前可点击“继续订货”恢复提交。" : "订单状态会同步至管理后台和活动看板；如需调整商品或数量，请点击“修改订单”。"}</div>
-              {orderEvents.length > 0 && <section className="submitted-events"><h3>操作记录</h3>{orderEvents.map((event, index) => <p key={`${event.time}-${index}`}><b>{event.time.slice(11)} {event.title}</b><span>{event.detail}</span></p>)}</section>}
+              {orderEvents.length > 0 && <section className="submitted-events"><h3>操作记录</h3>{orderEvents.map((event, index) => <p key={`${event.time}-${index}`}><b>{event.time} {event.title}</b><span>{event.detail}</span></p>)}</section>}
               <div className="submitted-actions">
                 {!customerOrderReadOnly && (orderStatus === "withdrawn" ? <button className="primary-btn" onClick={startEditingOrder}>继续订货</button> : <button className="primary-btn" onClick={startEditingOrder}>修改订单</button>)}
                 <button className="ghost-btn" onClick={() => setStep("channel")}>返回活动首页</button>

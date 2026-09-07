@@ -1,0 +1,8 @@
+CREATE TABLE price_sync_batch (
+  batch_key VARCHAR(128) PRIMARY KEY,
+  activity_id BIGINT UNSIGNED NOT NULL,
+  admin_id BIGINT UNSIGNED NOT NULL,
+  request_hash VARCHAR(64) NOT NULL,
+  result_json JSON NOT NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3)
+);
