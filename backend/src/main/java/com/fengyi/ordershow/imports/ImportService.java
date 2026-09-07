@@ -489,19 +489,19 @@ public class ImportService {
             normalized_branch_name = VALUES(normalized_branch_name), updated_at = UTC_TIMESTAMP(3)
           """, customerType, fullName, normalizedName, branchName, normalizedBranch);
       Long customerId = jdbc.queryForObject("SELECT id FROM customer WHERE customer_type = ? AND normalized_dealer_full_name = ? AND normalized_branch_name = ?", Long.class, customerType, normalizedName, normalizedBranch);
-      String phone = text(sensitive.get("dealerPhone"));
-      String confirmerPhone = text(sensitive.get("confirmerPhone"));
+      String phone = CryptoService.normalizePhone(text(sensitive.get("dealerPhone")));
+      String confirmerPhone = CryptoService.normalizePhone(text(sensitive.get("confirmerPhone")));
       jdbc.update("""
           INSERT INTO activity_customer(activity_id, customer_id, customer_type, region_code, branch_name, normalized_branch_name,
-            dealer_short_name, dealer_full_name, normalized_dealer_full_name, dealer_category, contact_name, phone_ciphertext, phone_lookup_hash, phone_masked,
-            confirmer_name, confirmer_phone_ciphertext, confirmer_phone_masked, excel_sequence, is_active,
+            dealer_short_name, dealer_full_name, normalized_dealer_full_name, dealer_category, contact_name, phone, phone_lookup_hash, phone_masked,
+            confirmer_name, confirmer_phone, confirmer_phone_masked, excel_sequence, is_active,
             source_import_task_id, data_version_id)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?)
           """, activityId, customerId, customerType,
           "GENERAL".equals(customerType) ? regions.resolveCode(activityId, text(data.get("regionName"))) : null,
           nullableText(data.get("branchName")), normalizedBranch, nullableText(data.get("dealerShortName")), fullName, normalizedName, nullableText(data.get("dealerCategory")),
-          nullableText(data.get("contactName")), crypto.encrypt(phone), crypto.lookupHash(phone), CryptoService.maskPhone(phone),
-          nullableText(data.get("confirmerName")), confirmerPhone.isBlank() ? null : crypto.encrypt(confirmerPhone),
+          nullableText(data.get("contactName")), phone, crypto.lookupHash(phone), CryptoService.maskPhone(phone),
+          nullableText(data.get("confirmerName")), confirmerPhone.isBlank() ? null : confirmerPhone,
           confirmerPhone.isBlank() ? null : CryptoService.maskPhone(confirmerPhone), intValue(data.get("sequence"), 0), taskId, versionId);
     }
   }
@@ -510,19 +510,19 @@ public class ImportService {
     Long whitelistVersion = attendanceMatching.currentWhitelistVersion(activityId);
     for (MaterializeRow row : rows) {
       Map<String, Object> data = row.effective();
-      String phone = text(row.sensitive(crypto, json).get("contactPhone"));
+      String phone = CryptoService.normalizePhone(text(row.sensitive(crypto, json).get("contactPhone")));
       AttendanceMatchingService.MatchResult match = attendanceMatching.match(activityId, whitelistVersion,
           text(data.get("participantType")), text(data.get("branchName")), text(data.get("dealerFullName")));
       jdbc.update("""
           INSERT INTO activity_attendee(activity_id, activity_customer_id, match_status, match_method, match_reason_code,
             participant_name, gender, participant_type,
-            dealer_name_snapshot, branch_name_snapshot, phone_ciphertext, phone_lookup_hash, phone_masked,
+            dealer_name_snapshot, branch_name_snapshot, phone, phone_lookup_hash, phone_masked,
             source_import_task_id, data_version_id, is_active, created_by)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
           """, activityId, match.customerId(), match.status(), match.method(), match.reasonCode(),
           nullableText(data.get("participantName")), nullableText(data.get("gender")),
           nullableText(data.get("participantType")), text(data.get("dealerFullName")), nullableText(data.get("branchName")),
-          phone.isBlank() ? null : crypto.encrypt(phone), phone.matches("1\\d{10}") ? crypto.lookupHash(phone) : null,
+          phone.isBlank() ? null : phone, phone.matches("1\\d{10}") ? crypto.lookupHash(phone) : null,
           phone.isBlank() ? null : CryptoService.maskPhone(phone), taskId, versionId, adminId);
     }
   }

@@ -115,6 +115,9 @@ public class AuditService {
     if (uri.contains("/admin/departments/")) return "DEPARTMENT_UPDATED";
     if (uri.endsWith("/admin/users")) return "ADMIN_USER_CREATED";
     if (uri.contains("/admin/users/")) return "ADMIN_USER_UPDATED";
+    if (uri.endsWith("/orders") && "POST".equals(method)) return "ORDER_ADMIN_CREATED";
+    if (uri.endsWith("/void") && uri.contains("/orders/")) return "ORDER_ADMIN_VOIDED";
+    if (uri.matches(".*/orders/\\d+$") && "PUT".equals(method)) return "ORDER_ADMIN_ADJUSTED";
     String suffix = uri.contains("/withdraw") ? "WITHDRAW" : uri.contains("/confirm") ? "CONFIRM"
         : uri.contains("/publish") ? "PUBLISH" : uri.contains("/draw") ? "DRAW"
         : uri.contains("/close") ? "CLOSE"

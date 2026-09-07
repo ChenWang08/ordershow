@@ -217,7 +217,7 @@ test("keeps whitelist imports status-only with filtering", async () => {
   assert.doesNotMatch(prototype, /\$\{row\.importAction\} · \$\{row\.status\}/);
 });
 
-test("keeps orders admin-read-only and wires the formal runtime APIs", async () => {
+test("keeps admin order management scoped and wires the formal runtime APIs", async () => {
   const [api, prototype, orderController, openapi] = await Promise.all([
     readApiSource(),
     readFrontendSource(),
@@ -464,6 +464,7 @@ test("uses live overview data, full admin phones, Chinese regions, and linked at
   assert.match(importService, /ATTENDANCE_WHITELIST_VERSION_CHANGED/);
     assert.match(importService, /matchedCustomerIds\.size\(\)/);
   assert.match(migration, /match_base_version_id/);
-  assert.match(customerService, /decrypt\(rs\.getBytes\(9\)\)/);
+  assert.match(customerService, /c\.phone, c\.phone_ciphertext, c\.phone_masked/);
+  assert.match(customerService, /phone = IF\(\?, \?, phone\)/);
   assert.match(customerService, /String phone, String phoneMasked/);
 });

@@ -32,20 +32,31 @@ export type ProductImageReview = {
 };
 
 export type RuntimeOrder = {
-  id: number; activityId: number; orderNo: string; status: "SUBMITTED" | "WITHDRAWN"; customerType: string;
-  regionCode?: string; branchName?: string; dealerShortName?: string; dealerFullName: string; phoneMasked: string;
+  id: number; activityId: number; activityCustomerId: number; orderNo: string; status: "SUBMITTED" | "WITHDRAWN" | "VOIDED";
+  createdSource: "H5" | "ADMIN"; lastModifiedSource: "H5" | "ADMIN" | "SYSTEM"; lockVersion: number; customerType: string;
+  regionCode?: string; branchName?: string; dealerShortName?: string; dealerFullName: string; phone?: string; phoneMasked: string;
   currentVersion: number; totalQuantity: number; totalTons?: number; totalAmount: number; firstSubmittedAt: string;
   lastSubmittedAt: string; lastModifiedAt: string; withdrawnAt?: string; withdrawnReason?: string;
+  voidedAt?: string; voidedReason?: string;
   items: Array<{ id: number; productId: number; lineNo: number; materialCode?: string; materialName: string; productLine?: string;
     specification?: string; casePack?: string; quantity: number; casePrice: number; appliedTierMinQuantity?: number;
     baseCasePrice?: number; basePriceQuantity?: number; tierCasePrice?: number; tierMinQuantity?: number; tierPriceQuantity?: number;
     pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; tonCaseFactor?: number; lineTons?: number }>;
   versions: Array<{ id: number; version: number; totalQuantity: number; totalTons?: number; totalAmount: number; submittedAt: string; submittedSource: string;
+    submittedByAdminName?: string; reason?: string;
     items?: Array<{ id: number; productId?: number; lineNo: number; materialCode?: string; materialName: string; productLine?: string;
       specification?: string; casePack?: string; quantity: number; casePrice: number; appliedTierMinQuantity?: number;
       baseCasePrice?: number; basePriceQuantity?: number; tierCasePrice?: number; tierMinQuantity?: number; tierPriceQuantity?: number;
       pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; tonCaseFactor?: number; lineTons?: number }> }>;
-  operations: Array<{ type: string; source: string; orderVersion?: number; reason?: string; occurredAt: string }>;
+  operations: Array<{ type: string; source: string; adminName?: string; orderVersion?: number; reason?: string; occurredAt: string }>;
+};
+
+export type AdminOrderPreview = {
+  totalQuantity: number; totalTons?: number; totalAmount: number;
+  items: Array<{ productId: number; materialCode?: string; materialName: string; productLine?: string;
+    specification?: string; casePack?: string; quantity: number; casePrice: number; appliedTierMinQuantity?: number;
+    baseCasePrice?: number; basePriceQuantity: number; tierCasePrice?: number; tierMinQuantity?: number;
+    tierPriceQuantity: number; pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; lineTons?: number }>;
 };
 
 export type RuntimeOrderDraft = {
@@ -74,7 +85,7 @@ export type AttendanceMatchPreview = {
     matchedDealerName?: string; lotteryEligible: boolean }>;
 };
 
-export type AdminOrderSummary = Omit<RuntimeOrder, "items" | "versions" | "operations" | "dealerShortName" | "withdrawnAt" | "withdrawnReason">;
+export type AdminOrderSummary = Omit<RuntimeOrder, "activityCustomerId" | "items" | "versions" | "operations" | "dealerShortName" | "withdrawnAt" | "withdrawnReason" | "voidedAt" | "voidedReason">;
 
 export type DashboardData = {
   activityId: number; activityName: string; status: string;

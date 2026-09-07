@@ -318,11 +318,13 @@ CREATE TABLE activity_customer (
   normalized_dealer_full_name VARCHAR(255) NOT NULL DEFAULT '',
   dealer_category VARCHAR(100) NULL,
   contact_name VARCHAR(100) NULL,
-  phone_ciphertext VARBINARY(512) NOT NULL,
+  phone VARCHAR(32) NULL,
+  phone_ciphertext VARBINARY(512) NULL,
   phone_lookup_hash BINARY(32) NOT NULL,
   phone_masked VARCHAR(32) NOT NULL,
   phone_key_version SMALLINT UNSIGNED NOT NULL DEFAULT 1,
   confirmer_name VARCHAR(100) NULL,
+  confirmer_phone VARCHAR(32) NULL,
   confirmer_phone_ciphertext VARBINARY(512) NULL,
   confirmer_phone_masked VARCHAR(32) NULL,
   excel_sequence INT UNSIGNED NULL,
@@ -377,6 +379,7 @@ CREATE TABLE activity_attendee (
   participant_type VARCHAR(100) NULL,
   dealer_name_snapshot VARCHAR(255) NOT NULL,
   branch_name_snapshot VARCHAR(200) NULL,
+  phone VARCHAR(32) NULL,
   phone_ciphertext VARBINARY(512) NULL,
   phone_lookup_hash BINARY(32) NULL,
   phone_masked VARCHAR(32) NULL,
@@ -527,6 +530,8 @@ CREATE TABLE customer_order (
   branch_name_snapshot VARCHAR(200) NULL,
   dealer_short_name_snapshot VARCHAR(200) NULL,
   dealer_full_name_snapshot VARCHAR(255) NOT NULL,
+  created_source VARCHAR(20) NOT NULL DEFAULT 'H5',
+  created_by_admin_id BIGINT UNSIGNED NULL,
   current_version_no INT UNSIGNED NOT NULL,
   total_quantity BIGINT UNSIGNED NOT NULL,
   total_tons DECIMAL(18,6) NULL,
@@ -536,7 +541,11 @@ CREATE TABLE customer_order (
   last_modified_at DATETIME(3) NOT NULL,
   withdrawn_at DATETIME(3) NULL,
   withdrawn_reason VARCHAR(500) NULL,
+  voided_at DATETIME(3) NULL,
+  voided_reason VARCHAR(500) NULL,
+  voided_by_admin_id BIGINT UNSIGNED NULL,
   last_modified_source VARCHAR(20) NOT NULL DEFAULT 'H5',
+  last_modified_admin_id BIGINT UNSIGNED NULL,
   lock_version INT UNSIGNED NOT NULL DEFAULT 0,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
@@ -547,9 +556,13 @@ CREATE TABLE customer_order (
   KEY idx_order_activity_customer_filter (activity_id, customer_type, region_code, branch_name_snapshot),
   CONSTRAINT fk_order_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_order_customer FOREIGN KEY (activity_customer_id) REFERENCES activity_customer (id),
-  CONSTRAINT ck_order_status CHECK (status IN ('SUBMITTED', 'WITHDRAWN')),
+  CONSTRAINT fk_order_created_admin FOREIGN KEY (created_by_admin_id) REFERENCES admin_user (id),
+  CONSTRAINT fk_order_modified_admin FOREIGN KEY (last_modified_admin_id) REFERENCES admin_user (id),
+  CONSTRAINT fk_order_voided_admin FOREIGN KEY (voided_by_admin_id) REFERENCES admin_user (id),
+  CONSTRAINT ck_order_status CHECK (status IN ('SUBMITTED', 'WITHDRAWN', 'VOIDED')),
   CONSTRAINT ck_order_customer_type CHECK (customer_type IN ('GENERAL', 'SPECIAL', 'ALL')),
-  CONSTRAINT ck_order_source CHECK (last_modified_source IN ('H5', 'SYSTEM')),
+  CONSTRAINT ck_order_created_source CHECK (created_source IN ('H5', 'ADMIN')),
+  CONSTRAINT ck_order_source CHECK (last_modified_source IN ('H5', 'ADMIN', 'SYSTEM')),
   CONSTRAINT ck_order_totals CHECK (total_quantity > 0 AND (total_tons IS NULL OR total_tons >= 0) AND total_amount >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -607,6 +620,8 @@ CREATE TABLE order_version (
   total_tons DECIMAL(18,6) NULL,
   total_amount DECIMAL(18,2) NOT NULL,
   submitted_source VARCHAR(20) NOT NULL,
+  submitted_by_admin_id BIGINT UNSIGNED NULL,
+  reason VARCHAR(500) NULL,
   submitted_at DATETIME(3) NOT NULL,
   request_idempotency_key VARCHAR(128) NOT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -616,8 +631,9 @@ CREATE TABLE order_version (
   KEY idx_order_version_activity_time (activity_id, submitted_at),
   CONSTRAINT fk_order_version_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_order_version_order FOREIGN KEY (order_id) REFERENCES customer_order (id),
+  CONSTRAINT fk_order_version_admin FOREIGN KEY (submitted_by_admin_id) REFERENCES admin_user (id),
   CONSTRAINT ck_order_version_customer CHECK (customer_type IN ('GENERAL', 'SPECIAL', 'ALL')),
-  CONSTRAINT ck_order_version_source CHECK (submitted_source IN ('H5')),
+  CONSTRAINT ck_order_version_source CHECK (submitted_source IN ('H5', 'ADMIN')),
   CONSTRAINT ck_order_version_totals CHECK (total_quantity > 0 AND (total_tons IS NULL OR total_tons >= 0) AND total_amount >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -669,6 +685,7 @@ CREATE TABLE order_operation (
   order_id BIGINT UNSIGNED NOT NULL,
   operation_type VARCHAR(24) NOT NULL,
   source VARCHAR(20) NOT NULL,
+  admin_user_id BIGINT UNSIGNED NULL,
   order_version_no INT UNSIGNED NULL,
   reason VARCHAR(500) NULL,
   trace_id VARCHAR(64) NULL,
@@ -679,8 +696,9 @@ CREATE TABLE order_operation (
   KEY idx_order_operation_activity_time (activity_id, occurred_at),
   CONSTRAINT fk_order_operation_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_order_operation_order FOREIGN KEY (order_id) REFERENCES customer_order (id),
-  CONSTRAINT ck_order_operation_type CHECK (operation_type IN ('FIRST_SUBMIT', 'MODIFY_SUBMIT', 'WITHDRAW', 'RESUBMIT')),
-  CONSTRAINT ck_order_operation_source CHECK (source IN ('H5', 'SYSTEM'))
+  CONSTRAINT fk_order_operation_admin FOREIGN KEY (admin_user_id) REFERENCES admin_user (id),
+  CONSTRAINT ck_order_operation_type CHECK (operation_type IN ('FIRST_SUBMIT', 'MODIFY_SUBMIT', 'WITHDRAW', 'RESUBMIT', 'ADMIN_CREATE', 'ADMIN_ADJUST', 'ADMIN_VOID', 'ADMIN_RESTORE')),
+  CONSTRAINT ck_order_operation_source CHECK (source IN ('H5', 'ADMIN', 'SYSTEM'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE api_idempotency (

@@ -221,6 +221,14 @@ class IsolatedApiE2ETest {
   @Test
   @Order(5)
   void orderSubmitIdempotencyModifyWithdrawAndResubmit() throws Exception {
+    ObjectNode adminPreviewBody = JSON.createObjectNode().put("activityCustomerId", h5CustomerId);
+    adminPreviewBody.putArray("items").addObject().put("productId", productId).put("quantity", 2);
+    HttpResponse<String> adminPreview = send(admin, "POST", "/admin/activities/" + activityId + "/orders/preview",
+        adminPreviewBody, adminCsrf, null);
+    assertEquals(200, adminPreview.statusCode(), adminPreview.body());
+    assertEquals(2, data(adminPreview).path("totalQuantity").asLong());
+    assertEquals("200.00", data(adminPreview).path("totalAmount").decimalValue().setScale(2).toPlainString());
+
     ObjectNode first = orderBody(0, productId, 2);
     String firstKey = UUID.randomUUID().toString();
 
@@ -408,15 +416,31 @@ class IsolatedApiE2ETest {
   @Test
   @Order(8)
   void adminReportingDashboardAndCloseReadOnlyRules() throws Exception {
+    HttpResponse<String> phoneSearch = send(admin, "GET", "/admin/activities/" + activityId
+        + "/customers?keyword=" + GENERAL_PHONE + "&page=1&size=20", null, null, null);
+    assertEquals(200, phoneSearch.statusCode(), phoneSearch.body());
+    // The fixture intentionally reuses this phone for a GENERAL and a SPECIAL customer.
+    // A full-phone search should therefore return both matching customer records.
+    assertEquals(2, data(phoneSearch).size());
+    assertTrue(data(phoneSearch).toString().contains(Long.toString(h5CustomerId)));
+    assertTrue(phoneSearch.body().contains(GENERAL_PHONE));
+
+    HttpResponse<String> customerProducts = send(admin, "GET", "/admin/activities/" + activityId
+        + "/products?activityCustomerId=" + h5CustomerId, null, null, null);
+    assertEquals(200, customerProducts.statusCode(), customerProducts.body());
+    assertEquals(3, data(customerProducts).size());
+    for (JsonNode product : data(customerProducts)) assertTrue(product.path("orderable").asBoolean());
+
     HttpResponse<String> orders = send(admin, "GET", "/admin/activities/" + activityId + "/orders?page=1&size=20", null, null, null);
     assertEquals(200, orders.statusCode(), orders.body());
     assertEquals(1, json(orders).path("page").path("totalElements").asInt());
     assertEquals(orderId, json(orders).path("data").get(0).path("id").asLong());
-    assertFalse(orders.body().contains(GENERAL_PHONE));
+    assertTrue(orders.body().contains(GENERAL_PHONE));
 
     HttpResponse<String> detail = send(admin, "GET", "/admin/activities/" + activityId + "/orders/" + orderId, null, null, null);
     assertEquals(3, data(detail).path("versions").size());
     assertEquals(4, data(detail).path("operations").size());
+    assertTrue(detail.body().contains(GENERAL_PHONE));
 
     HttpResponse<String> dashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null);
     assertEquals(1, data(dashboard).path("totals").path("order_count").asInt());
@@ -451,8 +475,54 @@ class IsolatedApiE2ETest {
     assertEquals(409, afterClose.statusCode());
     assertTrue(List.of("ACTIVITY_NOT_WRITABLE", "ACTIVITY_CLOSED").contains(json(afterClose).path("code").asText()));
 
+    ObjectNode adjustBody = JSON.createObjectNode().put("expectedVersion", 3)
+        .put("expectedLockVersion", data(detail).path("lockVersion").asInt()).put("reason", "AUTOTEST 截止后调整");
+    adjustBody.putArray("items").addObject().put("productId", productId).put("quantity", 4);
+    HttpResponse<String> adjusted = send(admin, "PUT", "/admin/activities/" + activityId + "/orders/" + orderId,
+        adjustBody, adminCsrf, null, UUID.randomUUID().toString());
+    assertEquals(200, adjusted.statusCode(), adjusted.body());
+    assertEquals(4, data(adjusted).path("currentVersion").asInt());
+    assertEquals("ADMIN", data(adjusted).path("lastModifiedSource").asText());
+
+    ObjectNode voidBody = JSON.createObjectNode().put("expectedVersion", 4)
+        .put("expectedLockVersion", data(adjusted).path("lockVersion").asInt()).put("reason", "AUTOTEST 作废验证");
+    HttpResponse<String> voided = send(admin, "POST", "/admin/activities/" + activityId + "/orders/" + orderId + "/void",
+        voidBody, adminCsrf, null, UUID.randomUUID().toString());
+    assertEquals(200, voided.statusCode(), voided.body());
+    assertEquals("VOIDED", data(voided).path("status").asText());
+    assertEquals(4, data(voided).path("currentVersion").asInt());
+    assertEquals(0, data(send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null))
+        .path("totals").path("order_count").asInt());
+
+    ObjectNode restoreBody = JSON.createObjectNode().put("expectedVersion", 4)
+        .put("expectedLockVersion", data(voided).path("lockVersion").asInt()).put("reason", "AUTOTEST 调整并恢复");
+    restoreBody.putArray("items").addObject().put("productId", productId).put("quantity", 2);
+    HttpResponse<String> restored = send(admin, "PUT", "/admin/activities/" + activityId + "/orders/" + orderId,
+        restoreBody, adminCsrf, null, UUID.randomUUID().toString());
+    assertEquals(200, restored.statusCode(), restored.body());
+    assertEquals("SUBMITTED", data(restored).path("status").asText());
+    assertEquals(5, data(restored).path("currentVersion").asInt());
+
+    JsonNode customers = data(send(admin, "GET", "/admin/activities/" + activityId
+        + "/customers?customerType=GENERAL&page=1&size=20", null, null, null));
+    long secondCustomerId = 0;
+    for (JsonNode customer : customers) {
+      if (customer.path("id").asLong() != h5CustomerId && "上海分".equals(customer.path("branchName").asText())) {
+        secondCustomerId = customer.path("id").asLong(); break;
+      }
+    }
+    assertTrue(secondCustomerId > 0);
+    ObjectNode createBody = JSON.createObjectNode().put("activityCustomerId", secondCustomerId)
+        .put("reason", "AUTOTEST 管理员创建");
+    createBody.putArray("items").addObject().put("productId", productId).put("quantity", 1);
+    HttpResponse<String> adminCreated = send(admin, "POST", "/admin/activities/" + activityId + "/orders",
+        createBody, adminCsrf, null, UUID.randomUUID().toString());
+    assertEquals(200, adminCreated.statusCode(), adminCreated.body());
+    assertEquals("ADMIN", data(adminCreated).path("createdSource").asText());
+    assertEquals(1, data(adminCreated).path("currentVersion").asInt());
+
     HttpResponse<String> finalDashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null);
-    assertEquals(1, data(finalDashboard).path("totals").path("order_count").asInt());
+    assertEquals(2, data(finalDashboard).path("totals").path("order_count").asInt());
 
     ObjectNode finishBody = JSON.createObjectNode().put("reason", "AUTOTEST 验证整场活动结束");
     HttpResponse<String> finished = send(admin, "POST", "/admin/activities/" + activityId + "/finish", finishBody,
@@ -461,7 +531,7 @@ class IsolatedApiE2ETest {
     assertEquals("FINISHED", data(finished).path("status").asText());
 
     HttpResponse<String> historyDashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null);
-    assertEquals(1, data(historyDashboard).path("totals").path("order_count").asInt());
+    assertEquals(2, data(historyDashboard).path("totals").path("order_count").asInt());
     assertEquals("FINISHED", data(historyDashboard).path("status").asText());
     assertEquals(409, send(client(), "GET", "/screen/activities/" + activityCode + "/events", null, null, null).statusCode());
 

@@ -59,15 +59,28 @@ public class ProductService {
   }
 
   public List<ProductView> adminProducts(long activityId, String customerType, String status, String keyword) {
+    return adminProducts(activityId, customerType, status, keyword, null);
+  }
+
+  public List<ProductView> adminProducts(long activityId, String customerType, String status, String keyword,
+                                         Long activityCustomerId) {
     Long version = currentVersion(activityId);
     if (version == null) return List.of();
+    CustomerScope customer = activityCustomerId == null ? null : customerScope(activityId, activityCustomerId);
+    String resolvedCustomerType = customer == null ? customerType : customer.customerType();
+    String resolvedBranchName = customer == null ? null : normalize(customer.branchName());
+    Boolean orderableOnly = customer == null ? null : Boolean.TRUE;
     return jdbc.query("""
         SELECT p.* FROM activity_product p WHERE p.activity_id = ? AND p.data_version_id = ? AND p.is_visible = TRUE
-          AND (? IS NULL OR ? = '' OR p.customer_type = ? OR p.customer_type = 'ALL')
+          AND (? IS NULL OR ? = '' OR ? = 'ALL' OR p.customer_type = ? OR p.customer_type = 'ALL')
           AND (? IS NULL OR ? = '' OR p.data_status = ?)
+          AND (? IS NULL OR p.is_orderable = TRUE)
+          AND (? IS NULL OR NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id)
+            OR EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id AND s.normalized_branch_name = ?))
           AND (? IS NULL OR ? = '' OR p.material_name LIKE CONCAT('%', ?, '%') OR p.material_code LIKE CONCAT('%', ?, '%'))
         ORDER BY p.sort_no, p.id
-        """, this::map, activityId, version, customerType, customerType, customerType, status, status, status,
+        """, this::map, activityId, version, resolvedCustomerType, resolvedCustomerType, resolvedCustomerType, resolvedCustomerType,
+        status, status, status, orderableOnly, resolvedBranchName, resolvedBranchName,
         keyword, keyword, keyword, keyword).stream().map(this::withImages).toList();
   }
 
@@ -604,6 +617,17 @@ public class ProductService {
         rs -> rs.next() ? rs.getLong(1) : null, activityId);
   }
 
+  private CustomerScope customerScope(long activityId, long activityCustomerId) {
+    return jdbc.query("""
+        SELECT c.customer_type, c.branch_name
+        FROM activity_customer c
+        JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
+        WHERE c.id = ? AND c.activity_id = ? AND c.is_active = TRUE AND c.data_version_id = b.current_version_id
+        """, (rs, rowNum) -> new CustomerScope(rs.getString("customer_type"), rs.getString("branch_name")),
+        activityCustomerId, activityId).stream().findFirst()
+        .orElseThrow(() -> DomainException.notFound("CUSTOMER_NOT_FOUND", "当前活动客户不存在或已失效"));
+  }
+
   private VersionSource currentSource(long activityId) {
     return jdbc.query("""
         SELECT v.id, v.source_import_task_id FROM activity_data_binding b
@@ -751,4 +775,5 @@ public class ProductService {
   private record ImageSignature(Set<String> volumes, Set<String> packCounts, String brand, String category, String variety, String grade,
                                 Set<String> containerMaterial, Set<String> containerShape, Set<String> outerPackaging) {}
   private record VersionSource(long versionId, long taskId) {}
+  private record CustomerScope(String customerType, String branchName) {}
 }

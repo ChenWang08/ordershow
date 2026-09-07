@@ -1,7 +1,19 @@
 import { api } from "./client";
 import type { Envelope, ProductImageReview, RuntimeProduct } from "./types";
 
-export async function loadAdminProducts(activityId: number) { return (await api<Envelope<RuntimeProduct[]>>(`/admin/activities/${activityId}/products`)).data; }
+export async function loadAdminProducts(activityId: number, filters: {
+  activityCustomerId?: number;
+  customerType?: string;
+  status?: string;
+  keyword?: string;
+} = {}) {
+  const query = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== "") query.set(key, String(value));
+  });
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return (await api<Envelope<RuntimeProduct[]>>(`/admin/activities/${activityId}/products${suffix}`)).data;
+}
 export async function loadProductImageReviews(activityId: number) {
   return (await api<Envelope<ProductImageReview[]>>(`/admin/activities/${activityId}/product-image-reviews`)).data;
 }

@@ -12,6 +12,10 @@ async function loadAllPages<T>(path: string) {
   return rows;
 }
 export async function loadAdminCustomers(activityId: number) { return loadAllPages<AdminCustomer>(`/admin/activities/${activityId}/customers`); }
+export async function searchAdminCustomers(activityId: number, keyword: string) {
+  const query = new URLSearchParams({ keyword, page: "1", size: "50" });
+  return (await api<PageEnvelope<AdminCustomer>>(`/admin/activities/${activityId}/customers?${query.toString()}`)).data;
+}
 export async function loadAdminAttendees(activityId: number) { return loadAllPages<AdminAttendee>(`/admin/activities/${activityId}/attendees`); }
 export async function createAdminCustomer(activityId: number, body: Record<string, unknown>) {
   return (await api<Envelope<AdminCustomer>>(`/admin/activities/${activityId}/customers`, { method: "POST", body: JSON.stringify(body) }, "admin")).data;

@@ -11,7 +11,7 @@ import type { ActivityStatus } from "../shared/types";
 import { maskPhone, money, normalizePhone } from "../shared/utils";
 
 type H5Step = "channel" | "region" | "verify" | "order" | "confirm" | "success" | "submitted";
-type H5OrderStatus = "none" | "submitted" | "withdrawn";
+type H5OrderStatus = "none" | "submitted" | "withdrawn" | "voided";
 type H5Channel = "综合客户" | "特渠专业客户" | "";
 type RebateFilter = "ALL" | "PARTICIPATING" | "NOT_PARTICIPATING";
 type Product = {
@@ -171,6 +171,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [orderStatus, setOrderStatus] = useState<H5OrderStatus>("none");
+  const customerOrderReadOnly = activityClosed || orderStatus === "voided";
   const [submitMode, setSubmitMode] = useState<"first" | "update">("first");
   const [orderVersion, setOrderVersion] = useState(0);
   const [orderUpdatedAt, setOrderUpdatedAt] = useState("");
@@ -313,14 +314,14 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
       return { product: found, quantity: item.quantity };
     });
     setQuantities(itemQuantities); setSubmittedQuantities(itemQuantities); setSubmittedItems(items);
-    setOrderStatus(order.status === "WITHDRAWN" ? "withdrawn" : "submitted");
+    setOrderStatus(order.status === "WITHDRAWN" ? "withdrawn" : order.status === "VOIDED" ? "voided" : "submitted");
     setOrderVersion(order.currentVersion);
     setOrderUpdatedAt(new Date(order.lastModifiedAt).toLocaleString("zh-CN", { hour12: false }));
     setOrderWithdrawnAt(order.withdrawnAt ? new Date(order.withdrawnAt).toLocaleString("zh-CN", { hour12: false }) : "");
     setOrderEvents(order.operations.map((event) => ({
       time: new Date(event.occurredAt).toLocaleString("zh-CN", { hour12: false }),
-      title: event.type === "WITHDRAW" ? "客户撤回订单" : event.type === "SUBMIT" ? "客户首次提交" : "客户修改并重新提交",
-      detail: `经销商手机端 · ${event.orderVersion ? `版本 V${event.orderVersion}` : "订单状态变更"}`,
+      title: event.type === "WITHDRAW" ? "客户撤回订单" : event.type === "SUBMIT" ? "客户首次提交" : event.type === "ADMIN_CREATE" ? "管理员创建订单" : event.type === "ADMIN_VOID" ? "管理员作废订单" : event.type === "ADMIN_RESTORE" ? "管理员调整并恢复订单" : event.type === "ADMIN_ADJUST" ? "管理员调整订单" : "客户修改并重新提交",
+      detail: `${event.source === "ADMIN" ? event.adminName || "管理员" : "经销商手机端"} · ${event.orderVersion ? `版本 V${event.orderVersion}` : "订单状态变更"}`,
     })));
   };
 
@@ -577,7 +578,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                 <button className="cart-summary" disabled={activityClosed || !totalBoxes} onClick={() => setCartOpen(true)}>
                   <span>已选 {selected.length} 种 · {totalBoxes} 箱 <em>查看明细⌃</em></span><b>¥{money(totalAmount)}</b>
                 </button>
-                <button className="confirm-cart-btn" disabled={activityClosed || (!totalBoxes && orderStatus === "none")} onClick={() => totalBoxes ? setStep("confirm") : setCancelConfirmOpen(true)}>{totalBoxes ? "确认订单" : "取消本次订货"}</button>
+                <button className="confirm-cart-btn" disabled={customerOrderReadOnly || (!totalBoxes && orderStatus === "none")} onClick={() => totalBoxes ? setStep("confirm") : setCancelConfirmOpen(true)}>{totalBoxes ? "确认订单" : "取消本次订货"}</button>
               </div>
             </section>
           )}
@@ -608,7 +609,7 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                   ))}
                   {!selected.length && <div className="cart-empty">还没有选择商品</div>}
                 </div>
-                <footer><div><span>合计</span><b>¥{money(totalAmount)}</b><small>共 {totalBoxes} 箱</small></div><button disabled={activityClosed || (!totalBoxes && orderStatus === "none")} onClick={() => { setCartOpen(false); if (totalBoxes) setStep("confirm"); else setCancelConfirmOpen(true); }}>{totalBoxes ? "去确认订单" : "取消本次订货"}</button></footer>
+                <footer><div><span>合计</span><b>¥{money(totalAmount)}</b><small>共 {totalBoxes} 箱</small></div><button disabled={customerOrderReadOnly || (!totalBoxes && orderStatus === "none")} onClick={() => { setCartOpen(false); if (totalBoxes) setStep("confirm"); else setCancelConfirmOpen(true); }}>{totalBoxes ? "去确认订单" : "取消本次订货"}</button></footer>
               </section>
             </div>
           )}
@@ -631,23 +632,23 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
               </div>
               <label className="agreement"><input type="checkbox" defaultChecked /> 我已核对商品与订货数量</label>
               {runtimeMessage && <div className="verify-error" role="alert">{runtimeMessage}</div>}
-              <button className="submit-order" disabled={activityClosed || runtimeBusy} onClick={() => void submitOrder()}>{runtimeBusy ? "正在提交…" : orderStatus === "none" ? "确认提交订单" : orderStatus === "withdrawn" ? "重新提交订单" : "确认修改并提交"}</button>
+              <button className="submit-order" disabled={customerOrderReadOnly || runtimeBusy} onClick={() => void submitOrder()}>{runtimeBusy ? "正在提交…" : orderStatus === "none" ? "确认提交订单" : orderStatus === "withdrawn" ? "重新提交订单" : "确认修改并提交"}</button>
             </section>
           )}
 
           {visibleStep === "submitted" && (
             <section className="h5-page submitted-page">
               <header className="simple-header"><button onClick={() => setStep("verify")}>‹</button><b>我的订单</b><span /></header>
-              <div className={`submitted-state-card ${orderStatus === "withdrawn" ? "withdrawn" : ""}`}>
-                <span className="submitted-status">{orderStatus === "withdrawn" ? "已撤回" : "已提交"}</span>
-                <h2>{orderStatus === "withdrawn" ? "当前订单已撤回" : "您的订货已成功提交"}</h2>
-                <p>{orderStatus === "withdrawn" ? "商品明细和订单号已保留，截止前可继续订货并重新提交。" : "订单截止前可修改或取消本次订货，修改后将以最新提交内容为准。"}</p>
+              <div className={`submitted-state-card ${orderStatus === "withdrawn" || orderStatus === "voided" ? "withdrawn" : ""}`}>
+                <span className="submitted-status">{orderStatus === "withdrawn" ? "已撤回" : orderStatus === "voided" ? "已作废" : "已提交"}</span>
+                <h2>{orderStatus === "withdrawn" ? "当前订单已撤回" : orderStatus === "voided" ? "当前订单已由管理员作废" : "您的订货已成功提交"}</h2>
+                <p>{orderStatus === "withdrawn" ? "商品明细和订单号已保留，截止前可继续订货并重新提交。" : orderStatus === "voided" ? "订单号、商品明细和历史版本已保留。如需恢复，请联系管理员调整订单。" : "订单截止前可修改或取消本次订货，修改后将以最新提交内容为准。"}</p>
               </div>
               <div className="submitted-meta">
                 <p><span>订单编号</span><b>{runtimeOrder?.orderNo || "ZYORDER280018"}</b></p>
                 <p><span>最后提交时间</span><b>{orderUpdatedAt}</b></p>
                 <p><span>当前版本</span><b>V{orderVersion}</b></p>
-                <p><span>编辑权限</span><b className={activityClosed ? "muted" : ""}>{activityClosed ? "已截止" : orderStatus === "withdrawn" ? "可重新提交" : "可修改或取消"}</b></p>
+                <p><span>编辑权限</span><b className={customerOrderReadOnly ? "muted" : ""}>{orderStatus === "voided" ? "仅可查看" : activityClosed ? "已截止" : orderStatus === "withdrawn" ? "可重新提交" : "可修改或取消"}</b></p>
                 {orderStatus === "withdrawn" && orderWithdrawnAt && <p><span>取消时间</span><b>{orderWithdrawnAt}</b></p>}
                 <p><span>经销商</span><b>{dealerName}</b></p>
               </div>
@@ -664,10 +665,10 @@ export function H5Prototype({ activityStatus, importedRows, importedWhitelistRow
                 <p className="grand-total"><span>订单总金额</span><b>¥{money(orderViewAmount)}</b></p>
                 <p><span>订货数量</span><b>{orderViewBoxes} 箱 · {orderViewSelected.length} 种商品</b></p>
               </div>
-              <div className="submitted-note">{activityClosed ? "活动已截止，当前订单仅可查看，不能修改、取消或重新提交。" : orderStatus === "withdrawn" ? "该订单当前不计入有效订单、金额统计和抽奖资格；截止前可点击“继续订货”恢复提交。" : "订单状态会同步至管理后台和活动看板；如需调整商品或数量，请点击“修改订单”。"}</div>
+              <div className="submitted-note">{orderStatus === "voided" ? "该订单已由管理员作废，不计入有效订单、金额统计和抽奖资格；客户侧仅可查看。" : activityClosed ? "活动已截止，当前订单仅可查看，不能修改、取消或重新提交。" : orderStatus === "withdrawn" ? "该订单当前不计入有效订单、金额统计和抽奖资格；截止前可点击“继续订货”恢复提交。" : "订单状态会同步至管理后台和活动看板；如需调整商品或数量，请点击“修改订单”。"}</div>
               {orderEvents.length > 0 && <section className="submitted-events"><h3>操作记录</h3>{orderEvents.map((event, index) => <p key={`${event.time}-${index}`}><b>{event.time.slice(11)} {event.title}</b><span>{event.detail}</span></p>)}</section>}
               <div className="submitted-actions">
-                {!activityClosed && (orderStatus === "withdrawn" ? <button className="primary-btn" onClick={startEditingOrder}>继续订货</button> : <button className="primary-btn" onClick={startEditingOrder}>修改订单</button>)}
+                {!customerOrderReadOnly && (orderStatus === "withdrawn" ? <button className="primary-btn" onClick={startEditingOrder}>继续订货</button> : <button className="primary-btn" onClick={startEditingOrder}>修改订单</button>)}
                 <button className="ghost-btn" onClick={() => setStep("channel")}>返回活动首页</button>
               </div>
             </section>

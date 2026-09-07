@@ -652,7 +652,7 @@ paths:
     post:
       operationId: finishActivityNow
       tags: [Activities]
-      summary: 结束整场活动并冻结抽奖、看板和战报
+      summary: 结束整场活动并停止抽奖和实时推送
       security:
         - adminCookie: []
       parameters:
@@ -974,6 +974,11 @@ paths:
           in: query
           schema:
             type: string
+        - name: activityCustomerId
+          in: query
+          description: 传入订单客户 ID 时，仅返回该客户当前可订的商品（客户类型、分公司范围和可订状态由服务端校验）。
+          schema:
+            $ref: '#/components/schemas/Id'
       responses:
         '200':
           description: 商品分页
@@ -1251,7 +1256,7 @@ paths:
       operationId: listActivityCustomers
       tags: [Customers]
       summary: 活动白名单列表
-      description: 仅限已登录管理员；响应可包含完整 phone 和 confirmerPhone，订单、H5、排行和大屏接口不得复用这些明文字段。
+      description: 仅限已登录管理员；响应可包含完整 phone 和 confirmerPhone，H5、排行和大屏接口不得复用这些明文字段。keyword 支持经销商名称、规范化完整手机号或手机号后四位。
       security:
         - adminCookie: []
       parameters:
@@ -1268,7 +1273,7 @@ paths:
             $ref: '#/components/schemas/RegionCode'
         - name: keyword
           in: query
-          description: 经销商名称模糊查询或完整手机号精确查询
+          description: 经销商名称模糊查询、规范化完整手机号精确查询或手机号后四位查询
           schema:
             type: string
       responses:
@@ -1477,7 +1482,7 @@ paths:
             type: string
         - name: keyword
           in: query
-          description: 经销商名称模糊查询或完整手机号精确查询，不支持订单号搜索
+          description: 经销商名称模糊查询、完整手机号精确查询或手机号后四位查询，不支持订单号搜索
           schema:
             type: string
       responses:
@@ -1487,6 +1492,55 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrderPageResponse'
+    post:
+      operationId: createAdminOrder
+      tags: [Orders]
+      summary: 管理员为尚未下单的客户创建订单
+      description: 仅活动处于 ACTIVE、CLOSED 或 FINISHED 时可用；SUPER_ADMIN 和本部门 DEPARTMENT_ADMIN 可操作。创建 V1，来源为 ADMIN。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateOrderRequest'
+      responses:
+        '200':
+          description: 订单已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentOrderResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/orders/preview:
+    post:
+      operationId: previewAdminOrder
+      tags: [Orders]
+      summary: 按后台选定客户和商品试算订单
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminOrderPreviewRequest'
+      responses:
+        '200':
+          description: 试算结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
   /admin/activities/{activityId}/orders/export:
     get:
       operationId: exportActivityOrders
@@ -1537,6 +1591,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CurrentOrderResponse'
+    put:
+      operationId: adjustAdminOrder
+      tags: [Orders]
+      summary: 管理员调整订单并生成新版本
+      description: 活动处于 ACTIVE、CLOSED 或 FINISHED 时可调整已提交、已撤回或已作废订单；后两者调整成功后恢复为 SUBMITTED。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminAdjustOrderRequest'
+      responses:
+        '200':
+          description: 调整成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentOrderResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/orders/{orderId}/void:
+    post:
+      operationId: voidAdminOrder
+      tags: [Orders]
+      summary: 管理员作废订单
+      description: 活动处于 ACTIVE、CLOSED 或 FINISHED 时可逻辑作废；不删除订单、明细、版本或操作记录。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminVoidOrderRequest'
+      responses:
+        '200':
+          description: 已作废，历史信息保留
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentOrderResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
   /admin/activities/{activityId}/orders/{orderId}/versions:
     get:
       operationId: listOrderVersions
@@ -2148,9 +2257,10 @@ components:
     ActivityStatus:
       type: string
       enum: [DRAFT, SCHEDULED, ACTIVE, CLOSED, FINISHED, ARCHIVED]
+      description: 正常活动生命周期到 FINISHED 结束；ARCHIVED 仅为历史兼容状态，当前不提供活动归档接口。
     OrderStatus:
       type: string
-      enum: [SUBMITTED, WITHDRAWN]
+      enum: [SUBMITTED, WITHDRAWN, VOIDED]
     ImportType:
       type: string
       enum: [PRODUCT, WHITELIST, ATTENDANCE, PRODUCT_IMAGE]
@@ -2491,6 +2601,62 @@ components:
           maxItems: 1000
           items:
             $ref: '#/components/schemas/SubmitOrderItem'
+    AdminOrderPreviewRequest:
+      type: object
+      required: [activityCustomerId, items]
+      properties:
+        activityCustomerId:
+          $ref: '#/components/schemas/Id'
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/SubmitOrderItem'
+    AdminCreateOrderRequest:
+      allOf:
+        - $ref: '#/components/schemas/AdminOrderPreviewRequest'
+        - type: object
+          required: [reason]
+          properties:
+            reason:
+              type: string
+              minLength: 1
+              maxLength: 500
+    AdminAdjustOrderRequest:
+      type: object
+      required: [expectedVersion, expectedLockVersion, items, reason]
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 1
+        expectedLockVersion:
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          items:
+            $ref: '#/components/schemas/SubmitOrderItem'
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+    AdminVoidOrderRequest:
+      type: object
+      required: [expectedVersion, expectedLockVersion, reason]
+      properties:
+        expectedVersion:
+          type: integer
+          minimum: 1
+        expectedLockVersion:
+          type: integer
+          minimum: 0
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
     SaveOrderDraftRequest:
       type: object
       required: [customerId, baseOrderVersion, items]
@@ -2604,7 +2770,7 @@ components:
             - type: 'null'
     CurrentOrder:
       type: object
-      required: [id, orderNo, status, currentVersion, totalQuantity, totalAmount, customer, items, firstSubmittedAt, lastSubmittedAt]
+      required: [id, orderNo, status, currentVersion, lockVersion, totalQuantity, totalAmount, items, firstSubmittedAt, lastSubmittedAt, createdSource, lastModifiedSource]
       properties:
         id:
           $ref: '#/components/schemas/Id'
@@ -2614,6 +2780,14 @@ components:
           $ref: '#/components/schemas/OrderStatus'
         currentVersion:
           type: integer
+        lockVersion:
+          type: integer
+        createdSource:
+          type: string
+          enum: [H5, ADMIN]
+        lastModifiedSource:
+          type: string
+          enum: [H5, ADMIN, SYSTEM]
         writable:
           type: boolean
         totalQuantity:
@@ -2627,6 +2801,12 @@ components:
           $ref: '#/components/schemas/Decimal'
         customer:
           $ref: '#/components/schemas/ActivityCustomerSummary'
+        phone:
+          type: [string, 'null']
+          description: 仅管理员订单接口返回的完整手机号；H5 订单接口不返回该字段。
+        phoneMasked:
+          type: [string, 'null']
+          description: 脱敏手机号；公开/H5 场景仅使用此字段。
         items:
           type: array
           items:
@@ -2641,6 +2821,11 @@ components:
           type: [string, 'null']
           format: date-time
         withdrawnReason:
+          type: [string, 'null']
+        voidedAt:
+          type: [string, 'null']
+          format: date-time
+        voidedReason:
           type: [string, 'null']
     CurrentOrderResponse:
       type: object
@@ -2672,7 +2857,11 @@ components:
           format: date-time
         submittedSource:
           type: string
-          enum: [H5]
+          enum: [H5, ADMIN]
+        submittedByAdminName:
+          type: [string, 'null']
+        reason:
+          type: [string, 'null']
     AdminMeResponse:
       type: object
       required: [data, traceId]

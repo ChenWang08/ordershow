@@ -11,7 +11,7 @@ export function apiAssetUrl(path?: string) {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string) { super(message); }
+  constructor(public status: number, public code: string, message: string, public traceId?: string) { super(message); }
 }
 
 function cookie(name: string) {
@@ -29,7 +29,6 @@ export async function api<T>(path: string, init: RequestInit = {}, csrfKind?: "a
   const response = await fetch(`${apiBase()}${path}`, { ...init, headers, credentials: "include" });
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("json") ? await response.json() : await response.text();
-  if (!response.ok) throw new ApiError(response.status, body?.code || "REQUEST_FAILED", body?.detail || body?.message || "请求失败");
+  if (!response.ok) throw new ApiError(response.status, body?.code || "REQUEST_FAILED", body?.detail || body?.message || "请求失败", body?.traceId);
   return body as T;
 }
-

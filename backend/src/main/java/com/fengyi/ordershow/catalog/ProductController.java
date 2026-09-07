@@ -33,8 +33,9 @@ public class ProductController {
   @GetMapping("/admin/activities/{activityId}/products")
   ApiResponse<List<ProductService.ProductView>> admin(@PathVariable long activityId,
       @RequestParam(required = false) String customerType, @RequestParam(required = false) String status,
-      @RequestParam(required = false) String keyword, HttpServletRequest request) {
-    return ApiResponse.of(service.adminProducts(activityId, customerType, status, keyword), TraceFilter.id(request));
+      @RequestParam(required = false) String keyword, @RequestParam(required = false) Long activityCustomerId,
+      HttpServletRequest request) {
+    return ApiResponse.of(service.adminProducts(activityId, customerType, status, keyword, activityCustomerId), TraceFilter.id(request));
   }
 
   @PostMapping("/admin/activities/{activityId}/products")

@@ -3,6 +3,7 @@ package com.fengyi.ordershow.order;
 import com.fengyi.ordershow.common.ApiResponse;
 import com.fengyi.ordershow.common.PageResponse;
 import com.fengyi.ordershow.common.TraceFilter;
+import com.fengyi.ordershow.audit.AuditService;
 import com.fengyi.ordershow.security.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.net.URLEncoder;
@@ -75,9 +76,42 @@ public class OrderController {
     return service.adminOrders(activityId, status, customerType, keyword, page, size, TraceFilter.id(request));
   }
 
+  @PostMapping("/admin/activities/{activityId}/orders/preview")
+  ApiResponse<OrderService.OrderPreview> preview(@PathVariable long activityId,
+      @RequestBody OrderService.AdminPreviewRequest body, HttpServletRequest request) {
+    return ApiResponse.of(service.adminPreview(activityId, body, auth.requireAdmin(request)), TraceFilter.id(request));
+  }
+
+  @PostMapping("/admin/activities/{activityId}/orders")
+  ApiResponse<OrderService.AdminOrderView> createOrder(@PathVariable long activityId,
+      @RequestBody OrderService.AdminCreateRequest body,
+      @RequestHeader("Idempotency-Key") String idempotencyKey, HttpServletRequest request) {
+    request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason());
+    return ApiResponse.of(service.adminCreate(activityId, body, auth.requireAdmin(request), idempotencyKey,
+        TraceFilter.id(request)), TraceFilter.id(request));
+  }
+
   @GetMapping("/admin/activities/{activityId}/orders/{orderId}")
-  ApiResponse<OrderService.OrderView> order(@PathVariable long activityId, @PathVariable long orderId, HttpServletRequest request) {
+  ApiResponse<OrderService.AdminOrderView> order(@PathVariable long activityId, @PathVariable long orderId, HttpServletRequest request) {
     return ApiResponse.of(service.adminOrder(activityId, orderId), TraceFilter.id(request));
+  }
+
+  @PutMapping("/admin/activities/{activityId}/orders/{orderId}")
+  ApiResponse<OrderService.AdminOrderView> adjustOrder(@PathVariable long activityId, @PathVariable long orderId,
+      @RequestBody OrderService.AdminAdjustRequest body,
+      @RequestHeader("Idempotency-Key") String idempotencyKey, HttpServletRequest request) {
+    request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason());
+    return ApiResponse.of(service.adminAdjust(activityId, orderId, body, auth.requireAdmin(request), idempotencyKey,
+        TraceFilter.id(request)), TraceFilter.id(request));
+  }
+
+  @PostMapping("/admin/activities/{activityId}/orders/{orderId}/void")
+  ApiResponse<OrderService.AdminOrderView> voidOrder(@PathVariable long activityId, @PathVariable long orderId,
+      @RequestBody OrderService.AdminVoidRequest body,
+      @RequestHeader("Idempotency-Key") String idempotencyKey, HttpServletRequest request) {
+    request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason());
+    return ApiResponse.of(service.adminVoid(activityId, orderId, body, auth.requireAdmin(request), idempotencyKey,
+        TraceFilter.id(request)), TraceFilter.id(request));
   }
 
   @GetMapping("/admin/activities/{activityId}/orders/{orderId}/versions")

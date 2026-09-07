@@ -202,13 +202,23 @@ public class DashboardService {
   public void freezeFinalSnapshots(ActivityFinishedEvent event) {
     var activity = activities.byId(event.activityId());
     if (!"FINISHED".equals(activity.status())) return;
-    storeSnapshot(activity.id(), rankingKey(null, null), liveRanking(activity, null, null));
-    storeSnapshot(activity.id(), rankingKey("GENERAL", null), liveRanking(activity, "GENERAL", null));
-    storeSnapshot(activity.id(), rankingKey("SPECIAL", null), liveRanking(activity, "SPECIAL", null));
+    replaceFinalSnapshots(activity);
+  }
+
+  /** Refreshes finished activity snapshots after an administrator changes an order. Archived results stay frozen. */
+  public void refreshFinalSnapshots(long activityId) {
+    var activity = activities.byId(activityId);
+    if ("FINISHED".equals(activity.status())) replaceFinalSnapshots(activity);
+  }
+
+  private void replaceFinalSnapshots(ActivityService.ActivityView activity) {
+    replaceSnapshot(activity.id(), rankingKey(null, null), liveRanking(activity, null, null));
+    replaceSnapshot(activity.id(), rankingKey("GENERAL", null), liveRanking(activity, "GENERAL", null));
+    replaceSnapshot(activity.id(), rankingKey("SPECIAL", null), liveRanking(activity, "SPECIAL", null));
     for (var region : activity.regions()) {
-      storeSnapshot(activity.id(), rankingKey("GENERAL", region.code()), liveRanking(activity, "GENERAL", region.code()));
+      replaceSnapshot(activity.id(), rankingKey("GENERAL", region.code()), liveRanking(activity, "GENERAL", region.code()));
     }
-    storeSnapshot(activity.id(), "REPORT", liveReport(activity, "FINAL"));
+    replaceSnapshot(activity.id(), "REPORT", liveReport(activity, "FINAL"));
   }
 
   private String rankingKey(String customerType, String regionCode) {
@@ -241,6 +251,18 @@ public class DashboardService {
           """, activityId, key, json.writeValueAsString(value));
     } catch (JsonProcessingException exception) {
       throw new IllegalStateException("最终看板快照生成失败", exception);
+    }
+  }
+
+  private void replaceSnapshot(long activityId, String key, Object value) {
+    try {
+      jdbc.update("""
+          INSERT INTO activity_dashboard_snapshot(activity_id, snapshot_key, payload_json)
+          VALUES (?, ?, CAST(? AS JSON))
+          ON DUPLICATE KEY UPDATE payload_json = VALUES(payload_json), generated_at = UTC_TIMESTAMP(3)
+          """, activityId, key, json.writeValueAsString(value));
+    } catch (JsonProcessingException exception) {
+      throw new IllegalStateException("最终看板快照更新失败", exception);
     }
   }
 

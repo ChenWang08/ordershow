@@ -1,5 +1,5 @@
 import { api, apiBase, ApiError } from "./client";
-import type { AdminOrderSummary, Envelope, PageEnvelope, RuntimeOrder } from "./types";
+import type { AdminOrderPreview, AdminOrderSummary, Envelope, PageEnvelope, RuntimeOrder } from "./types";
 
 export async function loadAdminOrders(activityId: number, filters: { status?: string; customerType?: string; keyword?: string; page?: number; size?: number } = {}) {
   const query = new URLSearchParams();
@@ -9,6 +9,37 @@ export async function loadAdminOrders(activityId: number, filters: { status?: st
 
 export async function loadAdminOrder(activityId: number, orderId: number) {
   return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders/${orderId}`)).data;
+}
+
+export async function previewAdminOrder(activityId: number, activityCustomerId: number,
+    items: Array<{ productId: number; quantity: number }>) {
+  return (await api<Envelope<AdminOrderPreview>>(`/admin/activities/${activityId}/orders/preview`, {
+    method: "POST", body: JSON.stringify({ activityCustomerId, items }),
+  }, "admin")).data;
+}
+
+export async function createAdminOrder(activityId: number, activityCustomerId: number,
+    items: Array<{ productId: number; quantity: number }>, reason: string) {
+  return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders`, {
+    method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ activityCustomerId, items, reason }),
+  }, "admin")).data;
+}
+
+export async function adjustAdminOrder(activityId: number, orderId: number, expectedVersion: number,
+    expectedLockVersion: number, items: Array<{ productId: number; quantity: number }>, reason: string) {
+  return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders/${orderId}`, {
+    method: "PUT", headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ expectedVersion, expectedLockVersion, items, reason }),
+  }, "admin")).data;
+}
+
+export async function voidAdminOrder(activityId: number, orderId: number, expectedVersion: number,
+    expectedLockVersion: number, reason: string) {
+  return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders/${orderId}/void`, {
+    method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ expectedVersion, expectedLockVersion, reason }),
+  }, "admin")).data;
 }
 
 export async function exportAdminOrders(activityId: number, filters: { status?: string; customerType?: string; keyword?: string } = {}, activityName = "活动") {
@@ -21,4 +52,3 @@ export async function exportAdminOrders(activityId: number, filters: { status?: 
   const safeName = activityName.replace(/[\\/:*?"<>|]/g, "-");
   link.href = url; link.download = `${safeName}_订单数据_${new Date().toISOString().slice(0, 10)}.xlsx`; link.click(); URL.revokeObjectURL(url);
 }
-

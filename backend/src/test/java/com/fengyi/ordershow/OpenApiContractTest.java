@@ -12,7 +12,7 @@ import org.yaml.snakeyaml.Yaml;
 
 class OpenApiContractTest {
   @Test
-  void contractIsValidYamlAndKeepsAdminOrdersReadOnly() throws Exception {
+  void contractIsValidYamlAndExposesAuditedAdminOrderManagement() throws Exception {
     Path contract = List.of(
             Path.of("docs/design/openapi/order-show-api.yaml"),
             Path.of("../docs/design/openapi/order-show-api.yaml"))
@@ -28,10 +28,12 @@ class OpenApiContractTest {
     Map<String, Object> paths = (Map<String, Object>) document.get("paths");
     assertThat(paths).containsKeys(
         "/admin/activities/{activityId}/orders",
+        "/admin/activities/{activityId}/orders/preview",
         "/admin/activities/{activityId}/publish",
         "/admin/activities/{activityId}/withdraw-publication",
         "/admin/activities/{activityId}/close",
         "/admin/activities/{activityId}/orders/{orderId}",
+        "/admin/activities/{activityId}/orders/{orderId}/void",
         "/admin/activities/{activityId}/orders/export",
         "/admin/activities/{activityId}/products/{productId}",
         "/admin/activities/{activityId}/customers/{customerId}",
@@ -41,6 +43,12 @@ class OpenApiContractTest {
         "/h5/activities/{activityCode}/order-draft",
         "/h5/activities/{activityCode}/order/withdraw");
     assertThat(paths.keySet()).noneMatch(path -> path.startsWith("/admin/") && path.endsWith("/withdraw"));
+    @SuppressWarnings("unchecked")
+    Map<String, Object> orderCollection = (Map<String, Object>) paths.get("/admin/activities/{activityId}/orders");
+    @SuppressWarnings("unchecked")
+    Map<String, Object> orderResource = (Map<String, Object>) paths.get("/admin/activities/{activityId}/orders/{orderId}");
+    assertThat(orderCollection).containsKeys("get", "post");
+    assertThat(orderResource).containsKeys("get", "put");
     assertThat(paths).doesNotContainKey("/admin/activities/{activityId}/customers/{customerId}/status");
   }
 }
