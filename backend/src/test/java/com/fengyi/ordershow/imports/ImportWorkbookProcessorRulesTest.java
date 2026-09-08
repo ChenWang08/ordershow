@@ -78,12 +78,12 @@ class ImportWorkbookProcessorRulesTest {
 
   @Test
   void mapsBlankAndAllowedProductTypeValuesToGenericSentinels() {
-    assertThat(ImportWorkbookProcessor.productCustomerType("综合")).isEqualTo("GENERAL");
-    assertThat(ImportWorkbookProcessor.productCustomerType("特渠")).isEqualTo("SPECIAL");
-    assertThat(ImportWorkbookProcessor.productCustomerType(" ")).isEqualTo("ALL");
-    assertThat(ImportWorkbookProcessor.productRebateStatus("是")).isEqualTo("PARTICIPATING");
-    assertThat(ImportWorkbookProcessor.productRebateStatus("否")).isEqualTo("NOT_PARTICIPATING");
-    assertThat(ImportWorkbookProcessor.productRebateStatus(" ")).isEqualTo("ALL");
+    assertThat(ImportWorkbookRules.productCustomerType("综合")).isEqualTo("GENERAL");
+    assertThat(ImportWorkbookRules.productCustomerType("特渠")).isEqualTo("SPECIAL");
+    assertThat(ImportWorkbookRules.productCustomerType(" ")).isEqualTo("ALL");
+    assertThat(ImportWorkbookRules.productRebateStatus("是")).isEqualTo("PARTICIPATING");
+    assertThat(ImportWorkbookRules.productRebateStatus("否")).isEqualTo("NOT_PARTICIPATING");
+    assertThat(ImportWorkbookRules.productRebateStatus(" ")).isEqualTo("ALL");
   }
 
   @Test

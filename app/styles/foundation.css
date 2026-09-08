@@ -1,0 +1,73 @@
+:root {
+  --red-950: #3e090a;
+  --red-900: #581011;
+  --red-800: #7d1517;
+  --red-700: #a31d1f;
+  --red-600: #c92c2b;
+  --red-500: #dc3a31;
+  --gold-500: #d9a441;
+  --gold-400: #f0c76c;
+  --cream: #fff8e8;
+  --ink: #2f1e18;
+  --muted: #826d62;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; background: #eee9e2; color: var(--ink); }
+button, input, select { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .45; }
+
+.prototype-root { min-height: 100vh; }
+.prototype-nav {
+  height: 74px; position: sticky; top: 0; z-index: 100; display: flex; align-items: center; gap: 28px;
+  padding: 0 26px; color: #fff; background: rgba(43, 10, 9, .96); border-bottom: 1px solid rgba(240,199,108,.3);
+  box-shadow: 0 10px 32px rgba(45, 9, 8, .18); backdrop-filter: blur(15px);
+}
+.prototype-title { display: flex; align-items: center; gap: 11px; min-width: 240px; }
+.prototype-title > span { display: grid; place-items: center; width: 38px; height: 38px; border: 1px solid var(--gold-400); border-radius: 50%; color: var(--gold-400); font-family: serif; font-weight: 900; }
+.prototype-title p { display: flex; flex-direction: column; margin: 0; }
+.prototype-title b { font-size: 15px; letter-spacing: .08em; }
+.prototype-title small { margin-top: 2px; color: #d8bfa4; font-size: 10px; letter-spacing: .13em; text-transform: uppercase; }
+.surface-tabs { display: flex; align-self: stretch; flex: 1; justify-content: center; }
+.surface-tabs button { min-width: 112px; padding: 8px 18px 7px; border: 0; border-bottom: 3px solid transparent; color: #cdb9ae; background: transparent; transition: .2s; }
+.surface-tabs button:hover { background: rgba(255,255,255,.05); color: #fff; }
+.surface-tabs button.active { color: #fff; border-bottom-color: var(--gold-400); background: linear-gradient(180deg, transparent, rgba(217,164,65,.11)); }
+.surface-tabs b, .surface-tabs small { display: block; }
+.surface-tabs b { font-size: 14px; }
+.surface-tabs small { margin-top: 3px; color: inherit; opacity: .65; font-size: 10px; }
+.prototype-status { min-width: 108px; font-size: 12px; color: #decdbb; }
+.prototype-status i { display: inline-block; width: 7px; height: 7px; margin-right: 7px; border-radius: 50%; background: #65d49d; box-shadow: 0 0 0 5px rgba(101,212,157,.1); }
+.surface-admin .prototype-status { margin-left: auto; text-align: right; }
+.prototype-canvas { min-height: calc(100vh - 74px); }
+.surface-slot { min-height: inherit; }.surface-hidden { display: none; }
+.admin-shell { min-height: calc(100vh - 74px); padding: 38px 24px; background: #f4f1ed; }
+.admin-shell .admin-main { max-width: 720px; margin: 0 auto; padding: 0; }
+.admin-login-panel { min-height: 0; padding: 34px; box-shadow: 0 12px 34px rgba(54,36,23,.06); }
+.admin-login-heading { display: flex; align-items: center; gap: 13px; padding-bottom: 21px; border-bottom: 1px solid #eee8e4; }
+.admin-login-heading h2 { margin: 0 0 5px; color: #3c2923; font-size: 19px; }
+.admin-login-heading p { max-width: 560px; margin: 0; color: #8f7e75; font-size: 10px; line-height: 1.6; }
+.admin-login-mark { display: grid; width: 42px; height: 42px; place-items: center; flex: 0 0 auto; color: #e7b85f; border: 1px solid #e7b85f; border-radius: 50%; background: #351211; font-family: serif; font-size: 19px; }
+.admin-login-form { display: grid; gap: 14px; max-width: 480px; margin: 25px auto 0; }
+.admin-login-form label { display: flex; flex-direction: column; gap: 6px; color: #695950; font-size: 10px; }
+.admin-login-form input { width: 100%; height: 40px; padding: 0 11px; color: #332822; border: 1px solid #ddd2cb; border-radius: 7px; outline: 0; background: #fff; font-size: 11px; }
+.admin-login-form input:focus { border-color: #ae4b45; box-shadow: 0 0 0 3px rgba(169,35,33,.08); }
+.admin-login-form .admin-primary { width: 100%; height: 40px; margin-top: 1px; font-size: 10px; }
+.admin-login-hint { display: flex; flex-direction: column; gap: 4px; padding: 11px 12px; color: #806d63; border: 1px solid #eadfd8; border-radius: 8px; background: #fbf8f6; font-size: 8px; line-height: 1.55; }
+.admin-login-hint b { color: #5e4439; font-size: 9px; }
+
+/* Shared festival scene */
+.festival-moon { position: absolute; right: -65px; top: -75px; width: 235px; height: 235px; border-radius: 50%; opacity: .88; background: radial-gradient(circle at 35% 32%, #fffbd3 0 6%, #ffeaa4 21%, #e9af38 66%, rgba(200,115,19,.2) 72%); box-shadow: 0 0 60px rgba(255,209,104,.42); pointer-events: none; }
+.festival-moon i { position: absolute; width: 18px; height: 11px; border-radius: 50%; background: rgba(181,118,26,.18); }
+.festival-moon i:nth-child(1) { top: 83px; left: 58px; }
+.festival-moon i:nth-child(2) { top: 119px; left: 117px; width: 31px; }
+.festival-moon i:nth-child(3) { top: 53px; left: 131px; width: 25px; }
+.festival-cloud { position: absolute; height: 18px; width: 115px; opacity: .28; border-top: 5px solid #ffd78a; border-radius: 50%; pointer-events: none; }
+.festival-cloud::before, .festival-cloud::after { content: ""; position: absolute; border-top: 5px solid #ffd78a; border-radius: 50%; }
+.festival-cloud::before { width: 62px; height: 14px; left: 11px; top: -15px; }
+.festival-cloud::after { width: 82px; height: 14px; left: 55px; top: 7px; }
+.cloud-a { left: -10px; top: 95px; transform: rotate(7deg); }
+.cloud-b { right: 105px; top: 145px; transform: scale(.75) rotate(-5deg); }
+.festival-mountains { position: absolute; z-index: 0; left: 0; right: 0; bottom: -2px; height: 92px; overflow: hidden; opacity: .75; pointer-events: none; }
+.festival-mountains i { position: absolute; bottom: -55px; width: 150px; height: 150px; transform: rotate(45deg); border: 2px solid rgba(246,183,75,.7); background: linear-gradient(135deg, rgba(242,159,48,.25), rgba(109,22,18,.7)); }
+.festival-mountains i:nth-child(1){ left: -22px; }.festival-mountains i:nth-child(2){ left: 18%; width: 115px; height: 115px; }.festival-mountains i:nth-child(3){ right: 18%; width: 115px; height: 115px; }.festival-mountains i:nth-child(4){ right: -25px; }

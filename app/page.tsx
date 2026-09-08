@@ -1,5 +1,5 @@
-import { Prototype } from "./prototype";
+import { OrderShowApp } from "./order-show-app";
 
 export default function Home() {
-  return <Prototype />;
+  return <OrderShowApp />;
 }

@@ -51,7 +51,7 @@ frontend/
 └── pnpm-workspace.yaml
 ```
 
-当前已在保留 `app/prototype.tsx` 视觉和交互的基础上，将正式接口集中到 `app/api.ts`，所有关键业务数据以后端为准。后续维护可按 H5、后台、看板和抽奖逐步拆分页面组件，不改变现有业务契约。
+当前前端入口为 `app/order-show-app.tsx`，活动路由位于 `app/activity-routes.tsx`，正式接口仍通过 `app/api.ts` 使用，所有关键业务数据以后端为准。页面、共享状态、后台、H5、大屏与样式已按模块整理；商品、导入、订单和价格同步后端也已分离职责。现有业务契约保持，模块边界见 `09-frontend-module-boundaries.md`、`10-catalog-import-module-boundaries.md` 和 `11-screen-style-module-boundaries.md`。
 
 ### 3.1 推荐路由
 

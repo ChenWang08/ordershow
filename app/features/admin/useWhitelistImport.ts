@@ -1,0 +1,152 @@
+"use client";
+
+import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { ApiError, cancelImport, confirmImport, waitForImport, uploadImport, loadImportRows, loadAdminAttendees, type ImportStagingRow } from "../../api";
+import { bindWhitelistStaging, cloneWhitelistRows, prepareWhitelistImportRows, summarizeWhitelistRows, type WhitelistRow, type AttendanceRow, type AttendanceImportDraft } from "../../domain/import-domain";
+import { parseWhitelistWorkbook } from "./admin-utils";
+import { mapAdminAttendanceRows } from "./attendance-utils";
+import type { CustomerImportOptions } from "./customer-module-types";
+
+type WhitelistImportOptions = CustomerImportOptions & {
+  whitelistRows: WhitelistRow[];
+  setWhitelistRows: Dispatch<SetStateAction<WhitelistRow[]>>;
+  whitelistImportHasRun: boolean;
+  setWhitelistImportCompleted: (completed: boolean) => void;
+  onWhitelistImportCommitted: () => void;
+  attendanceRows: AttendanceRow[];
+  setAttendanceRows: Dispatch<SetStateAction<AttendanceRow[]>>;
+  pendingAttendanceImport: AttendanceImportDraft | null;
+};
+
+// The admin shell owns mounting so switching tabs retains the current preview.
+export function useWhitelistImport({
+  activityId, activityStatus, whitelistRows, setWhitelistRows, whitelistImportHasRun,
+  setWhitelistImportCompleted, onWhitelistImportCommitted, attendanceRows, setAttendanceRows,
+  pendingAttendanceImport, serverImportTasks, serverImportBlocking, setServerImportTasks,
+  setServerImportBlocking, setActionNotice, recordOperation, refreshServerImportPreview,
+}: WhitelistImportOptions) {
+  const activityPublished = activityStatus !== "draft";
+  const [whitelistFileName, setWhitelistFileName] = useState("");
+  const [whitelistImportWarnings, setWhitelistImportWarnings] = useState<string[]>([]);
+  const [whitelistImportError, setWhitelistImportError] = useState("");
+  const [whitelistSheetCounts, setWhitelistSheetCounts] = useState<Array<{ name: string; count: number }>>([]);
+  const [whitelistImportInputCount, setWhitelistImportInputCount] = useState(0);
+  const whitelistImportStats = useMemo(() => summarizeWhitelistRows(whitelistRows), [whitelistRows]);
+  const [pendingWhitelistRollbackRows, setPendingWhitelistRollbackRows] = useState<WhitelistRow[] | null>(null);
+  const beginWhitelistImport = () => {
+    if (activityPublished) {
+      setActionNotice("活动发布后白名单 Excel 已锁定，请先撤回发布。");
+      return;
+    }
+    setWhitelistImportCompleted(false);
+    setWhitelistFileName("");
+    setWhitelistSheetCounts([]);
+    setWhitelistImportWarnings([]);
+    setWhitelistImportError("");
+    setWhitelistImportInputCount(0);
+    setPendingWhitelistRollbackRows(null);
+  };
+  const cancelWhitelistImport = async () => {
+    const taskId = serverImportTasks.WHITELIST;
+    if (taskId && Number.isFinite(Number(activityId))) {
+      try {
+        await cancelImport(Number(activityId), taskId);
+      } catch (error) {
+        setActionNotice(error instanceof ApiError ? error.message : "取消白名单导入失败，请稍后重试。");
+        return;
+      }
+      setServerImportTasks((current) => ({ ...current, WHITELIST: undefined }));
+      setServerImportBlocking((current) => ({ ...current, WHITELIST: 0 }));
+    }
+    const hadConfirmedImport = whitelistImportHasRun;
+    const rollbackRows = pendingWhitelistRollbackRows ? cloneWhitelistRows(pendingWhitelistRollbackRows) : whitelistRows;
+    if (pendingWhitelistRollbackRows) setWhitelistRows(rollbackRows);
+    setPendingWhitelistRollbackRows(null);
+    setWhitelistFileName("");
+    setWhitelistSheetCounts([]);
+    setWhitelistImportWarnings([]);
+    setWhitelistImportError("");
+    setWhitelistImportInputCount(0);
+    setWhitelistImportCompleted(hadConfirmedImport);
+    setActionNotice("已取消本次白名单替换，当前白名单保持不变。" );
+  };
+  const confirmWhitelistImport = async () => {
+    if (activityPublished) {
+      setActionNotice("活动发布后禁止确认白名单 Excel 导入，请先撤回发布。");
+      return;
+    }
+    if ((serverImportBlocking.WHITELIST ?? 0) > 0) {
+      setActionNotice(`仍有 ${serverImportBlocking.WHITELIST} 条白名单异常，请先编辑或删除后再发布。`);
+      return;
+    }
+    const taskId = serverImportTasks.WHITELIST;
+    if (taskId) {
+      try { await confirmImport(Number(activityId), taskId); await waitForImport(Number(activityId), taskId); }
+      catch (error) { setActionNotice(error instanceof ApiError ? error.message : "白名单导入发布失败，请处理异常数据后重试。"); return; }
+    }
+    setPendingWhitelistRollbackRows(null);
+    setWhitelistImportCompleted(true);
+    onWhitelistImportCommitted();
+    let refreshedAttendance = attendanceRows;
+    if (taskId && attendanceRows.length > 0) {
+      refreshedAttendance = mapAdminAttendanceRows(await loadAdminAttendees(Number(activityId)));
+      setAttendanceRows(refreshedAttendance);
+    }
+    if (pendingAttendanceImport && serverImportTasks.ATTENDANCE) await refreshServerImportPreview("ATTENDANCE");
+    const linkedAttendance = refreshedAttendance.filter((row) => row.lotteryEligible).length;
+    recordOperation("替换白名单 Excel", whitelistFileName || "客户白名单 Excel", `共 ${whitelistImportStats.total} 名；有效 ${whitelistImportStats.valid} 名，待处理 ${whitelistImportStats.pending} 名。`);
+    setActionNotice(`白名单已替换：共 ${whitelistImportStats.total} 名，有效 ${whitelistImportStats.valid} 名；当前到场已重新关联 ${linkedAttendance} 名。`);
+  };
+  const handleWhitelistFile = async (file: File) => {
+    if (activityPublished) {
+      setWhitelistImportError("活动发布后白名单 Excel 已锁定，请先撤回发布。");
+      setActionNotice("活动发布后白名单 Excel 已锁定，请先撤回发布。");
+      return;
+    }
+    setWhitelistImportError("");
+    try {
+      const result = await parseWhitelistWorkbook(file);
+      let serverRows: ImportStagingRow[] = [];
+      if (Number.isFinite(Number(activityId))) {
+        const task = await uploadImport(Number(activityId), "WHITELIST", file);
+        setServerImportTasks((current) => ({ ...current, WHITELIST: Number(task.id) }));
+        setServerImportBlocking((current) => ({ ...current, WHITELIST: Number(task.errorCount || 0) }));
+        serverRows = await loadImportRows(Number(activityId), Number(task.id));
+      }
+      const prepared = prepareWhitelistImportRows(result.rows);
+      setPendingWhitelistRollbackRows(pendingWhitelistRollbackRows ? pendingWhitelistRollbackRows : cloneWhitelistRows(whitelistRows));
+      const nextRows = bindWhitelistStaging(prepared.rows, serverRows);
+      setWhitelistRows(nextRows);
+      setWhitelistFileName(file.name);
+      setWhitelistSheetCounts(result.sheetCounts);
+      setWhitelistImportInputCount(result.rows.length);
+      setWhitelistImportWarnings([...result.warnings, ...prepared.warnings]);
+      setWhitelistImportCompleted(false);
+      const stats = summarizeWhitelistRows(nextRows);
+      setActionNotice(`已解析 ${stats.total} 名白名单客户：有效 ${stats.valid} 名、待处理 ${stats.pending} 名，请检查后确认替换。`);
+    } catch (error) {
+      setWhitelistFileName(file.name);
+      setWhitelistSheetCounts([]);
+      setWhitelistImportInputCount(0);
+      setWhitelistImportWarnings([]);
+      setWhitelistImportError(error instanceof Error ? error.message : "文件解析失败，请检查 Excel 格式。");
+      setWhitelistImportCompleted(false);
+    }
+  };
+  return {
+    whitelistFileName,
+    setWhitelistFileName,
+    whitelistImportWarnings,
+    whitelistImportError,
+    whitelistSheetCounts,
+    setWhitelistSheetCounts,
+    whitelistImportInputCount,
+    setWhitelistImportInputCount,
+    whitelistImportStats,
+    setPendingWhitelistRollbackRows,
+    beginWhitelistImport,
+    cancelWhitelistImport,
+    confirmWhitelistImport,
+    handleWhitelistFile,
+  };
+}

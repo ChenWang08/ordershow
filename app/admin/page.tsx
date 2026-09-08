@@ -1,5 +1,5 @@
-import { AdminRoutedPrototype } from "../routed-prototype";
+import { AdminRoute } from "../activity-routes";
 
 export default function AdminPage() {
-  return <AdminRoutedPrototype />;
+  return <AdminRoute />;
 }

@@ -42,6 +42,12 @@ try {
     & npm test
     if ($LASTEXITCODE -ne 0) { throw "Frontend tests failed." }
 
+    & npm run typecheck
+    if ($LASTEXITCODE -ne 0) { throw "Frontend type checking failed." }
+
+    & npm run lint
+    if ($LASTEXITCODE -ne 0) { throw "Frontend lint failed." }
+
     & docker run --rm `
       -e ORDER_SHOW_E2E=order-show-e2e `
       -e ORDER_SHOW_E2E_BASE_URL=http://host.docker.internal:8180/api/v1 `
@@ -65,4 +71,3 @@ try {
     Write-Warning "The disposable order-show-e2e environment was intentionally kept running."
   }
 }
-

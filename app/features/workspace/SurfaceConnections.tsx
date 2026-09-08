@@ -1,0 +1,27 @@
+"use client";
+
+import { AdminGateway } from "../admin/AdminGateway";
+import { AdminWorkspace } from "../admin/AdminWorkspace";
+import { H5Ordering } from "../h5/H5Ordering";
+import { LotteryBoard } from "../lottery/Lottery";
+import { useActivityWorkspace, useImportWorkspace } from "./ActivityWorkspace";
+
+export function AdminSurface() {
+  const { activityId, activityStartAt, activityEndAt, activityEventEndAt } = useActivityWorkspace();
+  return <AdminGateway><AdminWorkspace key={`${activityId}-${activityStartAt}-${activityEndAt}-${activityEventEndAt}`} /></AdminGateway>;
+}
+
+export function H5Surface() {
+  const { activityStatus, runtimeActivity } = useActivityWorkspace();
+  const { products, whitelist } = useImportWorkspace();
+  return <H5Ordering activityStatus={activityStatus} importedRows={products.completed ? products.rows : null}
+    importedWhitelistRows={whitelist.completed ? whitelist.rows : null} runtimeActivity={runtimeActivity} />;
+}
+
+export function LotterySurface() {
+  const { lotteryRounds, setLotteryRounds, activityId, activityStatus } = useActivityWorkspace();
+  const { attendance } = useImportWorkspace();
+  return <LotteryBoard rounds={lotteryRounds} attendanceRows={attendance.rows} activityId={Number(activityId)}
+    activityFinished={activityStatus === "finished"}
+    onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed", serverStatus: "COMPLETED" } : item))} />;
+}

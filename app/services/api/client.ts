@@ -29,6 +29,7 @@ export async function api<T>(path: string, init: RequestInit = {}, csrfKind?: "a
   const response = await fetch(`${apiBase()}${path}`, { ...init, headers, credentials: "include" });
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("json") ? await response.json() : await response.text();
-  if (!response.ok) throw new ApiError(response.status, body?.code || "REQUEST_FAILED", body?.detail || body?.message || "请求失败", body?.traceId);
+  const errorBody = body as { code?: string; detail?: string; message?: string; traceId?: string } | null;
+  if (!response.ok) throw new ApiError(response.status, errorBody?.code || "REQUEST_FAILED", errorBody?.detail || errorBody?.message || "请求失败", errorBody?.traceId);
   return body as T;
 }

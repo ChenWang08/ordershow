@@ -1,0 +1,5 @@
+{
+  // Type generation only; Sites owns the deployment configuration and bindings.
+  "name": "order-show-types",
+  "compatibility_date": "2026-05-15"
+}

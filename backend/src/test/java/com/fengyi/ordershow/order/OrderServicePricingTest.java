@@ -10,8 +10,40 @@ class OrderServicePricingTest {
   private static final BigDecimal TIER_PRICE = new BigDecimal("134.00");
 
   @Test
+  void comparesNumericValuesWithoutTreatingScaleAsAPriceChange() {
+    assertThat(OrderPricingCalculator.samePriceValue(new BigDecimal("1.00"), 1L)).isTrue();
+    assertThat(OrderPricingCalculator.samePriceValue(null, null)).isTrue();
+    assertThat(OrderPricingCalculator.samePriceValue(null, BigDecimal.ZERO)).isFalse();
+    assertThat(OrderPricingCalculator.samePriceValue(new BigDecimal("1.01"), 1L)).isFalse();
+  }
+
+  @Test
+  void roundsTheCombinedIncrementalAmountOnlyOnce() {
+    var price = OrderPricingCalculator.calculatePrice(new BigDecimal("1.005"), 2L, new BigDecimal("0.995"), "INCREMENTAL", 2);
+    assertThat(price.lineAmount()).isEqualByComparingTo("2.00");
+    assertThat(price.lineAmount().scale()).isEqualTo(2);
+  }
+
+  @Test
+  void blankModesKeepWholeOrderPricing() {
+    for (String mode : new String[]{null, "", " "}) {
+      var price = OrderPricingCalculator.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, mode, 1500);
+      assertThat(price.pricingMode()).isEqualTo("WHOLE_ORDER");
+      assertThat(price.lineAmount()).isEqualByComparingTo("201000.00");
+    }
+  }
+
+  @Test
+  void incompleteTierConfigurationFallsBackToTheBasePrice() {
+    var price = OrderPricingCalculator.calculatePrice(BASE_PRICE, 1500L, null, "INCREMENTAL", 1500);
+    assertThat(price.lineAmount()).isEqualByComparingTo("204000.00");
+    assertThat(price.appliedTierMinQuantity()).isNull();
+    assertThat(price.tierQuantity()).isZero();
+  }
+
+  @Test
   void keepsBasePriceBelowTheTierThreshold() {
-    var applied = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "WHOLE_ORDER", 1499);
+    var applied = OrderPricingCalculator.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "WHOLE_ORDER", 1499);
 
     assertThat(applied.casePriceSnapshot()).isEqualByComparingTo("136.00");
     assertThat(applied.appliedTierMinQuantity()).isNull();
@@ -22,7 +54,7 @@ class OrderServicePricingTest {
 
   @Test
   void appliesTheDiscountToEveryCaseAtTheThreshold() {
-    var applied = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "WHOLE_ORDER", 1500);
+    var applied = OrderPricingCalculator.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "WHOLE_ORDER", 1500);
 
     assertThat(applied.casePriceSnapshot()).isEqualByComparingTo("134.00");
     assertThat(applied.appliedTierMinQuantity()).isEqualTo(1500L);
@@ -33,7 +65,7 @@ class OrderServicePricingTest {
 
   @Test
   void keepsTheDiscountAboveTheThreshold() {
-    var applied = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "WHOLE_ORDER", 1501);
+    var applied = OrderPricingCalculator.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "WHOLE_ORDER", 1501);
 
     assertThat(applied.casePriceSnapshot()).isEqualByComparingTo("134.00");
     assertThat(applied.lineAmount()).isEqualByComparingTo("201134.00");
@@ -41,9 +73,9 @@ class OrderServicePricingTest {
 
   @Test
   void pricesOnlyTheThresholdAndExcessCasesAtTheIncrementalPrice() {
-    var below = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "INCREMENTAL", 1499);
-    var threshold = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "INCREMENTAL", 1500);
-    var above = OrderService.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "INCREMENTAL", 1501);
+    var below = OrderPricingCalculator.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "INCREMENTAL", 1499);
+    var threshold = OrderPricingCalculator.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "INCREMENTAL", 1500);
+    var above = OrderPricingCalculator.calculatePrice(BASE_PRICE, 1500L, TIER_PRICE, "INCREMENTAL", 1501);
 
     assertThat(below.lineAmount()).isEqualByComparingTo("203864.00");
     assertThat(below.baseQuantity()).isEqualTo(1499);
@@ -58,7 +90,7 @@ class OrderServicePricingTest {
 
   @Test
   void keepsLegacyProductsOnTheirBasePrice() {
-    var applied = OrderService.calculatePrice(BASE_PRICE, null, null, null, 1500);
+    var applied = OrderPricingCalculator.calculatePrice(BASE_PRICE, null, null, null, 1500);
 
     assertThat(applied.casePriceSnapshot()).isEqualByComparingTo("136.00");
     assertThat(applied.appliedTierMinQuantity()).isNull();

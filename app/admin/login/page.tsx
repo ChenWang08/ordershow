@@ -1,6 +1,6 @@
 import { ACTIVITY_CODE } from "../../api";
-import { RoutedPrototype } from "../../routed-prototype";
+import { ActivityRoute } from "../../activity-routes";
 
 export default function AdminLoginPage() {
-  return <RoutedPrototype activityCode={ACTIVITY_CODE} surface="admin" />;
+  return <ActivityRoute activityCode={ACTIVITY_CODE} surface="admin" />;
 }

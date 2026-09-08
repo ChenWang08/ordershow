@@ -1,0 +1,26 @@
+/* Lottery */
+.lottery-board { display: flex; flex-direction: column; align-items: center; padding-bottom: 75px; background: radial-gradient(circle at 50% 20%, #b62323 0, #821518 35%, #520b0e 75%); }
+.lottery-brand { position: relative; z-index: 2; padding: 17px 20px 5px; text-align: center; }
+.lottery-brand > span { color: #ffcd72; font-size: 10px; letter-spacing: .18em; }
+.lottery-brand h1 { margin: 3px 0; color: #fff1c9; font-family: "STKaiti", serif; font-size: 29px; }
+.lottery-brand small { color: #eabd70; font-size: 9px; letter-spacing: .17em; }
+.lottery-controls { position: relative; z-index: 3; display: flex; align-items: center; gap: 13px; padding: 8px 14px; border: 1px solid rgba(255,211,126,.28); border-radius: 9px; background: rgba(52,3,5,.28); }
+.lottery-controls label { color: #e9c68d; font-size: 10px; }
+.lottery-controls select { margin-left: 5px; padding: 5px 22px 5px 8px; color: #fff0cc; border: 1px solid rgba(255,214,137,.3); border-radius: 5px; background: #741416; font-size: 10px; }
+.lottery-controls > span { color: #ffd77d; font-size: 10px; }
+.lottery-title { position: relative; z-index: 2; margin: clamp(28px, 5vh, 56px) 0 0; text-align: center; }
+.lottery-title b { display: block; color: #ffd45f; font-family: serif; font-size: clamp(32px, 3.2vw, 44px); line-height: 1.12; letter-spacing: .04em; text-shadow: 0 3px 16px rgba(75,0,0,.3); }
+.lottery-title span { display: block; margin-top: 8px; color: #ffe2a4; font-size: clamp(14px, 1.15vw, 16px); font-weight: 700; }
+.lottery-ready { position: relative; z-index: 2; display: flex; width: 100%; flex: 1; min-height: 300px; flex-direction: column; align-items: center; justify-content: center; gap: 22px; text-align: center; }
+.lucky-seal { display: grid; place-items: center; width: clamp(155px, 16vw, 200px); height: clamp(155px, 16vw, 200px); color: #b51c1c; border: 7px double #b51c1c; border-radius: 50%; outline: 3px solid #e4aa41; background: #f5c75d; box-shadow: 0 0 0 14px rgba(255,206,101,.08), 0 18px 50px rgba(33,0,0,.25); font-family: "STKaiti", serif; font-size: clamp(86px, 7vw, 112px); line-height: 1; }
+.lottery-ready h2 { margin: 0; color: #fff0c4; font-family: serif; font-size: clamp(32px, 2.7vw, 42px); line-height: 1.15; letter-spacing: .03em; }
+.lottery-ready p { margin: 0; color: #e8bd75; font-size: 11px; }
+.lottery-rule-summary { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; margin-top: 16px; }
+.lottery-rule-summary span { padding: 5px 10px; color: #ffe5aa; border: 1px solid rgba(255,218,139,.25); border-radius: 99px; background: rgba(86,6,8,.3); font-size: 9px; }
+.winner-grid { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 58px; width: min(1200px, 86vw); flex: 1; align-content: center; padding: 24px 40px; border: 1px solid rgba(255,202,102,.16); border-radius: 20px; background: rgba(89,7,9,.18); }
+.winner-grid > div { display: grid; grid-template-columns: 42px 1fr; align-items: center; color: #fff9df; font-family: serif; font-size: clamp(22px, 1.7vw, 28px); text-shadow: 0 2px 8px rgba(43,0,0,.7); }
+.winner-grid span { color: #eebd55; font-size: 13px; }
+.winner-grid.rolling > div { animation: flicker .18s linear infinite alternate; filter: blur(.45px); }
+@keyframes flicker { from { opacity: .45; transform: translateY(-2px); } to { opacity: 1; transform: translateY(2px); } }
+.lottery-action { position: relative; z-index: 3; min-width: clamp(210px, 18vw, 260px); margin-top: 0; padding: 15px 36px; color: #7a1a11; border: 1px solid #fff0b4; border-radius: 999px; background: linear-gradient(#ffdc76, #e8a634); box-shadow: 0 10px 30px rgba(55,0,0,.3); font-size: clamp(15px, 1.25vw, 18px); font-weight: 800; line-height: 1.1; }
+.lottery-action.rolling { color: #fff4d2; background: linear-gradient(#d94d35, #aa1718); }

@@ -1,0 +1,153 @@
+"use client";
+
+import { useState } from "react";
+import {
+  ApiError, loadActivity, updateActivity, publishActivity, withdrawActivityPublication,
+  closeActivityNow, finishActivityNow, type RuntimeActivity,
+} from "../../api";
+import type { ActivityStatus } from "../shared/types";
+import { runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
+
+type ActivitySettingsOptions = {
+  activityId: string;
+  activityCode: string;
+  activityName: string;
+  activityStatus: ActivityStatus;
+  activityStartAt: string;
+  activityEndAt: string;
+  activityEventEndAt: string;
+  productImportCompleted: boolean;
+  whitelistImportCompleted: boolean;
+  onActivityNameChange: (value: string) => void;
+  onActivityStatusChange: (value: ActivityStatus) => void;
+  onActivityStartAtChange: (value: string) => void;
+  onActivityEndAtChange: (value: string) => void;
+  onActivityEventEndAtChange: (value: string) => void;
+  setActionNotice: (value: string) => void;
+  recordOperation: (action: string, target: string, detail: string) => void;
+};
+
+export function useActivitySettings({
+  activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, productImportCompleted, whitelistImportCompleted, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation,
+}: ActivitySettingsOptions) {
+  const [activityStartDraft, setActivityStartDraft] = useState(activityStartAt);
+  const [activityEndDraft, setActivityEndDraft] = useState(activityEndAt);
+  const [activityEventEndDraft, setActivityEventEndDraft] = useState(activityEventEndAt);
+  const [activityNameDraft, setActivityNameDraft] = useState(activityName);
+  const applyActivity = (activity: RuntimeActivity) => {
+    const nextStatus = runtimeActivityStatus(activity.status);
+    onActivityStatusChange(nextStatus);
+    onActivityNameChange(activity.name);
+    onActivityStartAtChange(toDateTimeLocal(activity.startsAt));
+    onActivityEndAtChange(toDateTimeLocal(activity.endsAt));
+    onActivityEventEndAtChange(toDateTimeLocal(activity.eventEndsAt || new Date(new Date(activity.endsAt).getTime() + 4 * 60 * 60 * 1000).toISOString()));
+    setActivityNameDraft(activity.name);
+    setActivityStartDraft(toDateTimeLocal(activity.startsAt));
+    setActivityEndDraft(toDateTimeLocal(activity.endsAt));
+    setActivityEventEndDraft(toDateTimeLocal(activity.eventEndsAt || new Date(new Date(activity.endsAt).getTime() + 4 * 60 * 60 * 1000).toISOString()));
+  };
+  const saveActivityConfig = async (): Promise<boolean> => {
+    if (!activityNameDraft.trim()) {
+      setActionNotice("请填写活动名称。" );
+      return false;
+    }
+    if (!activityStartDraft || !activityEndDraft || !activityEventEndDraft) {
+      setActionNotice("请填写订货开始、订货截止和整场活动结束时间。" );
+      return false;
+    }
+    const startTime = new Date(activityStartDraft).getTime();
+    const endTime = new Date(activityEndDraft).getTime();
+    const eventEndTime = new Date(activityEventEndDraft).getTime();
+    if (startTime >= endTime) {
+      setActionNotice("活动开始时间必须早于截止时间。" );
+      return false;
+    }
+    if (eventEndTime < endTime) {
+      setActionNotice("整场活动结束时间不能早于订货截止时间。" );
+      return false;
+    }
+    if ((activityStatus === "draft" || activityStatus === "scheduled") && startTime <= Date.now()) {
+      setActionNotice("订货开始时间必须晚于当前时间，请重新选择。" );
+      return false;
+    }
+    if (activityStatus === "running" && startTime !== new Date(activityStartAt).getTime()) {
+      setActionNotice("活动进行中，订货开始时间不能修改。" );
+      return false;
+    }
+    if (activityStatus === "running" && endTime < new Date(activityEndAt).getTime()) {
+      setActionNotice("活动进行中只能延长截止时间；如需停止，请使用“立即截止订货”。" );
+      return false;
+    }
+    if (Number.isFinite(Number(activityId))) {
+      try {
+        const updated = await updateActivity(await loadActivity(), { name: activityNameDraft.trim(), startsAt: activityStartDraft, endsAt: activityEndDraft, eventEndsAt: activityEventEndDraft });
+        applyActivity(updated);
+      } catch (error) {
+        setActionNotice(error instanceof ApiError ? error.message : "活动配置保存失败，请稍后重试。");
+        return false;
+      }
+    } else {
+      onActivityNameChange(activityNameDraft.trim());
+      onActivityStartAtChange(activityStartDraft);
+      onActivityEndAtChange(activityEndDraft);
+      onActivityEventEndAtChange(activityEventEndDraft);
+    }
+    recordOperation("保存活动配置", activityCode, `活动名称：${activityNameDraft.trim()}；活动编号：${activityCode}；订货开始：${activityStartDraft.replace("T", " ")}；订货截止：${activityEndDraft.replace("T", " ")}；整场结束：${activityEventEndDraft.replace("T", " ")}。`);
+    setActionNotice(activityStatus === "running" ? "新的订货截止时间已保存。" : "活动名称和时间配置已保存。" );
+    return true;
+  };
+  const publishCurrentActivity = async () => {
+    if (!productImportCompleted || !whitelistImportCompleted) {
+      setActionNotice("发布活动前必须完成商品和白名单导入。" );
+      return;
+    }
+    if (!window.confirm(`发布后活动将于 ${activityStartDraft.replace("T", " ")} 自动开始，商品和白名单将锁定。确定发布吗？`)) return;
+    if (!await saveActivityConfig()) return;
+    try {
+      if (Number.isFinite(Number(activityId))) applyActivity(await publishActivity(await loadActivity()));
+      else onActivityStatusChange("scheduled");
+      recordOperation("发布活动", activityId, `活动将于 ${activityStartDraft.replace("T", " ")} 自动开始订货。`);
+      setActionNotice("活动已发布，当前为待开始；到达开始时间后将自动开放 H5 订货。" );
+    } catch (error) {
+      setActionNotice(error instanceof ApiError ? error.message : "活动发布失败，请稍后重试。" );
+    }
+  };
+  const withdrawCurrentActivity = async () => {
+    if (!window.confirm("撤回发布后活动将恢复为草稿，并重新开放商品和白名单维护。确定撤回吗？")) return;
+    try {
+      if (Number.isFinite(Number(activityId))) applyActivity(await withdrawActivityPublication(await loadActivity()));
+      else onActivityStatusChange("draft");
+      recordOperation("撤回活动发布", activityId, "活动恢复为草稿，H5 保持关闭。" );
+      setActionNotice("活动已撤回发布并恢复为草稿。" );
+    } catch (error) {
+      setActionNotice(error instanceof ApiError ? error.message : "撤回发布失败，请稍后重试。" );
+    }
+  };
+  const closeCurrentActivity = async () => {
+    const reason = window.prompt("请输入立即截止原因（必填）：")?.trim();
+    if (!reason) return;
+    if (!window.confirm("确定立即截止订货吗？截止后客户将无法新增、修改或撤回订单。")) return;
+    try {
+      if (Number.isFinite(Number(activityId))) applyActivity(await closeActivityNow(await loadActivity(), reason));
+      else onActivityStatusChange("closed");
+      recordOperation("立即截止订货", activityId, `原因：${reason}`);
+      setActionNotice("活动已立即截止；H5 订单只读，看板和抽奖仍可使用。" );
+    } catch (error) {
+      setActionNotice(error instanceof ApiError ? error.message : "立即截止失败，请稍后重试。" );
+    }
+  };
+  const finishCurrentActivity = async () => {
+    const reason = window.prompt("请输入结束整场活动的原因（必填）：")?.trim();
+    if (!reason) return;
+    if (!window.confirm("确定结束整场活动吗？结束后将停止抽奖和实时推送，并冻结最终看板与战报。")) return;
+    try {
+      if (Number.isFinite(Number(activityId))) applyActivity(await finishActivityNow(await loadActivity(), reason));
+      else onActivityStatusChange("finished");
+      recordOperation("结束整场活动", activityId, `原因：${reason}`);
+      setActionNotice("整场活动已结束；抽奖已关闭，看板和战报可只读回看。" );
+    } catch (error) {
+      setActionNotice(error instanceof ApiError ? error.message : "结束整场活动失败，请稍后重试。" );
+    }
+  };
+  return { activityNameDraft, setActivityNameDraft, activityStartDraft, setActivityStartDraft, activityEndDraft, setActivityEndDraft, activityEventEndDraft, setActivityEventEndDraft, saveActivityConfig, publishCurrentActivity, withdrawCurrentActivity, closeCurrentActivity, finishCurrentActivity };
+}

@@ -1,6 +1,6 @@
-import { RoutedPrototype } from "../../../routed-prototype";
+import { ActivityRoute } from "../../../activity-routes";
 
 export default async function ReportPage({ params }: { params: Promise<{ activityCode: string }> }) {
   const { activityCode } = await params;
-  return <RoutedPrototype activityCode={activityCode} surface="report" />;
+  return <ActivityRoute activityCode={activityCode} surface="report" />;
 }

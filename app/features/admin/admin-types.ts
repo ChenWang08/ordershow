@@ -1,0 +1,47 @@
+import type { AttendanceRow, ProductImportRow, WhitelistRow } from "../../domain/import-domain";
+import type { LotteryRound } from "../lottery/Lottery";
+import type { ActivityStatus } from "../shared/types";
+
+type ProductRowsSetter = (value: ProductImportRow[] | ((current: ProductImportRow[]) => ProductImportRow[])) => void;
+type WhitelistRowsSetter = (value: WhitelistRow[] | ((current: WhitelistRow[]) => WhitelistRow[])) => void;
+type AttendanceRowsSetter = (value: AttendanceRow[] | ((current: AttendanceRow[]) => AttendanceRow[])) => void;
+export type OperationLogEntry = { id: string; action: string; target: string; detail: string; operator: string; time: string };
+
+export type AdminWorkspaceProps = {
+  lotteryRounds: LotteryRound[];
+  onLotteryChange: (rounds: LotteryRound[]) => void;
+  activityCode: string;
+  activityName: string;
+  onActivityNameChange: (value: string) => void;
+  activityId: string;
+  activityStatus: ActivityStatus;
+  onActivityStatusChange: (status: ActivityStatus) => void;
+  activityStartAt: string;
+  onActivityStartAtChange: (value: string) => void;
+  activityEndAt: string;
+  onActivityEndAtChange: (value: string) => void;
+  activityEventEndAt: string;
+  onActivityEventEndAtChange: (value: string) => void;
+  productRows: ProductImportRow[];
+  onProductRowsChange: ProductRowsSetter;
+  productImportCompleted: boolean;
+  onProductImportCompleted: (completed: boolean) => void;
+  onProductImportCommitted: () => void;
+  productImportHasRun: boolean;
+  whitelistRows: WhitelistRow[];
+  onWhitelistRowsChange: WhitelistRowsSetter;
+  whitelistImportCompleted: boolean;
+  onWhitelistImportCompleted: (completed: boolean) => void;
+  onWhitelistImportCommitted: () => void;
+  whitelistImportHasRun: boolean;
+  attendanceRows: AttendanceRow[];
+  onAttendanceRowsChange: AttendanceRowsSetter;
+  attendanceFileName: string;
+  onAttendanceFileNameChange: (value: string) => void;
+  attendanceWarnings: string[];
+  onAttendanceWarningsChange: (value: string[]) => void;
+  attendanceSheetCounts: Array<{ name: string; count: number }>;
+  onAttendanceSheetCountsChange: (value: Array<{ name: string; count: number }>) => void;
+  attendanceImportError: string;
+  onAttendanceImportErrorChange: (value: string) => void;
+};

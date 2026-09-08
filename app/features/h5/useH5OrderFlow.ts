@@ -1,0 +1,288 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { ApiError, loadH5Order, loadH5OrderDraft, loadH5Products, saveH5Order, verifyPhone, withdrawH5Order, type RuntimeIdentity, type RuntimeOrder, type RuntimeProduct } from "../../api";
+import type { WhitelistRow } from "../../domain/import-domain";
+import { maskPhone, normalizePhone } from "../shared/utils";
+import { useH5Draft } from "./useH5Draft";
+import { productRowToProduct, runtimeProductToProduct, priceBreakdown, h5QuantitySignature, h5OrderItems, type H5Props, type H5Step, type H5Channel, type H5OrderStatus, type Product, type RebateFilter, type SubmittedOrderItem } from "./h5-domain";
+
+export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelistRows, runtimeActivity }: H5Props) {
+  const activityClosed = activityStatus === "closed" || activityStatus === "finished";
+  const activityNotStarted = activityStatus === "draft" || activityStatus === "scheduled";
+  const importedWhitelistIsUnspecified = Boolean(importedWhitelistRows?.length && importedWhitelistRows.every((row) => row.customerType === ""));
+  const unspecifiedWhitelist = runtimeActivity?.whitelistCustomerTypeMode === "UNSPECIFIED" || (!runtimeActivity && importedWhitelistIsUnspecified);
+  const [runtimeProducts, setRuntimeProducts] = useState<RuntimeProduct[] | null>(null);
+  const [runtimeIdentity, setRuntimeIdentity] = useState<RuntimeIdentity | null>(null);
+  const [runtimeOrder, setRuntimeOrder] = useState<RuntimeOrder | null>(null);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [runtimeMessage, setRuntimeMessage] = useState("");
+  const [orderNeedsRefresh, setOrderNeedsRefresh] = useState(false);
+  const catalog = useMemo(() => runtimeProducts ? runtimeProducts.map(runtimeProductToProduct) : importedRows ? importedRows.map(productRowToProduct) : [], [runtimeProducts, importedRows]);
+  const [step, setStep] = useState<H5Step>(() => unspecifiedWhitelist ? "verify" : "channel");
+  const [channel, setChannel] = useState<H5Channel>("");
+  const [region, setRegion] = useState("");
+  const [verifiedBranch, setVerifiedBranch] = useState("");
+  const [verifiedIdentity, setVerifiedIdentity] = useState<WhitelistRow | null>(null);
+  const [submittedIdentity, setSubmittedIdentity] = useState<WhitelistRow | null>(null);
+  const [phone, setPhone] = useState("");
+  const [verifyError, setVerifyError] = useState("");
+  const [rebateFilter, setRebateFilter] = useState<RebateFilter>("PARTICIPATING");
+  const [line, setLine] = useState("全部");
+  const [search, setSearch] = useState("");
+  const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
+  const [cartOpen, setCartOpen] = useState(false);
+  const [orderStatus, setOrderStatus] = useState<H5OrderStatus>("none");
+  const customerOrderReadOnly = activityClosed || orderStatus === "voided";
+  const [submitMode, setSubmitMode] = useState<"first" | "update">("first");
+  const [orderVersion, setOrderVersion] = useState(0);
+  const [orderUpdatedAt, setOrderUpdatedAt] = useState("");
+  const [orderWithdrawnAt, setOrderWithdrawnAt] = useState("");
+  const [orderEvents, setOrderEvents] = useState<Array<{ time: string; title: string; detail: string }>>([]);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+  const [submittedQuantities, setSubmittedQuantities] = useState<Record<string, number>>({});
+  const [submittedItems, setSubmittedItems] = useState<SubmittedOrderItem[]>([]);
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const visibleStep = unspecifiedWhitelist && step === "channel" ? "verify" : step;
+  const whitelistRegions = runtimeActivity?.regions ?? [];
+  const regionOptions = [
+    ...whitelistRegions.map((item) => ({ value: item.code, name: item.name, detail: `${item.name}综合经销商` })),
+    ...(whitelistRegions.length > 0 && runtimeActivity?.hasUnassignedGeneralCustomers
+      ? [{ value: "UNASSIGNED", name: "不分大区", detail: "白名单中未填写大区的综合经销商" }]
+      : []),
+  ];
+  const regionalized = whitelistRegions.length > 0;
+  const selectedRegionName = regionOptions.find((item) => item.value === region)?.name || region;
+  const lineOptions = useMemo(() => ["全部", ...Array.from(new Set(catalog.map((product) => product.line).filter(Boolean)))], [catalog]);
+  const effectiveLine = lineOptions.includes(line) ? line : "全部";
+  const h5CustomerType = channel === "综合客户" ? "综合" : "特渠";
+  const normalizedProductSearch = search.trim().toLocaleLowerCase("zh-CN");
+  const hasRebateSplit = useMemo(() => {
+    const hasParticipating = catalog.some((product) => product.rebate === true);
+    const hasNotParticipating = catalog.some((product) => product.rebate === false);
+    return hasParticipating && hasNotParticipating;
+  }, [catalog]);
+  let effectiveRebateFilter: RebateFilter = "ALL";
+  if (hasRebateSplit) effectiveRebateFilter = rebateFilter === "NOT_PARTICIPATING" ? "NOT_PARTICIPATING" : "PARTICIPATING";
+  const visibleProducts = catalog.filter(
+    (p) => (p.status === "有效" || p.status === "待完善")
+      && (unspecifiedWhitelist || p.customerType === "全部" || p.customerType === h5CustomerType)
+      && (effectiveRebateFilter === "ALL"
+        || p.rebate === "全部"
+        || (effectiveRebateFilter === "PARTICIPATING" ? p.rebate === true : p.rebate === false))
+      && (p.branchScope.length === 0 || p.branchScope.includes(verifiedBranch))
+      && (effectiveLine === "全部" || p.line === effectiveLine)
+      && (!normalizedProductSearch
+        || p.name.toLocaleLowerCase("zh-CN").includes(normalizedProductSearch)
+        || (p.materialCode ?? "").toLocaleLowerCase("zh-CN").includes(normalizedProductSearch)),
+  );
+  const selected = catalog.filter((p) => (quantities[p.id] || 0) > 0);
+  const totalBoxes = selected.reduce((sum, p) => sum + quantities[p.id], 0);
+  const totalAmount = selected.reduce((sum, p) => sum + priceBreakdown(p, quantities[p.id]).amount, 0);
+  const orderViewQuantities = submittedQuantities;
+  const orderViewSelected = submittedItems.map((item) => item.product);
+  const orderViewBoxes = orderViewSelected.reduce((sum, p) => sum + orderViewQuantities[p.id], 0);
+  const orderViewAmount = orderViewSelected.reduce((sum, p) => sum + priceBreakdown(p, orderViewQuantities[p.id]).amount, 0);
+  const importedIdentity = verifiedIdentity ?? submittedIdentity;
+  const identityRegionCode = runtimeIdentity?.regionCode || importedIdentity?.region || region;
+  const identityRegion = regionOptions.find((item) => item.value === identityRegionCode)?.name || identityRegionCode;
+  const identityBranch = runtimeIdentity?.branchName || importedIdentity?.branch || verifiedBranch;
+  const identityLabel = runtimeIdentity
+    ? `${runtimeIdentity.customerType === "GENERAL" ? "综合客户" : runtimeIdentity.customerType === "SPECIAL" ? "特渠专业客户" : "不区分客户类型"}${runtimeIdentity.customerType === "ALL" ? "" : identityRegion ? ` · ${identityRegion}` : ""}`
+    : importedIdentity ? `${importedIdentity.customerType || "不区分客户类型"}${importedIdentity.customerType === "" ? "" : identityRegion ? ` · ${identityRegion}` : ""}` : unspecifiedWhitelist ? "不区分客户类型" : channel === "综合客户" ? `综合客户${selectedRegionName ? ` · ${selectedRegionName}` : ""}` : "特渠专业客户";
+  const dealerName = runtimeIdentity?.dealerFullName || importedIdentity?.dealerFull || "—";
+  const displayBranch = runtimeIdentity?.branchName || identityBranch;
+  const displayPhone = runtimeIdentity?.phoneMasked || (importedIdentity ? maskPhone(importedIdentity.dealerPhone) : "—");
+
+  const { setDraftReady, draftMessage, setDraftMessage, draftOwnerIdRef, lastSavedDraftSignatureRef, latestDraftSnapshotRef, draftSaveTimerRef, draftSaveChainRef, queueDraftSync } = useH5Draft({ activityClosed, catalog, quantities, runtimeIdentity, runtimeOrder });
+  const applyRuntimeOrder = (order: RuntimeOrder | null, liveCatalog: Product[], preserveDraft = false) => {
+    setOrderNeedsRefresh(false);
+    setRuntimeOrder(order);
+    if (!order) {
+      if (!preserveDraft) setQuantities({});
+      setOrderStatus("none"); setOrderVersion(0); setSubmittedQuantities({}); setSubmittedItems([]); setOrderEvents([]);
+      setOrderUpdatedAt(""); setOrderWithdrawnAt(""); setCartOpen(false); setCancelConfirmOpen(false); setPreviewProduct(null);
+      return;
+    }
+    const itemQuantities: Record<string, number> = {};
+    const items = order.items.map((item) => {
+      const id = String(item.productId);
+      itemQuantities[id] = item.quantity;
+      const catalogProduct = liveCatalog.find((product) => product.id === id);
+      const snapshot = { price: Number(item.baseCasePrice ?? item.casePrice), tierMinQuantity: item.tierMinQuantity,
+        tierCasePrice: item.tierCasePrice == null ? undefined : Number(item.tierCasePrice), tierPricingMode: item.pricingMode };
+      const found = catalogProduct ? { ...catalogProduct, ...snapshot } : {
+        id, name: item.materialName, line: item.productLine || "未分类", spec: item.specification || "", ...snapshot,
+        rebate: true, gift: false, atlas: 0, customerType: "全部" as const, branchScope: [], status: "有效" as const, isOrderable: true,
+      };
+      return { product: found, quantity: item.quantity };
+    });
+    setQuantities(itemQuantities); setSubmittedQuantities(itemQuantities); setSubmittedItems(items);
+    setOrderStatus(order.status === "WITHDRAWN" ? "withdrawn" : order.status === "VOIDED" ? "voided" : "submitted");
+    setOrderVersion(order.currentVersion);
+    setOrderUpdatedAt(new Date(order.lastModifiedAt).toLocaleString("zh-CN", { hour12: false }));
+    setOrderWithdrawnAt(order.withdrawnAt ? new Date(order.withdrawnAt).toLocaleString("zh-CN", { hour12: false }) : "");
+    setOrderEvents(order.operations.map((event) => ({
+      time: new Date(event.occurredAt).toLocaleTimeString("zh-CN", {
+        hour12: false,
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      }),
+      title: event.type === "WITHDRAW" ? "客户撤回订单" : event.type === "SUBMIT" ? "客户首次提交" : event.type === "ADMIN_CREATE" ? "管理员创建订单" : event.type === "ADMIN_VOID" ? "管理员作废订单" : event.type === "ADMIN_RESTORE" ? "管理员调整并恢复订单" : event.type === "ADMIN_ADJUST" ? "管理员调整订单" : "客户修改并重新提交",
+      detail: `${event.source === "ADMIN" ? event.adminName || "管理员" : "经销商手机端"} · ${event.orderVersion ? `版本 V${event.orderVersion}` : "订单状态变更"}${event.reason ? ` · ${event.reason}` : ""}`,
+    })));
+  };
+
+  const changeQty = (id: string, delta: number) => {
+    setQuantities((old) => ({ ...old, [id]: Math.min(999999, Math.max(0, (old[id] || 0) + delta)) }));
+  };
+
+  useEffect(() => {
+    if (!runtimeIdentity || runtimeBusy || (step !== "submitted" && step !== "success")) return;
+    let active = true;
+    let loading = false;
+    const refresh = async () => {
+      if (loading || document.hidden) return;
+      loading = true;
+      try {
+        const order = await loadH5Order();
+        if (active && order && (order.currentVersion !== runtimeOrder?.currentVersion || order.lockVersion !== runtimeOrder?.lockVersion)) {
+          applyRuntimeOrder(order, catalog);
+
+        }
+      } catch { /* Preserve the last confirmed order when offline. */ }
+      finally { loading = false; }
+    };
+    const timer = window.setInterval(() => void refresh(), 15000);
+    window.addEventListener("focus", refresh);
+    return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", refresh); };
+  }, [runtimeIdentity, runtimeBusy, step, runtimeOrder, catalog]);
+
+  const startEditingOrder = () => {
+    if (orderStatus === "withdrawn") setQuantities({ ...submittedQuantities });
+    setStep("order");
+  };
+
+  const verifyIdentity = async () => {
+    if (activityNotStarted) return;
+    const normalizedPhone = normalizePhone(phone);
+    if (runtimeActivity) {
+      setRuntimeBusy(true); setVerifyError(""); setRuntimeMessage("");
+      try {
+        if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
+        if (latestDraftSnapshotRef.current) await queueDraftSync(latestDraftSnapshotRef.current, false);
+        setDraftReady(false);
+        const identity = await verifyPhone(unspecifiedWhitelist ? "ALL" : channel === "综合客户" ? "GENERAL" : "SPECIAL", unspecifiedWhitelist ? "" : region, normalizedPhone);
+        const preserveDraft = runtimeIdentity?.activityId === identity.activityId
+          && runtimeIdentity.customerId === identity.customerId;
+        const liveRows = await loadH5Products();
+        const liveCatalog = liveRows.map(runtimeProductToProduct);
+        const order = await loadH5Order();
+        const draft = activityClosed ? null : await loadH5OrderDraft();
+        const baseVersion = order?.currentVersion || 0;
+        const validDraft = draft?.baseOrderVersion === baseVersion ? draft : null;
+        setRuntimeIdentity(identity); setRuntimeProducts(liveRows); setVerifiedBranch(identity.branchName || "");
+        applyRuntimeOrder(order, liveCatalog, preserveDraft);
+        draftOwnerIdRef.current = identity.customerId;
+        if (validDraft) {
+          const availableIds = new Set(liveCatalog.filter((product) => product.isOrderable).map((product) => product.id));
+          const restored: Record<string, number> = {};
+          validDraft.items.forEach((item) => { if (availableIds.has(String(item.productId))) restored[String(item.productId)] = item.quantity; });
+          setQuantities(restored);
+          lastSavedDraftSignatureRef.current = h5QuantitySignature(validDraft.items);
+          setDraftMessage(`已恢复 ${new Date(validDraft.updatedAt).toLocaleString("zh-CN", {
+            hour12: false,
+            timeZone: "Asia/Shanghai",
+          })} 保存的草稿`);
+          setStep("order");
+        } else {
+          const baseItems = h5OrderItems(order);
+          lastSavedDraftSignatureRef.current = draft ? h5QuantitySignature(draft.items) : h5QuantitySignature(baseItems);
+          setDraftMessage(draft ? "订单已更新，旧草稿未恢复" : "");
+          setStep(order ? "submitted" : "order");
+        }
+        setDraftReady(!activityClosed);
+      } catch (error) {
+        setVerifyError(error instanceof ApiError ? error.message : "连接服务失败，请稍后重试。");
+      } finally { setRuntimeBusy(false); }
+      return;
+    }
+    if (importedWhitelistRows) {
+      const expectedType: WhitelistRow["customerType"] = unspecifiedWhitelist ? "" : channel === "综合客户" ? "综合客户" : "特渠专业客户";
+      const identity = importedWhitelistRows.find((item) => item.status === "有效" && item.customerType === expectedType && normalizePhone(item.dealerPhone) === normalizedPhone);
+      if (!identity) {
+        const otherChannelIdentity = importedWhitelistRows.find((item) => item.status === "有效" && normalizePhone(item.dealerPhone) === normalizedPhone);
+        setVerifyError(otherChannelIdentity && !unspecifiedWhitelist ? `该手机号登记在${otherChannelIdentity.customerType}白名单中，请返回选择对应订货通道。` : "该手机号不在本次活动白名单中，请核对后重新输入。");
+        return;
+      }
+      if (!unspecifiedWhitelist && expectedType === "综合客户" && identity.region !== region) {
+        setVerifyError(`该手机号登记为综合客户 · ${identity.region}，请重新选择订货大区。`);
+        return;
+      }
+      setVerifyError("");
+      setVerifiedIdentity(identity);
+      setVerifiedBranch(identity.branch);
+      setStep(orderStatus === "none" ? "order" : "submitted");
+      return;
+    }
+    setVerifyError("订货服务暂不可用，请稍后刷新页面重试。");
+  };
+
+  const submitOrder = async () => {
+    if (runtimeActivity) {
+      setRuntimeBusy(true); setRuntimeMessage("");
+      try {
+        if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
+        await draftSaveChainRef.current.catch(() => undefined);
+        const isFirstSubmit = !runtimeOrder;
+        const order = await saveH5Order(runtimeOrder?.currentVersion || 0,
+          selected.map((product) => ({ productId: Number(product.id), quantity: quantities[product.id] })));
+        setSubmitMode(isFirstSubmit ? "first" : "update");
+        setSubmittedIdentity(verifiedIdentity ? { ...verifiedIdentity } : null);
+        applyRuntimeOrder(order, catalog);
+        lastSavedDraftSignatureRef.current = h5QuantitySignature(h5OrderItems(order));
+        setDraftMessage("");
+        setStep("success");
+      } catch (error) {
+        setRuntimeMessage(error instanceof ApiError ? error.message : "订单提交失败，请稍后重试。");
+        if (error instanceof ApiError && error.code === "ORDER_VERSION_CONFLICT") setOrderNeedsRefresh(true);
+      } finally { setRuntimeBusy(false); }
+      return;
+    }
+    setRuntimeMessage("订货服务暂不可用，订单未提交，请稍后重试。");
+  };
+
+  const withdrawOrder = async () => {
+    if (runtimeActivity && runtimeOrder) {
+      setRuntimeBusy(true); setRuntimeMessage("");
+      try {
+        if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
+        await draftSaveChainRef.current.catch(() => undefined);
+        const order = await withdrawH5Order(runtimeOrder.currentVersion);
+        applyRuntimeOrder(order, catalog); lastSavedDraftSignatureRef.current = h5QuantitySignature(h5OrderItems(order));
+        setDraftMessage(""); setCancelConfirmOpen(false); setCartOpen(false); setStep("submitted");
+      } catch (error) {
+        setRuntimeMessage(error instanceof ApiError ? error.message : "订单撤回失败，请稍后重试。");
+      } finally { setRuntimeBusy(false); }
+      return;
+    }
+    setRuntimeMessage("订货服务暂不可用，订单未撤回，请稍后重试。");
+  };
+
+  const reloadLatestOrder = async () => {
+                setRuntimeBusy(true);
+                try {
+                  const rows = await loadH5Products();
+                  const current = await loadH5Order();
+                  setRuntimeProducts(rows);
+                  applyRuntimeOrder(current, rows.map(runtimeProductToProduct));
+                  setRuntimeMessage("已加载最新订单，请重新核对后修改。此前未提交的修改已清除。");
+                  setStep("submitted");
+                } catch { setRuntimeMessage("最新订单加载失败，请重试。"); }
+                finally { setRuntimeBusy(false); }
+                };
+  return { activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, selected, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
+}
+
+export type H5OrderModel = ReturnType<typeof useH5OrderFlow>;

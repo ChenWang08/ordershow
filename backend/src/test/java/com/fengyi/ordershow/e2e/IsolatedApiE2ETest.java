@@ -543,7 +543,7 @@ class IsolatedApiE2ETest {
   @Order(7)
   void freeTextWhitelistRegionIsPublishedToH5AndRemainsVerifiable() throws Exception {
     HttpResponse<String> listed = send(admin, "GET",
-        "/admin/activities/" + activityId + "/customers?customerType=GENERAL&keyword=AUTOTEST_%E7%BB%BC%E5%90%88%E7%BB%8F%E9%94%80%E5%95%86%E4%BA%8C&page=1&size=20",
+        "/admin/activities/" + activityId + "/customers?customerType=GENERAL&keyword=AUTOTEST%E7%BB%BC%E5%90%88%E7%BB%8F%E9%94%80%E5%95%86%E4%BA%8C&page=1&size=20",
         null, null, null);
     assertEquals(200, listed.statusCode(), listed.body());
     JsonNode customer = data(listed).get(0);
@@ -717,12 +717,12 @@ class IsolatedApiE2ETest {
     List<String> headers = List.of("客户类型", "大区", "分公司名称", "经销商名称（简）", "经销商名称（全）", "经销商姓名", "经销商电话", "分公司确认人姓名", "分公司确认人电话");
     try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
       Sheet whitelist = sheet(workbook, "白名单", headers);
-      row(whitelist, "综合客户", "东区", "上海分", "测试综合一", "AUTOTEST_综合经销商一", "测试甲", GENERAL_PHONE, "确认甲", "13800000001");
-      row(whitelist, "综合客户", "东区", "上海分", "测试综合二", "AUTOTEST_综合经销商二", "测试乙", "13900000002", "确认甲", "13800000001");
-      row(whitelist, "综合客户", "南区", "广州分", "测试综合三", "AUTOTEST_综合经销商三", "测试丙", "13900000003", "确认乙", "13800000002");
-      row(whitelist, "综合客户", "北1区", "北京分", "测试综合四", "AUTOTEST_综合经销商四", "测试丁", "13900000004", "确认丙", "13800000003");
-      row(whitelist, "特渠专业客户", "", "特渠分", "测试特渠一", "AUTOTEST_特渠经销商一", "测试戊", SPECIAL_PHONE, "确认丁", "13800000004");
-      row(whitelist, "特渠专业客户", "", "特渠分", "测试特渠二", "AUTOTEST_特渠经销商二", "测试己", "13900000005", "确认丁", "13800000004");
+      row(whitelist, "综合客户", "东区", "上海分", "测试综合一", "AUTOTEST综合经销商一", "测试甲", GENERAL_PHONE, "确认甲", "13800000001");
+      row(whitelist, "综合客户", "东区", "上海分", "测试综合二", "AUTOTEST综合经销商二", "测试乙", "13900000002", "确认甲", "13800000001");
+      row(whitelist, "综合客户", "南区", "广州分", "测试综合三", "AUTOTEST综合经销商三", "测试丙", "13900000003", "确认乙", "13800000002");
+      row(whitelist, "综合客户", "北1区", "北京分", "测试综合四", "AUTOTEST综合经销商四", "测试丁", "13900000004", "确认丙", "13800000003");
+      row(whitelist, "特渠专业客户", "", "特渠分", "测试特渠一", "AUTOTEST特渠经销商一", "测试戊", SPECIAL_PHONE, "确认丁", "13800000004");
+      row(whitelist, "特渠专业客户", "", "特渠分", "测试特渠二", "AUTOTEST特渠经销商二", "测试己", "13900000005", "确认丁", "13800000004");
       workbook.write(out);
       return out.toByteArray();
     }
@@ -732,7 +732,7 @@ class IsolatedApiE2ETest {
     List<String> headers = List.of("分公司", "参会人姓名", "性别", "参会人电话", "参会人员类型", "经销商名称");
     try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
       Sheet attendance = sheet(workbook, "现场参会名单", headers);
-      row(attendance, "上海分", "测试甲", "男", "13900000006", "综合经销商", "AUTOTEST_综合经销商一");
+      row(attendance, "上海分", "测试甲", "男", "13900000006", "综合经销商", "AUTOTEST综合经销商一");
       row(attendance, "上海分", "测试乙", "女", "13900000007", "综合经销商", "测试综合二");
       row(attendance, "未知分", "测试未知", "男", "13900000008", "综合经销商", "AUTOTEST_不存在经销商");
       workbook.write(out);
@@ -811,6 +811,42 @@ class IsolatedApiE2ETest {
     patch.put("casePrice",120).put("orderable",true);
     assertEquals(200,send(admin,"PATCH",base+"/products/"+productId,patch,adminCsrf,product.path("version").asText()).statusCode());
     assertEquals(data(withdrawn),data(send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null)));
+  }
+
+  @Test
+  @Order(10)
+  void failedProductPublicationKeepsThePublishedCatalogAndCanRetry() throws Exception {
+    createDraftAndRejectPrematurePublication();
+    long originalTask = upload("PRODUCT", "products-original.xlsx", productWorkbook());
+    confirmAndAwait(originalTask);
+    String productsPath = "/admin/activities/" + activityId + "/products";
+    JsonNode before = data(send(admin, "GET", productsPath, null, null, null));
+    assertEquals(5, before.size());
+
+    long replacementTask = upload("PRODUCT", "products-replacement.xlsx", productWorkbook());
+    String boundary = "----OrderShowRollback" + UUID.randomUUID();
+    ByteArrayOutputStream body = new ByteArrayOutputStream();
+    write(body, "--" + boundary + "\r\nContent-Disposition: form-data; name=\"imageZip\"; filename=\"broken-images.zip\"\r\nContent-Type: application/zip\r\n\r\n");
+    write(body, "not-a-zip\r\n--" + boundary + "--\r\n");
+    HttpRequest confirm = request("/admin/activities/" + activityId + "/imports/" + replacementTask + "/confirm")
+        .header("Content-Type", "multipart/form-data; boundary=" + boundary).header("X-CSRF-Token", adminCsrf)
+        .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray())).build();
+    var accepted = admin.send(confirm, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    assertEquals(202, accepted.statusCode(), accepted.body());
+    long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+    JsonNode failed = task(replacementTask);
+    while (!"FAILED".equals(failed.path("status").asText()) && System.nanoTime() < deadline) {
+      Thread.sleep(100);
+      failed = task(replacementTask);
+    }
+    assertEquals("FAILED", failed.path("status").asText(), failed.toString());
+    assertEquals("PUBLISH_FAILED", failed.path("failureCode").asText());
+    assertEquals(before, data(send(admin, "GET", productsPath, null, null, null)));
+
+    confirmAndAwait(replacementTask);
+    JsonNode after = data(send(admin, "GET", productsPath, null, null, null));
+    assertEquals(5, after.size());
+    assertNotEquals(before.get(0).path("id"), after.get(0).path("id"));
   }
 
   private HttpClient client() {
