@@ -66,6 +66,17 @@ public class ActivityService {
     return withRegions(rows.getFirst());
   }
 
+  /** Internal order/catalog lookup: no UI regions or whitelist summaries on the request hot path. */
+  public OrderingActivity orderingActivity(String code) {
+    var rows = jdbc.query("SELECT id,ends_at FROM activity WHERE activity_code=? AND archived_at IS NULL",
+        (rs, rowNum) -> new OrderingActivity(rs.getLong("id"),rs.getTimestamp("ends_at").toInstant()),code);
+    if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
+    return rows.getFirst();
+  }
+
+  public record OrderingActivity(long id, Instant endsAt) {}
+  private record OrderingWindow(String status, Instant startsAt, Instant endsAt, Instant eventEndsAt) {}
+
   public ActivityView currentOrderable() {
     List<ActivityView> rows = jdbc.query("""
         SELECT a.*, d.department_name
@@ -253,9 +264,13 @@ public class ActivityService {
   }
 
   public void requireWritable(long activityId) {
-    ActivityView activity = byId(activityId);
+    var rows = jdbc.query("SELECT status,starts_at,ends_at,event_ends_at FROM activity WHERE id=? AND archived_at IS NULL",
+        (rs, rowNum) -> new OrderingWindow(rs.getString("status"),rs.getTimestamp("starts_at").toInstant(),
+            rs.getTimestamp("ends_at").toInstant(),instant(rs.getTimestamp("event_ends_at"))),activityId);
+    if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
+    OrderingWindow activity = rows.getFirst();
     Instant now = now();
-    if (!"ACTIVE".equals(activity.status()) || !now.isBefore(activity.endsAt())) {
+    if (!"ACTIVE".equals(effectiveStatus(activity.status(),activity.startsAt(),activity.endsAt(),activity.eventEndsAt(),now)) || !now.isBefore(activity.endsAt())) {
       throw DomainException.conflict("ACTIVITY_NOT_WRITABLE", "活动当前不允许提交或修改订单");
     }
   }

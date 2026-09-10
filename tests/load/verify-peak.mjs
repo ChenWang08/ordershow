@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import {guard,sql,save,resultsRoot} from './lib.mjs';
+guard();
+const fixture=JSON.parse(readFileSync(`${resultsRoot}/peak-fixture.json`,'utf8'));
+const ids=fixture.customers.slice(0,1000).map(c=>c.id);
+assert.equal(ids.length,1000);assert(ids.every(Number.isSafeInteger));assert.equal(new Set(ids).size,1000);
+const values=sql(`SELECT COUNT(*),SUM(total_amount),MIN(total_amount),MAX(total_amount),SUM(total_quantity),MIN(current_version_no),MAX(current_version_no) FROM customer_order WHERE activity_customer_id IN (${ids.join(',')});`).trim().split('\t').map(Number);
+assert.deepEqual(values,[1000,2000000,2000,2000,20000,1,1]);
+const report={timestamp:new Date().toISOString(),customers:1000,orders:values[0],amount:values[1],quantity:values[4],allFirstVersion:true};
+save(`peak-cohort-verification-${Date.now()}.json`,report);console.log(report);

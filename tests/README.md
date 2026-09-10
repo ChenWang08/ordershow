@@ -17,3 +17,10 @@
 浏览器脚本只使用固定的 3100/8180 测试端口，并依赖 API E2E 生成的夹具。测试会创建和修改订单、截止测试活动，因此整套复跑前必须重新生成隔离数据。验证后使用 `scripts/test-env.ps1 reset` 清理测试环境。
 
 当前结果和未覆盖范围见 `docs/testing/refactor-regression-2026-09-07.md`。通过测试不代表此前记录的客户名称标准化缺陷已被修复，也不代表压测、灾备和全部浏览器兼容性已验收。
+
+## 性能测试
+
+独立压测环境使用 `docker-compose.load.yml`，项目名 `order-show-load`，后端端口8280。
+启动、生成数据、执行k6/SSE及清理方法见 [load/README.md](load/README.md)。
+执行范围见[性能计划](../docs/testing/performance-test-plan.md)，本机实测与未验收项见[性能报告](../docs/testing/performance-test-report.md)。
+性能测试不由 `npm test` 自动启动，避免常规回归意外产生高负载。

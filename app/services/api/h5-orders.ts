@@ -13,7 +13,7 @@ export async function loadH5Products() {
 }
 
 export async function loadH5Order() {
-  try { return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order`)).data; }
+  try { return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order?includeHistory=false`)).data; }
   catch (error) { if (error instanceof ApiError && error.status === 404) return null; throw error; }
 }
 
@@ -35,13 +35,13 @@ export async function deleteH5OrderDraft(customerId: number, keepalive = false) 
 }
 
 export async function saveH5Order(expectedVersion: number, items: Array<{ productId: number; quantity: number }>) {
-  return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order`, {
+  return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order?includeHistory=false`, {
     method: "PUT", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ expectedVersion, items }),
   }, "h5")).data;
 }
 
 export async function withdrawH5Order(expectedVersion: number) {
-  return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order/withdraw`, {
+  return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order/withdraw?includeHistory=false`, {
     method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ expectedVersion }),
   }, "h5")).data;
 }

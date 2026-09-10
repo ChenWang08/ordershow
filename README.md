@@ -1,6 +1,6 @@
 # 订购会业务系统
 
-本机业务前后端已于 2026-09-07 更新到六阶段重构版本，部署范围、镜像标识和只读验证结果见 [业务部署记录](docs/deployment/2026-09-07-refactor.md)。
+本机后端已于 2026-09-10 更新到H5高频写入隔离版本，部署范围、镜像标识和验证结果见 [最新本地部署记录](docs/deployment/2026-09-10-high-frequency.md)。此前记录：[启动/审计及订单号修复](docs/deployment/2026-09-08-startup-audit.md)、[H5吞吐优化](docs/deployment/2026-09-08-h5-throughput.md)、[实时通知优化](docs/deployment/2026-09-08-realtime.md)、[性能优化部署](docs/deployment/2026-09-08-performance.md)、[六阶段重构部署](docs/deployment/2026-09-07-refactor.md)。
 
 面向调味品事业部订购会的完整本地业务系统。项目保留已确认的 React UI，并已接入 Spring Boot、MySQL、Redis、MinIO、Excel/ZIP 导入、H5 订单、后台订单管理、实时排行、专题战报、抽奖和审计日志。
 

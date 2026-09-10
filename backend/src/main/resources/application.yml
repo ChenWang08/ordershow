@@ -1,10 +1,16 @@
 server:
   port: ${SERVER_PORT:8080}
+  tomcat:
+    threads:
+      max: ${HTTP_MAX_THREADS:40}
   servlet:
     context-path: /api/v1
   forward-headers-strategy: framework
 
 spring:
+  threads:
+    virtual:
+      enabled: ${VIRTUAL_THREADS_ENABLED:true}
   application:
     name: order-show-backend
   datasource:
@@ -14,6 +20,8 @@ spring:
     hikari:
       maximum-pool-size: ${DB_POOL_SIZE:20}
       connection-timeout: 5000
+      data-source-properties:
+        rewriteBatchedStatements: true
   flyway:
     enabled: true
     locations: classpath:db/migration

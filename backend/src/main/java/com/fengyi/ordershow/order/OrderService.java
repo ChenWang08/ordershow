@@ -43,18 +43,29 @@ public class OrderService {
     this.exports = exports;
   }
 
+  @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
   public OrderView current(String activityCode, H5Principal customer) {
-    var activity = activities.byCode(activityCode);
+    return current(activityCode, customer, true);
+  }
+
+  @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
+  public OrderView current(String activityCode, H5Principal customer, boolean includeHistory) {
+    var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
-    return repository.findByCustomer(activity.id(), customer.customerId());
+    return repository.findByCustomer(activity.id(), customer.customerId(), includeHistory);
   }
 
   @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public OrderView submit(String activityCode, H5Principal customer, SubmitRequest request, String idempotencyKey, String traceId) {
-    var activity = activities.byCode(activityCode);
+    return submit(activityCode, customer, request, idempotencyKey, traceId, true);
+  }
+
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+  public OrderView submit(String activityCode, H5Principal customer, SubmitRequest request, String idempotencyKey, String traceId, boolean includeHistory) {
+    var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
     activities.requireWritable(activity.id());
-    repository.lockPricing(activity.id());
+    repository.lockCustomerSubmission(activity.id(), customer.customerId());
     activities.requireWritable(activity.id());
     if (request.items() == null || request.items().isEmpty()) throw DomainException.unprocessable("ORDER_EMPTY", "请至少选择一种商品");
     if (request.items().size() > 1000) throw DomainException.unprocessable("ORDER_TOO_MANY_ITEMS", "订单商品种类过多");
@@ -67,7 +78,7 @@ public class OrderService {
     IdempotencyResult replay = repository.beginIdempotency(activity.id(), customer.customerId(), "ORDER_SUBMIT", idempotencyKey, requestHash);
     if (replay.replay()) {
       repository.deleteDraft(activity.id(), customer.customerId());
-      return repository.findByCustomer(activity.id(), customer.customerId());
+      return repository.findByCustomer(activity.id(), customer.customerId(), includeHistory);
     }
 
     OrderRow current = repository.lockOrder(activity.id(), customer.customerId());
@@ -79,7 +90,7 @@ public class OrderService {
     if (current != null && "SUBMITTED".equals(current.status()) && repository.sameItems(current.id(), quantities)) {
       repository.completeIdempotency(activity.id(), customer.customerId(), "ORDER_SUBMIT", idempotencyKey, current.id());
       repository.deleteDraft(activity.id(), customer.customerId());
-      return repository.order(current.id());
+      return repository.order(current.id(), includeHistory);
     }
 
     List<ProductSnapshot> products = repository.loadProducts(activity.id(), customer.customerType(), customer.branchName(), quantities.keySet());
@@ -119,20 +130,26 @@ public class OrderService {
     repository.writeOutbox(activity.id(), orderId, "ORDER_SUBMITTED", Map.of("orderId", orderId, "version", nextVersion));
     repository.completeIdempotency(activity.id(), customer.customerId(), "ORDER_SUBMIT", idempotencyKey, orderId);
     repository.deleteDraft(activity.id(), customer.customerId());
-    return repository.order(orderId);
+    return repository.order(orderId, includeHistory);
   }
 
   @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public OrderView withdraw(String activityCode, H5Principal customer, int expectedVersion, String idempotencyKey, String traceId) {
-    var activity = activities.byCode(activityCode);
+    return withdraw(activityCode, customer, expectedVersion, idempotencyKey, traceId, true);
+  }
+
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+  public OrderView withdraw(String activityCode, H5Principal customer, int expectedVersion, String idempotencyKey, String traceId, boolean includeHistory) {
+    var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
     activities.requireWritable(activity.id());
-    repository.lockPricing(activity.id());
+    repository.lockCustomerSubmission(activity.id(), customer.customerId());
+    activities.requireWritable(activity.id());
     byte[] requestHash = hash(Map.of("expectedVersion", expectedVersion));
     IdempotencyResult replay = repository.beginIdempotency(activity.id(), customer.customerId(), "ORDER_WITHDRAW", idempotencyKey, requestHash);
     if (replay.replay()) {
       repository.deleteDraft(activity.id(), customer.customerId());
-      return repository.findByCustomer(activity.id(), customer.customerId());
+      return repository.findByCustomer(activity.id(), customer.customerId(), includeHistory);
     }
     OrderRow order = repository.lockOrder(activity.id(), customer.customerId());
     if (order == null) throw DomainException.notFound("ORDER_NOT_FOUND", "尚未提交订单");
@@ -140,7 +157,7 @@ public class OrderService {
     if ("WITHDRAWN".equals(order.status())) {
       repository.completeIdempotency(activity.id(), customer.customerId(), "ORDER_WITHDRAW", idempotencyKey, order.id());
       repository.deleteDraft(activity.id(), customer.customerId());
-      return repository.order(order.id());
+      return repository.order(order.id(), includeHistory);
     }
     int changed = repository.withdrawOrder(order, expectedVersion);
     if (changed != 1) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单状态已变化，请刷新后重试");
@@ -148,7 +165,7 @@ public class OrderService {
     repository.writeOutbox(activity.id(), order.id(), "ORDER_WITHDRAWN", Map.of("orderId", order.id(), "version", expectedVersion));
     repository.completeIdempotency(activity.id(), customer.customerId(), "ORDER_WITHDRAW", idempotencyKey, order.id());
     repository.deleteDraft(activity.id(), customer.customerId());
-    return repository.order(order.id());
+    return repository.order(order.id(), includeHistory);
   }
 
   public OrderPreview adminPreview(long activityId, AdminPreviewRequest request, AdminPrincipal admin) {

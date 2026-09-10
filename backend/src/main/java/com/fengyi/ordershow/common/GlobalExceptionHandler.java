@@ -1,6 +1,7 @@
 package com.fengyi.ordershow.common;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.ConstraintViolationException;
 import java.net.URI;
 import java.util.Map;
@@ -15,10 +16,30 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
+import org.springframework.web.context.request.async.AsyncRequestTimeoutException;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
   private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+  @ExceptionHandler(AsyncRequestNotUsableException.class)
+  void disconnectedAsyncClient(AsyncRequestNotUsableException exception) {
+    // The response is already unusable; writing ProblemDetail would produce another conversion error for SSE.
+    log.debug("Async client disconnected: {}", exception.getMessage());
+  }
+
+  @ExceptionHandler(AsyncRequestTimeoutException.class)
+  ResponseEntity<ProblemDetail> asyncTimeout(AsyncRequestTimeoutException exception, HttpServletRequest request,
+      HttpServletResponse response) {
+    String contentType = response.getContentType();
+    if (contentType != null && contentType.startsWith("text/event-stream")) {
+      // A finite SSE subscription ending is expected. Complete the async dispatch without a JSON body.
+      log.debug("SSE subscription expired: {}", request.getRequestURI());
+      return null;
+    }
+    return problem(HttpStatus.SERVICE_UNAVAILABLE, "ASYNC_REQUEST_TIMEOUT", "请求处理超时，请稍后重试", request, null);
+  }
 
   @ExceptionHandler(DomainException.class)
   ResponseEntity<ProblemDetail> domain(DomainException exception, HttpServletRequest request) {

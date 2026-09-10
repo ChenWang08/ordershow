@@ -130,6 +130,7 @@ paths:
         - h5Cookie: []
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
+        - $ref: '#/components/parameters/IncludeOrderHistory'
       responses:
         '200':
           description: 当前订单；未提交时 data 为 null
@@ -147,6 +148,7 @@ paths:
         - $ref: '#/components/parameters/ActivityCode'
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/IncludeOrderHistory'
       requestBody:
         required: true
         content:
@@ -246,6 +248,7 @@ paths:
         - $ref: '#/components/parameters/ActivityCode'
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CsrfToken'
+        - $ref: '#/components/parameters/IncludeOrderHistory'
       requestBody:
         required: true
         content:
@@ -2127,11 +2130,12 @@ paths:
         - $ref: '#/components/parameters/ActivityCode'
         - name: Last-Event-ID
           in: header
+          description: 兼容接收但当前不提供事件续传；每次连接建立后应重新查询完整快照。
           schema:
             type: string
       responses:
         '200':
-          description: SSE 流
+          description: connected/invalidate事件流。invalidate按活动合并，scope为ACTIVITY，eventCount为本批事件数，oldestEventAt为最早事件时间；version为本批最大ID而非可跳过迟提交事件的全局水位。eventType/aggregateId仅描述最后一条事件。客户端收到通知后刷新完整快照，允许重复通知。
           content:
             text/event-stream:
               schema:
@@ -2218,6 +2222,13 @@ components:
       required: true
       schema:
         type: string
+    IncludeOrderHistory:
+      name: includeHistory
+      in: query
+      description: 默认兼容返回全部历史；false只读取当前订单，versions与operations返回空数组。不会删除历史，管理员历史接口不受影响。
+      schema:
+        type: boolean
+        default: true
   responses:
     Problem:
       description: 统一错误

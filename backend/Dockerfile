@@ -14,4 +14,5 @@ RUN useradd --system --uid 10001 ordershow
 COPY --from=build /workspace/backend/target/order-show-backend-0.1.0.jar app.jar
 USER ordershow
 EXPOSE 8080
+HEALTHCHECK --interval=3s --timeout=3s --start-period=45s --retries=20 CMD curl --fail --silent http://127.0.0.1:${SERVER_PORT:-8080}/api/v1/actuator/health/readiness > /dev/null || exit 1
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

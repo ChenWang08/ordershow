@@ -8,6 +8,10 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -18,21 +22,20 @@ public class ProductCatalogReader {
   private final ActivityService activities;
   public ProductCatalogReader(JdbcTemplate jdbc, ActivityService activities) { this.jdbc = jdbc; this.activities = activities; }
   public List<ProductView> h5Products(String activityCode, H5Principal customer, String rebateStatus, String keyword) {
-    var activity = activities.byCode(activityCode);
+    var activity = activities.orderingActivity(activityCode);
     if (activity.id() != customer.activityId()) throw DomainException.forbidden("H5_ACTIVITY_MISMATCH", "当前身份不属于该活动");
-    Long version = currentVersion(activity.id());
-    if (version == null) return List.of();
     String sql = """
         SELECT p.* FROM activity_product p
-        WHERE p.activity_id = ? AND p.data_version_id = ? AND (? = 'ALL' OR p.customer_type = ? OR p.customer_type = 'ALL') AND p.is_visible = TRUE
+        JOIN activity_data_binding b ON b.activity_id = p.activity_id AND b.data_type = 'PRODUCT' AND b.current_version_id = p.data_version_id
+        WHERE p.activity_id = ? AND (? = 'ALL' OR p.customer_type = ? OR p.customer_type = 'ALL') AND p.is_visible = TRUE
           AND (? IS NULL OR ? = '' OR p.rebate_status = ? OR p.rebate_status = 'ALL')
           AND (? IS NULL OR ? = '' OR p.material_name LIKE CONCAT('%', ?, '%') OR p.material_code LIKE CONCAT('%', ?, '%'))
           AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id)
                OR EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id AND s.normalized_branch_name = ?))
         ORDER BY p.sort_no, p.id
         """;
-    return jdbc.query(sql, this::map, activity.id(), version, customer.customerType(), customer.customerType(), rebateStatus, rebateStatus, rebateStatus,
-        keyword, keyword, keyword, keyword, normalize(customer.branchName())).stream().map(this::withImages).toList();
+    return withDetails(jdbc.query(sql, this::map, activity.id(), customer.customerType(), customer.customerType(), rebateStatus, rebateStatus, rebateStatus,
+        keyword, keyword, keyword, keyword, normalize(customer.branchName())));
   }
 
   public List<ProductView> adminProducts(long activityId, String customerType, String status, String keyword) {
@@ -47,7 +50,7 @@ public class ProductCatalogReader {
     String resolvedCustomerType = customer == null ? customerType : customer.customerType();
     String resolvedBranchName = customer == null ? null : normalize(customer.branchName());
     Boolean orderableOnly = customer == null ? null : Boolean.TRUE;
-    return jdbc.query("""
+    return withDetails(jdbc.query("""
         SELECT p.* FROM activity_product p WHERE p.activity_id = ? AND p.data_version_id = ? AND p.is_visible = TRUE
           AND (? IS NULL OR ? = '' OR ? = 'ALL' OR p.customer_type = ? OR p.customer_type = 'ALL')
           AND (? IS NULL OR ? = '' OR p.data_status = ?)
@@ -58,7 +61,7 @@ public class ProductCatalogReader {
         ORDER BY p.sort_no, p.id
         """, this::map, activityId, version, resolvedCustomerType, resolvedCustomerType, resolvedCustomerType, resolvedCustomerType,
         status, status, status, orderableOnly, resolvedBranchName, resolvedBranchName,
-        keyword, keyword, keyword, keyword).stream().map(this::withImages).toList();
+        keyword, keyword, keyword, keyword));
   }
 
   List<ProductView> productsForVersion(long activityId, long versionId) {
@@ -101,19 +104,38 @@ public class ProductCatalogReader {
   }
 
   ProductView withImages(ProductView product) {
-    List<ImageView> images = jdbc.query("""
-        SELECT i.id, i.stored_file_id, i.is_primary, i.sort_no, i.source_type, i.match_status FROM product_image i
-        WHERE i.activity_product_id = ? AND i.deleted_at IS NULL ORDER BY i.is_primary DESC, i.sort_no, i.id
-        """, (rs, rowNum) -> new ImageView(rs.getLong(1), rs.getLong(2), "/api/v1/public/files/" + rs.getLong(2),
-        rs.getBoolean(3), rs.getInt(4), rs.getString(5), rs.getString(6)), product.id());
-    List<String> branchScope = jdbc.query("""
-        SELECT branch_name FROM activity_product_branch_scope
-        WHERE activity_product_id = ? ORDER BY id
-        """, (rs, rowNum) -> rs.getString(1), product.id());
-    PriceTierView priceTier = jdbc.query("""
-        SELECT min_quantity, case_price, pricing_mode FROM activity_product_price_tier WHERE activity_product_id = ?
-        """, (rs, rowNum) -> new PriceTierView(rs.getLong(1), rs.getBigDecimal(2), rs.getString(3)), product.id())
-        .stream().findFirst().orElse(null);
+    return withDetails(List.of(product)).getFirst();
+  }
+
+  // Hydrate only IDs already authorized by the catalog query; bound SQL parameter counts.
+  List<ProductView> withDetails(List<ProductView> products) {
+    if (products.isEmpty()) return products;
+    Map<Long, List<ImageView>> images = new HashMap<>();
+    Map<Long, List<String>> scopes = new HashMap<>();
+    Map<Long, PriceTierView> tiers = new HashMap<>();
+    for (int start = 0; start < products.size(); start += 500) {
+      List<ProductView> batch = products.subList(start, Math.min(start + 500, products.size()));
+      String ids = batch.stream().map(p -> "?").collect(Collectors.joining(","));
+      Object[] args = batch.stream().map(ProductView::id).toArray();
+      jdbc.query("SELECT activity_product_id,id,stored_file_id,is_primary,sort_no,source_type,match_status FROM product_image WHERE deleted_at IS NULL AND activity_product_id IN ("
+          + ids + ") ORDER BY activity_product_id,is_primary DESC,sort_no,id", (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+            images.computeIfAbsent(rs.getLong(1), ignored -> new ArrayList<>()).add(new ImageView(rs.getLong(2),rs.getLong(3),
+                "/api/v1/public/files/" + rs.getLong(3),rs.getBoolean(4),rs.getInt(5),rs.getString(6),rs.getString(7)));
+          }, args);
+      jdbc.query("SELECT activity_product_id,branch_name FROM activity_product_branch_scope WHERE activity_product_id IN ("
+          + ids + ") ORDER BY activity_product_id,id", (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+            scopes.computeIfAbsent(rs.getLong(1), ignored -> new ArrayList<>()).add(rs.getString(2));
+          }, args);
+      jdbc.query("SELECT activity_product_id,min_quantity,case_price,pricing_mode FROM activity_product_price_tier WHERE activity_product_id IN ("
+          + ids + ")", (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+            tiers.put(rs.getLong(1),new PriceTierView(rs.getLong(2),rs.getBigDecimal(3),rs.getString(4)));
+          }, args);
+    }
+    return products.stream().map(p -> details(p, List.copyOf(images.getOrDefault(p.id(),List.of())),
+        List.copyOf(scopes.getOrDefault(p.id(),List.of())),tiers.get(p.id()))).toList();
+  }
+
+  private ProductView details(ProductView product, List<ImageView> images, List<String> branchScope, PriceTierView priceTier) {
     return new ProductView(product.id(), product.materialCode(), product.materialName(), product.description(), product.categoryName(), product.productLine(),
         product.brandName(), product.varietyName(), product.specification(), product.casePack(), product.bottlePrice(), product.casePrice(),
         product.tonCaseFactor(), product.customerType(), product.rebateStatus(), product.giftBox(), product.visible(), product.orderable(),

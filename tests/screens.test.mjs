@@ -77,7 +77,7 @@ function refreshHarness(status) {
   const timers = [];
   const events = [];
   const { useOrderDashboard } = loadModule("app/features/screens/useOrderDashboard.ts", {
-    react: { useState: (initial) => [initial, () => {}], useCallback: (callback) => callback, useEffect: (callback) => { effect = callback; } },
+    react: { useState: (initial) => [initial, () => {}], useRef: (initial) => ({ current: initial }), useCallback: (callback) => callback, useEffect: (callback) => { effect = callback; } },
     "../../api": { ApiError: class ApiError extends Error {}, loadOrderDashboard: async () => { calls++; return null; }, apiBase: () => "http://test/api", getActiveActivityCode: () => "fixture" },
   }, {
     window: { setInterval: (callback, delay) => { timers.push({ callback, delay, cleared: false }); return 0; }, clearInterval: (id) => { timers[id].cleared = true; } },
@@ -100,6 +100,8 @@ test("live dashboard refreshes initially, by timer and by SSE, and cleans up", a
   await harness.timers[0].callback();
   harness.events[0].listeners.invalidate(); await settle();
   assert.equal(harness.calls, 3);
+  harness.events[0].listeners.open(); await settle();
+  assert.equal(harness.calls, 4);
   cleanup();
   assert.equal(harness.timers[0].cleared, true);
   assert.equal(harness.events[0].closed, true);
@@ -114,4 +116,20 @@ test("historical dashboard loads once without subscriptions and still supports m
   assert.equal(harness.events.length, 0);
   await model.refresh();
   assert.equal(harness.calls, 2);
+});
+
+test("dashboard ignores a response after effect cleanup", async () => {
+  let effect, release;
+  const updates=[];
+  const {useOrderDashboard}=loadModule("app/features/screens/useOrderDashboard.ts", {
+    react: {
+      useState: initial=>[initial,value=>updates.push(value)], useRef: initial=>({current:initial}),
+      useCallback: callback=>callback, useEffect: callback=>{effect=callback;},
+    },
+    "../../api": {ApiError:class extends Error{},loadOrderDashboard:()=>new Promise(resolve=>{release=resolve;}),apiBase:()=>"http://test/api",getActiveActivityCode:()=>"fixture"},
+  });
+  useOrderDashboard({id:1,status:"FINISHED"});
+  const cleanup=effect();await settle();
+  cleanup();const count=updates.length;release({stale:true});await settle();
+  assert.equal(updates.length,count);
 });

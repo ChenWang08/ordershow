@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { guard, sql, save, request, resultsRoot } from './lib.mjs';
+guard();
+const source=JSON.parse(readFileSync(`${resultsRoot}/fixture.json`,'utf8'));
+const activity=source.activities.find(a=>a.code==='LOAD-1');
+assert(activity && Number.isSafeInteger(activity.id));
+const used=new Set(sql(`SELECT activity_customer_id FROM customer_order WHERE activity_id=${activity.id};`).trim().split(/\s+/).map(Number));
+const fresh=source.customers.filter(c=>c.activityId===activity.id && !used.has(c.id));
+assert(fresh.length>=1020,`Need 1020 unused customers, have ${fresh.length}. Do not reuse first-order cohorts.`);
+const customers=fresh.slice(0,1020);
+const catalog=await request(`/h5/activities/${activity.code}/products`,{session:customers[0]});
+assert.equal(catalog.status,200);assert.equal(catalog.data.length,300);
+assert(catalog.data.every(p=>Number(p.casePrice)===100),'Peak fixture assumes 100 yuan per case');
+const snapshot={createdAt:new Date().toISOString(),activity,customers};
+save('peak-fixture.json',snapshot);
+save(`peak-fixture-${Date.now()}.json`,snapshot);
+console.log({prepared:customers.length,mainCohort:1000,smokeCohort:20,unusedAvailable:fresh.length});

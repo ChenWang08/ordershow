@@ -8,6 +8,7 @@ import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.order.OrderPricingCalculator.PricingResult;
 import com.fengyi.ordershow.security.H5Principal;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -43,17 +44,16 @@ public class OrderRepository {
   }
 
   List<OrderVersionView> versions(long activityId, long orderId) {
-    adminOrder(activityId, orderId);
-    return jdbc.query("""
+    requireOrderAccess(activityId, orderId);
+    return withVersionItems(jdbc.query("""
         SELECT v.*, u.display_name submitted_by_admin_name FROM order_version v
         LEFT JOIN admin_user u ON u.id = v.submitted_by_admin_id
         WHERE v.order_id = ? ORDER BY v.version_no DESC
-        """, this::mapVersion, orderId)
-        .stream().map(this::withVersionItems).toList();
+        """, this::mapVersion, orderId));
   }
 
   List<OperationView> operations(long activityId, long orderId) {
-    adminOrder(activityId, orderId);
+    requireOrderAccess(activityId, orderId);
     return jdbc.query("""
         SELECT o.operation_type, o.source, u.display_name admin_name, o.order_version_no, o.reason, o.occurred_at
         FROM order_operation o LEFT JOIN admin_user u ON u.id = o.admin_user_id
@@ -145,6 +145,10 @@ public class OrderRepository {
     jdbc.queryForList("SELECT id FROM activity WHERE id = ? FOR UPDATE", activityId);
   }
 
+  void lockCustomerSubmission(long activityId, long customerId) {
+    OrderWriteLock.acquire(jdbc, activityId, customerId);
+  }
+
   void saveRepriced(long activityId, long orderId, Map<Long, PricingResult> prices, long adminId,
                     String reason, String batchId) {
     for (var entry : prices.entrySet()) {
@@ -192,18 +196,20 @@ public class OrderRepository {
   }
 
   void insertCurrentItems(long orderId, List<CalculatedItem> items) {
-    for (CalculatedItem item : items) jdbc.update("""
+    String sql = """
         INSERT INTO order_item(order_id, activity_product_id, line_no, material_code, material_name, category_name,
           product_line, brand_name, variety_name, specification, case_pack, rebate_status, is_gift_box,
           primary_image_object_key, quantity, case_price, applied_tier_min_quantity, base_case_price, base_price_quantity,
           tier_case_price, tier_min_quantity, tier_price_quantity, pricing_mode, line_amount, ton_case_factor, line_tons)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, orderId, item.product().id(), item.lineNo(), item.product().materialCode(), item.product().materialName(),
+        """;
+    List<Object[]> rows = items.stream().map(item -> new Object[]{orderId, item.product().id(), item.lineNo(), item.product().materialCode(), item.product().materialName(),
         item.product().categoryName(), item.product().productLine(), item.product().brandName(), item.product().varietyName(),
         item.product().specification(), item.product().casePack(), item.product().rebateStatus(), item.product().giftBox(),
         item.product().imageKey(), item.quantity(), item.pricing().casePriceSnapshot(), item.pricing().appliedTierMinQuantity(),
         item.pricing().baseCasePrice(), item.pricing().baseQuantity(), item.pricing().tierCasePrice(), item.pricing().tierMinQuantity(), item.pricing().tierQuantity(),
-        item.pricing().pricingMode(), item.pricing().lineAmount(), item.product().tonCaseFactor(), item.lineTons());
+        item.pricing().pricingMode(), item.pricing().lineAmount(), item.product().tonCaseFactor(), item.lineTons()}).toList();
+    insertItemBatches(sql, rows);
   }
 
   long insertVersion(long activityId, long orderId, int version, H5Principal customer, long totalQuantity,
@@ -235,19 +241,28 @@ public class OrderRepository {
   }
 
   void insertVersionItems(long versionId, List<CalculatedItem> items) {
-    for (CalculatedItem item : items) jdbc.update("""
+    String sql = """
         INSERT INTO order_version_item(order_version_id, line_no, activity_product_id, material_code, material_name,
           category_name, product_line, brand_name, variety_name, specification, case_pack, customer_type, rebate_status,
           is_gift_box, primary_image_object_key, quantity, case_price, applied_tier_min_quantity, base_case_price, base_price_quantity,
           tier_case_price, tier_min_quantity, tier_price_quantity, pricing_mode, line_amount, ton_case_factor, line_tons)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, versionId, item.lineNo(), item.product().id(), item.product().materialCode(), item.product().materialName(),
+        """;
+    List<Object[]> rows = items.stream().map(item -> new Object[]{versionId, item.lineNo(), item.product().id(), item.product().materialCode(), item.product().materialName(),
         item.product().categoryName(), item.product().productLine(), item.product().brandName(), item.product().varietyName(),
         item.product().specification(), item.product().casePack(), item.product().customerType(), item.product().rebateStatus(),
         item.product().giftBox(), item.product().imageKey(), item.quantity(), item.pricing().casePriceSnapshot(), item.pricing().appliedTierMinQuantity(),
         item.pricing().baseCasePrice(), item.pricing().baseQuantity(), item.pricing().tierCasePrice(), item.pricing().tierMinQuantity(), item.pricing().tierQuantity(),
         item.pricing().pricingMode(), item.pricing().lineAmount(),
-        item.product().tonCaseFactor(), item.lineTons());
+        item.product().tonCaseFactor(), item.lineTons()}).toList();
+    insertItemBatches(sql, rows);
+  }
+
+  // Keep all chunks in the caller's transaction; do not request generated item IDs.
+  private void insertItemBatches(String sql, List<Object[]> rows) {
+    for (int start = 0; start < rows.size(); start += 100) {
+      jdbc.batchUpdate(sql, rows.subList(start, Math.min(start + 100, rows.size())));
+    }
   }
 
   OrderRow lockOrder(long activityId, long customerId) {
@@ -268,8 +283,15 @@ public class OrderRepository {
   }
 
   OrderView findByCustomer(long activityId, long customerId) {
-    List<Long> ids = jdbc.queryForList("SELECT id FROM customer_order WHERE activity_id = ? AND activity_customer_id = ?", Long.class, activityId, customerId);
-    return ids.isEmpty() ? null : order(ids.getFirst());
+    return findByCustomer(activityId, customerId, true);
+  }
+
+  OrderView findByCustomer(long activityId, long customerId, boolean includeHistory) {
+    List<OrderView> rows = jdbc.query("""
+        SELECT o.*, c.phone_masked FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
+        WHERE o.activity_id = ? AND o.activity_customer_id = ?
+        """, this::mapOrder, activityId, customerId);
+    return rows.isEmpty() ? null : withOrderDetails(rows.getFirst(), includeHistory);
   }
 
   void deleteDraft(long activityId, long customerId) {
@@ -277,23 +299,30 @@ public class OrderRepository {
   }
 
   OrderView order(long orderId) {
+    return order(orderId, true);
+  }
+
+  OrderView order(long orderId, boolean includeHistory) {
     List<OrderView> rows = jdbc.query("""
         SELECT o.*, c.phone_masked FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id WHERE o.id = ?
         """, this::mapOrder, orderId);
     if (rows.size() != 1) throw DomainException.notFound("ORDER_NOT_FOUND", "订单不存在");
-    OrderView order = rows.getFirst();
+    return withOrderDetails(rows.getFirst(), includeHistory);
+  }
+
+  private OrderView withOrderDetails(OrderView order, boolean includeHistory) {
+    long orderId = order.id();
     List<ItemView> items = jdbc.query("SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no", this::mapItem, orderId);
-    List<OrderVersionView> versions = jdbc.query("""
+    List<OrderVersionView> versions = includeHistory ? withVersionItems(jdbc.query("""
         SELECT v.*, u.display_name submitted_by_admin_name FROM order_version v
         LEFT JOIN admin_user u ON u.id = v.submitted_by_admin_id
         WHERE v.order_id = ? ORDER BY v.version_no DESC
-        """, this::mapVersion, orderId)
-        .stream().map(this::withVersionItems).toList();
-    List<OperationView> operations = jdbc.query("""
+        """, this::mapVersion, orderId)) : List.of();
+    List<OperationView> operations = includeHistory ? jdbc.query("""
         SELECT o.operation_type, o.source, u.display_name admin_name, o.order_version_no, o.reason, o.occurred_at
         FROM order_operation o LEFT JOIN admin_user u ON u.id = o.admin_user_id
         WHERE o.order_id = ? ORDER BY o.occurred_at DESC, o.id DESC
-        """, this::mapOperation, orderId);
+        """, this::mapOperation, orderId) : List.of();
     return new OrderView(order.id(), order.activityId(), order.activityCustomerId(), order.orderNo(), order.status(),
         order.createdSource(), order.lastModifiedSource(), order.lockVersion(), order.customerType(), order.regionCode(),
         order.branchName(), order.dealerShortName(), order.dealerFullName(), order.phoneMasked(), order.currentVersion(),
@@ -314,10 +343,25 @@ public class OrderRepository {
         order.items(), order.versions(), order.operations());
   }
 
-  OrderVersionView withVersionItems(OrderVersionView version) {
-    List<ItemView> items = jdbc.query("SELECT * FROM order_version_item WHERE order_version_id = ? ORDER BY line_no", this::mapVersionItem, version.id());
-    return new OrderVersionView(version.id(), version.version(), version.totalQuantity(), version.totalTons(), version.totalAmount(),
-        version.submittedAt(), version.submittedSource(), version.submittedByAdminName(), version.reason(), items);
+  private void requireOrderAccess(long activityId, long orderId) {
+    if (jdbc.queryForList("SELECT id FROM customer_order WHERE activity_id=? AND id=?", Long.class, activityId, orderId).isEmpty()) {
+      throw DomainException.notFound("ORDER_NOT_FOUND", "订单不存在");
+    }
+  }
+
+  List<OrderVersionView> withVersionItems(List<OrderVersionView> versions) {
+    if (versions.isEmpty()) return versions;
+    Map<Long, List<ItemView>> byVersion = new HashMap<>();
+    for (int start = 0; start < versions.size(); start += 500) {
+      List<OrderVersionView> batch = versions.subList(start, Math.min(start + 500, versions.size()));
+      String placeholders = batch.stream().map(v -> "?").collect(Collectors.joining(","));
+      jdbc.query("SELECT * FROM order_version_item WHERE order_version_id IN (" + placeholders + ") ORDER BY order_version_id,line_no",
+          (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+            byVersion.computeIfAbsent(rs.getLong("order_version_id"), ignored -> new ArrayList<>()).add(mapVersionItem(rs, 0));
+          }, batch.stream().map(OrderVersionView::id).toArray());
+    }
+    return versions.stream().map(v -> new OrderVersionView(v.id(), v.version(), v.totalQuantity(), v.totalTons(), v.totalAmount(),
+        v.submittedAt(), v.submittedSource(), v.submittedByAdminName(), v.reason(), List.copyOf(byVersion.getOrDefault(v.id(), List.of())))).toList();
   }
 
   IdempotencyResult beginIdempotency(long activityId, long actorId, String endpoint, String key, byte[] hash) {
@@ -365,7 +409,13 @@ public class OrderRepository {
     } catch (Exception exception) { throw new IllegalStateException(exception); }
   }
 
-  static String orderNo(long activityId) { return "ZY" + DateTimeFormatter.ofPattern("yyyyMMddHHmmss").withZone(ZoneOffset.UTC).format(Instant.now()) + String.format("%02d", activityId % 100) + UUID.randomUUID().toString().substring(0, 4).toUpperCase(Locale.ROOT); }
+  static String orderNo(long activityId) { return orderNo(UUID.randomUUID()); }
+
+  // Preserve all UUID bits. Base36 keeps the global public identifier within 27 characters.
+  // Existing order numbers are never rewritten; activity ownership remains in its own column.
+  static String orderNo(UUID uuid) {
+    return "ZY" + new BigInteger(uuid.toString().replace("-", ""),16).toString(36).toUpperCase(Locale.ROOT);
+  }
 
   static String normalize(String value) { return value == null ? "" : value.toLowerCase(Locale.CHINA).replaceAll("[\\s　_-]+", ""); }
 
@@ -378,6 +428,7 @@ public class OrderRepository {
   ItemView mapVersionItem(ResultSet rs, int rowNum) throws SQLException { return item(rs, "id", "activity_product_id"); }
 
   ItemView item(ResultSet rs, String idColumn, String productColumn) throws SQLException { return new ItemView(rs.getLong(idColumn), rs.getObject(productColumn) == null ? null : rs.getLong(productColumn), rs.getInt("line_no"), rs.getString("material_code"), rs.getString("material_name"), rs.getString("product_line"), rs.getString("specification"), rs.getString("case_pack"), rs.getLong("quantity"), rs.getBigDecimal("case_price"), nullableLong(rs, "applied_tier_min_quantity"), rs.getBigDecimal("base_case_price"), nullableLong(rs, "base_price_quantity"), rs.getBigDecimal("tier_case_price"), nullableLong(rs, "tier_min_quantity"), nullableLong(rs, "tier_price_quantity"), rs.getString("pricing_mode"), rs.getBigDecimal("line_amount"), rs.getBigDecimal("ton_case_factor"), rs.getBigDecimal("line_tons")); }
+
 
   OrderVersionView mapVersion(ResultSet rs, int rowNum) throws SQLException { return new OrderVersionView(rs.getLong("id"), rs.getInt("version_no"), rs.getLong("total_quantity"), rs.getBigDecimal("total_tons"), rs.getBigDecimal("total_amount"), rs.getTimestamp("submitted_at").toInstant(), rs.getString("submitted_source"), rs.getString("submitted_by_admin_name"), rs.getString("reason"), List.of()); }
 

@@ -53,20 +53,21 @@ public class OrderController {
   }
 
   @GetMapping("/h5/activities/{activityCode}/order")
-  ApiResponse<OrderService.OrderView> current(@PathVariable String activityCode, HttpServletRequest request) {
-    return ApiResponse.of(service.current(activityCode, auth.requireH5(request)), TraceFilter.id(request));
+  ApiResponse<OrderService.OrderView> current(@PathVariable String activityCode,
+      @RequestParam(defaultValue = "true") boolean includeHistory, HttpServletRequest request) {
+    return ApiResponse.of(service.current(activityCode, auth.requireH5(request), includeHistory), TraceFilter.id(request));
   }
 
   @PutMapping("/h5/activities/{activityCode}/order")
   ApiResponse<OrderService.OrderView> submit(@PathVariable String activityCode, @RequestBody OrderService.SubmitRequest body,
-      @RequestHeader("Idempotency-Key") String idempotencyKey, HttpServletRequest request) {
-    return ApiResponse.of(service.submit(activityCode, auth.requireH5(request), body, idempotencyKey, TraceFilter.id(request)), TraceFilter.id(request));
+      @RequestHeader("Idempotency-Key") String idempotencyKey, @RequestParam(defaultValue = "true") boolean includeHistory, HttpServletRequest request) {
+    return ApiResponse.of(service.submit(activityCode, auth.requireH5(request), body, idempotencyKey, TraceFilter.id(request), includeHistory), TraceFilter.id(request));
   }
 
   @PostMapping("/h5/activities/{activityCode}/order/withdraw")
   ApiResponse<OrderService.OrderView> withdraw(@PathVariable String activityCode, @RequestBody OrderService.WithdrawRequest body,
-      @RequestHeader("Idempotency-Key") String idempotencyKey, HttpServletRequest request) {
-    return ApiResponse.of(service.withdraw(activityCode, auth.requireH5(request), body.expectedVersion(), idempotencyKey, TraceFilter.id(request)), TraceFilter.id(request));
+      @RequestHeader("Idempotency-Key") String idempotencyKey, @RequestParam(defaultValue = "true") boolean includeHistory, HttpServletRequest request) {
+    return ApiResponse.of(service.withdraw(activityCode, auth.requireH5(request), body.expectedVersion(), idempotencyKey, TraceFilter.id(request), includeHistory), TraceFilter.id(request));
   }
 
   @GetMapping("/admin/activities/{activityId}/orders")

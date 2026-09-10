@@ -29,10 +29,12 @@ public class AuditService {
   private static final Pattern LAST_ID = Pattern.compile("/(\\d+)(?:/[^/]*)?$");
   private final JdbcTemplate jdbc;
   private final DepartmentAccessService departmentAccess;
+  private final AuditBatchWriter writer;
 
-  public AuditService(JdbcTemplate jdbc, DepartmentAccessService departmentAccess) {
+  public AuditService(JdbcTemplate jdbc, DepartmentAccessService departmentAccess, AuditBatchWriter writer) {
     this.jdbc = jdbc;
     this.departmentAccess = departmentAccess;
+    this.writer = writer;
   }
 
   public void record(HttpServletRequest request, HttpServletResponse response, Exception exception) {
@@ -50,13 +52,9 @@ public class AuditService {
       String reason = request.getAttribute(REASON_REQUEST_ATTRIBUTE) instanceof String value ? value : null;
       boolean success = exception == null && response.getStatus() < 400;
       String ip = remoteIp(request);
-      jdbc.update("""
-          INSERT INTO audit_log(activity_id, actor_type, admin_user_id, action_code, object_type, object_id, reason,
-            result, error_code, trace_id, ip_address, user_agent, occurred_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, INET6_ATON(?), ?, UTC_TIMESTAMP(3))
-          """, activityId, actorType, admin == null ? null : admin.id(), action, objectType, objectId, truncate(reason, 500),
+      writer.write(new Object[]{activityId, actorType, admin == null ? null : admin.id(), action, objectType, objectId, truncate(reason, 500),
           success ? "SUCCESS" : "FAILURE", success ? null : "HTTP_" + response.getStatus(), TraceFilter.id(request), ip,
-          truncate(request.getHeader("User-Agent"), 500));
+          truncate(request.getHeader("User-Agent"), 500), java.sql.Timestamp.from(Instant.now())});
     } catch (Exception auditFailure) {
       log.warn("Failed to persist audit event for {} {}", request.getMethod(), request.getRequestURI(), auditFailure);
     }

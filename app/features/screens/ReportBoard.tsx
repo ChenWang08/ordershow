@@ -5,6 +5,7 @@ import { ApiError, apiBase, getActiveActivityCode, loadDashboardReport, type Das
 import { FestivalDecor } from "../shared/components/FestivalDecor";
 import { isUnspecifiedCustomerTypeActivity } from "./dashboard-domain";
 import { MetricTable } from "./ReportMetricTable";
+import { createRefreshQueue } from "./refresh-queue";
 
 const reports = [
   "特渠专业客户 TOP5",
@@ -29,17 +30,19 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
     if (unspecifiedCustomerType) {
       return () => { active = false; };
     }
-    const refresh = async () => {
+    const queue = createRefreshQueue(async () => {
       try { const next = await loadDashboardReport(report); if (active) { setData(next); setError(""); } }
       catch (reason) { if (active) setError(reason instanceof ApiError ? reason.message : "战报数据加载失败"); }
-    };
+    });
+    const refresh = queue.refresh;
     void refresh();
-    if (historical) return () => { active = false; };
+    if (historical) return () => { active = false; queue.dispose(); };
     const timer = window.setInterval(refresh, 15000);
     const events = new EventSource(`${apiBase()}/screen/activities/${encodeURIComponent(getActiveActivityCode())}/events`);
     events.addEventListener("invalidate", () => void refresh());
-    return () => { active = false; window.clearInterval(timer); events.close(); };
-  }, [report, historical, unspecifiedCustomerType]);
+    events.addEventListener("open", () => void refresh());
+    return () => { active = false; queue.dispose(); window.clearInterval(timer); events.close(); };
+  }, [activity?.id, report, historical, unspecifiedCustomerType]);
   const isTop = report.includes("TOP5");
   const isTotal = report === "总战绩";
   const isDual = report === reports[8];

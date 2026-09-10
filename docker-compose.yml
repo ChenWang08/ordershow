@@ -11,7 +11,7 @@ services:
       - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
     restart: unless-stopped
 
   mysql:
@@ -73,6 +73,10 @@ services:
     environment:
       DB_URL: jdbc:mysql://mysql:3306/order_show?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
       DB_USERNAME: order_show
+      HTTP_MAX_THREADS: ${HTTP_MAX_THREADS:-40}
+      H5_WARMUP_ENABLED: ${H5_WARMUP_ENABLED:-true}
+      H5_WRITE_CONCURRENCY: ${H5_WRITE_CONCURRENCY:-12}
+      VIRTUAL_THREADS_ENABLED: ${VIRTUAL_THREADS_ENABLED:-true}
       DB_PASSWORD: ${DB_PASSWORD:-order_show_local}
       REDIS_HOST: redis
       S3_ENDPOINT: http://minio:9000

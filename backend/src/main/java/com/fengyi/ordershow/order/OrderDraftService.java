@@ -35,7 +35,7 @@ public class OrderDraftService {
   }
 
   public DraftView current(String activityCode, H5Principal customer) {
-    var activity = activities.byCode(activityCode);
+    var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
     List<Map<String, Object>> rows = jdbc.queryForList("""
         SELECT id, activity_id, activity_customer_id, base_order_version, items_json, lock_version, updated_at, expires_at
@@ -45,11 +45,12 @@ public class OrderDraftService {
     return rows.isEmpty() ? null : map(rows.getFirst());
   }
 
-  @Transactional
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public DraftView save(String activityCode, H5Principal customer, SaveDraftRequest request) {
-    var activity = activities.byCode(activityCode);
+    var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
     requireOwner(customer, request.customerId());
+    OrderWriteLock.acquire(jdbc, activity.id(), customer.customerId());
     activities.requireWritable(activity.id());
     List<DraftItem> items = validateItems(activity.id(), customer, request.items());
     int currentOrderVersion = currentOrderVersion(activity.id(), customer.customerId());
@@ -69,11 +70,12 @@ public class OrderDraftService {
     return current(activityCode, customer);
   }
 
-  @Transactional
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public boolean delete(String activityCode, H5Principal customer, long ownerCustomerId) {
-    var activity = activities.byCode(activityCode);
+    var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
     requireOwner(customer, ownerCustomerId);
+    OrderWriteLock.acquire(jdbc, activity.id(), customer.customerId());
     return jdbc.update("DELETE FROM h5_order_draft WHERE activity_id = ? AND activity_customer_id = ?",
         activity.id(), customer.customerId()) > 0;
   }
