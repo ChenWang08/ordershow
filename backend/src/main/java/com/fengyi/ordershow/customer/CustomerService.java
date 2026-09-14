@@ -2,6 +2,7 @@ package com.fengyi.ordershow.customer;
 
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.activity.ActivityRegionService;
+import com.fengyi.ordershow.common.TextNormalizer;
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.common.PageResponse;
 import com.fengyi.ordershow.security.AdminPrincipal;
@@ -357,7 +358,7 @@ public class CustomerService {
         rs.getString(13), rs.getBoolean(14), rs.getTimestamp(15).toInstant(), rs.getTimestamp(16).toInstant());
   }
   private String decrypt(byte[] value) { return value == null ? null : crypto.decrypt(value); }
-  private static String normalize(String value) { return value == null ? null : value.replaceAll("\\s+", "").toLowerCase(); }
+  private static String normalize(String value) { return value == null ? null : TextNormalizer.normalize(value); }
   private static String blankToNull(String value) { return value == null || value.isBlank() ? null : value.trim(); }
   private static String required(String value, String message) { if (value == null || value.isBlank()) throw DomainException.badRequest("FIELD_REQUIRED", message); return value.trim(); }
 

@@ -81,7 +81,7 @@ export type AttendanceMatchPreview = {
   whitelistVersionId?: number; calculatedAt: string; totalCount: number; matchedCount: number;
   pendingCount: number; unmatchedCount: number; eligibleCustomerCount: number;
   rows: Array<{ stagingRowId: number; activityCustomerId?: number; matchStatus: "MATCHED" | "PENDING_CONFIRMATION" | "UNMATCHED";
-    matchMethod?: "PHONE" | "FULL_NAME" | "SHORT_NAME" | "MANUAL"; matchReasonCode?: string;
+    matchMethod?: "PHONE" | "FULL_NAME" | "FULL_NAME_BRANCH" | "SHORT_NAME" | "MANUAL"; matchReasonCode?: string;
     matchedDealerName?: string; lotteryEligible: boolean }>;
 };
 
@@ -141,7 +141,7 @@ export type AdminAttendee = {
   id: number; activityCustomerId?: number; participantName?: string; gender?: string; participantType?: string;
   dealerName: string; branchName?: string; phone?: string; phoneMasked?: string;
   matchStatus: "MATCHED" | "PENDING_CONFIRMATION" | "UNMATCHED";
-  matchMethod?: "PHONE" | "FULL_NAME" | "SHORT_NAME" | "MANUAL";
+  matchMethod?: "PHONE" | "FULL_NAME" | "FULL_NAME_BRANCH" | "SHORT_NAME" | "MANUAL";
   matchReasonCode?: string; matchedDealerName?: string; lotteryEligible: boolean;
   createdAt: string; updatedAt: string;
 };

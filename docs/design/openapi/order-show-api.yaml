@@ -3093,7 +3093,7 @@ components:
           enum: [MATCHED, PENDING_CONFIRMATION, UNMATCHED]
         matchMethod:
           type: [string, 'null']
-          enum: [PHONE, FULL_NAME, SHORT_NAME, MANUAL, null]
+          enum: [PHONE, FULL_NAME, FULL_NAME_BRANCH, SHORT_NAME, MANUAL, null]
         matchReasonCode:
           type: [string, 'null']
         matchedDealerName:
@@ -3314,7 +3314,7 @@ components:
           enum: [MATCHED, PENDING_CONFIRMATION, UNMATCHED]
         matchMethod:
           type: [string, 'null']
-          enum: [PHONE, FULL_NAME, SHORT_NAME, MANUAL, null]
+          enum: [PHONE, FULL_NAME, FULL_NAME_BRANCH, SHORT_NAME, MANUAL, null]
         matchReasonCode:
           type: [string, 'null']
         matchedDealerName:

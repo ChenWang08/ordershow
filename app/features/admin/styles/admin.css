@@ -255,13 +255,14 @@
 .product-image-tile.primary .product-image-tile-preview { border-color: #b12623; box-shadow: 0 0 0 2px rgba(177,38,35,.1); }
 .product-image-tile.pending .product-image-tile-preview { border-color: #d8a345; border-style: dashed; background: #fffaf0; }
 .product-image-tile.pending .product-image-tile-preview span { background: rgba(166,103,18,.86); }
-.product-image-tile-actions { display: flex; gap: 3px; }
+.product-image-tile-actions { display: flex; flex-wrap: wrap; gap: 3px; }
 .product-image-tile-actions button { min-width: 0; flex: 1; padding: 3px 2px; overflow: hidden; color: #8e2421; border: 1px solid #dfc1b7; border-radius: 4px; background: #fff; font-size: 7px; text-overflow: ellipsis; white-space: nowrap; }
 .product-image-tile-actions button.danger { color: #9f6257; border-color: #ead5ce; }
 .product-image-editor-empty { display: flex; min-height: 70px; align-items: center; justify-content: center; gap: 8px; color: #a5948b; border: 1px dashed #d8c9c0; border-radius: 6px; background: #fff; }
 .product-image-editor-empty i { font-style: normal; font-size: 9px; }.product-image-editor-empty span { font-size: 8px; }
 .product-image-editor-actions { display: flex; gap: 7px; }
 .product-image-upload-button { display: inline-flex; align-items: center; justify-content: center; padding: 6px 9px; color: #fff; border: 1px solid #a92321; border-radius: 5px; background: #a92321; font-size: 8px; cursor: pointer; }
+.drawer-form-grid .product-image-upload-button { color: #fff; }
 .product-image-upload-button.secondary { color: #8e2421; border-color: #d8b7ad; background: #fff; }
 .product-image-upload-button input { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; pointer-events: none; }
 .product-image-editor-hint { color: #8d7c74; font-size: 8px; }.product-image-editor-error { color: #b72a26; font-size: 8px; line-height: 1.4; }

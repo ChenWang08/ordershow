@@ -9,7 +9,7 @@ export function normalizeMaterialCode(value: string) {
 }
 
 export function runtimeProductToImportRow(product: RuntimeProduct): ProductImportRow {
-  const selectedImage = [...product.images].sort((a, b) => Number(b.primary) - Number(a.primary) || a.sortNo - b.sortNo)[0];
+  const selectedImages = [...product.images].sort((a, b) => Number(b.primary) - Number(a.primary) || a.sortNo - b.sortNo || a.id - b.id);
   return {
     id: String(product.id), serverVersion: product.version, sequence: product.sortNo,
     customerType: product.customerType === "GENERAL" ? "综合" : product.customerType === "SPECIAL" ? "特渠" : "",
@@ -25,12 +25,12 @@ export function runtimeProductToImportRow(product: RuntimeProduct): ProductImpor
     conversion: product.tonCaseFactor == null ? "" : String(product.tonCaseFactor),
     gift: product.giftBox ? "是" : "否", branchScope: (product.branchScope ?? []).join("，"),
     status: product.dataStatus === "INCOMPLETE" ? "待完善" : "有效", source: "excel",
-    imageStatus: product.images.length ? "已匹配" : "未匹配",
-    images: selectedImage ? [{
-      id: String(selectedImage.id), fileName: product.materialName, url: apiAssetUrl(selectedImage.url),
-      normalizedName: normalizeProductImageName(product.materialName), relationStatus: "CONFIRMED",
-      matchStatus: "已匹配", source: selectedImage.sourceType === "MANUAL" ? "manual" : "zip",
-    }] : undefined,
+    imageStatus: selectedImages.length ? "已匹配" : "未匹配",
+    images: selectedImages.length ? selectedImages.map((image) => ({
+      id: String(image.id), fileName: product.materialName, url: apiAssetUrl(image.url),
+      normalizedName: normalizeProductImageName(product.materialName), relationStatus: "CONFIRMED" as const,
+      matchStatus: "已匹配" as const, source: image.sourceType === "MANUAL" ? "manual" as const : "zip" as const,
+    })) : undefined,
   };
 }
 

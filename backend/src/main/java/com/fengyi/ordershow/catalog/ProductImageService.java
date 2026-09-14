@@ -26,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 public class ProductImageService {
   private static final Set<String> IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp", "gif", "bmp");
+  private static final int MAX_IMAGES_PER_PRODUCT = 10;
   private final JdbcTemplate jdbc;
   private final ActivityService activities;
   private final StorageService storage;
@@ -38,6 +39,12 @@ public class ProductImageService {
     ProductView product = catalog.product(activityId, productId);
     validateImage(file.getOriginalFilename(), file.getSize());
     List<ProductView> targets = sameMaterialNameProducts(activityId, product);
+    for (ProductView target : targets) {
+      Integer current = jdbc.queryForObject("SELECT COUNT(*) FROM product_image WHERE activity_product_id = ? AND deleted_at IS NULL", Integer.class, target.id());
+      if (current != null && current >= MAX_IMAGES_PER_PRODUCT) {
+        throw DomainException.unprocessable("PRODUCT_IMAGE_LIMIT", "每个商品最多配置 " + MAX_IMAGES_PER_PRODUCT + " 张图片");
+      }
+    }
     String materialName = materialNameKey(product.materialName());
     if (!materialName.isBlank()) {
       VersionSource source = catalog.currentSource(activityId);
@@ -49,16 +56,24 @@ public class ProductImageService {
     }
     StorageService.StoredFile stored = storage.save(activityId, file, "PRODUCT_IMAGE", adminId);
     for (ProductView target : targets) {
-      jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", target.id());
+      Integer current = jdbc.queryForObject("SELECT COUNT(*) FROM product_image WHERE activity_product_id = ? AND deleted_at IS NULL", Integer.class, target.id());
+      boolean makePrimary = primary || current == null || current == 0;
+      if (makePrimary) {
+        jdbc.update("UPDATE product_image SET is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", target.id());
+      }
       jdbc.update("""
           INSERT INTO product_image(activity_product_id, stored_file_id, is_primary, sort_no, source_type, match_status, created_by)
-          VALUES (?, ?, TRUE, 0, 'MANUAL', 'CONFIRMED', ?)
-          ON DUPLICATE KEY UPDATE deleted_at = NULL, is_primary = TRUE, sort_no = 0,
+          VALUES (?, ?, ?, ?, 'MANUAL', 'CONFIRMED', ?)
+          ON DUPLICATE KEY UPDATE deleted_at = NULL, is_primary = VALUES(is_primary), sort_no = VALUES(sort_no),
             source_type = 'MANUAL', match_status = 'CONFIRMED', created_by = VALUES(created_by)
-          """, target.id(), stored.id(), adminId);
+          """, target.id(), stored.id(), makePrimary, current == null ? 0 : current, adminId);
     }
-    Long imageId = jdbc.queryForObject("SELECT id FROM product_image WHERE activity_product_id = ? AND stored_file_id = ?", Long.class, productId, stored.id());
-    return new ImageView(imageId, stored.id(), "/api/v1/public/files/" + stored.id(), true, 0, "MANUAL", "CONFIRMED");
+    return jdbc.queryForObject("""
+        SELECT id, stored_file_id, is_primary, sort_no, source_type, match_status
+        FROM product_image WHERE activity_product_id = ? AND stored_file_id = ? AND deleted_at IS NULL
+        """, (rs, rowNum) -> new ImageView(rs.getLong("id"), rs.getLong("stored_file_id"),
+        "/api/v1/public/files/" + rs.getLong("stored_file_id"), rs.getBoolean("is_primary"), rs.getInt("sort_no"),
+        rs.getString("source_type"), rs.getString("match_status")), productId, stored.id());
   }
 
   public void updateImage(long activityId, long productId, long imageId, Boolean primary, Integer sortNo) {
@@ -73,11 +88,18 @@ public class ProductImageService {
   public void deleteImage(long activityId, long productId, long imageId) {
     requireImageWritable(activityId);
     ProductView current = catalog.product(activityId, productId);
+    List<Long> storedFileIds = jdbc.queryForList("SELECT stored_file_id FROM product_image WHERE id = ? AND activity_product_id = ? AND deleted_at IS NULL", Long.class, imageId, productId);
+    if (storedFileIds.isEmpty()) throw DomainException.notFound("PRODUCT_IMAGE_NOT_FOUND", "商品图片不存在");
+    long storedFileId = storedFileIds.getFirst();
     int changed = jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE id = ? AND activity_product_id = ? AND deleted_at IS NULL", imageId, productId);
     if (changed != 1) throw DomainException.notFound("PRODUCT_IMAGE_NOT_FOUND", "商品图片不存在");
-    for (ProductView target : sameMaterialNameProducts(activityId, current)) {
-      jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", target.id());
+    List<ProductView> targets = sameMaterialNameProducts(activityId, current);
+    for (ProductView target : targets) {
+      if (target.id() != productId) {
+        jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE activity_product_id = ? AND stored_file_id = ? AND deleted_at IS NULL", target.id(), storedFileId);
+      }
     }
+    ensurePrimaryImages(targets);
   }
 
   private List<ProductView> sameMaterialNameProducts(long activityId, ProductView product) {
@@ -106,13 +128,20 @@ public class ProductImageService {
     List<ProductView> targets = catalog.productsForVersion(activityId, candidate.versionId()).stream()
         .filter(product -> materialNameKey(product.materialName()).equals(candidate.materialNameKey())).toList();
     if (targets.isEmpty()) throw DomainException.conflict("IMAGE_REVIEW_PRODUCT_MISSING", "当前商品版本中已不存在该商品名称");
+    for (ProductView target : targets) {
+      Integer current = jdbc.queryForObject("SELECT COUNT(*) FROM product_image WHERE activity_product_id = ? AND deleted_at IS NULL", Integer.class, target.id());
+      Integer linked = jdbc.queryForObject("SELECT COUNT(*) FROM product_image WHERE activity_product_id = ? AND stored_file_id = ? AND deleted_at IS NULL", Integer.class, target.id(), candidate.storedFileId());
+      if ((current != null && current >= MAX_IMAGES_PER_PRODUCT) && (linked == null || linked == 0)) {
+        throw DomainException.unprocessable("PRODUCT_IMAGE_LIMIT", "每个商品最多配置 " + MAX_IMAGES_PER_PRODUCT + " 张图片");
+      }
+    }
     jdbc.update("""
         UPDATE product_image_review_candidate SET status = 'EXCLUDED', resolved_by = ?, resolved_at = UTC_TIMESTAMP(3)
         WHERE data_version_id = ? AND (normalized_material_name = ? OR stored_file_id = ?) AND status = 'PENDING'
         """, adminId, candidate.versionId(), candidate.materialNameKey(), candidate.storedFileId());
     jdbc.update("UPDATE product_image_review_candidate SET status = 'SELECTED' WHERE id = ?", candidateId);
     for (ProductView target : targets) {
-      jdbc.update("UPDATE product_image SET deleted_at = UTC_TIMESTAMP(3), is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", target.id());
+      jdbc.update("UPDATE product_image SET is_primary = FALSE, sort_no = sort_no + 1 WHERE activity_product_id = ? AND deleted_at IS NULL", target.id());
       jdbc.update("""
           INSERT INTO product_image(activity_product_id, stored_file_id, is_primary, sort_no, source_type, match_status, created_by)
           VALUES (?, ?, TRUE, 0, 'ZIP_IMPORT', 'CONFIRMED', ?)
@@ -210,13 +239,16 @@ public class ProductImageService {
                 """, Integer.class, candidate.id(), storedId);
             if (alreadyLinked != null && alreadyLinked > 0) continue;
             int current = jdbc.queryForObject("SELECT COUNT(*) FROM product_image WHERE activity_product_id = ? AND deleted_at IS NULL", Integer.class, candidate.id());
+            int primaryCount = jdbc.queryForObject("SELECT COUNT(*) FROM product_image WHERE activity_product_id = ? AND deleted_at IS NULL AND is_primary = TRUE", Integer.class, candidate.id());
+            boolean makePrimary = current == 0 || primaryCount == 0;
+            if (makePrimary) jdbc.update("UPDATE product_image SET is_primary = FALSE WHERE activity_product_id = ? AND deleted_at IS NULL", candidate.id());
             jdbc.update("""
                 INSERT INTO product_image(activity_product_id, stored_file_id, is_primary, sort_no, source_type, match_status, created_by)
                 VALUES (?, ?, ?, ?, 'ZIP_IMPORT', ?, ?)
                 ON DUPLICATE KEY UPDATE deleted_at = NULL, is_primary = VALUES(is_primary), sort_no = VALUES(sort_no),
                   source_type = 'ZIP_IMPORT', match_status = VALUES(match_status), created_by = VALUES(created_by)
             """,
-                candidate.id(), storedId, current == 0, current, status, adminId);
+                candidate.id(), storedId, makePrimary, current, status, adminId);
           }
         }
         if (confirm && decision != null && "PENDING".equals(decision.status()) && versionId != null && importTaskId != null) {

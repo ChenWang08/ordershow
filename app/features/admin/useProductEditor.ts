@@ -159,6 +159,22 @@ export function useProductEditor({
         const saved = await createAdminProduct(Number(activityId), productBody);
         manualRow = { ...manualRow, id: String(saved.id), serverVersion: saved.version, sequence: saved.sortNo,
           status: saved.dataStatus === "INCOMPLETE" ? "待完善" : "有效" };
+        const desiredImages = nextRow.images ?? [];
+        if (desiredImages.length > 0) {
+          const uploadedIds = new Map<string, number>();
+          for (const image of desiredImages.filter((item) => item.file)) {
+            const uploaded = await addAdminProductImage(Number(activityId), Number(saved.id), image.file!, false);
+            uploadedIds.set(image.id, uploaded.id);
+          }
+          const orderedImageIds = desiredImages.map((image) => Number.isSafeInteger(Number(image.id)) ? Number(image.id) : uploadedIds.get(image.id))
+            .filter((imageId): imageId is number => imageId !== undefined);
+          for (let index = 0; index < orderedImageIds.length; index += 1) {
+            await updateAdminProductImage(Number(activityId), Number(saved.id), orderedImageIds[index], index === 0, index);
+          }
+          const refreshedProducts = await loadAdminProducts(Number(activityId));
+          const refreshed = refreshedProducts.find((product) => product.id === Number(saved.id));
+          if (refreshed) manualRow = { ...runtimeProductToImportRow(refreshed), manuallyEdited: true };
+        }
       } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "商品新增失败"); return false; }
     }
     setProductRows((current) => [...current, manualRow]);

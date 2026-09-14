@@ -399,7 +399,7 @@ CREATE TABLE activity_attendee (
   CONSTRAINT fk_attendee_version FOREIGN KEY (data_version_id) REFERENCES import_publish_version (id),
   CONSTRAINT fk_attendee_created_by FOREIGN KEY (created_by) REFERENCES admin_user (id),
   CONSTRAINT ck_attendee_match_status CHECK (match_status IN ('MATCHED', 'PENDING_CONFIRMATION', 'UNMATCHED')),
-  CONSTRAINT ck_attendee_match_method CHECK (match_method IS NULL OR match_method IN ('PHONE', 'FULL_NAME', 'SHORT_NAME', 'MANUAL'))
+  CONSTRAINT ck_attendee_match_method CHECK (match_method IS NULL OR match_method IN ('PHONE', 'FULL_NAME', 'FULL_NAME_BRANCH', 'SHORT_NAME', 'MANUAL'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE activity_product (

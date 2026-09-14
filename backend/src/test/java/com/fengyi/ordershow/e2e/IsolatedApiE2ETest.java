@@ -147,7 +147,7 @@ class IsolatedApiE2ETest {
     long whitelistTask = upload("WHITELIST", "whitelist-valid.xlsx", whitelistWorkbook());
     JsonNode whitelistPreview = task(whitelistTask);
     assertEquals("PREVIEW_READY", whitelistPreview.path("status").asText());
-    assertEquals(6, whitelistPreview.path("inputCount").asInt());
+    assertEquals(8, whitelistPreview.path("inputCount").asInt());
     assertEquals(0, whitelistPreview.path("errorCount").asInt());
     confirmAndAwait(whitelistTask);
 
@@ -328,24 +328,37 @@ class IsolatedApiE2ETest {
     long attendanceTask = upload("ATTENDANCE", "attendance-valid.xlsx", attendanceWorkbook());
     JsonNode preview = data(send(admin, "GET", "/admin/activities/" + activityId + "/imports/" + attendanceTask
         + "/attendance-match-preview", null, null, null));
-    assertEquals(3, preview.path("totalCount").asInt());
-    assertEquals(2, preview.path("matchedCount").asInt());
+    assertEquals(6, preview.path("totalCount").asInt());
+    assertEquals(4, preview.path("matchedCount").asInt());
     assertEquals(0, preview.path("pendingCount").asInt());
-    assertEquals(1, preview.path("unmatchedCount").asInt());
-    assertEquals(2, preview.path("eligibleCustomerCount").asInt());
+    assertEquals(2, preview.path("unmatchedCount").asInt());
+    assertEquals(4, preview.path("eligibleCustomerCount").asInt());
     long whitelistVersionId = preview.path("whitelistVersionId").asLong();
     confirmAndAwait(attendanceTask, "?attendanceWhitelistVersionId=" + whitelistVersionId);
 
     HttpResponse<String> attendees = send(admin, "GET", "/admin/activities/" + activityId + "/attendees", null, null, null);
     assertEquals(200, attendees.statusCode(), attendees.body());
-    assertEquals(3, data(attendees).size());
-    assertEquals(2, count(data(attendees), "matchStatus", "MATCHED"));
+    assertEquals(6, data(attendees).size());
+    assertEquals(4, count(data(attendees), "matchStatus", "MATCHED"));
     assertTrue(attendees.body().contains("13900000006"));
+
+    long nanjingCustomerId = 0;
+    long xuzhouCustomerId = 0;
+    JsonNode sameNameCustomers = data(send(admin, "GET", "/admin/activities/" + activityId
+        + "/customers?customerType=SPECIAL&keyword=%E6%B1%9F%E8%8B%8F%E5%9B%9B%E5%90%88&page=1&size=20", null, null, null));
+    for (JsonNode customer : sameNameCustomers) {
+      if ("南京分".equals(customer.path("branchName").asText())) nanjingCustomerId = customer.path("id").asLong();
+      if ("徐州分".equals(customer.path("branchName").asText())) xuzhouCustomerId = customer.path("id").asLong();
+    }
+    assertTrue(nanjingCustomerId > 0);
+    assertTrue(xuzhouCustomerId > 0);
+    assertTrue(hasAttendee(data(attendees), "南京分", nanjingCustomerId));
+    assertTrue(hasAttendee(data(attendees), "徐州分", xuzhouCustomerId));
 
     ObjectNode allPreview = lotteryPreview("ALL_CUSTOMERS", "ALL", 10, "0");
     JsonNode allCandidates = data(send(admin, "POST", "/admin/activities/" + activityId + "/lottery/candidates/preview",
         allPreview, adminCsrf, null));
-    assertEquals(6, allCandidates.path("candidateCount").asInt());
+    assertEquals(8, allCandidates.path("candidateCount").asInt());
 
     ObjectNode orderPreview = lotteryPreview("VALID_ORDERS", "ALL", 10, "50");
     JsonNode orderCandidates = data(send(admin, "POST", "/admin/activities/" + activityId + "/lottery/candidates/preview",
@@ -355,7 +368,7 @@ class IsolatedApiE2ETest {
     ObjectNode attendeePreview = lotteryPreview("ATTENDEES", "ALL", 10, "0");
     JsonNode attendeeCandidates = data(send(admin, "POST", "/admin/activities/" + activityId + "/lottery/candidates/preview",
         attendeePreview, adminCsrf, null));
-    assertEquals(2, attendeeCandidates.path("candidateCount").asInt());
+    assertEquals(4, attendeeCandidates.path("candidateCount").asInt());
 
     ObjectNode ruleBody = lotteryRuleBody();
     HttpResponse<String> createdRule = send(admin, "POST", "/admin/activities/" + activityId + "/lottery/rules",
@@ -384,7 +397,7 @@ class IsolatedApiE2ETest {
     assertEquals(1, drawResponses.stream().filter(response -> response.statusCode() == 200).count());
     assertEquals(9, drawResponses.stream().filter(response -> response.statusCode() == 409).count());
     JsonNode draw = data(drawResponses.stream().filter(response -> response.statusCode() == 200).findFirst().orElseThrow());
-    assertEquals(2, draw.path("candidateCount").asInt());
+    assertEquals(4, draw.path("candidateCount").asInt());
     assertEquals(1, draw.path("actualWinnerCount").asInt());
     assertEquals(1, draw.path("winners").size());
     assertFalse(draw.toString().contains(GENERAL_PHONE));
@@ -723,6 +736,8 @@ class IsolatedApiE2ETest {
       row(whitelist, "综合客户", "北1区", "北京分", "测试综合四", "AUTOTEST综合经销商四", "测试丁", "13900000004", "确认丙", "13800000003");
       row(whitelist, "特渠专业客户", "", "特渠分", "测试特渠一", "AUTOTEST特渠经销商一", "测试戊", SPECIAL_PHONE, "确认丁", "13800000004");
       row(whitelist, "特渠专业客户", "", "特渠分", "测试特渠二", "AUTOTEST特渠经销商二", "测试己", "13900000005", "确认丁", "13800000004");
+      row(whitelist, "特渠专业客户", "", "南京分", "测试特渠同名南京", "江苏四合商贸发展有限公司", "测试庚", "13900000009", "确认戊", "13800000008");
+      row(whitelist, "特渠专业客户", "", "徐州分", "测试特渠同名徐州", "江苏四合商贸发展有限公司", "测试辛", "13900000010", "确认己", "13800000009");
       workbook.write(out);
       return out.toByteArray();
     }
@@ -735,6 +750,9 @@ class IsolatedApiE2ETest {
       row(attendance, "上海分", "测试甲", "男", "13900000006", "综合经销商", "AUTOTEST综合经销商一");
       row(attendance, "上海分", "测试乙", "女", "13900000007", "综合经销商", "测试综合二");
       row(attendance, "未知分", "测试未知", "男", "13900000008", "综合经销商", "AUTOTEST_不存在经销商");
+      row(attendance, "南京分", "测试庚", "男", "13900000011", "特渠专业经销商", "江苏四合商贸发展有限公司");
+      row(attendance, "徐州分", "测试辛", "女", "13900000012", "特渠专业经销商", "江苏四合商贸发展有限公司");
+      row(attendance, "未知分", "测试错分公司", "男", "13900000013", "特渠专业经销商", "江苏四合商贸发展有限公司");
       workbook.write(out);
       return out.toByteArray();
     }
@@ -761,6 +779,16 @@ class IsolatedApiE2ETest {
     long count = 0;
     for (JsonNode row : rows) if (expected.equals(row.path(field).asText())) count++;
     return count;
+  }
+
+  private boolean hasAttendee(JsonNode rows, String branch, long customerId) {
+    for (JsonNode row : rows) {
+      if (branch.equals(row.path("branchName").asText())
+          && customerId == row.path("activityCustomerId").asLong()
+          && "MATCHED".equals(row.path("matchStatus").asText())
+          && "FULL_NAME_BRANCH".equals(row.path("matchMethod").asText())) return true;
+    }
+    return false;
   }
 
   @Test

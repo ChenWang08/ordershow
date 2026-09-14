@@ -204,7 +204,7 @@ POST 确认 → CONFIRMING → MATERIALIZING → READY_TO_PUBLISH → PUBLISHING
 - 试算返回当前 `whitelistVersionId`、已关联记录数、按 `activity_customer.id` 去重后的资格客户数、待确认数、未关联数及逐行原因。编辑或删除到场预览行后必须重新试算；白名单发布成功后，仍存在的到场预览也必须刷新试算；
 - 管理端把确认入口放在到场预览列表及分页下方，与商品、白名单导入一致；按钮前展示关联摘要并进行二次确认。`PENDING_CONFIRMATION` 与 `UNMATCHED` 不阻断名单发布，只是不进入抽奖候选池；只有 staging 阻断错误、空预览、活动锁定、试算未完成或正在发布时禁用按钮；
 - 确认到场导入时必须回传该 `whitelistVersionId`。确认入口和发布 Worker 都重新比较当前白名单版本；若发生变化，返回 409 `ATTENDANCE_WHITELIST_VERSION_CHANGED`，管理员刷新试算后再提交；
-- 后端先按参会人员类型限定客户通道，再按经销商全称唯一、同分公司经销商简称唯一依次精确匹配，不做模糊匹配；现场手机号只作为联系信息保存，不参与客户身份关联；
+- 后端先按参会人员类型限定客户通道；现场填写分公司时，优先按“客户类型 + 分公司 + 经销商全称”唯一精确匹配，再按“客户类型 + 分公司 + 经销商简称”唯一精确匹配，不做跨分公司回退或模糊匹配。分公司为空时仅兼容唯一的客户类型 + 经销商全称匹配；现场手机号只作为联系信息保存，不参与客户身份关联；
 - 响应返回 `matchStatus`、`matchMethod`、`matchReasonCode`、`matchedDealerName` 和 `lotteryEligible`；
 - `matchStatus` 只有 `MATCHED`、`PENDING_CONFIRMATION`、`UNMATCHED`；当前列表可按状态筛选；
 - 全称与简称指向不同客户或名称存在多个候选时返回 `PENDING_CONFIRMATION`，不能静默选择第一条；没有唯一名称候选时返回 `UNMATCHED`；

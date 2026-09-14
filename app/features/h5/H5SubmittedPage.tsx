@@ -6,7 +6,7 @@ import { money } from "../shared/utils";
 import { priceBreakdown, tierPriceLabel } from "./h5-domain";
 
 export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
-  const { activityClosed, runtimeOrder, runtimeMessage, setStep, orderStatus, customerOrderReadOnly, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, visibleStep, orderViewQuantities, orderViewSelected, orderViewBoxes, orderViewAmount, dealerName, startEditingOrder } = model;
+  const { activityClosed, runtimeOrder, runtimeMessage, setStep, setPreviewProduct, orderStatus, customerOrderReadOnly, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, visibleStep, orderViewQuantities, orderViewSelected, orderViewBoxes, orderViewAmount, dealerName, startEditingOrder } = model;
   return <>
           {visibleStep === "submitted" && (
             <section className="h5-page submitted-page">
@@ -29,7 +29,7 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
                 {orderViewSelected.map((product) => (
                   <div key={product.id}>
                     <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
-                    <p><b>{product.name}</b><span>¥{money(priceBreakdown(product, orderViewQuantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, orderViewQuantities[product.id]) ? ` · ${tierPriceLabel(product, orderViewQuantities[product.id])}` : ""}</span></p>
+                    <p><button type="button" className="order-product-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button><span>¥{money(priceBreakdown(product, orderViewQuantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, orderViewQuantities[product.id]) ? ` · ${tierPriceLabel(product, orderViewQuantities[product.id])}` : ""}</span></p>
                     <strong>× {orderViewQuantities[product.id]}</strong>
                   </div>
                 ))}

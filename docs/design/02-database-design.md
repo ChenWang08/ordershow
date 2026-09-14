@@ -140,7 +140,7 @@ V010 新增草稿表；V011 将早期受 MySQL `Asia/Shanghai` 会话默认值�
 
 抽奖候选的业务主体始终是 `activity_customer`。当候选范围为 `ATTENDEES` 时，只选取当前到场发布版本中 `match_status=MATCHED`、且仍指向当前有效白名单版本的活动客户，并按 `activity_customer.id` 去重；`PENDING_CONFIRMATION` 和 `UNMATCHED` 不进入候选池。
 
-`activity_attendee.match_method` 新关联仅记录名称精确关联依据：`FULL_NAME`、`SHORT_NAME` 或 `MANUAL`；`PHONE` 仅为兼容历史记录保留，新计算不再产生。现场手机号只作联系信息，不参与客户身份关联。Excel 发布不更新上一版本行，而是创建新版本并重新计算全部关联。白名单版本切换后，当前到场版本也必须在同一发布事务中重新计算，不能保留旧白名单关联。
+`activity_attendee.match_method` 新关联仅记录名称精确关联依据：`FULL_NAME_BRANCH`（客户类型 + 分公司 + 经销商全称）、`FULL_NAME`（无分公司范围时的历史/兼容全称匹配）、`SHORT_NAME` 或 `MANUAL`；`PHONE` 仅为兼容历史记录保留，新计算不再产生。现场手机号只作联系信息，不参与客户身份关联。Excel 发布不更新上一版本行，而是创建新版本并重新计算全部关联。白名单版本切换后，当前到场版本也必须在同一发布事务中重新计算，不能保留旧白名单关联。
 
 ### 4.7 审计
 

@@ -64,8 +64,9 @@ export function productRowToProduct(row: ProductImportRow): Product {
 }
 
 export function runtimeProductToProduct(row: RuntimeProduct): Product {
-  const selectedImage = [...row.images].sort((a, b) => Number(b.primary) - Number(a.primary) || a.sortNo - b.sortNo)[0];
-  const imageUrls = selectedImage ? [apiAssetUrl(selectedImage.url)] : [];
+  const imageUrls = [...row.images]
+    .sort((a, b) => Number(b.primary) - Number(a.primary) || a.sortNo - b.sortNo || a.id - b.id)
+    .map((image) => apiAssetUrl(image.url));
   return {
     id: String(row.id),
     name: row.materialName,

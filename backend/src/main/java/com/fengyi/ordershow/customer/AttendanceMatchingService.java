@@ -1,5 +1,6 @@
 package com.fengyi.ordershow.customer;
 
+import com.fengyi.ordershow.common.TextNormalizer;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.List;
@@ -32,14 +33,14 @@ public class AttendanceMatchingService {
     if (customerType == null) return MatchResult.unmatched("CUSTOMER_TYPE_UNKNOWN");
 
     String normalizedDealer = normalize(dealerName);
+    String normalizedBranch = normalize(branchName);
     List<Long> fullNameMatches = normalizedDealer.isEmpty() ? List.of() : jdbc.queryForList("""
         SELECT id FROM activity_customer
         WHERE activity_id = ? AND data_version_id = ? AND customer_type = ?
-          AND normalized_dealer_full_name = ? AND is_active = TRUE
+          AND normalized_branch_name = ? AND normalized_dealer_full_name = ? AND is_active = TRUE
         ORDER BY id
-        """, Long.class, activityId, whitelistVersionId, customerType, normalizedDealer);
+        """, Long.class, activityId, whitelistVersionId, customerType, normalizedBranch, normalizedDealer);
 
-    String normalizedBranch = normalize(branchName);
     List<Long> shortNameMatches = normalizedDealer.isEmpty() || normalizedBranch.isEmpty() ? List.of() : jdbc.queryForList("""
         SELECT id FROM activity_customer
         WHERE activity_id = ? AND data_version_id = ? AND customer_type = ?
@@ -48,16 +49,20 @@ public class AttendanceMatchingService {
         ORDER BY id
         """, Long.class, activityId, whitelistVersionId, customerType, normalizedBranch, normalizedDealer);
 
-    return decideNameMatches(fullNameMatches, shortNameMatches);
+    return decideNameMatches(fullNameMatches, shortNameMatches, !normalizedBranch.isEmpty());
   }
 
   static MatchResult decideNameMatches(List<Long> fullNameMatches, List<Long> shortNameMatches) {
+    return decideNameMatches(fullNameMatches, shortNameMatches, false);
+  }
+
+  static MatchResult decideNameMatches(List<Long> fullNameMatches, List<Long> shortNameMatches, boolean branchScoped) {
     Long fullNameCustomer = unique(fullNameMatches);
     Long shortNameCustomer = unique(shortNameMatches);
     if (fullNameCustomer != null && shortNameCustomer != null && !fullNameCustomer.equals(shortNameCustomer)) {
       return MatchResult.pending("FULL_SHORT_NAME_CONFLICT");
     }
-    if (fullNameCustomer != null) return MatchResult.matched(fullNameCustomer, "FULL_NAME");
+    if (fullNameCustomer != null) return MatchResult.matched(fullNameCustomer, branchScoped ? "FULL_NAME_BRANCH" : "FULL_NAME");
     if (shortNameCustomer != null) return MatchResult.matched(shortNameCustomer, "SHORT_NAME");
     if (fullNameMatches.size() > 1 || shortNameMatches.size() > 1) {
       return MatchResult.pending("MULTIPLE_CANDIDATES");
@@ -87,9 +92,7 @@ public class AttendanceMatchingService {
   }
 
   private static Long unique(List<Long> matches) { return matches.size() == 1 ? matches.getFirst() : null; }
-  private static String normalize(String value) {
-    return value == null ? "" : value.replace("　", "").replaceAll("\\s+", "").toLowerCase();
-  }
+  private static String normalize(String value) { return TextNormalizer.normalize(value); }
   private static String customerType(String participantType) {
     if (participantType == null) return null;
     if (participantType.contains("特渠")) return "SPECIAL";

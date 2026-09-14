@@ -164,7 +164,7 @@ export type AttendanceRow = {
   sourceSheet?: string;
   manuallyEdited?: boolean;
   matchStatus?: "MATCHED" | "PENDING_CONFIRMATION" | "UNMATCHED";
-  matchMethod?: "PHONE" | "FULL_NAME" | "SHORT_NAME" | "MANUAL";
+  matchMethod?: "PHONE" | "FULL_NAME" | "FULL_NAME_BRANCH" | "SHORT_NAME" | "MANUAL";
   matchReasonCode?: string;
   matchedDealerName?: string;
   lotteryEligible?: boolean;

@@ -39,9 +39,9 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
               <div className="product-list">
                 {visibleProducts.map((product) => (
                   <article className="product-card" key={product.id}>
-                    <button type="button" className="product-image product-image-button" disabled={!product.imageUrls?.length} aria-label={`查看${product.name}商品图片`} onClick={() => product.imageUrls?.length && setPreviewProduct(product)}><ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} /></button>
-                    <div className="product-info">
-                      <h3>{product.name}</h3>
+                  <button type="button" className="product-image product-image-button" aria-label={`查看${product.name}商品详情`} onClick={() => setPreviewProduct(product)}><ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} /></button>
+                  <div className="product-info">
+                      <h3><button type="button" className="product-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button></h3>
                       {product.description && <p className="product-description" title={product.description}>{product.description}</p>}
                       <div className="product-action">
                         <div className="product-price-block"><strong>{product.isOrderable ? <>¥{money(priceBreakdown(product, quantities[product.id] || 0).displayPrice)}<small>/箱</small></> : "价格待完善"}</strong>{product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small>{tierPriceLabel(product, quantities[product.id] || 0)}</small>}</div>
@@ -75,7 +75,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                     <article key={product.id}>
                       <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
                       <div className="cart-item-info">
-                        <b>{product.name}</b>
+                        <button type="button" className="cart-item-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button>
                         <span>¥{money(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span>
                         <strong>小计 ¥{money(priceBreakdown(product, quantities[product.id]).amount)}</strong>
                       </div>

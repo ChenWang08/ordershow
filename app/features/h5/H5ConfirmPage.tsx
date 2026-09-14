@@ -6,7 +6,7 @@ import { money } from "../shared/utils";
 import { priceBreakdown, tierPriceLabel } from "./h5-domain";
 
 export function H5ConfirmPage({ model }: { model: H5OrderModel }) {
-  const { runtimeBusy, runtimeMessage, orderNeedsRefresh, setStep, orderStatus, customerOrderReadOnly, quantities, visibleStep, selected, totalAmount, identityBranch, identityLabel, dealerName, submitOrder, reloadLatestOrder } = model;
+  const { runtimeBusy, runtimeMessage, orderNeedsRefresh, setStep, setPreviewProduct, orderStatus, customerOrderReadOnly, quantities, visibleStep, selected, totalAmount, identityBranch, identityLabel, dealerName, submitOrder, reloadLatestOrder } = model;
   return <>
           {visibleStep === "confirm" && (
             <section className="h5-page confirm-page">
@@ -16,7 +16,7 @@ export function H5ConfirmPage({ model }: { model: H5OrderModel }) {
                 {selected.map((product) => (
                   <div key={product.id}>
                     <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
-                    <p><b>{product.name}</b><span>¥{money(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span></p>
+                    <p><button type="button" className="order-product-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button><span>¥{money(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span></p>
                     <strong>× {quantities[product.id]}</strong>
                   </div>
                 ))}

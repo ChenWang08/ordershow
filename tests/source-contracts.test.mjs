@@ -166,7 +166,7 @@ test("keeps product imports as independent full-replacement batches", async () =
   assert.doesNotMatch(prototype, /confirmedZipIds|savedProductKey|sameProduct/);
   assert.match(prototype, /选择此图/);
   assert.match(prototype, /排除候选/);
-  assert.match(prototype, /每个商品只保留一张图片/);
+  assert.match(prototype, /最多配置 \$\{MAX_PRODUCT_IMAGES\} 张/);
   assert.match(productImages, /一个商品名称只能有一张图/);
   assert.match(importService, /IMAGE_DECISION_MULTIPLE_IMAGES/);
   assert.match(productService, /sameMaterialNameProducts/);

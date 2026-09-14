@@ -17,6 +17,15 @@ class AttendanceMatchingServiceTest {
   }
 
   @Test
+  void prefersUniqueFullNameMatchWithinBranch() {
+    var result = AttendanceMatchingService.decideNameMatches(List.of(101L), List.of(), true);
+
+    assertEquals("MATCHED", result.status());
+    assertEquals(101L, result.customerId());
+    assertEquals("FULL_NAME_BRANCH", result.method());
+  }
+
+  @Test
   void fallsBackToUniqueBranchAndShortNameMatch() {
     var result = AttendanceMatchingService.decideNameMatches(List.of(), List.of(202L));
 
