@@ -7,7 +7,32 @@
 .phone-screen { position: relative; height: 100%; overflow: hidden; border-radius: 33px; background: #f9f2e6; }
 .h5-page { position: relative; z-index: 2; height: 100%; overflow-y: auto; scrollbar-width: none; }
 .h5-page::-webkit-scrollbar { display: none; }
-.verify-page { padding: 25px 23px 118px; color: #fff8e5; background: linear-gradient(155deg, #9f171b 0%, #b82525 43%, #6e0f11 100%); }
+.verify-page {
+  padding: 25px 23px 118px;
+  color: #fff8e5;
+  background-color: #811520;
+  background-image: url("/order-entry-backdrop.svg");
+  background-size: 100% 100%;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.verify-page .mini-brand::after {
+  content: "";
+  width: 58px;
+  height: 1px;
+  margin-left: 6px;
+  align-self: center;
+  background: linear-gradient(90deg, #e9bc75a6, transparent);
+}
+.verify-page .h5-hero-copy .eyebrow { text-shadow: 0 2px 12px #5c101940; }
+.verify-page .verify-card {
+  border-color: #f0d5a3;
+  background: linear-gradient(135deg, #fffaf0, #fcf1df);
+  box-shadow: 0 20px 45px #470a2040, 0 0 55px #f7be6f14, inset 0 0 0 4px #ffffff70;
+}
+.verify-page .channel-options > button { border-color: #e5c99e; }
+.verify-page .channel-options > button:active, .verify-page .region-options > button:active { transform: scale(.98); background: #f9e8cd; }
+.verify-page button:focus-visible { outline: 2px solid #d5a34f; outline-offset: 3px; }
 .mini-brand { display: flex; align-items: baseline; gap: 9px; position: relative; z-index: 3; }
 .mini-brand b { font-family: serif; color: var(--gold-400); letter-spacing: .12em; }
 .mini-brand span { padding-left: 9px; border-left: 1px solid rgba(255,255,255,.4); font-size: 9px; opacity: .7; }
@@ -80,6 +105,20 @@
 .product-image-button:disabled { opacity: 1; }
 .product-art { display: block; width: 100%; height: 100%; background-image: url("/product-atlas.png"); background-repeat: no-repeat; background-size: 205% 205%; }
 .product-photo { object-fit: contain; background-color: #fffaf5; background-image: none; }
+.product-image-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 6px;
+  color: #929796;
+  border: 1px solid #e2e4e1;
+  background: linear-gradient(145deg, #f2f3f1 0%, #ffffff 100%);
+  background-image: repeating-linear-gradient(135deg, transparent 0 13px, rgba(132, 140, 136, .035) 13px 14px), linear-gradient(145deg, #f2f3f1 0%, #ffffff 100%);
+}
+.product-image-placeholder-icon { width: 30px; height: 27px; fill: none; stroke: #a7adaa; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
+.product-image-placeholder-icon circle { fill: #bdc2bf; stroke: none; }
+.product-image-placeholder b { color: #979c99; font-size: 10px; font-weight: 500; letter-spacing: .04em; }
 .atlas-0 { background-position: 0 0; }.atlas-1 { background-position: 100% 0; }.atlas-2 { background-position: 0 100%; }.atlas-3 { background-position: 100% 100%; }
 .gift-badge { position: absolute; top: 5px; left: 5px; padding: 2px 5px; color: #fff; border-radius: 5px; background: #b82422; font-size: 8px; }
 .product-info { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
