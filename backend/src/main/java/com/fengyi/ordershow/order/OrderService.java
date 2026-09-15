@@ -9,12 +9,12 @@ import com.fengyi.ordershow.common.PageResponse;
 import com.fengyi.ordershow.dashboard.DashboardService;
 import com.fengyi.ordershow.security.AdminPrincipal;
 import static com.fengyi.ordershow.order.OrderPricingCalculator.calculatePrice;
+import static com.fengyi.ordershow.order.OrderPricingCalculator.calculateTons;
 import static com.fengyi.ordershow.order.OrderPricingCalculator.samePriceValue;
 
 import com.fengyi.ordershow.order.OrderPricingCalculator.PricingResult;
 import com.fengyi.ordershow.security.H5Principal;
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -104,7 +104,7 @@ public class OrderService {
     for (ProductSnapshot product : products) {
       long quantity = quantities.get(product.id());
       PricingResult pricing = calculatePrice(product.casePrice(), product.priceTierMinQuantity(), product.priceTierCasePrice(), product.priceTierPricingMode(), quantity);
-      BigDecimal lineTons = product.tonCaseFactor() == null ? null : BigDecimal.valueOf(quantity).divide(product.tonCaseFactor(), 6, RoundingMode.HALF_UP);
+       BigDecimal lineTons = calculateTons(quantity, product.tonCaseFactor());
       items.add(new CalculatedItem(++line, product, quantity, pricing, lineTons));
       totalQuantity += quantity;
       totalAmount = totalAmount.add(pricing.lineAmount());
@@ -324,8 +324,7 @@ public class OrderService {
       long quantity = quantities.get(product.id());
       PricingResult pricing = calculatePrice(product.casePrice(), product.priceTierMinQuantity(),
           product.priceTierCasePrice(), product.priceTierPricingMode(), quantity);
-      BigDecimal lineTons = product.tonCaseFactor() == null ? null
-          : BigDecimal.valueOf(quantity).divide(product.tonCaseFactor(), 6, RoundingMode.HALF_UP);
+       BigDecimal lineTons = calculateTons(quantity, product.tonCaseFactor());
       items.add(new CalculatedItem(++line, product, quantity, pricing, lineTons));
       totalQuantity += quantity;
       totalAmount = totalAmount.add(pricing.lineAmount());

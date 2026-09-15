@@ -12,6 +12,11 @@ final class OrderPricingCalculator {
         : new BigDecimal(first.toString()).compareTo(new BigDecimal(second.toString())) == 0;
   }
 
+  static BigDecimal calculateTons(long quantity, BigDecimal tonCaseFactor) {
+    return tonCaseFactor == null ? null
+        : BigDecimal.valueOf(quantity).divide(tonCaseFactor, 6, RoundingMode.HALF_UP);
+  }
+
   static PricingResult calculatePrice(BigDecimal basePrice, Long tierMinQuantity, BigDecimal tierCasePrice, String pricingMode, long quantity) {
     if (tierMinQuantity == null || tierCasePrice == null) {
       return new PricingResult(basePrice, basePrice, quantity, null, null, 0, null, null,

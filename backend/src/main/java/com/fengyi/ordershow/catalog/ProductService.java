@@ -4,6 +4,7 @@ import com.fengyi.ordershow.catalog.ProductCatalogReader.VersionSource;
 
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.DomainException;
+import com.fengyi.ordershow.order.TonnageSyncService;
 import com.fengyi.ordershow.security.H5Principal;
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
@@ -24,13 +25,16 @@ public class ProductService {
   private final ProductCatalogReader catalog;
   private final ProductImageService images;
   private final com.fengyi.ordershow.order.PriceSyncService prices;
+  private final TonnageSyncService tonnage;
 
-  public ProductService(JdbcTemplate jdbc, ActivityService activities, ProductCatalogReader catalog, ProductImageService images, com.fengyi.ordershow.order.PriceSyncService prices) {
+  public ProductService(JdbcTemplate jdbc, ActivityService activities, ProductCatalogReader catalog, ProductImageService images,
+                        com.fengyi.ordershow.order.PriceSyncService prices, TonnageSyncService tonnage) {
     this.jdbc = jdbc;
     this.activities = activities;
     this.catalog = catalog;
     this.images = images;
     this.prices = prices;
+    this.tonnage = tonnage;
   }
 
   public List<ProductView> h5Products(String activityCode, H5Principal customer, String rebateStatus, String keyword) { return catalog.h5Products(activityCode, customer, rebateStatus, keyword); }
@@ -86,6 +90,7 @@ public class ProductService {
       if (!samePrice(casePrice,current.casePrice()) || !sameTier(priceTier,current.priceTier())) {
         prices.sync(activityId,productId,casePrice,priceTier==null?null:priceTier.minQuantity(),priceTier==null?null:priceTier.casePrice(),priceTier==null?null:priceTier.pricingMode());
       }
+      if (!samePrice(factor, current.tonCaseFactor())) tonnage.sync(activityId, productId, factor);
     } catch (DuplicateKeyException exception) {
       throw DomainException.conflict("PRODUCT_EXISTS", "当前商品目录已存在相同客户类型、返利类型和商品名称");
     }
