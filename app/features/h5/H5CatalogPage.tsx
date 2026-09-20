@@ -6,7 +6,7 @@ import { money } from "../shared/utils";
 import { priceBreakdown, tierPriceLabel } from "./h5-domain";
 
 export function H5CatalogPage({ model }: { model: H5OrderModel }) {
-  const { activityClosed, setStep, setRebateFilter, line, setLine, search, setSearch, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, setCancelConfirmOpen, quantities, setQuantities, visibleStep, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, selected, totalBoxes, totalAmount, importedIdentity, identityLabel, dealerName, displayBranch, displayPhone, changeQty, draftMessage } = model;
+  const { activityClosed, setStep, setRebateFilter, line, setLine, search, setSearch, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, setCancelConfirmOpen, quantities, setQuantities, visibleStep, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selectedLineGroups, selected, totalBoxes, totalAmount, importedIdentity, identityLabel, dealerName, displayBranch, displayPhone, changeQty, draftMessage } = model;
   return <>
           {visibleStep === "order" && (
             <section className="h5-page order-page">
@@ -37,7 +37,10 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                 ))}
               </div>
               <div className="product-list">
-                {visibleProducts.map((product) => (
+                {visibleProductGroups.map((group) => (
+                  <section className="product-line-group" key={group.line}>
+                  <header className="product-line-heading"><b>{group.line}</b><span>{group.items.length} 种商品</span></header>
+                  {group.items.map((product) => (
                   <article className="product-card" key={product.id}>
                   <button type="button" className="product-image product-image-button" aria-label={`查看${product.name}商品详情`} onClick={() => setPreviewProduct(product)}><ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} /></button>
                   <div className="product-info">
@@ -53,6 +56,8 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                       </div>
                     </div>
                   </article>
+                  ))}
+                  </section>
                 ))}
                 {visibleProducts.length === 0 && <div className="empty-state">没有符合条件的商品</div>}
               </div>
@@ -71,11 +76,15 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
               <section className="cart-sheet" aria-label="已选商品明细">
                 <header><div><b>已选商品</b><span>{selected.length} 种 · {totalBoxes} 箱</span></div><button disabled={!selected.length} onClick={() => setQuantities({})}>清空</button></header>
                 <div className="cart-sheet-list">
-                  {selected.map((product) => (
+                  {selectedLineGroups.map((group) => (
+                    <section className="cart-line-group" key={group.line}>
+                    <header className="order-line-group-heading"><b>{group.line}</b><span>{group.items.reduce((sum, item) => sum + item.quantity, 0)} 箱</span></header>
+                    {group.items.map(({ product }) => (
                     <article key={product.id}>
                       <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
                       <div className="cart-item-info">
                         <button type="button" className="cart-item-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button>
+                        <small className="product-line-label">产线：{group.line}</small>
                         <span>¥{money(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span>
                         <strong>小计 ¥{money(priceBreakdown(product, quantities[product.id]).amount)}</strong>
                       </div>
@@ -88,6 +97,8 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                         </div>
                       </div>
                     </article>
+                    ))}
+                    </section>
                   ))}
                   {!selected.length && <div className="cart-empty">还没有选择商品</div>}
                 </div>

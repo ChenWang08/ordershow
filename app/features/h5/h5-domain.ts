@@ -91,7 +91,22 @@ export function runtimeProductToProduct(row: RuntimeProduct): Product {
   };
 }
 
-export type SubmittedOrderItem = { product: Product; quantity: number };
+export type SubmittedOrderItem = { product: Product; quantity: number; lineAmount?: number };
+
+export function productLineLabel(line: string | null | undefined) {
+  return line?.trim() || "未分类";
+}
+
+export function groupByProductLine<T>(items: readonly T[], getLine: (item: T) => string | null | undefined) {
+  const groups = new Map<string, T[]>();
+  items.forEach((item) => {
+    const line = productLineLabel(getLine(item));
+    const group = groups.get(line);
+    if (group) group.push(item);
+    else groups.set(line, [item]);
+  });
+  return Array.from(groups, ([line, groupedItems]) => ({ line, items: groupedItems }));
+}
 
 export function priceBreakdown(product: Product, quantity: number) {
   if (product.tierMinQuantity == null || product.tierCasePrice == null) {
@@ -106,6 +121,20 @@ export function priceBreakdown(product: Product, quantity: number) {
   const applied = quantity >= product.tierMinQuantity;
   return { amount: quantity * (applied ? product.tierCasePrice : product.price),
     displayPrice: applied ? product.tierCasePrice : product.price, baseQuantity: applied ? 0 : quantity, tierQuantity: applied ? quantity : 0 };
+}
+
+export function summarizeOrderLineAmounts(items: readonly SubmittedOrderItem[]) {
+  const summaries = new Map<string, { line: string; amount: number }>();
+  items.forEach((item) => {
+    const line = productLineLabel(item.product.line);
+    const summary = summaries.get(line) ?? { line, amount: 0 };
+    const amount = typeof item.lineAmount === "number" && Number.isFinite(item.lineAmount)
+      ? item.lineAmount
+      : priceBreakdown(item.product, item.quantity).amount;
+    summary.amount += amount;
+    summaries.set(line, summary);
+  });
+  return Array.from(summaries.values());
 }
 
 export function tierPriceLabel(product: Product, quantity: number) {

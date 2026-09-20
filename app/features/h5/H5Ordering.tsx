@@ -32,7 +32,7 @@ export function H5Ordering(props: H5Props) {
           <H5SubmittedPage model={model} />
           <H5ResultPages model={model} />
           {previewProduct && <H5ProductDetailSheet product={previewProduct} onClose={() => setPreviewProduct(null)} onViewImages={previewProduct.imageUrls?.length ? () => { setImagePreviewProduct(previewProduct); setPreviewProduct(null); } : undefined} />}
-          {imagePreviewProduct && <ProductImageViewer contained allowZoom={false} productName={imagePreviewProduct.name} images={(imagePreviewProduct.imageUrls ?? []).map((url, index) => ({ url, fileName: `${imagePreviewProduct.name} · 第 ${index + 1} 张` }))} onClose={() => setImagePreviewProduct(null)} />}
+          {imagePreviewProduct && <ProductImageViewer contained productName={imagePreviewProduct.name} images={(imagePreviewProduct.imageUrls ?? []).map((url, index) => ({ url, fileName: `${imagePreviewProduct.name} · 第 ${index + 1} 张` }))} onClose={() => setImagePreviewProduct(null)} />}
         </div>
       </div>
     </div>

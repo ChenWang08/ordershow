@@ -6,7 +6,7 @@ import { money } from "../shared/utils";
 import { priceBreakdown, tierPriceLabel } from "./h5-domain";
 
 export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
-  const { activityClosed, runtimeOrder, runtimeMessage, setStep, setPreviewProduct, orderStatus, customerOrderReadOnly, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, visibleStep, orderViewQuantities, orderViewSelected, orderViewBoxes, orderViewAmount, dealerName, startEditingOrder } = model;
+  const { activityClosed, runtimeOrder, runtimeMessage, setStep, setPreviewProduct, orderStatus, customerOrderReadOnly, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, visibleStep, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, dealerName, startEditingOrder } = model;
   return <>
           {visibleStep === "submitted" && (
             <section className="h5-page submitted-page">
@@ -26,16 +26,22 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
                 <p><span>经销商</span><b>{dealerName}</b></p>
               </div>
               <div className="confirm-list submitted-list">
-                {orderViewSelected.map((product) => (
+                {orderViewLineGroups.map((group) => (
+                  <section className="submitted-line-group" key={group.line}>
+                  <header className="order-line-group-heading"><b>{group.line}</b><span>{group.items.length} 种 · {group.items.reduce((sum, item) => sum + item.quantity, 0)} 箱</span></header>
+                  {group.items.map(({ product, quantity }) => (
                   <div key={product.id}>
                     <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
-                    <p><button type="button" className="order-product-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button><span>¥{money(priceBreakdown(product, orderViewQuantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, orderViewQuantities[product.id]) ? ` · ${tierPriceLabel(product, orderViewQuantities[product.id])}` : ""}</span></p>
-                    <strong>× {orderViewQuantities[product.id]}</strong>
+                    <p><button type="button" className="order-product-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button><small className="product-line-label">产线：{group.line}</small><span>¥{money(priceBreakdown(product, orderViewQuantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, orderViewQuantities[product.id]) ? ` · ${tierPriceLabel(product, orderViewQuantities[product.id])}` : ""}</span></p>
+                    <strong>× {quantity}</strong>
                   </div>
+                  ))}
+                  </section>
                 ))}
               </div>
               <div className="summary-card">
                 <p className="grand-total"><span>订单总金额</span><b>¥{money(runtimeOrder?.totalAmount ?? orderViewAmount)}</b></p>
+                {orderViewLineSummaries.map((summary) => <p className="line-amount-row" key={summary.line}><span>产线：{summary.line}</span><b>¥{money(summary.amount)}</b></p>)}
                 <p><span>订货数量</span><b>{orderViewBoxes} 箱 · {orderViewSelected.length} 种商品</b></p>
               </div>
               <div className="submitted-note">{orderStatus === "voided" ? "该订单已由管理员作废，不计入有效订单、金额统计和抽奖资格；客户侧仅可查看。" : activityClosed ? "活动已截止，当前订单仅可查看，不能修改、取消或重新提交。" : orderStatus === "withdrawn" ? "该订单当前不计入有效订单、金额统计和抽奖资格；截止前可点击“继续订货”恢复提交。" : "订单状态会同步至管理后台和活动看板；如需调整商品或数量，请点击“修改订单”。"}</div>

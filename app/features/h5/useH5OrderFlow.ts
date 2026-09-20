@@ -5,7 +5,7 @@ import { ApiError, loadH5Order, loadH5OrderDraft, loadH5Products, saveH5Order, v
 import type { WhitelistRow } from "../../domain/import-domain";
 import { maskPhone, normalizePhone } from "../shared/utils";
 import { useH5Draft } from "./useH5Draft";
-import { productRowToProduct, runtimeProductToProduct, priceBreakdown, h5QuantitySignature, h5OrderItems, type H5Props, type H5Step, type H5Channel, type H5OrderStatus, type Product, type RebateFilter, type SubmittedOrderItem } from "./h5-domain";
+import { productRowToProduct, runtimeProductToProduct, priceBreakdown, groupByProductLine, summarizeOrderLineAmounts, h5QuantitySignature, h5OrderItems, type H5Props, type H5Step, type H5Channel, type H5OrderStatus, type Product, type RebateFilter, type SubmittedOrderItem } from "./h5-domain";
 
 export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelistRows, runtimeActivity }: H5Props) {
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
@@ -77,10 +77,16 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
         || (p.materialCode ?? "").toLocaleLowerCase("zh-CN").includes(normalizedProductSearch)),
   );
   const selected = catalog.filter((p) => (quantities[p.id] || 0) > 0);
+  const selectedOrderItems = selected.map((product) => ({ product, quantity: quantities[product.id] }));
+  const visibleProductGroups = groupByProductLine(visibleProducts, (product) => product.line);
+  const selectedLineGroups = groupByProductLine(selectedOrderItems, (item) => item.product.line);
+  const selectedLineSummaries = summarizeOrderLineAmounts(selectedOrderItems);
   const totalBoxes = selected.reduce((sum, p) => sum + quantities[p.id], 0);
   const totalAmount = selected.reduce((sum, p) => sum + priceBreakdown(p, quantities[p.id]).amount, 0);
   const orderViewQuantities = submittedQuantities;
   const orderViewSelected = submittedItems.map((item) => item.product);
+  const orderViewLineGroups = groupByProductLine(submittedItems, (item) => item.product.line);
+  const orderViewLineSummaries = summarizeOrderLineAmounts(submittedItems);
   const orderViewBoxes = orderViewSelected.reduce((sum, p) => sum + orderViewQuantities[p.id], 0);
   const orderViewAmount = orderViewSelected.reduce((sum, p) => sum + priceBreakdown(p, orderViewQuantities[p.id]).amount, 0);
   const importedIdentity = verifiedIdentity ?? submittedIdentity;
@@ -109,13 +115,15 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
       const id = String(item.productId);
       itemQuantities[id] = item.quantity;
       const catalogProduct = liveCatalog.find((product) => product.id === id);
+      const orderLine = item.productLine?.trim() || catalogProduct?.line || "未分类";
       const snapshot = { price: Number(item.baseCasePrice ?? item.casePrice), tierMinQuantity: item.tierMinQuantity,
         tierCasePrice: item.tierCasePrice == null ? undefined : Number(item.tierCasePrice), tierPricingMode: item.pricingMode };
-      const found = catalogProduct ? { ...catalogProduct, ...snapshot } : {
-        id, name: item.materialName, line: item.productLine || "未分类", spec: item.specification || "", ...snapshot,
+      const found = catalogProduct ? { ...catalogProduct, line: orderLine, ...snapshot } : {
+        id, name: item.materialName, line: orderLine, spec: item.specification || "", ...snapshot,
         rebate: true, gift: false, atlas: 0, customerType: "全部" as const, branchScope: [], status: "有效" as const, isOrderable: true,
       };
-      return { product: found, quantity: item.quantity };
+      const lineAmount = item.lineAmount == null ? undefined : Number(item.lineAmount);
+      return { product: found, quantity: item.quantity, lineAmount: Number.isFinite(lineAmount) ? lineAmount : undefined };
     });
     setQuantities(itemQuantities); setSubmittedQuantities(itemQuantities); setSubmittedItems(items);
     setOrderStatus(order.status === "WITHDRAWN" ? "withdrawn" : order.status === "VOIDED" ? "voided" : "submitted");
@@ -282,7 +290,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
                 } catch { setRuntimeMessage("最新订单加载失败，请重试。"); }
                 finally { setRuntimeBusy(false); }
                 };
-  return { activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, selected, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
+  return { activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
 }
 
 export type H5OrderModel = ReturnType<typeof useH5OrderFlow>;
