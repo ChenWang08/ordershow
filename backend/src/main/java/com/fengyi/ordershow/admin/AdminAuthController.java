@@ -53,6 +53,9 @@ public class AdminAuthController {
   @PostMapping("/auth/change-password")
   ApiResponse<Boolean> changePassword(@Valid @RequestBody ChangePasswordRequest body, HttpServletRequest request) {
     AdminPrincipal principal = auth.requireAdmin(request);
+    if ("DEPARTMENT_ADMIN".equals(principal.roleCode())) {
+      throw DomainException.forbidden("DEPARTMENT_PASSWORD_MANAGED", "部门账号密码由超级管理员统一管理");
+    }
     String currentHash = jdbc.queryForObject("SELECT password_hash FROM admin_user WHERE id = ?", String.class, principal.id());
     if (currentHash == null || !passwordEncoder.matches(body.currentPassword(), currentHash)) {
       throw DomainException.badRequest("CURRENT_PASSWORD_INCORRECT", "当前密码不正确");

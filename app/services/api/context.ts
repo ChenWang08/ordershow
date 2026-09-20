@@ -1,5 +1,7 @@
 export const ACTIVITY_CODE = process.env.NEXT_PUBLIC_ACTIVITY_CODE || "2026-mid-autumn";
 const ADMIN_ACTIVITY_PREFERENCE_KEY = "order-show.admin.activity-code";
+let adminPreferenceOwner: number | null = null;
+export function setAdminPreferenceOwner(id: number | null) { adminPreferenceOwner = id; }
 
 let activeActivityCode = ACTIVITY_CODE;
 const activeActivityListeners = new Set<() => void>();
@@ -17,14 +19,14 @@ export function getActiveActivityCode() {
 }
 
 export function getPreferredAdminActivityCode() {
-  if (typeof window === "undefined") return "";
-  return window.localStorage.getItem(ADMIN_ACTIVITY_PREFERENCE_KEY)?.trim() || "";
+  if (typeof window === "undefined" || adminPreferenceOwner === null) return "";
+  return window.localStorage.getItem(`${ADMIN_ACTIVITY_PREFERENCE_KEY}.${adminPreferenceOwner}`)?.trim() || "";
 }
 
 export function setPreferredAdminActivityCode(activityCode: string) {
   const normalized = activityCode.trim();
-  if (!normalized || typeof window === "undefined") return;
-  window.localStorage.setItem(ADMIN_ACTIVITY_PREFERENCE_KEY, normalized);
+  if (!normalized || typeof window === "undefined" || adminPreferenceOwner === null) return;
+  window.localStorage.setItem(`${ADMIN_ACTIVITY_PREFERENCE_KEY}.${adminPreferenceOwner}`, normalized);
 }
 
 /** Subscribe to activity changes for components that must wait before loading data. */
@@ -36,4 +38,3 @@ export function subscribeActiveActivityCode(listener: () => void) {
 export function activeActivityPath() {
   return encodeURIComponent(activeActivityCode);
 }
-

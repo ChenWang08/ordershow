@@ -17,9 +17,9 @@ export async function loadAdminDepartments() {
   return (await api<Envelope<AdminDepartment[]>>("/admin/departments")).data;
 }
 
-export async function createAdminDepartment(name: string) {
+export async function createAdminDepartment(input: { name: string; username: string; password: string }) {
   return (await api<Envelope<AdminDepartment>>("/admin/departments", {
-    method: "POST", body: JSON.stringify({ name }),
+    method: "POST", body: JSON.stringify(input),
   }, "admin")).data;
 }
 
@@ -33,13 +33,13 @@ export async function loadAdminUsers() {
   return (await api<Envelope<AdminUser[]>>("/admin/users")).data;
 }
 
-export async function createDepartmentUser(input: { username: string; displayName: string; initialPassword: string; departmentId: number }) {
-  return (await api<Envelope<AdminUser>>("/admin/users", {
+export async function createDepartmentUser(departmentId: number, input: { username: string; password: string }) {
+  return (await api<Envelope<AdminUser>>(`/admin/departments/${departmentId}/account`, {
     method: "POST", body: JSON.stringify(input),
   }, "admin")).data;
 }
 
-export async function updateAdminUser(id: number, changes: { displayName?: string; status?: "ACTIVE" | "DISABLED"; initialPassword?: string }) {
+export async function updateAdminUser(id: number, changes: { status?: "ACTIVE" | "DISABLED"; password?: string }) {
   return (await api<Envelope<AdminUser>>(`/admin/users/${id}`, {
     method: "PATCH", body: JSON.stringify(changes),
   }, "admin")).data;

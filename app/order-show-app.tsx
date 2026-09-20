@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ActivityWorkspaceProvider, useActivityWorkspace } from "./features/workspace/ActivityWorkspace";
 import { AdminSurface, H5Surface, LotterySurface } from "./features/workspace/SurfaceConnections";
 import { OrderDashboard, RankingBoard, ReportBoard } from "./features/screens/ScreenBoards";
+import { AdminEntry } from "./features/admin/AdminEntry";
 
 type Surface = "h5" | "dashboard" | "ranking" | "report" | "lottery" | "admin";
 type OrderShowAppProps = {
@@ -12,6 +13,7 @@ type OrderShowAppProps = {
 };
 
 export function OrderShowApp(props: OrderShowAppProps = {}) {
+  if (props.initialSurface === "admin" && props.showSurfaceTabs === false) return <main className="prototype-root surface-admin"><nav className="prototype-nav"><div className="prototype-title"><span>金</span><p><b>订购会管理平台</b><small>多活动运营 · 部门管理</small></p></div></nav><div className="prototype-canvas"><AdminEntry /></div></main>;
   return <ActivityWorkspaceProvider><OrderShowContent {...props} /></ActivityWorkspaceProvider>;
 }
 

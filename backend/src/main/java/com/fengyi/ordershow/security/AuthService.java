@@ -48,7 +48,8 @@ public class AuthService {
   public LoginResult login(String username, String password, HttpServletRequest request, HttpServletResponse response) {
     List<Map<String, Object>> users = jdbc.queryForList("""
         SELECT u.id, u.username, u.display_name, u.password_hash, u.role_code, u.department_id,
-               d.department_name, u.must_change_password
+               d.department_name,
+               CASE WHEN u.role_code = 'SUPER_ADMIN' THEN u.must_change_password ELSE FALSE END AS must_change_password
         FROM admin_user u
         LEFT JOIN department d ON d.id = u.department_id
         WHERE u.username = ? AND u.status = 'ACTIVE'
@@ -69,15 +70,16 @@ public class AuthService {
     jdbc.update("UPDATE admin_user SET last_login_at = UTC_TIMESTAMP(3) WHERE id = ?", id);
     addCookie(response, ADMIN_COOKIE, token, true, Duration.ofHours(properties.adminSessionHours()));
     addCookie(response, ADMIN_CSRF_COOKIE, csrf, false, Duration.ofHours(properties.adminSessionHours()));
+    boolean mustChangePassword = booleanValue(user.get("must_change_password"));
     AdminPrincipal principal = new AdminPrincipal(id, user.get("username").toString(), user.get("display_name").toString(),
         user.get("role_code").toString(), nullableLong(user.get("department_id")),
         user.get("department_name") == null ? null : user.get("department_name").toString(),
-        (Boolean) user.get("must_change_password"));
+        mustChangePassword);
     request.setAttribute(ADMIN_REQUEST_ATTRIBUTE, principal);
     return new LoginResult(id, user.get("username").toString(), user.get("display_name").toString(),
         user.get("role_code").toString(), nullableLong(user.get("department_id")),
         user.get("department_name") == null ? null : user.get("department_name").toString(),
-        (Boolean) user.get("must_change_password"), csrf);
+        mustChangePassword, csrf);
   }
 
   @Transactional
@@ -94,7 +96,8 @@ public class AuthService {
     String token = cookie(request, ADMIN_COOKIE);
     if (token == null) throw DomainException.unauthorized("请先登录管理后台");
     List<AdminPrincipal> rows = jdbc.query("""
-        SELECT u.id, u.username, u.display_name, u.role_code, u.department_id, d.department_name, u.must_change_password
+        SELECT u.id, u.username, u.display_name, u.role_code, u.department_id, d.department_name,
+               CASE WHEN u.role_code = 'SUPER_ADMIN' THEN u.must_change_password ELSE FALSE END AS must_change_password
         FROM admin_session s JOIN admin_user u ON u.id = s.admin_user_id
         LEFT JOIN department d ON d.id = u.department_id
         WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > UTC_TIMESTAMP(3) AND u.status = 'ACTIVE'
@@ -265,6 +268,13 @@ public class AuthService {
 
   private static Long nullableLong(Object value) {
     return value == null ? null : ((Number) value).longValue();
+  }
+
+  private static boolean booleanValue(Object value) {
+    if (value == null) return false;
+    if (value instanceof Boolean booleanValue) return booleanValue;
+    if (value instanceof Number number) return number.longValue() != 0;
+    return Boolean.parseBoolean(value.toString());
   }
 
   public record LoginResult(long id, String username, String displayName, String roleCode,

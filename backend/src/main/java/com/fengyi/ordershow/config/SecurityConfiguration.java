@@ -74,7 +74,7 @@ public class SecurityConfiguration implements WebMvcConfigurer {
       @Override
       public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
         var admin = authService.requireAdmin(request);
-        if (admin.mustChangePassword() && !request.getRequestURI().endsWith("/admin/auth/change-password")
+        if (admin.isSuperAdmin() && admin.mustChangePassword() && !request.getRequestURI().endsWith("/admin/auth/change-password")
             && !request.getRequestURI().endsWith("/admin/auth/logout") && !HttpMethod.GET.matches(request.getMethod())) {
           throw com.fengyi.ordershow.common.DomainException.forbidden("PASSWORD_CHANGE_REQUIRED", "首次登录请先修改初始密码");
         }

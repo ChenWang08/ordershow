@@ -2,6 +2,11 @@ import { api } from "./client";
 import { activeActivityPath } from "./context";
 import type { DashboardData, DashboardReport, Envelope } from "./types";
 
+export async function loadAdminDashboard(activityId: number, filters: { customerType?: string } = {}) {
+  const query = new URLSearchParams(filters);
+  return (await api<Envelope<DashboardData>>(`/admin/activities/${activityId}/ranking?${query}`)).data;
+}
+
 export async function loadDashboard(filters: { customerType?: string; regionCode?: string } = {}) {
   const query = new URLSearchParams();
   if (filters.customerType) query.set("customerType", filters.customerType);
@@ -10,4 +15,3 @@ export async function loadDashboard(filters: { customerType?: string; regionCode
 }
 export async function loadOrderDashboard() { return (await api<Envelope<DashboardReport>>(`/screen/activities/${activeActivityPath()}/dashboard`)).data; }
 export async function loadDashboardReport(reportCode: string) { return (await api<Envelope<DashboardReport>>(`/screen/activities/${activeActivityPath()}/reports/${encodeURIComponent(reportCode)}`)).data; }
-

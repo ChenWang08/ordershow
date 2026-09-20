@@ -22,6 +22,32 @@ tags:
   - name: Exports
   - name: Audit
 paths:
+  /admin/activities/{activityId}/ranking:
+    get:
+      operationId: getAdminActivityRanking
+      tags: [AdminAuth]
+      summary: 按部门权限读取活动概览统计（含本部门历史活动）
+      security:
+        - adminCookie: []
+      parameters:
+        - name: activityId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - name: customerType
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 活动统计
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResponse'
+        '404':
+          $ref: '#/components/responses/Problem'
   /public/activities/current:
     get:
       operationId: getCurrentOrderableActivity
@@ -332,7 +358,8 @@ paths:
     post:
       operationId: changeAdminPassword
       tags: [AdminAuth]
-      summary: 修改当前管理员密码并撤销其他会话
+      summary: 修改当前超级管理员密码并撤销其他会话
+      description: 部门共享账号密码由超级管理员统一管理，部门账号不能调用此接口。
       security:
         - adminCookie: []
       parameters:
@@ -376,7 +403,8 @@ paths:
     post:
       operationId: createDepartment
       tags: [AdminAuth]
-      summary: 创建部门
+      summary: 创建部门及共享账号
+      description: 创建部门的同时创建一个部门共享账号；账号显示名自动使用部门名称，登录密码由超级管理员管理。
       security:
         - adminCookie: []
       parameters:
@@ -444,20 +472,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AdminUserListResponse'
+  /admin/departments/{departmentId}/account:
     post:
-      operationId: createAdminUser
+      operationId: createDepartmentAccount
       tags: [AdminAuth]
-      summary: 创建部门共享管理员账号
+      summary: 为已有部门创建共享账号
       security:
         - adminCookie: []
       parameters:
+        - name: departmentId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
         - $ref: '#/components/parameters/CsrfToken'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AdminUserWriteRequest'
+              $ref: '#/components/schemas/DepartmentAccountWriteRequest'
       responses:
         '200':
           description: 创建成功
@@ -2902,35 +2936,26 @@ components:
               type: string
         traceId:
           type: string
-    AdminUserWriteRequest:
+    DepartmentAccountWriteRequest:
       type: object
-      required: [username, displayName, initialPassword, departmentId]
+      required: [username, password]
       properties:
         username:
           type: string
           minLength: 3
           maxLength: 64
-        displayName:
-          type: string
-          minLength: 1
-          maxLength: 100
-        initialPassword:
+        password:
           type: string
           format: password
           minLength: 8
           maxLength: 100
-        departmentId:
-          $ref: '#/components/schemas/Id'
     AdminUserPatchRequest:
       type: object
       properties:
-        displayName:
-          type: string
-          maxLength: 100
         status:
           type: string
           enum: [ACTIVE, DISABLED]
-        initialPassword:
+        password:
           type: string
           format: password
           minLength: 8
@@ -3016,13 +3041,24 @@ components:
           format: int64
     DepartmentWriteRequest:
       type: object
-      required: [name]
+      required: [name, username, password]
       properties:
         name:
           type: string
           minLength: 1
           maxLength: 100
           description: 部门名称；部门编码由服务端根据名称生成。
+        username:
+          type: string
+          minLength: 3
+          maxLength: 64
+          description: 部门共享账号的登录用户名。
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 100
+          description: 部门共享账号的正式登录密码，由超级管理员管理。
     DepartmentResponse:
       type: object
       required: [data, traceId]

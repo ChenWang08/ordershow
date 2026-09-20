@@ -1,14 +1,12 @@
 "use client";
 
-import { AdminGateway } from "../admin/AdminGateway";
-import { AdminWorkspace } from "../admin/AdminWorkspace";
+import { AdminEntry } from "../admin/AdminEntry";
 import { H5Ordering } from "../h5/H5Ordering";
 import { LotteryBoard } from "../lottery/Lottery";
 import { useActivityWorkspace, useImportWorkspace } from "./ActivityWorkspace";
 
 export function AdminSurface() {
-  const { activityId, activityStartAt, activityEndAt, activityEventEndAt } = useActivityWorkspace();
-  return <AdminGateway><AdminWorkspace key={`${activityId}-${activityStartAt}-${activityEndAt}-${activityEventEndAt}`} /></AdminGateway>;
+  return <AdminEntry />;
 }
 
 export function H5Surface() {

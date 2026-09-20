@@ -5,10 +5,8 @@ import {
   ACTIVITY_CODE,
   ApiError,
   getActiveActivityCode,
-  getPreferredAdminActivityCode,
   loadCurrentActivity,
   setActiveActivityCode,
-  setPreferredAdminActivityCode,
   subscribeActiveActivityCode,
 } from "./api";
 import { OrderShowApp } from "./order-show-app";
@@ -52,18 +50,12 @@ export function ActivityRoute({ activityCode = ACTIVITY_CODE, surface }: Activit
 }
 
 export function AdminRoute() {
-  const activityCode = useSyncExternalStore(
-    () => () => undefined,
-    () => getPreferredAdminActivityCode() || ACTIVITY_CODE,
-    () => ACTIVITY_CODE,
-  );
-  return <ActivityRoute activityCode={activityCode} surface="admin" />;
+  return <OrderShowApp initialSurface="admin" showSurfaceTabs={false} />;
 }
 
 export function LegacyAdminActivityRoute({ activityCode }: { activityCode: string }) {
   useEffect(() => {
-    setPreferredAdminActivityCode(activityCode);
-    window.location.replace("/admin");
+    window.location.replace(`/admin?activity=${encodeURIComponent(activityCode)}`);
   }, [activityCode]);
 
   return <RouteLoading message="正在进入统一管理后台…" />;

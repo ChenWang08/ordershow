@@ -12,11 +12,11 @@ const reports = [
   "综合客户 TOP5",
   "总战绩",
   "特渠专业客户金额、综合客户金额及合计",
-  "综合客户各片区金额及合计",
+  "综合客户各大区金额及合计",
   "礼盒：特渠专业客户金额、综合客户金额及合计",
   "综合客户各产品线金额及合计",
   "特渠专业客户与综合客户各产品线金额及合计",
-  "综合客户区域金额与产品线金额同屏展示",
+  "综合客户大区金额与产品线金额同屏展示",
 ];
 
 export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) {
@@ -90,12 +90,12 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
           </div>
         ) : isDual ? (
           <>
-            <MetricTable kind="area" title="综合客户 · 区域" labels={regionLabels} values={regionValues} />
+            <MetricTable kind="area" title="综合客户 · 大区" labels={regionLabels} values={regionValues} />
             <MetricTable kind="product" title="综合客户 · 产品线" labels={(data?.generalProductLines ?? []).map((item) => item.productLine)} values={(data?.generalProductLines ?? []).map((item) => Number(item.amount))} />
           </>
         ) : report.includes("产品线") ? (
           <MetricTable kind="product" title={displayTitle} labels={productLineRows.map((item) => item.productLine)} values={productLineRows.map((item) => Number(item.amount))} />
-        ) : report.includes("各片区") ? (
+        ) : report.includes("各大区") ? (
           <MetricTable kind="area" title="综合客户" labels={regionLabels} values={regionValues} />
         ) : (
           <MetricTable title={displayTitle} labels={["特渠专业客户", "综合客户"]} values={[typeAmount("SPECIAL"), typeAmount("GENERAL")]} />

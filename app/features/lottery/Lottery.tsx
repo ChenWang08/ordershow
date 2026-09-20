@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ApiError, completeLotteryRound, createLotteryRule, drawLotteryRound, loadLotteryStatistics, loadPublicLottery, previewLotteryCandidates, publishLotteryRule, updateLotteryRule, type LotteryCandidatePreview, type LotteryRuleApi, type LotteryWinnerStatistics } from "../../api";
+import { ApiError, completeLotteryRound, createLotteryRule, drawLotteryRound, loadLotteryStatistics, loadPublicLottery, previewLotteryCandidates, publishLotteryRule, updateLotteryRule, type LotteryCandidatePreview, type LotteryRuleApi, type LotteryWinnerApi, type LotteryWinnerStatistics } from "../../api";
 import type { AttendanceCustomerType, AttendanceRow } from "../../domain/import-domain";
 import { FestivalDecor } from "../shared/components/FestivalDecor";
 import { normalizeSearchText } from "../shared/utils";
@@ -49,6 +49,14 @@ export function mapLotteryRule(rule: LotteryRuleApi): LotteryRound[] {
     candidateCount: round.candidateCount ?? 0 }));
 }
 
+export function groupLotteryWinnersByRound(winners: LotteryWinnerApi[]) {
+  const grouped: Record<number, string[]> = {};
+  for (const winner of [...winners].sort((a, b) => a.roundId - b.roundId || a.position - b.position)) {
+    (grouped[winner.roundId] ??= []).push(winner.dealerDisplayName);
+  }
+  return grouped;
+}
+
 type LotteryDisplayCandidate = {
   id: string;
   displayName: string;
@@ -82,11 +90,35 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
   const [sessionFinished, setSessionFinished] = useState(false);
   const [drawnCandidateNames, setDrawnCandidateNames] = useState<string[]>([]);
   const [persistedWinners, setPersistedWinners] = useState<string[]>([]);
+  const [historyWinnersByRound, setHistoryWinnersByRound] = useState<Record<number, string[]>>({});
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [historySelectionInitialized, setHistorySelectionInitialized] = useState(false);
   const [actionError, setActionError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const availableRounds = rounds.filter((item) => item.status !== "draft");
   const [roundId, setRoundId] = useState(availableRounds.find((item) => item.serverStatus !== "COMPLETED")?.id ?? availableRounds[0]?.id ?? 0);
   const currentRound = availableRounds.find((item) => item.id === roundId) ?? availableRounds[0];
+  useEffect(() => {
+    if (!activityFinished || historySelectionInitialized || availableRounds.length === 0) return;
+    setRoundId(availableRounds[0].id);
+    setHistorySelectionInitialized(true);
+  }, [activityFinished, availableRounds.length, historySelectionInitialized]);
+  useEffect(() => {
+    if (!activityFinished) return;
+    let active = true;
+    setHistoryLoading(true);
+    setHistoryError("");
+    void loadPublicLottery().then((data) => {
+      if (!active) return;
+      setHistoryWinnersByRound(groupLotteryWinnersByRound(data.winners));
+    }).catch((error) => {
+      if (active) setHistoryError(error instanceof ApiError ? error.message : "历史结果加载失败");
+    }).finally(() => {
+      if (active) setHistoryLoading(false);
+    });
+    return () => { active = false; };
+  }, [activityFinished]);
   useEffect(() => {
     if (status !== "rolling") return;
     const timer = window.setInterval(() => setTicker((n) => n + 1), 90);
@@ -100,13 +132,18 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
     ? Array.from({ length: Math.min(rollingCount, availableCandidateNames.length) }, (_, i) => availableCandidateNames[(ticker + i * 3) % availableCandidateNames.length])
     : Array.from({ length: rollingCount }, (_, index) => `幸运客户 ${index + 1}`);
   const winners = status === "done" ? persistedWinners : rollingNames;
+  const selectedHistoryWinners = currentRound ? historyWinnersByRound[currentRound.id] ?? [] : [];
   useEffect(() => {
+    if (activityFinished) return;
+    let active = true;
     void loadPublicLottery().then((data) => {
+      if (!active) return;
       if (!currentRound) return;
       const names = data.winners.filter((winner) => winner.roundId === currentRound.id).sort((a, b) => a.position - b.position).map((winner) => winner.dealerDisplayName);
       if (names.length > 0) { setPersistedWinners(names); setStatus(currentRound.serverStatus === "COMPLETED" ? "finished" : "done"); }
     }).catch(() => undefined);
-  }, [currentRound]);
+    return () => { active = false; };
+  }, [activityFinished, currentRound?.id, currentRound?.serverStatus]);
   if (!currentRound) return <section className="screen-board lottery-board"><div className="lottery-ready"><h2>暂无已发布抽奖轮次</h2></div></section>;
   const handleAction = async () => {
     if (sessionFinished || activityFinished) return;
@@ -139,9 +176,24 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
   return (
     <section className="screen-board lottery-board">
       <FestivalDecor />
-      <div className="lottery-controls"><label>当前轮次 <b>{currentRound.name}</b><small> · 按配置顺序执行</small></label></div>
+      <div className="lottery-controls">
+        <label htmlFor={activityFinished ? "lottery-round-selector" : undefined}>{activityFinished ? "查看轮次" : "当前轮次"}</label>
+        {activityFinished ? <select id="lottery-round-selector" aria-label="选择要查看的抽奖轮次" value={String(currentRound.id)} disabled={historyLoading || submitting} onChange={(event) => setRoundId(Number(event.target.value))}>
+          {availableRounds.map((item) => <option key={item.id} value={item.id}>{item.name} · {historyWinnersByRound[item.id]?.length ? "已开奖" : item.serverStatus === "COMPLETED" ? "已完成" : "暂无结果"}</option>)}
+        </select> : <><b>{currentRound.name}</b><small> · 按配置顺序执行</small></>}
+      </div>
       <div className="lottery-title"><b>{currentRound.name} 幸运抽奖</b><span>{activityFinished ? "活动已结束 · 历史结果回看" : `实物奖品：${currentRound.prize}`}</span></div>
-      {status === "ready" ? (
+      {activityFinished ? historyLoading ? (
+        <div className="lottery-ready history-empty"><h2>正在加载历史结果</h2><p>请稍候，正在读取各轮次的中奖名单</p></div>
+      ) : historyError ? (
+        <div className="lottery-ready history-empty"><h2>历史结果暂时无法加载</h2><p>{historyError}</p></div>
+      ) : selectedHistoryWinners.length > 0 ? (
+        <div className="winner-grid finished">
+          {selectedHistoryWinners.map((name, index) => <div key={`${name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><b>{name}</b></div>)}
+        </div>
+      ) : (
+        <div className="lottery-ready history-empty"><h2>本轮暂无中奖结果</h2><p>该轮次没有已保存的有效中奖记录</p></div>
+      ) : status === "ready" ? (
         <div className="lottery-ready"><div className="lucky-seal">福</div><h2>好运即将揭晓</h2><p>候选资格将在开始抽奖时由服务端复核并固定</p></div>
       ) : (
         <div className={`winner-grid ${status}`}>

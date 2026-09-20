@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, type Dispatch, type SetStateAction } from "react";
-import { ApiError, loadActivity, loadAdminProducts, loadProductImageReviews, loadAdminCustomers, loadAdminAttendees, loadLotteryRules, loadAuditLogs, loadImportTasks, loadImportRows, loadAttendanceMatchPreview, type ImportTask } from "../../api";
+import { ApiError, loadAdminActivity, loadAdminProducts, loadProductImageReviews, loadAdminCustomers, loadAdminAttendees, loadLotteryRules, loadAuditLogs, loadImportTasks, loadImportRows, loadAttendanceMatchPreview, type ImportTask } from "../../api";
 import { cloneProductRows, cloneWhitelistRows, type WhitelistRow } from "../../domain/import-domain";
 import { mapLotteryRule } from "../lottery/Lottery";
 import { mergeProductImageReviews, runtimeProductToImportRow, restoreProductPreview, restoreWhitelistPreview, restoreAttendancePreview, restoredSheetCounts } from "./admin-utils";
@@ -47,7 +47,7 @@ export function useAdminInitialization({
     const numericActivityId = Number(activityId);
     if (!Number.isFinite(numericActivityId)) return;
     let active = true;
-    void Promise.all([loadActivity(), loadAdminProducts(numericActivityId), loadProductImageReviews(numericActivityId), loadAdminCustomers(numericActivityId),
+    void Promise.all([loadAdminActivity(Number(activityId)), loadAdminProducts(numericActivityId), loadProductImageReviews(numericActivityId), loadAdminCustomers(numericActivityId),
       loadAdminAttendees(numericActivityId), loadLotteryRules(numericActivityId), loadAuditLogs(numericActivityId), loadImportTasks(numericActivityId)]).then(async ([activity, serverProducts, imageReviews, customers, attendees, rules, auditLogs, importTasks]) => {
       if (!active) return;
       const regionNames = new Map(activity.regions.map((region) => [region.code, region.name]));

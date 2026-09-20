@@ -29,7 +29,9 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice }
     [activities, activityDepartmentFilter],
   );
   useEffect(() => {
+    let active = true;
     void loadAdminActivities().then((items) => {
+      if (!active) return;
       setActivities(items);
       const savedCode = getPreferredAdminActivityCode();
       const savedActivity = savedCode ? items.find((item) => item.code === savedCode) : undefined;
@@ -42,7 +44,8 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice }
       } else if (savedActivity && savedActivity.code !== activityCode) {
         window.location.replace("/admin");
       }
-    }).catch(() => setActivities([]));
+    }).catch(() => { if (active) setActivities([]); });
+    return () => { active = false; };
   }, [activityCode, activityId]);
   useEffect(() => {
     if (adminIdentity?.roleCode !== "SUPER_ADMIN") {

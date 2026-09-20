@@ -178,7 +178,7 @@ public class DashboardService {
     dictionary.forEach(region -> historicalNames.putIfAbsent(region.code(), region.name()));
     for (String code : totalsByCode.keySet()) {
       if (definitions.stream().noneMatch(region -> region.code().equals(code))) {
-        String name = "UNASSIGNED".equals(code) ? "未分片区" : historicalNames.getOrDefault(code, code);
+        String name = "UNASSIGNED".equals(code) ? "未分大区" : historicalNames.getOrDefault(code, code);
         definitions.add(new ActivityService.RegionView(code, name, 10_000 + definitions.size()));
       }
     }
@@ -311,7 +311,11 @@ public class DashboardService {
   public record TrendPoint(String bucket, BigDecimal amount, long orders) {}
   public record RegionProductLineTotal(String regionCode, String productLine, BigDecimal amount, long quantity) {}
   public record GeneralRegion(String regionCode, String regionName, int sortNo, long orderCount, BigDecimal amount,
-                              List<ProductLineTotal> productLines) {}
+                              List<ProductLineTotal> productLines) {
+    public GeneralRegion {
+      if ("UNASSIGNED".equals(regionCode)) regionName = "未分大区";
+    }
+  }
   public record Dashboard(long activityId, String activityName, String status, Map<String, Object> totals,
                           List<RankRow> companies, List<RankRow> branches, List<ProductLineTotal> productLines,
                           List<LatestOrder> latestOrders, String version, Instant generatedAt) {}

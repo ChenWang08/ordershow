@@ -44,23 +44,35 @@ public class DepartmentService {
   }
 
   @Transactional
-  public DepartmentView createDepartment(AdminPrincipal admin, String name) {
+  public DepartmentView createDepartmentWithAccount(AdminPrincipal admin, String name, String username,
+                                                    String password) {
     access.requireSuperAdmin(admin);
     String normalizedName = normalizeName(name);
+    String normalizedUsername = normalizeUsername(username);
+    validatePassword(password);
     String baseCode = generateDepartmentCode(normalizedName);
+    long departmentId = 0;
     for (int attempt = 0; attempt < 1000; attempt++) {
       String generatedCode = attempt == 0 ? baseCode : baseCode + "-" + (attempt + 1);
       try {
         jdbc.update("INSERT INTO department(department_code, department_name, status) VALUES (?, ?, 'ACTIVE')",
             generatedCode, normalizedName);
-        long id = jdbc.queryForObject("SELECT id FROM department WHERE department_code = ?", Long.class, generatedCode);
-        return department(id);
+        departmentId = jdbc.queryForObject("SELECT id FROM department WHERE department_code = ?", Long.class, generatedCode);
+        break;
       } catch (DuplicateKeyException exception) {
         // A generated code can collide with a previous department (or a concurrent request).
         // Keep the code immutable after the successful insert and retry with a deterministic suffix.
       }
     }
-    throw DomainException.conflict("DEPARTMENT_CODE_GENERATION_FAILED", "部门编码生成失败，请稍后重试");
+    if (departmentId == 0) {
+      throw DomainException.conflict("DEPARTMENT_CODE_GENERATION_FAILED", "部门编码生成失败，请稍后重试");
+    }
+    try {
+      insertDepartmentAccount(normalizedUsername, password, departmentId, normalizedName);
+    } catch (DuplicateKeyException exception) {
+      throw DomainException.conflict("ADMIN_USER_EXISTS", "登录用户名已存在");
+    }
+    return department(departmentId);
   }
 
   @Transactional
@@ -87,6 +99,9 @@ public class DepartmentService {
     }
     jdbc.update("UPDATE department SET department_name = ?, status = ?, lock_version = lock_version + 1 WHERE id = ?",
         nextName, nextStatus, departmentId);
+    // The department name is the account display name by policy; keep the two values synchronized.
+    jdbc.update("UPDATE admin_user SET display_name = ?, lock_version = lock_version + 1 WHERE department_id = ? AND role_code = 'DEPARTMENT_ADMIN'",
+        nextName, departmentId);
     if ("DISABLED".equals(nextStatus)) {
       jdbc.update("UPDATE admin_session s JOIN admin_user u ON u.id = s.admin_user_id SET s.revoked_at = UTC_TIMESTAMP(3), s.revoke_reason = 'DEPARTMENT_DISABLED' WHERE u.department_id = ? AND s.revoked_at IS NULL", departmentId);
     }
@@ -104,50 +119,61 @@ public class DepartmentService {
   }
 
   @Transactional
-  public AdminUserView createDepartmentUser(AdminPrincipal admin, String username, String displayName,
-                                             String initialPassword, long departmentId) {
+  public AdminUserView createDepartmentUser(AdminPrincipal admin, String username, String password,
+                                             long departmentId) {
     access.requireSuperAdmin(admin);
     access.requireActiveDepartment(departmentId);
-    validatePassword(initialPassword);
-    try {
-      jdbc.update("""
-          INSERT INTO admin_user(username, display_name, password_hash, role_code, department_id, status, must_change_password)
-          VALUES (?, ?, ?, 'DEPARTMENT_ADMIN', ?, 'ACTIVE', TRUE)
-          """, normalizeUsername(username), normalizeName(displayName), passwordEncoder.encode(initialPassword), departmentId);
-    } catch (DuplicateKeyException exception) {
-      throw DomainException.conflict("ADMIN_USER_EXISTS", "用户名或该部门账号已存在");
+    DepartmentView department = department(departmentId);
+    if (department.accountId() != null) {
+      throw DomainException.conflict("ADMIN_USER_EXISTS", "该部门已绑定账号");
     }
-    long id = jdbc.queryForObject("SELECT id FROM admin_user WHERE username = ?", Long.class, normalizeUsername(username));
+    String normalizedUsername = normalizeUsername(username);
+    validatePassword(password);
+    try {
+      insertDepartmentAccount(normalizedUsername, password, departmentId, department.name());
+    } catch (DuplicateKeyException exception) {
+      throw DomainException.conflict("ADMIN_USER_EXISTS", "登录用户名已存在");
+    }
+    long id = jdbc.queryForObject("SELECT id FROM admin_user WHERE username = ?", Long.class, normalizedUsername);
     return user(id);
   }
 
   @Transactional
-  public AdminUserView updateUser(AdminPrincipal admin, long userId, String displayName, String status,
-                                  String initialPassword) {
+  public AdminUserView updateUser(AdminPrincipal admin, long userId, String status, String password) {
     access.requireSuperAdmin(admin);
     AdminUserView current = user(userId);
     if (current.id() == admin.id() && "DISABLED".equalsIgnoreCase(status)) {
       throw DomainException.badRequest("ADMIN_SELF_DISABLE", "不能停用当前登录账号");
     }
-    String nextName = displayName == null || displayName.isBlank() ? current.displayName() : normalizeName(displayName);
     String nextStatus = status == null || status.isBlank() ? current.status() : status.trim().toUpperCase(Locale.ROOT);
     if (!List.of("ACTIVE", "DISABLED").contains(nextStatus)) {
       throw DomainException.badRequest("ADMIN_STATUS_INVALID", "账号状态无效");
     }
-    boolean reset = initialPassword != null && !initialPassword.isBlank();
-    if (reset) validatePassword(initialPassword);
+    boolean reset = password != null && !password.isBlank();
+    if (reset) validatePassword(password);
+    String nextDisplayName = "DEPARTMENT_ADMIN".equals(current.roleCode()) && current.departmentName() != null
+        ? current.departmentName() : current.displayName();
     if (reset) {
-      jdbc.update("UPDATE admin_user SET display_name = ?, status = ?, password_hash = ?, must_change_password = TRUE, password_changed_at = NULL, lock_version = lock_version + 1 WHERE id = ?",
-          nextName, nextStatus, passwordEncoder.encode(initialPassword), userId);
+      boolean mustChange = "SUPER_ADMIN".equals(current.roleCode());
+      jdbc.update("UPDATE admin_user SET display_name = ?, status = ?, password_hash = ?, must_change_password = ?, password_changed_at = CASE WHEN ? THEN NULL ELSE UTC_TIMESTAMP(3) END, lock_version = lock_version + 1 WHERE id = ?",
+          nextDisplayName, nextStatus, passwordEncoder.encode(password), mustChange, mustChange, userId);
       jdbc.update("UPDATE admin_session SET revoked_at = UTC_TIMESTAMP(3), revoke_reason = 'PASSWORD_RESET' WHERE admin_user_id = ? AND revoked_at IS NULL", userId);
     } else {
       jdbc.update("UPDATE admin_user SET display_name = ?, status = ?, lock_version = lock_version + 1 WHERE id = ?",
-          nextName, nextStatus, userId);
+          nextDisplayName, nextStatus, userId);
     }
     if ("DISABLED".equals(nextStatus)) {
       jdbc.update("UPDATE admin_session SET revoked_at = UTC_TIMESTAMP(3), revoke_reason = 'USER_DISABLED' WHERE admin_user_id = ? AND revoked_at IS NULL", userId);
     }
     return user(userId);
+  }
+
+  private void insertDepartmentAccount(String username, String password, long departmentId, String departmentName) {
+    jdbc.update("""
+        INSERT INTO admin_user(username, display_name, password_hash, role_code, department_id, status,
+                               must_change_password, password_changed_at)
+        VALUES (?, ?, ?, 'DEPARTMENT_ADMIN', ?, 'ACTIVE', FALSE, UTC_TIMESTAMP(3))
+        """, username, departmentName, passwordEncoder.encode(password), departmentId);
   }
 
   private DepartmentView department(long id) {
@@ -237,7 +263,7 @@ public class DepartmentService {
 
   private static void validatePassword(String value) {
     if (value == null || value.length() < 8 || value.length() > 100) {
-      throw DomainException.badRequest("PASSWORD_INVALID", "初始密码长度须为 8-100 位");
+      throw DomainException.badRequest("PASSWORD_INVALID", "登录密码长度须为 8-100 位");
     }
   }
 

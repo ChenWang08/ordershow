@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import {
-  ApiError, loadActivity, updateActivity, publishActivity, withdrawActivityPublication,
+  ApiError, loadAdminActivity, updateActivity, publishActivity, withdrawActivityPublication,
   closeActivityNow, finishActivityNow, type RuntimeActivity,
 } from "../../api";
 import type { ActivityStatus } from "../shared/types";
@@ -80,7 +80,7 @@ export function useActivitySettings({
     }
     if (Number.isFinite(Number(activityId))) {
       try {
-        const updated = await updateActivity(await loadActivity(), { name: activityNameDraft.trim(), startsAt: activityStartDraft, endsAt: activityEndDraft, eventEndsAt: activityEventEndDraft });
+        const updated = await updateActivity(await loadAdminActivity(Number(activityId)), { name: activityNameDraft.trim(), startsAt: activityStartDraft, endsAt: activityEndDraft, eventEndsAt: activityEventEndDraft });
         applyActivity(updated);
       } catch (error) {
         setActionNotice(error instanceof ApiError ? error.message : "活动配置保存失败，请稍后重试。");
@@ -104,7 +104,7 @@ export function useActivitySettings({
     if (!window.confirm(`发布后活动将于 ${activityStartDraft.replace("T", " ")} 自动开始，商品和白名单将锁定。确定发布吗？`)) return;
     if (!await saveActivityConfig()) return;
     try {
-      if (Number.isFinite(Number(activityId))) applyActivity(await publishActivity(await loadActivity()));
+      if (Number.isFinite(Number(activityId))) applyActivity(await publishActivity(await loadAdminActivity(Number(activityId))));
       else onActivityStatusChange("scheduled");
       recordOperation("发布活动", activityId, `活动将于 ${activityStartDraft.replace("T", " ")} 自动开始订货。`);
       setActionNotice("活动已发布，当前为待开始；到达开始时间后将自动开放 H5 订货。" );
@@ -115,7 +115,7 @@ export function useActivitySettings({
   const withdrawCurrentActivity = async () => {
     if (!window.confirm("撤回发布后活动将恢复为草稿，并重新开放商品和白名单维护。确定撤回吗？")) return;
     try {
-      if (Number.isFinite(Number(activityId))) applyActivity(await withdrawActivityPublication(await loadActivity()));
+      if (Number.isFinite(Number(activityId))) applyActivity(await withdrawActivityPublication(await loadAdminActivity(Number(activityId))));
       else onActivityStatusChange("draft");
       recordOperation("撤回活动发布", activityId, "活动恢复为草稿，H5 保持关闭。" );
       setActionNotice("活动已撤回发布并恢复为草稿。" );
@@ -128,7 +128,7 @@ export function useActivitySettings({
     if (!reason) return;
     if (!window.confirm("确定立即截止订货吗？截止后客户将无法新增、修改或撤回订单。")) return;
     try {
-      if (Number.isFinite(Number(activityId))) applyActivity(await closeActivityNow(await loadActivity(), reason));
+      if (Number.isFinite(Number(activityId))) applyActivity(await closeActivityNow(await loadAdminActivity(Number(activityId)), reason));
       else onActivityStatusChange("closed");
       recordOperation("立即截止订货", activityId, `原因：${reason}`);
       setActionNotice("活动已立即截止；H5 订单只读，看板和抽奖仍可使用。" );
@@ -141,7 +141,7 @@ export function useActivitySettings({
     if (!reason) return;
     if (!window.confirm("确定结束整场活动吗？结束后将停止抽奖和实时推送，并冻结最终看板与战报。")) return;
     try {
-      if (Number.isFinite(Number(activityId))) applyActivity(await finishActivityNow(await loadActivity(), reason));
+      if (Number.isFinite(Number(activityId))) applyActivity(await finishActivityNow(await loadAdminActivity(Number(activityId)), reason));
       else onActivityStatusChange("finished");
       recordOperation("结束整场活动", activityId, `原因：${reason}`);
       setActionNotice("整场活动已结束；抽奖已关闭，看板和战报可只读回看。" );

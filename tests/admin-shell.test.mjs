@@ -110,7 +110,7 @@ function initializationHarness(apiOverrides = {}) {
     "../lottery/Lottery": { mapLotteryRule: (rule) => [rule.id] },
     "../../api": {
       ApiError: class ApiError extends Error {},
-      loadActivity: async () => ({ regions: [{ code: "EAST", name: "华东" }] }),
+      loadAdminActivity: async () => ({ regions: [{ code: "EAST", name: "华东" }] }),
       loadAdminProducts: async () => [{ id: 42, images: [], materialName: "已发布商品", version: 3 }],
       loadProductImageReviews: async () => [],
       loadAdminCustomers: async () => [{ id: 21, regionCode: "EAST", customerType: "GENERAL", dealerFullName: "客户", active: true }],
@@ -170,7 +170,7 @@ test("initialization restores all pending previews while retaining published rol
 
 test("initialization ignores a response that arrives after cleanup", async () => {
   let resolveActivity;
-  const harness = initializationHarness({ loadActivity: () => new Promise((resolve) => { resolveActivity = resolve; }) });
+  const harness = initializationHarness({ loadAdminActivity: () => new Promise((resolve) => { resolveActivity = resolve; }) });
   const cleanup = harness.mount(); cleanup();
   resolveActivity({ regions: [] }); await settle();
   assert.deepEqual(harness.calls, []);

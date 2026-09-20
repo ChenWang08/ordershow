@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, adminLogin, adminLogout, adminMe, changeAdminPassword, type AdminIdentity } from "../../api";
 import { AdminIdentityContext, AdminSessionContext } from "../../admin-context";
+import { setAdminPreferenceOwner } from "../../api";
 
 export function AdminGateway({ children }: { children: React.ReactNode }) {
   const [admin, setAdmin] = useState<AdminIdentity | null>(null);
@@ -12,11 +13,25 @@ export function AdminGateway({ children }: { children: React.ReactNode }) {
   const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState("");
   useEffect(() => {
-    void adminMe().then((value) => setAdmin(value)).catch(() => setAdmin(null)).finally(() => setLoading(false));
+    let active = true;
+    void adminMe().then((value) => { if (active) { setAdminPreferenceOwner(value.id); setAdmin(value); } }).catch(() => { if (active) setAdmin(null); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, []);
+  useEffect(() => {
+    if (!admin) return;
+    let active = true;
+    const check = () => { void adminMe().then((value) => {
+      if (active && (value.id !== admin.id || value.departmentId !== admin.departmentId || value.roleCode !== admin.roleCode)) {
+        setAdminPreferenceOwner(null); setAdmin(null);
+      }
+    }).catch(() => { if (active) { setAdminPreferenceOwner(null); setAdmin(null); } }); };
+    window.addEventListener("focus", check);
+    const timer = window.setInterval(check, 15000);
+    return () => { active = false; window.removeEventListener("focus", check); window.clearInterval(timer); };
+  }, [admin]);
   const login = async () => {
     setLoading(true); setError("");
-    try { setAdmin(await adminLogin(username, password)); }
+    try { const value = await adminLogin(username, password); setAdminPreferenceOwner(value.id); setAdmin(value); setPassword(""); }
     catch (reason) { setError(reason instanceof ApiError ? reason.message : "管理后台连接失败"); }
     finally { setLoading(false); }
   };
@@ -24,6 +39,7 @@ export function AdminGateway({ children }: { children: React.ReactNode }) {
     setLoading(true); setError("");
     try {
       await adminLogout();
+      setAdminPreferenceOwner(null);
       setAdmin(null);
       setPassword("");
       setNewPassword("");
@@ -40,15 +56,16 @@ export function AdminGateway({ children }: { children: React.ReactNode }) {
     finally { setLoading(false); }
   };
   if (loading && !admin) return <section className="admin-shell"><main className="admin-main"><div className="admin-panel"><div className="empty-state">正在连接管理服务…</div></div></main></section>;
-  if (!admin || admin.mustChangePassword) return (
+  const mustChangePassword = Boolean(admin?.roleCode === "SUPER_ADMIN" && admin.mustChangePassword);
+  if (!admin || mustChangePassword) return (
     <section className="admin-shell"><main className="admin-main"><div className="admin-panel admin-login-panel">
       <div className="admin-login-heading"><span className="admin-login-mark">金</span><div><h2>{admin ? "首次登录修改密码" : "管理后台登录"}</h2><p>{admin ? "修改初始密码后才可以导入数据和修改活动配置" : "请输入管理员账号密码，系统会自动识别超级管理员或部门账号，无需选择角色"}</p></div></div>
       <form className="admin-login-form" onSubmit={(event) => { event.preventDefault(); void (admin ? changePassword() : login()); }}>
         {!admin && <label><span>用户名</span><input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} placeholder="请输入后台账号" /></label>}
         <label><span>{admin ? "当前密码" : "密码"}</span><input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder={admin ? "请输入初始密码" : "请输入登录密码"} /></label>
         {admin && <label><span>新密码（至少 8 位）</span><input autoComplete="new-password" type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="请设置新的后台密码" /></label>}
-        {!admin && <div className="admin-login-hint"><b>账号说明</b><span>超级管理员由系统初始化；部门账号由超级管理员创建，每个部门一个共享账号。登录后只能看到授权范围内的活动和数据。</span></div>}
-        {admin && <div className="admin-login-hint"><b>首次登录安全要求</b><span>当前账号：{admin.displayName} · {admin.roleCode === "SUPER_ADMIN" ? "超级管理员" : admin.departmentName || "部门账号"}。请先修改初始密码。</span></div>}
+        {!admin && <div className="admin-login-hint"><b>账号说明</b><span>超级管理员由系统初始化；部门账号由超级管理员创建并管理密码，每个部门一个共享账号。登录后只能看到授权范围内的活动和数据。</span></div>}
+        {admin && mustChangePassword && <div className="admin-login-hint"><b>首次登录安全要求</b><span>当前账号：{admin.displayName} · 超级管理员。请先修改初始密码。</span></div>}
         {error && <div className="warning-box" role="alert"><b>操作失败</b><span>{error}</span></div>}
         <button type="submit" className="admin-primary" disabled={loading || !password || (Boolean(admin) && newPassword.length < 8)}>{loading ? "正在处理…" : admin ? "修改密码并进入后台" : "登录"}</button>
       </form>

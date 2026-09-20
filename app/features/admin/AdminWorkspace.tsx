@@ -32,6 +32,7 @@ import { useAdminInitialization } from "./useAdminInitialization";
 import type { OperationLogEntry } from "./admin-types";
 import { useAdminWorkspaceProps } from "../workspace/useAdminWorkspaceProps";
 import { DepartmentAdminPanel } from "./DepartmentAdminPanel";
+import { AdminLayout } from "./AdminLayout";
 
 export function AdminWorkspace() {
   const {
@@ -67,7 +68,6 @@ export function AdminWorkspace() {
   const [serverImportTasks, setServerImportTasks] = useState<Partial<Record<"PRODUCT" | "WHITELIST" | "ATTENDANCE", number>>>({});
   const [serverImportBlocking, setServerImportBlocking] = useState<Partial<Record<"PRODUCT" | "WHITELIST" | "ATTENDANCE", number>>>({});
   const [regionCodesByName, setRegionCodesByName] = useState<Record<string, string>>({});
-  const nav = ["活动概览", "商品导入", "白名单", "现场到场", "订单管理", "抽奖规则", ...(adminIdentity?.roleCode === "SUPER_ADMIN" ? ["部门与账号"] : [])];
   const recordOperation = (action: string, target: string, detail: string) => {
     setOperationLogs((current) => [{ id: createImportRowId("operation"), action, target, detail, operator: adminIdentity?.displayName || adminIdentity?.username || "运营管理员", time: new Date().toLocaleString("zh-CN", { hour12: false }) }, ...current]);
   };
@@ -145,17 +145,12 @@ export function AdminWorkspace() {
   });
   const activityOverview = useActivityOverview(activityId, whitelistRows);
   return (
-    <section className="admin-app">
-      <aside className="admin-sidebar">
-        <div className="admin-logo"><span>金</span><b>订购会管理平台</b></div>
-        <nav>{nav.map((item) => <button key={item} className={tab === item ? "active" : ""} onClick={() => setTab(item)}><i>{item.slice(0, 1)}</i>{item}</button>)}</nav>
-        <div className="admin-user"><span>{(adminIdentity?.displayName || "管").slice(0, 1)}</span><p><b>{adminIdentity?.displayName || "管理员"}</b><small>{adminIdentity?.roleCode === "SUPER_ADMIN" ? "超级管理员" : adminIdentity?.departmentName || "部门账号"}</small></p></div>
-      </aside>
-      <main className="admin-main">
+    <>
+      <AdminLayout tab={tab} onTabChange={setTab} header={
         <AdminHeader activityCode={activityCode} activityName={activityName} activityStatus={activityStatus}
           tab={tab} activities={adminActivities} operationLogs={operationLogs}
           operationLogOpen={operationLogOpen} setOperationLogOpen={setOperationLogOpen}
-        />
+        />}>
         {tab === "部门与账号" && adminIdentity?.roleCode === "SUPER_ADMIN" && <DepartmentAdminPanel />}
         {tab === "活动概览" && <ActivityOverview
           activityCode={activityCode} activityName={activityName} activityStatus={activityStatus}
@@ -175,12 +170,12 @@ export function AdminWorkspace() {
         {tab === "现场到场" && <AttendancePage rows={pendingAttendanceImport?.rows ?? attendanceRows} fileName={attendanceFileName} warnings={attendanceWarnings} sheetCounts={attendanceSheetCounts} error={attendanceImportError} activityStarted={activityStarted} activityClosed={activityClosed} pendingImport={pendingAttendanceImport} importAttemptName={attendanceImportAttemptName} blockingCount={serverImportBlocking.ATTENDANCE ?? 0} previewLoading={attendancePreviewLoading} publishing={attendancePublishing} onFile={handleAttendanceFile} onAdd={() => { setEditingAttendanceRow(null); setAttendanceFormOpen(true); }} onEdit={setEditingAttendanceRow} onDelete={deleteAttendanceRows} onConfirmImport={confirmAttendanceImport} onCancelImport={cancelAttendanceImport} customerTypeMode={whitelistMode} />}
         {tab === "订单管理" && <OrderManagement activityClosed={activityClosed} activityStarted={activityStarted} activityId={Number(activityId)} activityName={activityName} />}
         {tab === "抽奖规则" && <LotterySettings rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} customerCount={whitelistRows.filter((row) => row.status === "有效").length} customerTypeMode={whitelistMode} readOnly={activityFinished} onChange={onLotteryChange} />}
-      </main>
+      </AdminLayout>
       {(productFormOpen || editingProductRow) && <ProductFormDrawer key={editingProductRow?.id ?? "new-product"} rows={productRows} initialRow={editingProductRow ?? undefined} activityStarted={activityStarted} onClose={() => { setProductFormOpen(false); setEditingProductRow(null); }} onSave={saveProductRow} />}
       {(whitelistFormOpen || editingWhitelistRow) && <WhitelistFormDrawer key={editingWhitelistRow?.id ?? "new-whitelist"} rows={whitelistRows} initialRow={editingWhitelistRow ?? undefined} customerTypeMode={whitelistMode} activityStarted={activityStarted} onClose={() => { setWhitelistFormOpen(false); setEditingWhitelistRow(null); }} onSave={saveWhitelistRow} />}
       {(attendanceFormOpen || editingAttendanceRow) && !activityClosed && <AttendanceFormDrawer key={editingAttendanceRow?.id ?? "new-attendance"} rows={pendingAttendanceImport?.rows ?? attendanceRows} initialRow={editingAttendanceRow ?? undefined} onClose={() => { setAttendanceFormOpen(false); setEditingAttendanceRow(null); }} onSave={saveAttendanceRow} />}
       {adminActivities.newActivityOpen && <NewActivityDrawer activities={adminActivities} />}
       {actionNotice && <div className="admin-toast" role="status"><span>✓</span>{actionNotice}<button aria-label="关闭提示" onClick={() => setActionNotice("")}>×</button></div>}
-    </section>
+    </>
   );
 }

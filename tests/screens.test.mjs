@@ -68,8 +68,51 @@ test("untyped activities retain the all-customer donut and hide channel sections
   const html = renderToStaticMarkup(React.createElement(OrderDashboard, { activity: { ...activity, whitelistCustomerTypeMode: "UNSPECIFIED" } }));
   assert.match(html, /订单额占比/);
   assert.match(html, /全部客户/);
-  assert.doesNotMatch(html, /渠道订单额占比|各渠道产线订单额对比|综合渠道 · 各片区/);
+  assert.doesNotMatch(html, /渠道订单额占比|各渠道产线订单额对比|综合渠道 · 各大区/);
 });
+
+const regionalReport = {
+  dashboard: { totals: { total_amount: 220, total_tons: 1 }, productLines: [{ productLine: "酱油", amount: 140 }], branches: [], companies: [], generatedAt: "2026-09-07T10:00:00Z" },
+  customerTypes: [{ customerType: "GENERAL", amount: 140 }, { customerType: "SPECIAL", amount: 80 }],
+  regions: [], trend: [], specialProductLines: [],
+  generalProductLines: [{ productLine: "酱油", amount: 140 }],
+  generalRegions: [
+    { regionCode: "EAST", regionName: "华东", amount: 120, orderCount: 1, productLines: [{ productLine: "酱油", amount: 120 }] },
+    { regionCode: "UNASSIGNED", regionName: "未分大区", amount: 20, orderCount: 1, productLines: [{ productLine: "酱油", amount: 20 }] },
+  ],
+};
+
+test("order dashboard uses district terminology without changing region rows", () => {
+  const { OrderDashboard } = loadModule("app/features/screens/OrderDashboard.tsx", {
+    "./useOrderDashboard": { useOrderDashboard: () => ({ data: regionalReport, error: "", refreshing: false, historical: false, refresh: () => {} }) },
+  });
+  const html = renderToStaticMarkup(React.createElement(OrderDashboard, { activity }));
+  assert.match(html, /综合客户 · 大区订单额分布/);
+  assert.match(html, /综合渠道 · 各大区产线订单额明细/);
+  assert.match(html, /华东/);
+  assert.match(html, /未分大区/);
+  assert.doesNotMatch(html, /片区/);
+});
+
+for (const selected of ["综合客户各大区金额及合计", "综合客户大区金额与产品线金额同屏展示"]) {
+  test(`report selection renders district amounts: ${selected}`, () => {
+    const { ReportBoard } = loadModule("app/features/screens/ReportBoard.tsx", {
+      react: { ...React, useState: (initial) => [initial === "总战绩" ? selected : initial === null ? regionalReport : initial, () => {}] },
+      "../../api": {},
+    });
+    const html = renderToStaticMarkup(React.createElement(ReportBoard, { activity }));
+    assert.match(html, /metric-table-area/);
+    assert.match(html, /<span>华东<\/span><b>120<\/b>/);
+    assert.match(html, /<span>未分大区<\/span><b>20<\/b>/);
+    assert.match(html, /<span>合计<\/span><b>140<\/b>/);
+    assert.doesNotMatch(html, /metric-table-category|片区|区域/);
+    if (selected.includes("同屏")) {
+      assert.match(html, /综合客户 · 大区/);
+      assert.match(html, /metric-table-product/);
+      assert.match(html, /<span>酱油<\/span><b>140<\/b>/);
+    }
+  });
+}
 
 function refreshHarness(status) {
   let effect;

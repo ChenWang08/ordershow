@@ -7,6 +7,8 @@
 .lottery-controls { position: relative; z-index: 3; display: flex; align-items: center; gap: 13px; padding: 8px 14px; border: 1px solid rgba(255,211,126,.28); border-radius: 9px; background: rgba(52,3,5,.28); }
 .lottery-controls label { color: #e9c68d; font-size: 10px; }
 .lottery-controls select { margin-left: 5px; padding: 5px 22px 5px 8px; color: #fff0cc; border: 1px solid rgba(255,214,137,.3); border-radius: 5px; background: #741416; font-size: 10px; }
+.lottery-controls select:focus { outline: 2px solid rgba(255,215,125,.72); outline-offset: 2px; }
+.lottery-controls select:disabled { cursor: wait; opacity: .72; }
 .lottery-controls > span { color: #ffd77d; font-size: 10px; }
 .lottery-title { position: relative; z-index: 2; margin: clamp(28px, 5vh, 56px) 0 0; text-align: center; }
 .lottery-title b { display: block; color: #ffd45f; font-family: serif; font-size: clamp(32px, 3.2vw, 44px); line-height: 1.12; letter-spacing: .04em; text-shadow: 0 3px 16px rgba(75,0,0,.3); }
@@ -15,6 +17,8 @@
 .lucky-seal { display: grid; place-items: center; width: clamp(155px, 16vw, 200px); height: clamp(155px, 16vw, 200px); color: #b51c1c; border: 7px double #b51c1c; border-radius: 50%; outline: 3px solid #e4aa41; background: #f5c75d; box-shadow: 0 0 0 14px rgba(255,206,101,.08), 0 18px 50px rgba(33,0,0,.25); font-family: "STKaiti", serif; font-size: clamp(86px, 7vw, 112px); line-height: 1; }
 .lottery-ready h2 { margin: 0; color: #fff0c4; font-family: serif; font-size: clamp(32px, 2.7vw, 42px); line-height: 1.15; letter-spacing: .03em; }
 .lottery-ready p { margin: 0; color: #e8bd75; font-size: 11px; }
+.lottery-ready.history-empty { gap: 12px; }
+.lottery-ready.history-empty h2 { font-size: clamp(26px, 2.3vw, 36px); }
 .lottery-rule-summary { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; margin-top: 16px; }
 .lottery-rule-summary span { padding: 5px 10px; color: #ffe5aa; border: 1px solid rgba(255,218,139,.25); border-radius: 99px; background: rgba(86,6,8,.3); font-size: 9px; }
 .winner-grid { position: relative; z-index: 2; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 58px; width: min(1200px, 86vw); flex: 1; align-content: center; padding: 24px 40px; border: 1px solid rgba(255,202,102,.16); border-radius: 20px; background: rgba(89,7,9,.18); }

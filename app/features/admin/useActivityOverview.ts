@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { loadDashboard, type DashboardData } from "../../api";
+import { loadAdminDashboard, type DashboardData } from "../../api";
 import { type WhitelistRow, whitelistCustomerTypeMode } from "../../domain/import-domain";
 import { money } from "../shared/utils";
 
@@ -15,14 +15,14 @@ export function useActivityOverview(activityId: string, whitelistRows: Whitelist
     const refreshOverview = async () => {
       try {
         const [all, general, special] = await Promise.all([
-          loadDashboard(), loadDashboard({ customerType: "GENERAL" }), loadDashboard({ customerType: "SPECIAL" }),
+          loadAdminDashboard(Number(activityId)), loadAdminDashboard(Number(activityId), { customerType: "GENERAL" }), loadAdminDashboard(Number(activityId), { customerType: "SPECIAL" }),
         ]);
         if (active) {
           setOverviewDashboard(all);
           setOverviewByType({ GENERAL: general, SPECIAL: special });
         }
       } catch {
-        // 其它后台数据仍可正常维护；概览保留最近一次成功结果。
+        if (active) { setOverviewDashboard(null); setOverviewByType({ GENERAL: null, SPECIAL: null }); }
       }
     };
     void refreshOverview();

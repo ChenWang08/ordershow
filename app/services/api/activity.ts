@@ -12,6 +12,10 @@ export async function loadAdminActivities() {
   return (await api<Envelope<RuntimeActivity[]>>("/admin/activities")).data;
 }
 
+export async function loadAdminActivity(id: number) {
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${id}`)).data;
+}
+
 export type CreateActivityInput = {
   name: string;
   startsAt: string;

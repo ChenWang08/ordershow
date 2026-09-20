@@ -162,7 +162,7 @@ activities/{activityId}/exports/{exportTaskId}.xlsx
 - 支持 `SUPER_ADMIN` 超级管理员和绑定部门的 `DEPARTMENT_ADMIN` 部门共享账号；每个部门最多一个部门账号；部门编码创建时由服务端生成且永久不变；
 - 使用账号密码登录，密码使用 Argon2id 或 BCrypt 哈希；
 - 登录成功后使用 Secure、HttpOnly、SameSite Cookie；
-- 第一次登录必须修改初始密码；
+- 超级管理员第一次登录必须修改初始密码；部门共享账号的登录密码由超级管理员统一设置和重置，部门账号不能自行修改；
 - 管理员接口全部进行服务端鉴权和 CSRF 防护；
 - 每个敏感操作记录管理员 ID；部门共享账号的审计粒度明确到部门账号、会话和 IP，不能识别部门内部具体操作者。
 

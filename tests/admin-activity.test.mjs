@@ -47,7 +47,7 @@ function settingsHarness(overrides = {}, apiOverrides = {}, confirm = true) {
   };
   const api = {
     ApiError: class ApiError extends Error {},
-    loadActivity: async () => { calls.push("load"); return activity; },
+    loadAdminActivity: async () => { calls.push("load"); return activity; },
     updateActivity: async (_activity, request) => { calls.push("save"); return { ...activity, ...request }; },
     publishActivity: async () => { calls.push("publish"); return { ...activity, status: "SCHEDULED" }; },
     ...apiOverrides,

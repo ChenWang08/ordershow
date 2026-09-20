@@ -295,7 +295,7 @@ test("derives H5 and dashboard regions from the current whitelist", async () => 
   assert.match(prototype, /customerTypeMode=\{whitelistMode\}/);
   assert.match(styles, /repeat\(auto-fit,minmax\(max\(220px,calc\(\(100% - 30px\)\/4\)\),1fr\)\)/);
   assert.match(dashboardService, /record GeneralRegion/);
-  assert.match(dashboardService, /"未分片区"/);
+  assert.match(dashboardService, /"未分大区"/);
   assert.match(activityService, /b\.current_version_id = c\.data_version_id/);
   assert.match(authService, /\? = 'UNASSIGNED'/);
   assert.match(importService, /regions\.resolveCode/);
@@ -499,7 +499,7 @@ test("uses live overview data, full admin phones, Chinese regions, and linked at
   ]);
 
   assert.doesNotMatch(prototype, /19,457,005\.28|38,620|1,316\.0/);
-  assert.match(prototype, /loadDashboard\(\{ customerType: "GENERAL" \}\)/);
+  assert.match(prototype, /loadAdminDashboard\(Number\(activityId\), \{ customerType: "GENERAL" \}\)/);
   assert.match(prototype, /regionOptions\.find\(\(item\) => item\.value === identityRegionCode\)\?\.name/);
   assert.match(prototype, /row\.activityCustomerId !== null/);
   assert.match(prototype, /白名单实时试算/);

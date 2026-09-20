@@ -101,6 +101,7 @@ public class AuditService {
     if (uri.contains("/orders")) return "ORDER"; if (uri.contains("/products")) return "PRODUCT";
     if (uri.contains("/customers")) return "CUSTOMER"; if (uri.contains("/attendees")) return "ATTENDEE";
     if (uri.contains("/imports")) return "IMPORT"; if (uri.contains("/lottery")) return "LOTTERY";
+    if (uri.contains("/admin/departments/") && uri.endsWith("/account")) return "ADMIN_USER";
     if (uri.contains("/admin/users")) return "ADMIN_USER";
     if (uri.contains("/admin/departments")) return "DEPARTMENT";
     if (uri.contains("/activities")) return "ACTIVITY"; return "SESSION";
@@ -109,6 +110,7 @@ public class AuditService {
     if (uri.endsWith("/admin/auth/login")) return "ADMIN_LOGIN";
     if (uri.endsWith("/admin/auth/change-password")) return "ADMIN_PASSWORD_CHANGED";
     if (uri.endsWith("/admin/auth/logout")) return "ADMIN_LOGOUT";
+    if (uri.contains("/admin/departments/") && uri.endsWith("/account")) return "ADMIN_USER_CREATED";
     if (uri.endsWith("/admin/departments")) return "DEPARTMENT_CREATED";
     if (uri.contains("/admin/departments/")) return "DEPARTMENT_UPDATED";
     if (uri.endsWith("/admin/users")) return "ADMIN_USER_CREATED";

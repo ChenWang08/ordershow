@@ -186,7 +186,7 @@ try {
       console.log("PASS ranking customer-type switching");
     }
     if (route === "report") {
-      const reportName = "综合客户区域金额与产品线金额同屏展示";
+      const reportName = "综合客户大区金额与产品线金额同屏展示";
       const changed = screen.waitForResponse((response) => response.url().endsWith(`/reports/${encodeURIComponent(reportName)}`) && response.status() === 200);
       await screen.locator(".report-header select").selectOption({ label: reportName });
       await changed;
