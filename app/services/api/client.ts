@@ -30,7 +30,13 @@ export async function api<T>(path: string, init: RequestInit = {}, csrfKind?: "a
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("json") ? await response.json() : await response.text();
   const errorBody = body as { code?: string; detail?: string; message?: string; traceId?: string } | null;
-  if (!response.ok && typeof window !== "undefined" && path.startsWith("/admin/activities/") && [401, 403, 404].includes(response.status)) {
+  const requestPath = path.split("?")[0];
+  const requestMethod = (init.method || "GET").toUpperCase();
+  const isReadRequest = requestMethod === "GET" || requestMethod === "HEAD";
+  const lostReadAccess = isReadRequest && [401, 403].includes(response.status);
+  const missingActivity = isReadRequest && response.status === 404 && /^\/admin\/activities\/\d+\/?$/.test(requestPath);
+  if (!response.ok && typeof window !== "undefined" && path.startsWith("/admin/activities/")
+      && (lostReadAccess || missingActivity)) {
     window.dispatchEvent(new Event("admin-access-invalid"));
   }
   if (!response.ok) throw new ApiError(response.status, errorBody?.code || "REQUEST_FAILED", errorBody?.detail || errorBody?.message || "请求失败", errorBody?.traceId);

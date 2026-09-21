@@ -114,11 +114,14 @@ export type DashboardReport = {
 
 export type LotteryRoundApi = {
   id: number; activityId: number; ruleId: number; roundNo: number; name: string; prizeName: string;
+  prizeImageFileId?: number | null; prizeImageUrl?: string | null;
   winnerCount: number; candidateScope: "ALL_CUSTOMERS" | "ATTENDEES" | "VALID_ORDERS";
   customerType: "ALL" | "GENERAL" | "SPECIAL"; minimumOrderAmount: number;
+  qualificationMetric: "AMOUNT" | "BOX_COUNT"; minimumOrderBoxCount: number;
   excludePreviousWinners: boolean; displayNameType: "SHORT_NAME" | "FULL_NAME"; status: string;
   currentAttemptNo: number; candidateCount?: number; resultHash?: string; drawnAt?: string; completedAt?: string; lockVersion: number;
 };
+export type LotteryPrizeImageUpload = { fileId: number; url: string; filename: string; contentType: string; sizeBytes: number };
 
 export type LotteryRuleApi = { id: number; activityId: number; name: string; status: string; createdAt: string; updatedAt: string; rounds: LotteryRoundApi[] };
 export type LotteryWinnerApi = { roundId: number; position: number; activityCustomerId: number; dealerDisplayName: string; customerType: string; regionCode?: string; branchName?: string; phoneMasked: string };
@@ -126,7 +129,8 @@ export type LotteryDrawResult = { roundId: number; attemptId: number; attemptNo:
   configuredWinnerCount: number; actualWinnerCount: number; unawardedCount: number;
   winners: LotteryWinnerApi[]; resultHash: string; drawnAt: string };
 export type LotteryCandidatePreviewItem = { activityCustomerId: number; dealerFullName: string; customerType: string;
-  regionCode?: string; branchName?: string; phoneMasked?: string; qualificationSource: string; qualifyingOrderAmount?: number };
+  regionCode?: string; branchName?: string; phoneMasked?: string; qualificationSource: string;
+  qualifyingOrderAmount?: number; qualifyingOrderBoxCount?: number };
 export type LotteryCandidatePreview = { calculatedAt: string; candidateCount: number; configuredWinnerCount: number;
   actualWinnerCount: number; unawardedCount: number; candidates: LotteryCandidatePreviewItem[] };
 export type LotteryWinnerStatistics = { validWinnerRecords: number; validWinnerCustomers: number; invalidatedWinnerRecords: number };

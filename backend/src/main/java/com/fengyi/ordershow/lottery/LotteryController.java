@@ -6,11 +6,14 @@ import com.fengyi.ordershow.common.TraceFilter;
 import com.fengyi.ordershow.security.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.List;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -21,6 +24,19 @@ public class LotteryController {
 
   public LotteryController(LotteryService service, AuthService auth, ActivityService activities) {
     this.service = service; this.auth = auth; this.activities = activities;
+  }
+
+  @PostMapping("/admin/activities/{activityId}/lottery/prize-images")
+  ApiResponse<LotteryService.PrizeImageView> uploadPrizeImage(@PathVariable long activityId,
+      @RequestParam MultipartFile file, HttpServletRequest request) {
+    return ApiResponse.of(service.uploadPrizeImage(activityId, file, auth.requireAdmin(request)), TraceFilter.id(request));
+  }
+
+  @DeleteMapping("/admin/activities/{activityId}/lottery/prize-images/{fileId}")
+  ApiResponse<Boolean> deleteUnattachedPrizeImage(@PathVariable long activityId, @PathVariable long fileId,
+      HttpServletRequest request) {
+    auth.requireAdmin(request);
+    return ApiResponse.of(service.deleteUnattachedPrizeImage(activityId, fileId), TraceFilter.id(request));
   }
 
   @GetMapping("/admin/activities/{activityId}/lottery/rules")

@@ -1,12 +1,14 @@
 "use client";
 
+/* eslint-disable @next/next/no-img-element -- prize images come from the runtime file API. */
 import { useEffect, useState } from "react";
-import { ApiError, completeLotteryRound, createLotteryRule, drawLotteryRound, loadLotteryStatistics, loadPublicLottery, previewLotteryCandidates, publishLotteryRule, updateLotteryRule, type LotteryCandidatePreview, type LotteryRuleApi, type LotteryWinnerApi, type LotteryWinnerStatistics } from "../../api";
+import { apiAssetUrl, ApiError, completeLotteryRound, createLotteryRule, deleteLotteryPrizeImage, drawLotteryRound, loadLotteryStatistics, loadPublicLottery, previewLotteryCandidates, publishLotteryRule, updateLotteryRule, uploadLotteryPrizeImage, type LotteryCandidatePreview, type LotteryRuleApi, type LotteryWinnerApi, type LotteryWinnerStatistics } from "../../api";
 import type { AttendanceCustomerType, AttendanceRow } from "../../domain/import-domain";
 import { FestivalDecor } from "../shared/components/FestivalDecor";
 import { normalizeSearchText } from "../shared/utils";
 
 export type CandidateScope = "all" | "attended" | "ordered";
+export type QualificationMetric = "AMOUNT" | "BOX_COUNT";
 export type LotteryRoundStatus = "draft" | "published" | "completed";
 export type LotteryRound = {
   id: number;
@@ -18,6 +20,11 @@ export type LotteryRound = {
   customerType: "全部客户" | "特渠专业客户" | "综合客户";
   scope: CandidateScope;
   minAmount: number;
+  qualificationMetric: QualificationMetric;
+  minBoxCount: number;
+  prizeImageFileId?: number;
+  prizeImageUrl?: string;
+  savedPrizeImageFileId?: number;
   excludeWinners: boolean;
   status: LotteryRoundStatus;
   candidateCount: number;
@@ -32,7 +39,7 @@ const dealerNames = [
 ];
 
 export const initialLotteryRounds: LotteryRound[] = [
-  { id: -1, name: "第一轮", prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, excludeWinners: false, status: "draft", candidateCount: 0 },
+  { id: -1, name: "第一轮", prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, qualificationMetric: "AMOUNT", minBoxCount: 0, excludeWinners: false, status: "draft", candidateCount: 0 },
 ];
 
 function lotteryCustomerTypeCode(customerType: LotteryRound["customerType"]) {
@@ -45,6 +52,11 @@ export function mapLotteryRule(rule: LotteryRuleApi): LotteryRound[] {
     customerType: round.customerType === "GENERAL" ? "综合客户" : round.customerType === "SPECIAL" ? "特渠专业客户" : "全部客户",
     scope: round.candidateScope === "ATTENDEES" ? "attended" : round.candidateScope === "VALID_ORDERS" ? "ordered" : "all",
     minAmount: Number(round.minimumOrderAmount),
+    qualificationMetric: round.qualificationMetric ?? "AMOUNT",
+    minBoxCount: Number(round.minimumOrderBoxCount ?? 0),
+    prizeImageFileId: round.prizeImageFileId ?? undefined,
+    prizeImageUrl: round.prizeImageUrl ? apiAssetUrl(round.prizeImageUrl) : undefined,
+    savedPrizeImageFileId: round.prizeImageFileId ?? undefined,
     excludeWinners: round.excludePreviousWinners, status: round.status === "COMPLETED" ? "completed" : round.status === "DRAFT" ? "draft" : "published",
     candidateCount: round.candidateCount ?? 0 }));
 }
@@ -55,6 +67,14 @@ export function groupLotteryWinnersByRound(winners: LotteryWinnerApi[]) {
     (grouped[winner.roundId] ??= []).push(winner.dealerDisplayName);
   }
   return grouped;
+}
+
+function qualifyingOrderDisplay(candidate: LotteryCandidatePreview["candidates"][number], round: LotteryRound) {
+  if (round.scope !== "ordered") return "";
+  if (round.qualificationMetric === "BOX_COUNT") {
+    return candidate.qualifyingOrderBoxCount == null ? "" : " · " + Number(candidate.qualifyingOrderBoxCount).toLocaleString() + " 箱";
+  }
+  return candidate.qualifyingOrderAmount == null ? "" : " · ¥" + Number(candidate.qualifyingOrderAmount).toLocaleString();
 }
 
 type LotteryDisplayCandidate = {
@@ -131,7 +151,7 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
   const rollingNames = availableCandidateNames.length > 0
     ? Array.from({ length: Math.min(rollingCount, availableCandidateNames.length) }, (_, i) => availableCandidateNames[(ticker + i * 3) % availableCandidateNames.length])
     : Array.from({ length: rollingCount }, (_, index) => `幸运客户 ${index + 1}`);
-  const winners = status === "done" ? persistedWinners : rollingNames;
+  const winners = status === "done" || status === "finished" ? persistedWinners : rollingNames;
   const selectedHistoryWinners = currentRound ? historyWinnersByRound[currentRound.id] ?? [] : [];
   useEffect(() => {
     if (activityFinished) return;
@@ -141,6 +161,7 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
       if (!currentRound) return;
       const names = data.winners.filter((winner) => winner.roundId === currentRound.id).sort((a, b) => a.position - b.position).map((winner) => winner.dealerDisplayName);
       if (names.length > 0) { setPersistedWinners(names); setStatus(currentRound.serverStatus === "COMPLETED" ? "finished" : "done"); }
+      else if (currentRound.serverStatus === "COMPLETED") { setPersistedWinners([]); setStatus("finished"); }
     }).catch(() => undefined);
     return () => { active = false; };
   }, [activityFinished, currentRound?.id, currentRound?.serverStatus]);
@@ -182,22 +203,30 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
           {availableRounds.map((item) => <option key={item.id} value={item.id}>{item.name} · {historyWinnersByRound[item.id]?.length ? "已开奖" : item.serverStatus === "COMPLETED" ? "已完成" : "暂无结果"}</option>)}
         </select> : <><b>{currentRound.name}</b><small> · 按配置顺序执行</small></>}
       </div>
-      <div className="lottery-title"><b>{currentRound.name} 幸运抽奖</b><span>{activityFinished ? "活动已结束 · 历史结果回看" : `实物奖品：${currentRound.prize}`}</span></div>
+      <div className="lottery-title">
+        <b>{currentRound.name} 幸运抽奖</b>
+        <span>本轮奖品：{currentRound.prize}</span>
+        {currentRound.prizeImageUrl && <div className="lottery-prize-display">
+          <div className="lottery-prize-image"><img src={currentRound.prizeImageUrl} alt={currentRound.prize} /></div>
+        </div>}
+      </div>
       {activityFinished ? historyLoading ? (
         <div className="lottery-ready history-empty"><h2>正在加载历史结果</h2><p>请稍候，正在读取各轮次的中奖名单</p></div>
       ) : historyError ? (
         <div className="lottery-ready history-empty"><h2>历史结果暂时无法加载</h2><p>{historyError}</p></div>
       ) : selectedHistoryWinners.length > 0 ? (
         <div className="winner-grid finished">
-          {selectedHistoryWinners.map((name, index) => <div key={`${name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><b>{name}</b></div>)}
+          {selectedHistoryWinners.map((name, index) => <div key={`${name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><b title={name}>{name}</b></div>)}
         </div>
       ) : (
         <div className="lottery-ready history-empty"><h2>本轮暂无中奖结果</h2><p>该轮次没有已保存的有效中奖记录</p></div>
       ) : status === "ready" ? (
-        <div className="lottery-ready"><div className="lucky-seal">福</div><h2>好运即将揭晓</h2><p>候选资格将在开始抽奖时由服务端复核并固定</p></div>
+        <div className="lottery-ready"><div className="lucky-seal">福</div><h2>好运即将揭晓</h2></div>
+      ) : status === "finished" && winners.length === 0 ? (
+        <div className="lottery-ready history-empty"><h2>暂无已保存的中奖名单</h2><p>请刷新页面重新读取本轮抽奖结果</p></div>
       ) : (
         <div className={`winner-grid ${status}`}>
-          {winners.map((name, index) => <div key={`${name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><b>{name}</b></div>)}
+          {winners.map((name, index) => <div key={`${name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><b title={name}>{name}</b></div>)}
         </div>
       )}
       {actionError && <p className="field-error">{actionError}</p>}
@@ -215,12 +244,14 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
   const [previewOpen, setPreviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [prizeImageUploading, setPrizeImageUploading] = useState(false);
+  const [prizeImageError, setPrizeImageError] = useState("");
   const [preview, setPreview] = useState<LotteryCandidatePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [statistics, setStatistics] = useState<LotteryWinnerStatistics>({ validWinnerRecords: 0, validWinnerCustomers: 0, invalidatedWinnerRecords: 0 });
   const selected = rounds.find((item) => item.id === selectedId) ?? rounds[0];
   const selectedIndex = Math.max(0, rounds.findIndex((item) => item.id === selected.id));
-  const selectedLocked = readOnly || Boolean(selected.serverStatus && !["DRAFT", "READY"].includes(selected.serverStatus));
+  const selectedLocked = readOnly || prizeImageUploading || Boolean(selected.serverStatus && !["DRAFT", "READY"].includes(selected.serverStatus));
   const effectiveSelectedCustomerType = customerTypeMode === "UNSPECIFIED" ? "全部客户" : selected.customerType;
   const customerTypeOptions = customerTypeMode === "UNSPECIFIED" ? ["全部客户"] : ["全部客户", "特渠专业客户", "综合客户"];
   const statusLabel = { draft: "草稿", published: "已发布", completed: "已完成" } as const;
@@ -230,6 +261,37 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
     { key: "ordered", title: "有效下单客户", detail: "当前已提交订单" },
   ];
   const updateSelected = (patch: Partial<LotteryRound>) => onChange(rounds.map((item) => item.id === selected.id ? { ...item, ...patch } : item));
+  const removeTemporaryPrizeImage = (fileId: number) => {
+    const usedByAnotherRound = rounds.some((item) => item.id !== selected.id && item.prizeImageFileId === fileId);
+    if (!usedByAnotherRound && fileId !== selected.savedPrizeImageFileId) {
+      void deleteLotteryPrizeImage(activityId, fileId).catch(() => undefined);
+    }
+  };
+  const handlePrizeImageUpload = async (file: File) => {
+    const previousTemporaryFileId = selected.prizeImageFileId !== selected.savedPrizeImageFileId
+      ? selected.prizeImageFileId : undefined;
+    setPrizeImageUploading(true); setPrizeImageError("");
+    try {
+      const uploaded = await uploadLotteryPrizeImage(activityId, file);
+      updateSelected({ prizeImageFileId: uploaded.fileId, prizeImageUrl: apiAssetUrl(uploaded.url) });
+      if (previousTemporaryFileId && previousTemporaryFileId !== uploaded.fileId) {
+        removeTemporaryPrizeImage(previousTemporaryFileId);
+      }
+    } catch (error) {
+      setPrizeImageError(error instanceof ApiError
+        ? error.status === 404 ? "图片上传接口不可用，请重新加载页面并确认后端已更新" : error.message
+        : "奖品图片上传失败");
+    } finally {
+      setPrizeImageUploading(false);
+    }
+  };
+  const clearPrizeImage = () => {
+    if (selected.prizeImageFileId && selected.prizeImageFileId !== selected.savedPrizeImageFileId) {
+      removeTemporaryPrizeImage(selected.prizeImageFileId);
+    }
+    updateSelected({ prizeImageFileId: undefined, prizeImageUrl: undefined });
+    setPrizeImageError("");
+  };
   useEffect(() => {
     if (!Number.isFinite(activityId) || activityId <= 0 || !selected) return;
     const timer = window.setTimeout(() => {
@@ -239,6 +301,8 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
         candidateScope: selected.scope === "attended" ? "ATTENDEES" : selected.scope === "ordered" ? "VALID_ORDERS" : "ALL_CUSTOMERS",
         customerType: lotteryCustomerTypeCode(effectiveSelectedCustomerType),
         minimumOrderAmount: selected.scope === "ordered" ? selected.minAmount : 0,
+        qualificationMetric: selected.qualificationMetric,
+        minimumOrderBoxCount: selected.scope === "ordered" ? selected.minBoxCount : 0,
         excludePreviousWinners: selectedIndex > 0 && selected.excludeWinners,
       }).then(setPreview).catch((error) => setSaveError(error instanceof ApiError ? error.message : "候选名单试算失败"))
         .finally(() => setPreviewLoading(false));
@@ -250,12 +314,14 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
     void loadLotteryStatistics(activityId).then(setStatistics).catch(() => undefined);
   }, [activityId, rounds]);
   const addRound = () => {
+    if (prizeImageUploading) return;
     const id = Math.min(-1, ...rounds.map((item) => item.id - 1));
-    const next: LotteryRound = { id, name: `第${rounds.length + 1}轮`, prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, excludeWinners: true, status: "draft", candidateCount: 0 };
+    const next: LotteryRound = { id, name: `第${rounds.length + 1}轮`, prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, qualificationMetric: "AMOUNT", minBoxCount: 0, excludeWinners: true, status: "draft", candidateCount: 0 };
     onChange([...rounds, next]);
     setSelectedId(id);
   };
   const duplicateRound = () => {
+    if (prizeImageUploading) return;
     const id = Math.min(-1, ...rounds.map((item) => item.id - 1));
     onChange([...rounds, { ...selected, id, ruleId: undefined, serverStatus: undefined, name: `${selected.name}副本`, status: "draft" }]);
     setSelectedId(id);
@@ -267,6 +333,9 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
         winnerCount: round.winnerCount, candidateScope: round.scope === "attended" ? "ATTENDEES" : round.scope === "ordered" ? "VALID_ORDERS" : "ALL_CUSTOMERS",
          customerType: lotteryCustomerTypeCode(customerTypeMode === "UNSPECIFIED" ? "全部客户" : round.customerType),
         minimumOrderAmount: round.scope === "ordered" ? round.minAmount : 0,
+        qualificationMetric: round.qualificationMetric,
+        minimumOrderBoxCount: round.scope === "ordered" ? round.minBoxCount : 0,
+        prizeImageFileId: round.prizeImageFileId ?? null,
         excludePreviousWinners: index === 0 ? false : round.excludeWinners, displayNameType: "FULL_NAME" })) };
       const existingRuleId = rounds.find((round) => round.ruleId && ["DRAFT", "READY", "DRAWN", "COMPLETED", "RESET"].includes(round.serverStatus || ""))?.ruleId;
       const saved = existingRuleId ? await updateLotteryRule(activityId, existingRuleId, body) : await createLotteryRule(activityId, body);
@@ -278,16 +347,26 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
   };
   const removeRound = () => {
     if (selectedLocked || rounds.length === 1) return;
+    if (selected.prizeImageFileId && selected.prizeImageFileId !== selected.savedPrizeImageFileId
+        && !rounds.some((item) => item.id !== selected.id && item.prizeImageFileId === selected.prizeImageFileId)) {
+      void deleteLotteryPrizeImage(activityId, selected.prizeImageFileId).catch(() => undefined);
+    }
     const rest = rounds.filter((item) => item.id !== selected.id);
     onChange(rest);
     setSelectedId(rest[0].id);
   };
-  const ruleSummary = `${effectiveSelectedCustomerType} · ${selected.scope === "all" ? "活动白名单" : selected.scope === "attended" ? "现场已到场" : "有效下单"}${selected.scope === "ordered" && selected.minAmount > 0 ? ` · 订单满 ¥${selected.minAmount.toLocaleString()}` : ""} · ${selectedIndex === 0 ? "第一轮不涉及历史中奖" : selected.excludeWinners ? "排除已中奖" : "允许重复中奖"}`;
+  const thresholdSummary = selected.scope !== "ordered" ? "" : selected.qualificationMetric === "BOX_COUNT"
+    ? selected.minBoxCount > 0 ? " · 订货满 " + selected.minBoxCount.toLocaleString() + " 箱" : ""
+    : selected.minAmount > 0 ? " · 订单满 ¥" + selected.minAmount.toLocaleString() : "";
+  const ruleSummary = effectiveSelectedCustomerType + " · "
+    + (selected.scope === "all" ? "活动白名单" : selected.scope === "attended" ? "现场已到场" : "有效下单")
+    + thresholdSummary + " · "
+    + (selectedIndex === 0 ? "第一轮不涉及历史中奖" : selected.excludeWinners ? "排除已中奖" : "允许重复中奖");
   const resolvedCandidateCount = preview?.candidateCount ?? 0;
   const candidateSteps: [string, number][] = [["当前有效白名单", customerCount], [selected.scope === "attended" ? "已匹配到场客户" : selected.scope === "ordered" ? "有效订单客户" : "客户类型匹配", resolvedCandidateCount], ...(selectedIndex > 0 && selected.excludeWinners ? [["排除已中奖", resolvedCandidateCount] as [string, number]] : [])];
   return (
     <div className="admin-panel lottery-settings">
-      <div className="panel-title"><div><h2>抽奖规则工作台</h2><p>{readOnly ? "整场活动已结束，抽奖规则和结果只读" : "候选按白名单客户 ID 去重并严格按轮次执行；已开始轮次自动锁定"}</p></div><div className="panel-actions"><span className="attendance-not-linked">现场名单已同步 {attendanceRows.length} 名</span><button className="admin-primary" disabled={readOnly || saving || rounds.length === 0} onClick={saveAndPublish}>{readOnly ? "活动已结束" : saving ? "正在保存…" : rounds.some((round) => round.serverStatus === "READY") ? "保存规则修改" : "保存并发布"}</button></div></div>
+      <div className="panel-title"><div><h2>抽奖规则工作台</h2><p>{readOnly ? "整场活动已结束，抽奖规则和结果只读" : "候选按白名单客户 ID 去重并严格按轮次执行；已开始轮次自动锁定"}</p></div><div className="panel-actions"><span className="attendance-not-linked">现场名单已同步 {attendanceRows.length} 名</span><button className="admin-primary" disabled={readOnly || saving || prizeImageUploading || rounds.length === 0} onClick={saveAndPublish}>{readOnly ? "活动已结束" : saving ? "正在保存…" : rounds.some((round) => round.serverStatus === "READY") ? "保存规则修改" : "保存并发布"}</button></div></div>
       {saveError && <div className="warning-box"><b>抽奖规则未发布</b><span>{saveError}</span></div>}
       <div className="lottery-overview">
         <article><span>抽奖轮次</span><strong>{rounds.length}</strong><small>{rounds.filter((x) => x.status === "completed").length} 轮已完成</small></article>
@@ -301,16 +380,40 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
           <div className="round-form-heading"><div><h3>{selected.name}</h3><span className={`round-status ${selected.status}`}>{statusLabel[selected.status]}</span></div><div><button onClick={duplicateRound} disabled={readOnly}>复制</button><button onClick={removeRound} disabled={selectedLocked}>删除</button></div></div>
           <label><span>轮次名称</span><input value={selected.name} disabled={selectedLocked} onChange={(e) => updateSelected({ name: e.target.value })} /></label>
           <label><span>奖品名称</span><input value={selected.prize} disabled={selectedLocked} onChange={(e) => updateSelected({ prize: e.target.value })} /></label>
+          <div className="lottery-prize-image-setting">
+            <span className="lottery-prize-image-label">奖品图片</span>
+            <div className={selected.prizeImageUrl ? "lottery-prize-image-preview has-image" : "lottery-prize-image-preview empty"}>
+              {selected.prizeImageUrl ? <img src={selected.prizeImageUrl} alt={selected.prize} /> : <span>暂未上传图片</span>}
+            </div>
+            <div className="lottery-prize-image-actions">
+              <label className={selectedLocked ? "lottery-prize-image-upload disabled" : "lottery-prize-image-upload"}>
+                <span>{prizeImageUploading ? "正在上传…" : selected.prizeImageUrl ? "替换图片" : "上传图片"}</span>
+                <input type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.bmp" disabled={selectedLocked} onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.currentTarget.value = "";
+                  if (file) void handlePrizeImageUpload(file);
+                }} />
+              </label>
+              {selected.prizeImageFileId != null && <button type="button" className="lottery-prize-image-remove" disabled={selectedLocked} onClick={clearPrizeImage}>移除图片</button>}
+              <small>支持 JPG、PNG、WEBP、GIF、BMP，单张不超过 10MB</small>
+              {prizeImageError && <small className="field-error">{prizeImageError}</small>}
+            </div>
+          </div>
           <label><span>中奖人数</span><input type="number" min="1" value={selected.winnerCount} disabled={selectedLocked} onChange={(e) => updateSelected({ winnerCount: Number(e.target.value) })} /></label>
           <label><span>客户类型</span><select value={effectiveSelectedCustomerType} disabled={selectedLocked || customerTypeMode === "UNSPECIFIED"} onChange={(e) => updateSelected({ customerType: e.target.value as LotteryRound["customerType"] })}>{customerTypeOptions.map((x) => <option key={x}>{x}</option>)}</select></label>
-          <fieldset className="candidate-scope"><legend>候选客户范围</legend>{scopeOptions.map((option) => <button type="button" key={option.key} className={selected.scope === option.key ? "active" : ""} disabled={selectedLocked} onClick={() => updateSelected({ scope: option.key, minAmount: option.key === "ordered" ? selected.minAmount : 0 })}><i>{selected.scope === option.key ? "✓" : ""}</i><span><b>{option.title}</b><small>{option.detail}</small></span></button>)}</fieldset>
-          {selected.scope === "ordered" && <label><span>最低订单金额</span><div className="amount-input"><b>¥</b><input type="number" min="0" value={selected.minAmount} disabled={selectedLocked} onChange={(e) => updateSelected({ minAmount: Number(e.target.value) })} /></div><small className="field-help">填写 0 表示不限制订单金额；以开奖时有效订单为准</small></label>}
+          <fieldset className="candidate-scope"><legend>候选客户范围</legend>{scopeOptions.map((option) => <button type="button" key={option.key} className={selected.scope === option.key ? "active" : ""} disabled={selectedLocked} onClick={() => updateSelected({ scope: option.key })}><i>{selected.scope === option.key ? "✓" : ""}</i><span><b>{option.title}</b><small>{option.detail}</small></span></button>)}</fieldset>
+          {selected.scope === "ordered" && <>
+            <label><span>门槛依据</span><select value={selected.qualificationMetric} disabled={selectedLocked} onChange={(e) => updateSelected({ qualificationMetric: e.target.value as QualificationMetric })}><option value="AMOUNT">最低订单金额</option><option value="BOX_COUNT">最低订货箱数</option></select></label>
+            {selected.qualificationMetric === "AMOUNT"
+              ? <label><span>最低订单金额</span><div className="amount-input"><b>¥</b><input type="number" min="0" value={selected.minAmount} disabled={selectedLocked} onChange={(e) => updateSelected({ minAmount: Number(e.target.value) })} /></div><small className="field-help">填写 0 表示不限制订单金额；以开奖时有效订单为准</small></label>
+              : <label><span>最低订货箱数</span><input type="number" min="0" step="1" value={selected.minBoxCount} disabled={selectedLocked} onChange={(e) => updateSelected({ minBoxCount: Math.max(0, Math.trunc(Number(e.target.value) || 0)) })} /><small className="field-help">填写 0 表示不限制订货箱数；按订单商品箱数合计</small></label>}
+          </>}
           <label className="check-setting repeat-setting"><input type="checkbox" checked={selectedIndex === 0 ? false : selected.excludeWinners} disabled={selectedLocked || selectedIndex === 0} onChange={(e) => updateSelected({ excludeWinners: e.target.checked })} /><span><b>排除本活动已中奖客户</b><small>{selectedIndex === 0 ? "第一轮暂无历史中奖客户，无需设置" : "按白名单客户 ID 避免跨轮次重复中奖"}</small></span></label>
           <div className="rule-summary"><span>当前规则</span><p>{ruleSummary}</p></div>
           <div className="candidate-preview"><div><span>实时候选池</span><strong>{previewLoading ? "…" : resolvedCandidateCount}<small> 人</small></strong><p>后端实时试算 · 按白名单客户 ID 去重 · {preview ? new Date(preview.calculatedAt).toLocaleString("zh-CN", { hour12: false }) : "等待试算"}</p>{preview && preview.unawardedCount > 0 && <small className="field-error">配置中奖 {preview.configuredWinnerCount} 人，当前将由全部 {preview.actualWinnerCount} 名候选中奖，空缺 {preview.unawardedCount} 个名额</small>}</div><button disabled={previewLoading || !preview} onClick={() => setPreviewOpen(true)}>查看候选名单</button></div>
         </section>
       </div>
-      {previewOpen && preview && <div className="order-drawer-backdrop" onClick={() => setPreviewOpen(false)}><aside className="order-drawer candidate-drawer" onClick={(e) => e.stopPropagation()}><header><div><span>实时候选池预览</span><h2>{selected.name} · {resolvedCandidateCount} 人</h2></div><button onClick={() => setPreviewOpen(false)}>×</button></header><div className="candidate-funnel">{candidateSteps.map(([label, count]) => <div key={label}><span>{label}</span><b>{count}</b></div>)}</div><div className="candidate-table">{preview.candidates.map((candidate, index) => <div key={candidate.activityCustomerId}><span>{String(index + 1).padStart(3, "0")}</span><b>{candidate.dealerFullName}</b><em>{candidate.customerType === "SPECIAL" ? "特渠" : candidate.customerType === "GENERAL" ? "综合" : "全部客户"}</em><small>ID {candidate.activityCustomerId} · {candidate.branchName || candidate.regionCode || "—"}{candidate.qualifyingOrderAmount != null ? ` · ¥${Number(candidate.qualifyingOrderAmount).toLocaleString()}` : ""}</small></div>)}{preview.candidates.length === 0 && <div className="table-empty">当前没有符合条件的候选客户</div>}</div><footer><small>正式候选将在点击开始抽奖时再次校验并固定</small><button className="admin-primary" onClick={() => setPreviewOpen(false)}>关闭</button></footer></aside></div>}
+      {previewOpen && preview && <div className="order-drawer-backdrop" onClick={() => setPreviewOpen(false)}><aside className="order-drawer candidate-drawer" onClick={(e) => e.stopPropagation()}><header><div><span>实时候选池预览</span><h2>{selected.name} · {resolvedCandidateCount} 人</h2></div><button onClick={() => setPreviewOpen(false)}>×</button></header><div className="candidate-funnel">{candidateSteps.map(([label, count]) => <div key={label}><span>{label}</span><b>{count}</b></div>)}</div><div className="candidate-table">{preview.candidates.map((candidate, index) => <div key={candidate.activityCustomerId}><span>{String(index + 1).padStart(3, "0")}</span><b>{candidate.dealerFullName}</b><em>{candidate.customerType === "SPECIAL" ? "特渠" : candidate.customerType === "GENERAL" ? "综合" : "全部客户"}</em><small>ID {candidate.activityCustomerId} · {candidate.branchName || candidate.regionCode || "—"}{qualifyingOrderDisplay(candidate, selected)}</small></div>)}{preview.candidates.length === 0 && <div className="table-empty">当前没有符合条件的候选客户</div>}</div><footer><small>正式候选将在点击开始抽奖时再次校验并固定</small><button className="admin-primary" onClick={() => setPreviewOpen(false)}>关闭</button></footer></aside></div>}
     </div>
   );
 }

@@ -153,7 +153,7 @@ CREATE TABLE stored_file (
   KEY idx_stored_file_sha256 (sha256),
   CONSTRAINT fk_stored_file_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_stored_file_created_by FOREIGN KEY (created_by) REFERENCES admin_user (id),
-  CONSTRAINT ck_stored_file_purpose CHECK (file_purpose IN ('IMPORT_SOURCE', 'PRODUCT_IMAGE', 'IMAGE_ARCHIVE', 'EXPORT_RESULT', 'OTHER'))
+  CONSTRAINT ck_stored_file_purpose CHECK (file_purpose IN ('IMPORT_SOURCE', 'PRODUCT_IMAGE', 'IMAGE_ARCHIVE', 'LOTTERY_PRIZE_IMAGE', 'EXPORT_RESULT', 'OTHER'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE import_task (
@@ -780,10 +780,13 @@ CREATE TABLE lottery_round (
   round_no INT UNSIGNED NOT NULL,
   name VARCHAR(200) NOT NULL,
   prize_name VARCHAR(200) NULL,
+  prize_image_file_id BIGINT UNSIGNED NULL,
   winner_count INT UNSIGNED NOT NULL,
   candidate_scope VARCHAR(20) NOT NULL,
   customer_type VARCHAR(16) NOT NULL DEFAULT 'ALL',
   minimum_order_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+  qualification_metric VARCHAR(20) NOT NULL DEFAULT 'AMOUNT',
+  minimum_order_box_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
   qualification_cutoff_at DATETIME(3) NULL,
   exclude_previous_winners BOOLEAN NOT NULL DEFAULT TRUE,
   display_name_type VARCHAR(20) NOT NULL DEFAULT 'SHORT_NAME',
@@ -803,12 +806,15 @@ CREATE TABLE lottery_round (
   PRIMARY KEY (id),
   UNIQUE KEY uk_lottery_round_rule_no (lottery_rule_id, round_no),
   KEY idx_lottery_round_activity_status (activity_id, status, round_no),
+  KEY idx_lottery_round_prize_image (prize_image_file_id),
   CONSTRAINT fk_lottery_round_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_lottery_round_rule FOREIGN KEY (lottery_rule_id) REFERENCES lottery_rule (id),
+  CONSTRAINT fk_lottery_round_prize_image FOREIGN KEY (prize_image_file_id) REFERENCES stored_file (id),
   CONSTRAINT fk_lottery_round_drawn_by FOREIGN KEY (drawn_by) REFERENCES admin_user (id),
   CONSTRAINT fk_lottery_round_reset_by FOREIGN KEY (reset_by) REFERENCES admin_user (id),
   CONSTRAINT ck_lottery_round_scope CHECK (candidate_scope IN ('ALL_CUSTOMERS', 'ATTENDEES', 'VALID_ORDERS')),
   CONSTRAINT ck_lottery_round_customer CHECK (customer_type IN ('ALL', 'GENERAL', 'SPECIAL')),
+  CONSTRAINT ck_lottery_round_qualification_metric CHECK (qualification_metric IN ('AMOUNT', 'BOX_COUNT')),
   CONSTRAINT ck_lottery_round_status CHECK (status IN ('DRAFT', 'READY', 'DRAWING', 'DRAWN', 'COMPLETED', 'RESET')),
   CONSTRAINT ck_lottery_round_count CHECK (winner_count > 0 AND minimum_order_amount >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -855,6 +861,7 @@ CREATE TABLE lottery_candidate_snapshot (
   qualification_source VARCHAR(20) NOT NULL,
   qualifying_order_id BIGINT UNSIGNED NULL,
   qualifying_order_amount DECIMAL(18,2) NULL,
+  qualifying_order_box_count BIGINT UNSIGNED NULL,
   random_sort_key BINARY(32) NOT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),

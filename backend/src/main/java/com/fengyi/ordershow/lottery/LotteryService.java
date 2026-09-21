@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.security.AdminPrincipal;
+import com.fengyi.ordershow.storage.StorageService;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.security.MessageDigest;
@@ -19,6 +20,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import org.springframework.dao.DuplicateKeyException;
@@ -27,24 +30,95 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class LotteryService {
   private static final Set<String> SCOPES = Set.of("ALL_CUSTOMERS", "ATTENDEES", "VALID_ORDERS");
   private static final Set<String> CUSTOMER_TYPES = Set.of("ALL", "GENERAL", "SPECIAL");
+  private static final Set<String> QUALIFICATION_METRICS = Set.of("AMOUNT", "BOX_COUNT");
   private static final Set<String> DISPLAY_TYPES = Set.of("SHORT_NAME", "FULL_NAME");
+  private static final Set<String> PRIZE_IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp", "gif", "bmp");
+  private static final long MAX_PRIZE_IMAGE_SIZE = 10L * 1024 * 1024;
 
   private final JdbcTemplate jdbc;
   private final StringRedisTemplate redis;
   private final ObjectMapper json;
   private final ActivityService activities;
+  private final StorageService storage;
   private final SecureRandom random = new SecureRandom();
 
-  public LotteryService(JdbcTemplate jdbc, StringRedisTemplate redis, ObjectMapper json, ActivityService activities) {
+  public LotteryService(JdbcTemplate jdbc, StringRedisTemplate redis, ObjectMapper json, ActivityService activities,
+                        StorageService storage) {
     this.jdbc = jdbc;
     this.redis = redis;
     this.json = json;
     this.activities = activities;
+    this.storage = storage;
+  }
+
+  public PrizeImageView uploadPrizeImage(long activityId, MultipartFile file, AdminPrincipal admin) {
+    requireLotteryNotFinished(activityId);
+    if (file == null || file.isEmpty()) throw DomainException.badRequest("LOTTERY_PRIZE_IMAGE_REQUIRED", "请选择奖品图片");
+    String filename = file.getOriginalFilename();
+    int extensionStart = filename == null ? -1 : filename.lastIndexOf('.');
+    String extension = extensionStart < 0 ? "" : filename.substring(extensionStart + 1).toLowerCase(Locale.ROOT);
+    if (!PRIZE_IMAGE_EXTENSIONS.contains(extension)) {
+      throw DomainException.badRequest("LOTTERY_PRIZE_IMAGE_TYPE_INVALID", "仅支持 JPG、PNG、WEBP、GIF、BMP 图片");
+    }
+    if (file.getSize() > MAX_PRIZE_IMAGE_SIZE) {
+      throw DomainException.badRequest("LOTTERY_PRIZE_IMAGE_TOO_LARGE", "奖品图片不能超过 10MB");
+    }
+    StorageService.StoredFile stored = storage.save(activityId, file, "LOTTERY_PRIZE_IMAGE", admin.id());
+    return new PrizeImageView(stored.id(), prizeImageUrl(stored.id()), stored.originalFilename(), stored.contentType(), stored.sizeBytes());
+  }
+
+  @Transactional
+  public boolean deleteUnattachedPrizeImage(long activityId, long fileId) {
+    requireLotteryNotFinished(activityId);
+    List<Long> files = jdbc.queryForList("""
+        SELECT id FROM stored_file
+        WHERE id = ? AND activity_id = ? AND file_purpose = 'LOTTERY_PRIZE_IMAGE' AND deleted_at IS NULL
+        FOR UPDATE
+        """, Long.class, fileId, activityId);
+    if (files.size() != 1) throw DomainException.notFound("LOTTERY_PRIZE_IMAGE_NOT_FOUND", "奖品图片不存在或已移除");
+    Integer references = jdbc.queryForObject("SELECT COUNT(*) FROM lottery_round WHERE prize_image_file_id = ?",
+        Integer.class, fileId);
+    if (references != null && references > 0) {
+      throw DomainException.conflict("LOTTERY_PRIZE_IMAGE_IN_USE", "该奖品图片已关联抽奖轮次");
+    }
+    jdbc.update("""
+        UPDATE stored_file SET deleted_at = UTC_TIMESTAMP(3)
+        WHERE id = ? AND activity_id = ? AND file_purpose = 'LOTTERY_PRIZE_IMAGE' AND deleted_at IS NULL
+        """, fileId, activityId);
+    return true;
+  }
+
+  private void validatePrizeImageReference(long activityId, Long fileId) {
+    if (fileId == null) return;
+    List<Long> available = jdbc.queryForList("""
+        SELECT id FROM stored_file
+        WHERE id = ? AND activity_id = ? AND file_purpose = 'LOTTERY_PRIZE_IMAGE' AND deleted_at IS NULL
+        FOR UPDATE
+        """, Long.class, fileId, activityId);
+    if (available.size() != 1) {
+      throw DomainException.badRequest("LOTTERY_PRIZE_IMAGE_INVALID", "奖品图片无效或不属于当前活动");
+    }
+  }
+
+  private void cleanupUnreferencedPrizeImages(long activityId, List<Long> fileIds) {
+    for (Long fileId : fileIds) {
+      if (fileId == null) continue;
+      jdbc.update("""
+          UPDATE stored_file SET deleted_at = UTC_TIMESTAMP(3)
+          WHERE id = ? AND activity_id = ? AND file_purpose = 'LOTTERY_PRIZE_IMAGE' AND deleted_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM lottery_round WHERE prize_image_file_id = ?)
+          """, fileId, activityId, fileId);
+    }
+  }
+
+  private static String prizeImageUrl(Long fileId) {
+    return fileId == null ? null : "/api/v1/public/files/" + fileId;
   }
 
   public List<RuleView> rules(long activityId) {
@@ -61,7 +135,7 @@ public class LotteryService {
   @Transactional
   public RuleView create(long activityId, RuleWrite request, AdminPrincipal admin) {
     requireLotteryNotFinished(activityId);
-    validate(request);
+    validate(activityId, request);
     GeneratedKeyHolder keys = new GeneratedKeyHolder();
     jdbc.update(connection -> {
       PreparedStatement statement = connection.prepareStatement(
@@ -79,9 +153,11 @@ public class LotteryService {
   @Transactional
   public RuleView update(long activityId, long ruleId, RuleWrite request, AdminPrincipal admin) {
     requireLotteryNotFinished(activityId);
-    validate(request);
+    validate(activityId, request);
     RuleView current = rule(activityId, ruleId);
     if ("ARCHIVED".equals(current.status())) throw DomainException.conflict("LOTTERY_RULE_READ_ONLY", "已归档规则不能修改");
+    List<Long> previousPrizeImages = current.rounds().stream().map(RoundView::prizeImageFileId)
+        .filter(java.util.Objects::nonNull).distinct().toList();
     jdbc.update("UPDATE lottery_rule SET name = ?, updated_by = ? WHERE id = ? AND activity_id = ?",
         request.name(), admin.id(), ruleId, activityId);
     if ("DRAFT".equals(current.status())) {
@@ -91,6 +167,7 @@ public class LotteryService {
       revisePublishedRounds(activityId, ruleId, current.rounds(), request.rounds());
       outbox(activityId, "LOTTERY_RULE_REVISED", String.valueOf(ruleId));
     }
+    cleanupUnreferencedPrizeImages(activityId, previousPrizeImages);
     return rule(activityId, ruleId);
   }
 
@@ -232,12 +309,13 @@ public class LotteryService {
   public CandidatePreview preview(long activityId, PreviewRequest request) {
     validatePreview(request);
     RoundView virtualRound = new RoundView(0, activityId, 0, request.roundNo(), "预览", null,
-        request.winnerCount(), request.candidateScope(), request.customerType(), request.minimumOrderAmount(), null,
+        request.winnerCount(), request.candidateScope(), request.customerType(), request.minimumOrderAmount(),
+        request.qualificationMetric(), request.minimumOrderBoxCount(), null,
         request.roundNo() > 1 && request.excludePreviousWinners(), "FULL_NAME", "DRAFT", 0, null,
-        null, null, null, 0);
+        null, null, null, 0, null, null);
     List<CandidatePreviewItem> items = candidates(virtualRound).stream().map(candidate -> new CandidatePreviewItem(
         candidate.customerId(), candidate.fullName(), candidate.customerType(), candidate.regionCode(), candidate.branchName(),
-        candidate.phoneMasked(), request.candidateScope(), candidate.orderAmount())).toList();
+        candidate.phoneMasked(), request.candidateScope(), candidate.orderAmount(), candidate.orderBoxCount())).toList();
     int actualWinnerCount = Math.min(request.winnerCount(), items.size());
     return new CandidatePreview(Instant.now(), items.size(), request.winnerCount(), actualWinnerCount,
         Math.max(0, request.winnerCount() - actualWinnerCount), items);
@@ -276,36 +354,48 @@ public class LotteryService {
 
   private RoundView withCandidateCount(RoundView round, int candidateCount) {
     return new RoundView(round.id(), round.activityId(), round.ruleId(), round.roundNo(), round.name(), round.prizeName(),
-        round.winnerCount(), round.candidateScope(), round.customerType(), round.minimumOrderAmount(), round.qualificationCutoffAt(),
+        round.winnerCount(), round.candidateScope(), round.customerType(), round.minimumOrderAmount(),
+        round.qualificationMetric(), round.minimumOrderBoxCount(), round.qualificationCutoffAt(),
         round.excludePreviousWinners(), round.displayNameType(), round.status(), round.currentAttemptNo(), candidateCount,
-        round.resultHash(), round.drawnAt(), round.completedAt(), round.lockVersion());
+        round.resultHash(), round.drawnAt(), round.completedAt(), round.lockVersion(),
+        round.prizeImageFileId(), round.prizeImageUrl());
   }
 
   private List<RoundView> mapRounds(String where, Object... args) {
     return jdbc.query("""
         SELECT r.id, r.activity_id, r.lottery_rule_id, r.round_no, r.name, r.prize_name, r.winner_count,
-          r.candidate_scope, r.customer_type, r.minimum_order_amount, r.qualification_cutoff_at,
+          r.candidate_scope, r.customer_type, r.minimum_order_amount, r.qualification_metric, r.minimum_order_box_count,
+          r.qualification_cutoff_at,
           r.exclude_previous_winners, r.display_name_type, r.status, r.current_attempt_no, r.candidate_count,
-          HEX(r.result_hash), r.drawn_at, r.completed_at, r.lock_version
+          HEX(r.result_hash), r.drawn_at, r.completed_at, r.lock_version, r.prize_image_file_id
         FROM lottery_round r
-        """ + where + " ORDER BY r.round_no", (rs, rowNum) -> new RoundView(rs.getLong(1), rs.getLong(2), rs.getLong(3),
-        rs.getInt(4), rs.getString(5), rs.getString(6), rs.getInt(7), rs.getString(8), rs.getString(9),
-        rs.getBigDecimal(10), instant(rs.getTimestamp(11)), rs.getBoolean(12), rs.getString(13), rs.getString(14),
-        rs.getInt(15), rs.getObject(16) == null ? null : rs.getInt(16), rs.getString(17), instant(rs.getTimestamp(18)), instant(rs.getTimestamp(19)), rs.getInt(20)), args);
+        """ + where + " ORDER BY r.round_no", (rs, rowNum) -> {
+          Long imageFileId = rs.getObject(23) == null ? null : rs.getLong(23);
+          return new RoundView(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getInt(4), rs.getString(5),
+              rs.getString(6), rs.getInt(7), rs.getString(8), rs.getString(9), rs.getBigDecimal(10),
+              rs.getString(11), rs.getLong(12), instant(rs.getTimestamp(13)), rs.getBoolean(14), rs.getString(15),
+              rs.getString(16), rs.getInt(17), rs.getObject(18) == null ? null : rs.getInt(18), rs.getString(19),
+              instant(rs.getTimestamp(20)), instant(rs.getTimestamp(21)), rs.getInt(22), imageFileId, prizeImageUrl(imageFileId));
+        }, args);
   }
 
   private RoundView lockRound(long activityId, long roundId) {
     List<RoundView> result = jdbc.query("""
         SELECT r.id, r.activity_id, r.lottery_rule_id, r.round_no, r.name, r.prize_name, r.winner_count,
-          r.candidate_scope, r.customer_type, r.minimum_order_amount, r.qualification_cutoff_at,
+          r.candidate_scope, r.customer_type, r.minimum_order_amount, r.qualification_metric, r.minimum_order_box_count,
+          r.qualification_cutoff_at,
           r.exclude_previous_winners, r.display_name_type, r.status, r.current_attempt_no, r.candidate_count,
-          HEX(r.result_hash), r.drawn_at, r.completed_at, r.lock_version
+          HEX(r.result_hash), r.drawn_at, r.completed_at, r.lock_version, r.prize_image_file_id
         FROM lottery_round r JOIN lottery_rule lr ON lr.id = r.lottery_rule_id
         WHERE r.activity_id = ? AND r.id = ? AND lr.status = 'PUBLISHED' FOR UPDATE
-        """, (rs, rowNum) -> new RoundView(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getInt(4), rs.getString(5),
-        rs.getString(6), rs.getInt(7), rs.getString(8), rs.getString(9), rs.getBigDecimal(10), instant(rs.getTimestamp(11)),
-        rs.getBoolean(12), rs.getString(13), rs.getString(14), rs.getInt(15), rs.getObject(16) == null ? null : rs.getInt(16), rs.getString(17),
-        instant(rs.getTimestamp(18)), instant(rs.getTimestamp(19)), rs.getInt(20)), activityId, roundId);
+        """, (rs, rowNum) -> {
+          Long imageFileId = rs.getObject(23) == null ? null : rs.getLong(23);
+          return new RoundView(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getInt(4), rs.getString(5),
+              rs.getString(6), rs.getInt(7), rs.getString(8), rs.getString(9), rs.getBigDecimal(10), rs.getString(11),
+              rs.getLong(12), instant(rs.getTimestamp(13)), rs.getBoolean(14), rs.getString(15), rs.getString(16),
+              rs.getInt(17), rs.getObject(18) == null ? null : rs.getInt(18), rs.getString(19),
+              instant(rs.getTimestamp(20)), instant(rs.getTimestamp(21)), rs.getInt(22), imageFileId, prizeImageUrl(imageFileId));
+        }, activityId, roundId);
     if (result.isEmpty()) throw DomainException.notFound("LOTTERY_ROUND_NOT_FOUND", "已发布抽奖轮次不存在");
     return result.getFirst();
   }
@@ -320,7 +410,8 @@ public class LotteryService {
               AND a.match_status = 'MATCHED'
               AND (ab.current_version_id IS NULL OR a.data_version_id = ab.current_version_id))
           """;
-      case "VALID_ORDERS" -> "AND o.id IS NOT NULL AND o.status = 'SUBMITTED' AND o.total_amount >= ? ";
+      case "VALID_ORDERS" -> "AND o.id IS NOT NULL AND o.status = 'SUBMITTED' AND "
+          + ("BOX_COUNT".equals(round.qualificationMetric()) ? "o.total_quantity" : "o.total_amount") + " >= ? ";
       default -> throw DomainException.badRequest("LOTTERY_SCOPE_INVALID", "候选范围不正确");
     };
     String previousClause = round.excludePreviousWinners() ? """
@@ -330,10 +421,13 @@ public class LotteryService {
     List<Object> args = new ArrayList<>();
     args.add(round.activityId());
     args.add(round.customerType()); args.add(round.customerType());
-    if ("VALID_ORDERS".equals(round.candidateScope())) args.add(round.minimumOrderAmount());
+    if ("VALID_ORDERS".equals(round.candidateScope())) {
+      if ("BOX_COUNT".equals(round.qualificationMetric())) args.add(round.minimumOrderBoxCount());
+      else args.add(round.minimumOrderAmount());
+    }
     return jdbc.query("""
         SELECT c.id, c.dealer_short_name, c.dealer_full_name, c.customer_type, c.region_code, c.branch_name,
-          c.phone_masked, o.id, o.total_amount
+          c.phone_masked, o.id, o.total_amount, o.total_quantity
         FROM activity_customer c
         JOIN activity_data_binding wb ON wb.activity_id = c.activity_id AND wb.data_type = 'WHITELIST'
           AND wb.current_version_id = c.data_version_id
@@ -341,17 +435,29 @@ public class LotteryService {
         WHERE c.activity_id = ? AND c.is_active = TRUE AND (? = 'ALL' OR c.customer_type = ?)
         """ + scopeClause + previousClause + " ORDER BY c.id",
         (rs, rowNum) -> new Candidate(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
-            rs.getString(6), rs.getString(7), rs.getObject(8) == null ? null : rs.getLong(8), rs.getBigDecimal(9), null), args.toArray());
+            rs.getString(6), rs.getString(7), rs.getObject(8) == null ? null : rs.getLong(8), rs.getBigDecimal(9),
+            rs.getObject(10) == null ? null : rs.getLong(10), null), args.toArray());
   }
 
   private long insertAttempt(long activityId, RoundView round, int attemptNo, int candidateCount, byte[] resultHash, AdminPrincipal admin) {
     int actualWinnerCount = Math.min(round.winnerCount(), candidateCount);
     GeneratedKeyHolder keys = new GeneratedKeyHolder();
-    String snapshot = toJson(Map.of("scope", round.candidateScope(), "customerType", round.customerType(),
-        "minimumOrderAmount", round.minimumOrderAmount(), "excludePreviousWinners", round.excludePreviousWinners(),
-        "configuredWinnerCount", round.winnerCount(), "actualWinnerCount", actualWinnerCount,
-        "unawardedCount", round.winnerCount() - actualWinnerCount, "candidateCount", candidateCount,
-        "deduplicationKey", "activity_customer.id", "displayNameType", round.displayNameType()));
+    Map<String, Object> snapshotValues = new LinkedHashMap<>();
+    snapshotValues.put("scope", round.candidateScope());
+    snapshotValues.put("customerType", round.customerType());
+    snapshotValues.put("minimumOrderAmount", round.minimumOrderAmount());
+    snapshotValues.put("qualificationMetric", round.qualificationMetric());
+    snapshotValues.put("minimumOrderBoxCount", round.minimumOrderBoxCount());
+    snapshotValues.put("prizeName", round.prizeName());
+    snapshotValues.put("prizeImageFileId", round.prizeImageFileId());
+    snapshotValues.put("excludePreviousWinners", round.excludePreviousWinners());
+    snapshotValues.put("configuredWinnerCount", round.winnerCount());
+    snapshotValues.put("actualWinnerCount", actualWinnerCount);
+    snapshotValues.put("unawardedCount", round.winnerCount() - actualWinnerCount);
+    snapshotValues.put("candidateCount", candidateCount);
+    snapshotValues.put("deduplicationKey", "activity_customer.id");
+    snapshotValues.put("displayNameType", round.displayNameType());
+    String snapshot = toJson(snapshotValues);
     jdbc.update(connection -> {
       PreparedStatement statement = connection.prepareStatement("""
           INSERT INTO lottery_draw_attempt(activity_id, round_id, attempt_no, status, candidate_count, winner_count,
@@ -372,8 +478,9 @@ public class LotteryService {
       PreparedStatement statement = connection.prepareStatement("""
           INSERT INTO lottery_candidate_snapshot(activity_id, round_id, draw_attempt_id, activity_customer_id,
             dealer_short_name_snapshot, dealer_full_name_snapshot, customer_type, region_code, branch_name_snapshot,
-            phone_masked_snapshot, qualification_source, qualifying_order_id, qualifying_order_amount, random_sort_key)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            phone_masked_snapshot, qualification_source, qualifying_order_id, qualifying_order_amount,
+            qualifying_order_box_count, random_sort_key)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           """, Statement.RETURN_GENERATED_KEYS);
       int index = 1;
       statement.setLong(index++, activityId); statement.setLong(index++, round.id()); statement.setLong(index++, attemptId);
@@ -382,7 +489,10 @@ public class LotteryService {
       statement.setString(index++, candidate.regionCode()); statement.setString(index++, candidate.branchName());
       statement.setString(index++, candidate.phoneMasked()); statement.setString(index++, round.candidateScope());
       if (candidate.orderId() == null) statement.setNull(index++, java.sql.Types.BIGINT); else statement.setLong(index++, candidate.orderId());
-      statement.setBigDecimal(index++, candidate.orderAmount()); statement.setBytes(index, candidate.randomKey());
+      statement.setBigDecimal(index++, candidate.orderAmount());
+      if (candidate.orderBoxCount() == null) statement.setNull(index++, java.sql.Types.BIGINT);
+      else statement.setLong(index++, candidate.orderBoxCount());
+      statement.setBytes(index, candidate.randomKey());
       return statement;
     }, keys);
     return keys.getKey().longValue();
@@ -423,32 +533,40 @@ public class LotteryService {
 
   private boolean sameConfiguration(RoundView before, RoundWrite after) {
     return before.name().equals(after.name()) && java.util.Objects.equals(before.prizeName(), after.prizeName())
+        && java.util.Objects.equals(before.prizeImageFileId(), after.prizeImageFileId())
         && before.winnerCount() == after.winnerCount() && before.candidateScope().equals(after.candidateScope())
         && before.customerType().equals(after.customerType())
+        && before.qualificationMetric().equals(after.qualificationMetric())
         && before.minimumOrderAmount().compareTo(after.minimumOrderAmount()) == 0
+        && before.minimumOrderBoxCount() == after.minimumOrderBoxCount()
         && (before.roundNo() == 1 || before.excludePreviousWinners() == after.excludePreviousWinners());
   }
 
   private void updateReadyRound(long id, int roundNo, RoundWrite round) {
     jdbc.update("""
-        UPDATE lottery_round SET round_no = ?, name = ?, prize_name = ?, winner_count = ?, candidate_scope = ?,
-          customer_type = ?, minimum_order_amount = ?, qualification_cutoff_at = NULL,
+        UPDATE lottery_round SET round_no = ?, name = ?, prize_name = ?, prize_image_file_id = ?, winner_count = ?, candidate_scope = ?,
+          customer_type = ?, minimum_order_amount = ?, qualification_metric = ?, minimum_order_box_count = ?,
+          qualification_cutoff_at = NULL,
           exclude_previous_winners = ?, display_name_type = ? WHERE id = ? AND status = 'READY'
-        """, roundNo, round.name(), round.prizeName(), round.winnerCount(), round.candidateScope(), round.customerType(),
-        round.minimumOrderAmount(), roundNo > 1 && round.excludePreviousWinners(), round.displayNameType(), id);
+        """, roundNo, round.name(), round.prizeName(), round.prizeImageFileId(), round.winnerCount(),
+        round.candidateScope(), round.customerType(),
+        round.minimumOrderAmount(), round.qualificationMetric(), round.minimumOrderBoxCount(),
+        roundNo > 1 && round.excludePreviousWinners(), round.displayNameType(), id);
   }
 
   private void insertRound(long activityId, long ruleId, int roundNo, RoundWrite round, String status) {
     jdbc.update("""
-        INSERT INTO lottery_round(activity_id, lottery_rule_id, round_no, name, prize_name, winner_count,
-          candidate_scope, customer_type, minimum_order_amount, qualification_cutoff_at,
+        INSERT INTO lottery_round(activity_id, lottery_rule_id, round_no, name, prize_name, prize_image_file_id, winner_count,
+          candidate_scope, customer_type, minimum_order_amount, qualification_metric, minimum_order_box_count, qualification_cutoff_at,
           exclude_previous_winners, display_name_type, status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
-        """, activityId, ruleId, roundNo, round.name(), round.prizeName(), round.winnerCount(), round.candidateScope(),
-        round.customerType(), round.minimumOrderAmount(), roundNo > 1 && round.excludePreviousWinners(), round.displayNameType(), status);
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)
+        """, activityId, ruleId, roundNo, round.name(), round.prizeName(), round.prizeImageFileId(),
+        round.winnerCount(), round.candidateScope(), round.customerType(), round.minimumOrderAmount(),
+        round.qualificationMetric(), round.minimumOrderBoxCount(),
+        roundNo > 1 && round.excludePreviousWinners(), round.displayNameType(), status);
   }
 
-  private void validate(RuleWrite request) {
+  private void validate(long activityId, RuleWrite request) {
     if (request == null || request.name() == null || request.name().isBlank()) throw DomainException.badRequest("LOTTERY_NAME_REQUIRED", "请填写规则名称");
     if (request.rounds() == null || request.rounds().isEmpty()) throw DomainException.badRequest("LOTTERY_ROUNDS_EMPTY", "至少配置一个抽奖轮次");
     int roundNo = 0;
@@ -461,13 +579,18 @@ public class LotteryService {
       if (!SCOPES.contains(round.candidateScope()) || !CUSTOMER_TYPES.contains(round.customerType()) || !DISPLAY_TYPES.contains(round.displayNameType())) {
         throw DomainException.badRequest("LOTTERY_ROUND_INVALID", "轮次候选范围、客户类型或展示名称配置不正确");
       }
+      if (!QUALIFICATION_METRICS.contains(round.qualificationMetric()) || round.minimumOrderBoxCount() < 0) {
+        throw DomainException.badRequest("LOTTERY_QUALIFICATION_INVALID", "订单门槛类型或最低订货箱数配置不正确");
+      }
       if (round.minimumOrderAmount() == null || round.minimumOrderAmount().signum() < 0) throw DomainException.badRequest("LOTTERY_AMOUNT_INVALID", "最低订单金额不能小于零");
+      validatePrizeImageReference(activityId, round.prizeImageFileId());
     }
   }
 
   private void validatePreview(PreviewRequest request) {
     if (request == null || request.roundNo() < 1 || request.winnerCount() < 1
         || !SCOPES.contains(request.candidateScope()) || !CUSTOMER_TYPES.contains(request.customerType())
+        || !QUALIFICATION_METRICS.contains(request.qualificationMetric()) || request.minimumOrderBoxCount() < 0
         || request.minimumOrderAmount() == null || request.minimumOrderAmount().signum() < 0) {
       throw DomainException.badRequest("LOTTERY_PREVIEW_INVALID", "候选试算条件不正确");
     }
@@ -507,30 +630,50 @@ public class LotteryService {
   private static Instant instant(Timestamp value) { return value == null ? null : value.toInstant(); }
 
   private record Candidate(long customerId, String shortName, String fullName, String customerType, String regionCode,
-                           String branchName, String phoneMasked, Long orderId, BigDecimal orderAmount, byte[] randomKey) {
-    Candidate withRandom(byte[] key) { return new Candidate(customerId, shortName, fullName, customerType, regionCode, branchName, phoneMasked, orderId, orderAmount, key); }
+                           String branchName, String phoneMasked, Long orderId, BigDecimal orderAmount,
+                           Long orderBoxCount, byte[] randomKey) {
+    Candidate withRandom(byte[] key) {
+      return new Candidate(customerId, shortName, fullName, customerType, regionCode, branchName, phoneMasked,
+          orderId, orderAmount, orderBoxCount, key);
+    }
   }
   public record RoundWrite(String name, String prizeName, int winnerCount, String candidateScope, String customerType,
-                           BigDecimal minimumOrderAmount, Instant qualificationCutoffAt, boolean excludePreviousWinners,
-                           String displayNameType) {}
+                           BigDecimal minimumOrderAmount, String qualificationMetric, long minimumOrderBoxCount,
+                           Instant qualificationCutoffAt, boolean excludePreviousWinners, String displayNameType,
+                           Long prizeImageFileId) {
+    public RoundWrite {
+      if (minimumOrderAmount == null) minimumOrderAmount = BigDecimal.ZERO;
+      if (qualificationMetric == null || qualificationMetric.isBlank()) qualificationMetric = "AMOUNT";
+    }
+  }
   public record RuleWrite(String name, List<RoundWrite> rounds) {}
   public record RuleView(long id, long activityId, String name, String status, Instant createdAt, Instant updatedAt,
                          List<RoundView> rounds) {}
   public record RoundView(long id, long activityId, long ruleId, int roundNo, String name, String prizeName,
                           int winnerCount, String candidateScope, String customerType, BigDecimal minimumOrderAmount,
+                          String qualificationMetric, long minimumOrderBoxCount,
                           Instant qualificationCutoffAt, boolean excludePreviousWinners, String displayNameType,
                           String status, int currentAttemptNo, Integer candidateCount, String resultHash,
-                          Instant drawnAt, Instant completedAt, int lockVersion) {}
+                          Instant drawnAt, Instant completedAt, int lockVersion, Long prizeImageFileId,
+                          String prizeImageUrl) {}
+  public record PrizeImageView(long fileId, String url, String filename, String contentType, long sizeBytes) {}
   public record WinnerView(long roundId, int position, long activityCustomerId, String dealerDisplayName, String customerType,
                            String regionCode, String branchName, String phoneMasked) {}
   public record DrawResult(long roundId, long attemptId, int attemptNo, int candidateCount,
                            int configuredWinnerCount, int actualWinnerCount, int unawardedCount,
                            List<WinnerView> winners, String resultHash, Instant drawnAt) {}
   public record PreviewRequest(int roundNo, int winnerCount, String candidateScope, String customerType,
-                               BigDecimal minimumOrderAmount, boolean excludePreviousWinners) {}
+                               BigDecimal minimumOrderAmount, String qualificationMetric, long minimumOrderBoxCount,
+                               boolean excludePreviousWinners) {
+    public PreviewRequest {
+      if (minimumOrderAmount == null) minimumOrderAmount = BigDecimal.ZERO;
+      if (qualificationMetric == null || qualificationMetric.isBlank()) qualificationMetric = "AMOUNT";
+    }
+  }
   public record CandidatePreviewItem(long activityCustomerId, String dealerFullName, String customerType,
                                      String regionCode, String branchName, String phoneMasked,
-                                     String qualificationSource, BigDecimal qualifyingOrderAmount) {}
+                                     String qualificationSource, BigDecimal qualifyingOrderAmount,
+                                     Long qualifyingOrderBoxCount) {}
   public record CandidatePreview(Instant calculatedAt, int candidateCount, int configuredWinnerCount,
                                  int actualWinnerCount, int unawardedCount, List<CandidatePreviewItem> candidates) {}
   public record WinnerStatistics(long validWinnerRecords, long validWinnerCustomers, long invalidatedWinnerRecords) {}
