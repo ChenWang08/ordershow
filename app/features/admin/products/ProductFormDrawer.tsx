@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { createImportRowId, productImportIdentityKey, type ProductImportRow } from "../../../domain/import-domain";
+import { createImportRowId, productImportRowsConflict, type ProductImportRow } from "../../../domain/import-domain";
 import { ProductImageEditor } from "../products/ProductImageEditor";
 
 export function ProductFormDrawer({ rows, initialRow, activityStarted = false, onClose, onSave }: { rows: ProductImportRow[]; initialRow?: ProductImportRow; activityStarted?: boolean; onClose: () => void; onSave: (row: ProductImportRow, reason?: string) => Promise<boolean> }) {
@@ -12,7 +12,7 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, o
   const [saving, setSaving] = useState(false);
   const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
-  const duplicateMaterialName = form.materialName.trim() !== "" && rows.some((row) => row.id !== form.id && productImportIdentityKey(row) === productImportIdentityKey(form));
+  const duplicateProductIdentity = form.materialName.trim() !== "" && rows.some((row) => row.id !== form.id && productImportRowsConflict(row, form));
   const conversionValue = Number(form.conversion);
   const conversionValid = form.conversion.trim() !== "" && Number.isFinite(conversionValue) && conversionValue > 0;
   const basePrice = Number(form.casePrice);
@@ -20,7 +20,7 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, o
   const tierCasePrice = Number(form.priceTierCasePrice);
   const tierValid = !tierEnabled || (Number.isInteger(tierMinQuantity) && tierMinQuantity >= 2 && tierMinQuantity <= 999999
     && Number.isFinite(tierCasePrice) && tierCasePrice > 0 && tierCasePrice < basePrice);
-  const canSave = form.materialName.trim() !== "" && form.casePrice.trim() !== "" && (conversionValid || form.status === "待完善") && tierValid && !duplicateMaterialName && (isEditing || !activityStarted || editReason.trim() !== "");
+  const canSave = form.materialName.trim() !== "" && form.casePrice.trim() !== "" && (conversionValid || form.status === "待完善") && tierValid && !duplicateProductIdentity && (isEditing || !activityStarted || editReason.trim() !== "");
   return (
     <div className="order-drawer-backdrop" onClick={() => { if (!saving) onClose(); }}>
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
@@ -31,10 +31,10 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, o
           <label><span>是否参与返利</span><select value={form.rebate} onChange={(e) => update("rebate", e.target.value)}><option value="">未指定</option><option>参与</option><option>不参与</option></select></label>
           <label><span>产品大类</span><input value={form.category} onChange={(e) => update("category", e.target.value)} placeholder="例如：特渠定制产品" /></label>
           <label><span>产品线</span><input value={form.line} onChange={(e) => update("line", e.target.value)} placeholder="例如：调味油" /></label>
-          <label><span>物料代码</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /><small>允许为空，不参与商品名称判重</small></label>
+          <label><span>物料代码</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /><small>同名商品可用不同代码区分；代码为空时按名称判重</small></label>
           <label className="wide-field"><span>物料名称 *</span><input value={form.materialName} onChange={(e) => update("materialName", e.target.value)} /></label>
           <label className="wide-field"><span>产品说明</span><textarea value={form.description ?? ""} onChange={(e) => update("description", e.target.value)} placeholder="填写后可在 H5 商品详情展示" rows={3} /></label>
-          {duplicateMaterialName && <p className="field-error wide-field">同一客户类型、同一返利类型下商品名称已存在，请修改或删除重复行。</p>}
+          {duplicateProductIdentity && <p className="field-error wide-field">同一客户类型、同一返利类型下商品身份重复；物料代码相同或任一代码为空时，同名商品不能重复。</p>}
           <div className="product-form-image-field wide-field"><span>商品图片</span><ProductImageEditor materialName={form.materialName} images={form.images} imageStatus={form.imageStatus} onChange={(images, status) => setForm((current) => ({ ...current, images, imageStatus: status }))} /></div>
           <label><span>品牌</span><input value={form.brand} onChange={(e) => update("brand", e.target.value)} /></label>
           <label><span>品种</span><input value={form.variety} onChange={(e) => update("variety", e.target.value)} /></label>

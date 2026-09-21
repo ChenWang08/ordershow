@@ -11,40 +11,53 @@ import { NewActivityDrawer } from "./NewActivityDrawer";
 import { useAdminActivities } from "./useAdminActivities";
 import { AdminLayout, AdminAccountSummary } from "./AdminLayout";
 
+type AdminWorkspaceLoadState =
+  | { requestKey: string; status: "ready"; activity: RuntimeActivity | null }
+  | { requestKey: string; status: "error"; message: string };
+
 export function AdminEntry() {
   return <AdminGateway><AuthorizedWorkspace /></AdminGateway>;
 }
 
 export function AuthorizedWorkspace() {
   const identity = useAdminIdentity();
-  const [activity, setActivity] = useState<RuntimeActivity | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
+  const [loadState, setLoadState] = useState<AdminWorkspaceLoadState | null>(null);
+  const requestKey = (identity?.id ?? "anonymous") + ":" + retry;
+  const currentLoadState = loadState?.requestKey === requestKey ? loadState : null;
+  const loading = currentLoadState === null;
+  const error = currentLoadState?.status === "error" ? currentLoadState.message : "";
+  const activity = currentLoadState?.status === "ready" ? currentLoadState.activity : null;
+
   useEffect(() => {
     let active = true;
-    setActivity(null); setLoading(true); setError("");
     void loadAdminActivities().then(async (items) => {
       const saved = new URLSearchParams(window.location.search).get("activity") || getPreferredAdminActivityCode();
       const selected = items.find((item) => item.code === saved)
         ?? items.find((item) => item.status === "ACTIVE")
         ?? items.find((item) => item.status === "SCHEDULED") ?? items[0];
-      if (!selected) return;
+      if (!selected) {
+        if (active) setLoadState({ requestKey, status: "ready", activity: null });
+        return;
+      }
       const detail = await loadAdminActivity(selected.id);
       if (!active) return;
       setActiveActivityCode(detail.code);
       setPreferredAdminActivityCode(detail.code);
       if (window.location.search) window.history.replaceState(null, "", "/admin");
-      setActivity(detail);
-    }).catch((reason) => { if (active) setError(reason instanceof ApiError ? reason.message : "活动加载失败，请重试"); })
-      .finally(() => { if (active) setLoading(false); });
-    const invalidate = () => { if (active) { setActivity(null); setError("登录状态或活动权限已变化，请重新加载"); } };
+      setLoadState({ requestKey, status: "ready", activity: detail });
+    }).catch((reason) => {
+      if (active) setLoadState({ requestKey, status: "error", message: reason instanceof ApiError ? reason.message : "活动加载失败，请重试" });
+    });
+    const invalidate = () => {
+      if (active) setLoadState({ requestKey, status: "error", message: "登录状态或活动权限已变化，请重新加载" });
+    };
     window.addEventListener("admin-access-invalid", invalidate);
     return () => { active = false; window.removeEventListener("admin-access-invalid", invalidate); };
-  }, [identity?.id, retry]);
+  }, [requestKey]);
   if (loading || error) return <PendingAdminWorkspace loading={loading} error={error} onRetry={() => setRetry((value) => value + 1)} />;
   if (!activity) return <EmptyAdminWorkspace />;
-  return <ActivityWorkspaceProvider key={`${identity?.id}:${activity.id}`} adminActivity={activity}><AdminWorkspace /></ActivityWorkspaceProvider>;
+  return <ActivityWorkspaceProvider key={(identity?.id ?? "") + ":" + activity.id} adminActivity={activity}><AdminWorkspace /></ActivityWorkspaceProvider>;
 }
 
 export function EmptyAdminWorkspace() {

@@ -1,11 +1,11 @@
 import readXlsxFile, { readSheetNames } from "read-excel-file";
 import { apiAssetUrl, type ImportStagingRow, type ProductImageReview, type RuntimeProduct } from "../../api";
-import { attendanceCustomerType, createImportRowId, productImportIdentityKey, productMaterialNameKey, whitelistCustomerTypeLabel, type AttendanceRow, type ProductImageAsset, type ProductImportRow, type WhitelistRow } from "../../domain/import-domain";
+import { attendanceCustomerType, createImportRowId, productImportDuplicateRowIds, productMaterialCodeKey, productMaterialNameKey, whitelistCustomerTypeLabel, type AttendanceRow, type ProductImageAsset, type ProductImportRow, type WhitelistRow } from "../../domain/import-domain";
 import { normalizeProductImageName, productImageBaseName } from "../../domain/product-images";
-import { normalizePhone, normalizeSearchText } from "../shared/utils";
+import { normalizePhone } from "../shared/utils";
 
 export function normalizeMaterialCode(value: string) {
-  return normalizeSearchText(value).replace(/[-_]/g, "");
+  return productMaterialCodeKey(value);
 }
 
 export function runtimeProductToImportRow(product: RuntimeProduct): ProductImportRow {
@@ -165,28 +165,20 @@ export async function parseProductWorkbook(file: File): Promise<ProductImportPar
     });
   }
   if (parsed.length === 0) throw new Error("Excel 中没有找到可展示的商品数据行，请检查文件内容。");
-  const identityCounts = new Map<string, number>();
-  parsed.forEach((row) => {
-    const key = productImportIdentityKey(row);
-    if (key) identityCounts.set(key, (identityCounts.get(key) ?? 0) + 1);
-  });
-  const duplicateRows = parsed.filter((row) => {
-    const key = productImportIdentityKey(row);
-    return Boolean(key && (identityCounts.get(key) ?? 0) > 1);
-  });
   const invalidRows = parsed.filter((row) => {
     const customerTypeRaw = textCell(matrix[(row.sourceRowNumber ?? 1) - 1]?.[indexes["客户类型"]]);
     const rebateRaw = textCell(matrix[(row.sourceRowNumber ?? 1) - 1]?.[indexes["是否返利"]]);
     return !row.materialName.trim() || (customerTypeRaw !== "" && !row.customerType) || (rebateRaw !== "" && !row.rebate);
   });
-  const duplicateRowIds = new Set(duplicateRows.map((row) => row.id));
   const invalidRowIds = new Set(invalidRows.map((row) => row.id));
+  const duplicateRowIds = productImportDuplicateRowIds(parsed.filter((row) => !invalidRowIds.has(row.id)));
+  const duplicateRows = parsed.filter((row) => duplicateRowIds.has(row.id));
   parsed.forEach((row) => {
     const conversion = Number(row.conversion);
     row.status = invalidRowIds.has(row.id) || duplicateRowIds.has(row.id) ? "待核对"
       : !row.casePrice || !row.conversion || !Number.isFinite(conversion) || conversion <= 0 ? "待完善" : "有效";
   });
-  if (duplicateRows.length > 0) warnings.push(`${sheetName} 有 ${duplicateRows.length} 条商品在同一客户类型、同一返利类型下商品名称重复，已标记为待核对；物料代码不参与判重。`);
+  if (duplicateRows.length > 0) warnings.push(`${sheetName} 有 ${duplicateRows.length} 条商品在同一客户类型、同一返利类型下名称与物料代码冲突，已标记为待核对；任一物料代码为空时按名称判重。`);
   const missingNames = parsed.filter((row) => !row.materialName.trim()).length;
   if (missingNames > 0) warnings.push(`${sheetName} 有 ${missingNames} 条商品缺少物料名称，已标记为待核对。`);
   if (parsed.some((row) => row.status === "待完善")) warnings.push(`${sheetName} 有商品的元/箱或吨箱转换系数为空或无效，已标记为待完善。`);

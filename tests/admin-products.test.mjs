@@ -2,12 +2,46 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { loadModule } from "./helpers/load-ts-module.mjs";
 
+const { productImportRowsConflict, productImportDuplicateRowIds } = loadModule("app/domain/import-domain.ts");
+
 const productRow = (id, name = "测试商品") => ({
   id, materialName: name, status: "有效", imageStatus: "未匹配", materialCode: "SKU-1",
   customerType: "综合", rebate: "参与", category: "", line: "", description: "", brand: "",
   variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "100", conversion: "",
   priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER",
   gift: "否", branchScope: "", source: "excel",
+});
+
+const identityRow = (id, materialName, materialCode, customerType = "综合", rebate = "参与") => ({
+  ...productRow(id, materialName), materialCode, customerType, rebate,
+});
+
+test("product identity distinguishes nonblank codes and falls back to names when a code is empty", () => {
+  const codeA = identityRow("code-a", "同名商品", "A-01");
+  const codeB = identityRow("code-b", "同名商品", "B-02");
+  const sameCodeA = identityRow("same-code-a", "重复代码商品", "AA-01");
+  const sameCodeB = identityRow("same-code-b", "重复代码商品", "aa_01");
+  const missingCode = identityRow("missing-code", "空码混合商品", "");
+  const populatedCode = identityRow("populated-code", "空码混合商品", "C-03");
+  const emptyTypeA = identityRow("empty-type-a", "空类型商品", "T-01", "", "");
+  const emptyTypeB = identityRow("empty-type-b", "空类型商品", "T-02", "", "");
+
+  assert.equal(productImportRowsConflict(codeA, codeB), false);
+  assert.equal(productImportRowsConflict(sameCodeA, sameCodeB), true);
+  assert.equal(productImportRowsConflict(missingCode, populatedCode), true);
+  assert.equal(productImportRowsConflict(emptyTypeA, emptyTypeB), false);
+  assert.equal(productImportRowsConflict(codeA, { ...codeA, id: "other-type", customerType: "特渠" }), false);
+  assert.equal(productImportRowsConflict(codeA, { ...codeA, id: "other-rebate", rebate: "不参与" }), false);
+
+  const blankCodeA = identityRow("blank-a", "两个空码商品", "");
+  const blankCodeB = identityRow("blank-b", "两个空码商品", "");
+  const duplicateIds = productImportDuplicateRowIds([
+    codeA, codeB, sameCodeA, sameCodeB, missingCode, populatedCode,
+    blankCodeA, blankCodeB, emptyTypeA, emptyTypeB,
+  ]);
+  assert.deepEqual([...duplicateIds].sort(), [
+    "blank-a", "blank-b", "missing-code", "populated-code", "same-code-a", "same-code-b",
+  ]);
 });
 
 function productHarness(overrides = {}, apiOverrides = {}) {

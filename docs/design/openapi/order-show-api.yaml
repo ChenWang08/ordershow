@@ -974,7 +974,7 @@ paths:
                   description: 仅商品导入可传；上传阶段只在浏览器预览，确认时才随任务保存
                 imageDecisions:
                   type: string
-                  description: 仅商品导入可传；JSON 数组。每项包含 ZIP 内 entryPath、CONFIRMED/PENDING/UNMATCHED 状态和 targetRowIds。商品图片只按完整标准化物料名称匹配，物料代码不参与判重或图片匹配；商品名称中的 `/` 不是 ZIP 路径分隔符。CONFIRMED 与 PENDING 均须携带当前任务中的候选 staging 行，UNMATCHED 不得携带目标；一个商品名称最多确认一张图片，同名商品行共享，一张最终图片不能确认给多个不同名称。PENDING 会随商品版本发布并保留为后台待确认候选，不会作为 H5 商品图。
+                  description: 仅商品导入可传；JSON 数组。每项包含 ZIP 内 entryPath、CONFIRMED/PENDING/UNMATCHED 状态和 targetRowIds。商品判重按客户类型、返利类型、标准化物料名称和物料代码规则执行；图片仍只按完整标准化物料名称匹配，物料代码不参与图片匹配，同名商品行共享图片。商品名称中的 `/` 不是 ZIP 路径分隔符。CONFIRMED 与 PENDING 均须携带当前任务中的候选 staging 行，UNMATCHED 不得携带目标；一个商品名称最多确认一张图片，同名商品行共享，一张最终图片不能确认给多个不同名称。PENDING 会随商品版本发布并保留为后台待确认候选，不会作为 H5 商品图。
                 attendanceWhitelistVersionId:
                   $ref: '#/components/schemas/Id'
                   description: 仅现场到场导入传入；必须等于最近一次关联试算返回的 whitelistVersionId。若当前无已发布白名单则不传。

@@ -70,16 +70,61 @@ export type ProductImageSource = "zip" | "manual";
 export type ProductImageRelationStatus = "CONFIRMED" | "CANDIDATE";
 
 export function productMaterialCodeKey(value: string) {
-  return value.trim().replace(/\s+/g, "").toLocaleLowerCase("zh-CN");
+  return value.trim().replace(/[\s　_-]+/g, "").toLocaleLowerCase("zh-CN");
 }
 
 export function productMaterialNameKey(value: string) {
   return normalizeSearchText(value).replace(/[()（）\[\]【】{}：:，,。·\-_/\\]+/g, "");
 }
 
-export function productImportIdentityKey(row: Pick<ProductImportRow, "customerType" | "rebate" | "materialName">) {
+function productImportNameGroupKey(row: Pick<ProductImportRow, "customerType" | "rebate" | "materialName">) {
   const name = productMaterialNameKey(row.materialName);
   return name ? `${row.customerType}:${row.rebate}:${name}` : "";
+}
+
+export function productImportIdentityKey(row: Pick<ProductImportRow, "customerType" | "rebate" | "materialName" | "materialCode">) {
+  const groupKey = productImportNameGroupKey(row);
+  return groupKey ? JSON.stringify([groupKey, productMaterialCodeKey(row.materialCode)]) : "";
+}
+
+type ProductIdentityFields = Pick<ProductImportRow, "customerType" | "rebate" | "materialName" | "materialCode">;
+
+export function productImportRowsConflict(left: ProductIdentityFields, right: ProductIdentityFields) {
+  const leftGroupKey = productImportNameGroupKey(left);
+  if (!leftGroupKey || leftGroupKey !== productImportNameGroupKey(right)) return false;
+  const leftCode = productMaterialCodeKey(left.materialCode);
+  const rightCode = productMaterialCodeKey(right.materialCode);
+  return !leftCode || !rightCode || leftCode === rightCode;
+}
+
+export function productImportDuplicateRowIds(rows: ProductImportRow[]) {
+  const groups = new Map<string, ProductImportRow[]>();
+  rows.forEach((row) => {
+    const key = productImportNameGroupKey(row);
+    if (!key) return;
+    const group = groups.get(key);
+    if (group) group.push(row);
+    else groups.set(key, [row]);
+  });
+  const duplicateIds = new Set<string>();
+  groups.forEach((group) => {
+    if (group.length < 2) return;
+    const codeGroups = new Map<string, ProductImportRow[]>();
+    group.forEach((row) => {
+      const code = productMaterialCodeKey(row.materialCode);
+      const codeGroup = codeGroups.get(code);
+      if (codeGroup) codeGroup.push(row);
+      else codeGroups.set(code, [row]);
+    });
+    if (codeGroups.has("")) {
+      group.forEach((row) => duplicateIds.add(row.id));
+      return;
+    }
+    codeGroups.forEach((matchingRows) => {
+      if (matchingRows.length > 1) matchingRows.forEach((row) => duplicateIds.add(row.id));
+    });
+  });
+  return duplicateIds;
 }
 
 export type ProductImageAsset = {

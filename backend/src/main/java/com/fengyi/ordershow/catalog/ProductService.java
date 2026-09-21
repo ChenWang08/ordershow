@@ -4,6 +4,7 @@ import com.fengyi.ordershow.catalog.ProductCatalogReader.VersionSource;
 
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.DomainException;
+import com.fengyi.ordershow.common.ProductBusinessKey;
 import com.fengyi.ordershow.order.TonnageSyncService;
 import com.fengyi.ordershow.security.H5Principal;
 import java.math.BigDecimal;
@@ -62,7 +63,10 @@ public class ProductService {
     BigDecimal factor = patch.tonCaseFactorSet() ? patch.tonCaseFactor() : current.tonCaseFactor();
     String customerType = normalizeCustomerType(patch.customerType(), current.customerType());
     String rebateStatus = normalizeRebateStatus(patch.rebateStatus(), current.rebateStatus());
+    String materialCode = choose(patch.materialCode(), current.materialCode());
     validateTypes(customerType, rebateStatus);
+    VersionSource source = catalog.currentSource(activityId);
+    ensureNoProductIdentityConflict(activityId, source.versionId(), productId, customerType, rebateStatus, name, materialCode);
     boolean visible = patch.visible() == null ? current.visible() : patch.visible();
     boolean orderable = patch.orderable() == null ? current.orderable() : patch.orderable();
     if (orderable && (!visible || casePrice == null || casePrice.signum() <= 0)) {
@@ -74,8 +78,8 @@ public class ProductService {
           variety_name = ?, specification = ?, case_pack = ?, bottle_price = ?, case_price = ?, ton_case_factor = ?,
           is_gift_box = ?, is_branch_customized = ?, is_visible = ?, is_orderable = ?, data_status = ?, lock_version = lock_version + 1
         WHERE id = ? AND activity_id = ? AND lock_version = ?
-        """, customerType, rebateStatus, businessKey(customerType, rebateStatus, name),
-        choose(patch.materialCode(), current.materialCode()), name, choose(patch.description(), current.description()), choose(patch.categoryName(), current.categoryName()),
+        """, customerType, rebateStatus, businessKey(customerType, rebateStatus, name, materialCode),
+        materialCode, name, choose(patch.description(), current.description()), choose(patch.categoryName(), current.categoryName()),
         choose(patch.productLine(), current.productLine()), choose(patch.brandName(), current.brandName()),
         choose(patch.varietyName(), current.varietyName()), choose(patch.specification(), current.specification()),
         choose(patch.casePack(), current.casePack()), patch.bottlePriceSet() ? patch.bottlePrice() : current.bottlePrice(),
@@ -92,13 +96,14 @@ public class ProductService {
       }
       if (!samePrice(factor, current.tonCaseFactor())) tonnage.sync(activityId, productId, factor);
     } catch (DuplicateKeyException exception) {
-      throw DomainException.conflict("PRODUCT_EXISTS", "当前商品目录已存在相同客户类型、返利类型和商品名称");
+      throw DomainException.conflict("PRODUCT_EXISTS", duplicateProductMessage());
     }
     return product(activityId, productId);
   }
 
   @Transactional
   public ProductView create(long activityId, ProductCreate request) {
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     var activity = activities.byId(activityId);
     if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(activity.status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后商品只读");
     if ("SCHEDULED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品已锁定，请先撤回发布");
@@ -117,6 +122,7 @@ public class ProductService {
     PriceTierView priceTier = validatePriceTier(request.casePrice(), request.priceTierMinQuantity(), request.priceTierCasePrice(), request.priceTierPricingMode());
     VersionSource source = catalog.currentSource(activityId);
     String code = choose(request.materialCode(), null);
+    ensureNoProductIdentityConflict(activityId, source.versionId(), null, customerType, rebateStatus, name, code);
     try {
       jdbc.update("""
           INSERT INTO activity_product(activity_id, customer_type, rebate_status, business_key, material_code, material_name, description,
@@ -126,19 +132,19 @@ public class ProductService {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             (SELECT COALESCE(MAX(p.sort_no), 0) + 1 FROM activity_product p WHERE p.activity_id = ? AND p.data_version_id = ?),
             ?, ?, ?)
-          """, activityId, customerType, rebateStatus, businessKey(customerType, rebateStatus, name), code, name, choose(request.description(), null),
+          """, activityId, customerType, rebateStatus, businessKey(customerType, rebateStatus, name, code), code, name, choose(request.description(), null),
           choose(request.categoryName(), null), choose(request.productLine(), null), choose(request.brandName(), null),
           choose(request.varietyName(), null), choose(request.specification(), null), choose(request.casePack(), null),
           request.bottlePrice(), request.casePrice(), request.tonCaseFactor(), Boolean.TRUE.equals(request.giftBox()), !branchScopes.isEmpty(), visible, orderable,
           activityId, source.versionId(), incomplete(name, request.casePrice(), request.tonCaseFactor(),
           request.specification(), request.casePack()) ? "INCOMPLETE" : "ACTIVE", source.taskId(), source.versionId());
       Long id = jdbc.queryForObject("SELECT id FROM activity_product WHERE activity_id = ? AND data_version_id = ? AND business_key = ?",
-          Long.class, activityId, source.versionId(), businessKey(customerType, rebateStatus, name));
+          Long.class, activityId, source.versionId(), businessKey(customerType, rebateStatus, name, code));
       if (id != null) replaceBranchScopes(id, branchScopes);
       if (id != null) replacePriceTier(id, priceTier);
       return product(activityId, id);
     } catch (DuplicateKeyException exception) {
-      throw DomainException.conflict("PRODUCT_EXISTS", "当前商品目录已存在相同客户类型、返利类型和商品名称");
+      throw DomainException.conflict("PRODUCT_EXISTS", duplicateProductMessage());
     }
   }
 
@@ -255,12 +261,31 @@ public class ProductService {
     }
   }
 
+  private void ensureNoProductIdentityConflict(long activityId, long versionId, Long excludedProductId,
+      String customerType, String rebateStatus, String materialName, String materialCode) {
+    List<ProductIdentity> products = jdbc.query("""
+        SELECT id, customer_type, rebate_status, material_name, material_code
+        FROM activity_product WHERE activity_id = ? AND data_version_id = ?
+        """, (rs, rowNum) -> new ProductIdentity(rs.getLong("id"), rs.getString("customer_type"),
+        rs.getString("rebate_status"), rs.getString("material_name"), rs.getString("material_code")), activityId, versionId);
+    for (ProductIdentity product : products) {
+      if (excludedProductId != null && excludedProductId == product.id()) continue;
+      if (ProductBusinessKey.conflicts(customerType, rebateStatus, materialName, materialCode,
+          product.customerType(), product.rebateStatus(), product.materialName(), product.materialCode())) {
+        throw DomainException.conflict("PRODUCT_EXISTS", duplicateProductMessage());
+      }
+    }
+  }
+
+  private static String duplicateProductMessage() {
+    return "同一客户类型、同一返利类型下，同名且物料代码相同的商品已存在；任一物料代码为空时按名称判重";
+  }
 
   private static String normalize(String value) { return value == null ? "" : value.toLowerCase(Locale.CHINA).replaceAll("[\\s　_\\-（）()\\[\\]【】{}：:，,。·/\\\\]+", ""); }
   private static String value(String requested, String current) { return requested == null ? current : requested.trim(); }
   private static String choose(String requested, String current) { return requested == null ? current : requested.isBlank() ? null : requested.trim(); }
-  private static String businessKey(String customerType, String rebateStatus, String name) {
-    return customerType + "|" + rebateStatus + "|" + normalize(name);
+  private static String businessKey(String customerType, String rebateStatus, String name, String materialCode) {
+    return ProductBusinessKey.businessKey(customerType, rebateStatus, name, materialCode);
   }
   private static void validateTypes(String customerType, String rebateStatus) {
     if (!Set.of("GENERAL", "SPECIAL", "ALL").contains(customerType)) throw DomainException.badRequest("PRODUCT_CUSTOMER_TYPE_INVALID", "商品客户类型不正确");
@@ -293,4 +318,5 @@ public class ProductService {
   public record ZipPreview(int imageCount, int matchedCount, int ambiguousCount, int unmatchedCount, List<ZipMatch> matches, boolean committed) {}
   public record ZipDecision(String entryPath, String status, List<String> targetMaterialNames) {}
   public record ImageReviewView(long id, long fileId, String url, String archivePath, String materialCode, String materialName, String status) {}
+  private record ProductIdentity(long id, String customerType, String rebateStatus, String materialName, String materialCode) {}
 }

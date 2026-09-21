@@ -1,11 +1,14 @@
 package com.fengyi.ordershow.imports;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import com.fengyi.ordershow.common.ProductBusinessKey;
 import com.fengyi.ordershow.common.TextNormalizer;
 
 
@@ -49,7 +52,8 @@ final class ImportWorkbookRules {
   }
 
   static String productKey(Map<String, Object> data) {
-    return productNameMatchKey(data);
+    return ProductBusinessKey.businessKey(text(data.get("customerType")), text(data.get("rebateStatus")),
+        text(data.get("materialName")), text(data.get("materialCode")));
   }
 
   static String productCustomerType(String value) {
@@ -71,7 +75,33 @@ final class ImportWorkbookRules {
   }
 
   static String productNameMatchKey(Map<String, Object> data) {
-    return text(data.get("customerType")) + ":" + text(data.get("rebateStatus")) + ":" + normalize(text(data.get("materialName")));
+    return ProductBusinessKey.nameGroupKey(text(data.get("customerType")), text(data.get("rebateStatus")),
+        text(data.get("materialName")));
+  }
+
+  static Set<Integer> duplicateProductRowIndexes(List<Map<String, Object>> rows) {
+    Map<String, List<Integer>> nameGroups = new HashMap<>();
+    for (int index = 0; index < rows.size(); index++) {
+      Map<String, Object> row = rows.get(index);
+      if (bool(row.get("customerTypeInvalid")) || bool(row.get("rebateStatusInvalid"))
+          || ProductBusinessKey.normalizedMaterialName(text(row.get("materialName"))).isBlank()) continue;
+      nameGroups.computeIfAbsent(productNameMatchKey(row), ignored -> new ArrayList<>()).add(index);
+    }
+    Set<Integer> duplicateIndexes = new HashSet<>();
+    for (List<Integer> group : nameGroups.values()) {
+      if (group.size() < 2) continue;
+      Map<String, List<Integer>> codeGroups = new HashMap<>();
+      for (int index : group) {
+        String code = ProductBusinessKey.normalizeMaterialCode(text(rows.get(index).get("materialCode")));
+        codeGroups.computeIfAbsent(code, ignored -> new ArrayList<>()).add(index);
+      }
+      if (codeGroups.containsKey("")) {
+        duplicateIndexes.addAll(group);
+      } else {
+        codeGroups.values().stream().filter(matches -> matches.size() > 1).forEach(duplicateIndexes::addAll);
+      }
+    }
+    return duplicateIndexes;
   }
 
   static String decimalText(String value) {

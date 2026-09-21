@@ -25,7 +25,7 @@ class ImportWorkbookProcessorRulesTest {
       "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明");
 
   @Test
-  void usesOneSheetAndOnlyTypeRebateNameForProductDuplicates() throws Exception {
+  void usesTypeRebateNameAndMaterialCodeRulesForProductDuplicates() throws Exception {
     JdbcTemplate jdbc = mock(JdbcTemplate.class);
     List<Object[]> stagingRows = captureStagingRows(jdbc);
     ImportWorkbookProcessor processor = new ImportWorkbookProcessor(jdbc, mock(CryptoService.class), new ObjectMapper());
@@ -35,27 +35,45 @@ class ImportWorkbookProcessorRulesTest {
       writeRow(sheet.createRow(0), HEADERS.toArray(String[]::new));
       writeRow(sheet.createRow(1), "综合", "是", "调味品", "酱油", "P001", "同名商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明A");
       writeRow(sheet.createRow(2), "综合", "是", "调味品", "酱油", "P002", "同名商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明B");
-      writeRow(sheet.createRow(3), "特渠", "是", "调味品", "酱油", "P003", "同名商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明C");
-      writeRow(sheet.createRow(4), "综合", "否", "调味品", "酱油", "P004", "同名商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明D");
-      writeRow(sheet.createRow(5), "", "", "调味品", "酱油", "", "无码商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "通用商品说明");
+      writeRow(sheet.createRow(3), "综合", "是", "调味品", "酱油", "p-002", "同名商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明C");
+      writeRow(sheet.createRow(4), "综合", "是", "调味品", "酱油", "", "空码同名商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明D");
+      writeRow(sheet.createRow(5), "综合", "是", "调味品", "酱油", "Q001", "空码同名商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明E");
+      writeRow(sheet.createRow(6), "综合", "是", "调味品", "酱油", "", "双空码商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明F");
+      writeRow(sheet.createRow(7), "综合", "是", "调味品", "酱油", "", "双空码商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明G");
+      writeRow(sheet.createRow(8), "特渠", "是", "调味品", "酱油", "P001", "同名商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明H");
+      writeRow(sheet.createRow(9), "综合", "否", "调味品", "酱油", "P001", "同名商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明I");
+      writeRow(sheet.createRow(10), "", "", "调味品", "酱油", "", "空类型空返利混码", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明J");
+      writeRow(sheet.createRow(11), "", "", "调味品", "酱油", "G001", "空类型空返利混码", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明K");
+      writeRow(sheet.createRow(12), "", "", "调味品", "酱油", "G002", "空类型空返利不同码", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明L");
+      writeRow(sheet.createRow(13), "", "", "调味品", "酱油", "G003", "空类型空返利不同码", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明M");
       workbook.write(output);
 
       var summary = processor.parse(1, "PRODUCT", output.toByteArray());
-      assertThat(summary.inputCount()).isEqualTo(5);
-      assertThat(summary.addedCount()).isEqualTo(3);
+      assertThat(summary.inputCount()).isEqualTo(13);
+      assertThat(summary.addedCount()).isEqualTo(5);
       assertThat(summary.warnings()).isZero();
-      assertThat(summary.blocking()).isEqualTo(2);
+      assertThat(summary.blocking()).isEqualTo(8);
     }
 
-    assertThat(stagingRows).hasSize(5);
-    assertThat(stagingRows.get(0)[5]).isEqualTo("BLOCKED");
+    assertThat(stagingRows).hasSize(13);
+    assertThat(stagingRows.get(0)[5]).isEqualTo("VALID");
     assertThat(stagingRows.get(1)[5]).isEqualTo("BLOCKED");
-    assertThat(stagingRows.get(2)[5]).isEqualTo("VALID");
-    assertThat(stagingRows.get(3)[5]).isEqualTo("VALID");
-    assertThat(stagingRows.get(4)[5]).isEqualTo("VALID");
-    JsonNode genericData = new ObjectMapper().readTree((String) stagingRows.get(4)[6]);
+    assertThat(stagingRows.get(2)[5]).isEqualTo("BLOCKED");
+    assertThat(stagingRows.get(0)[3]).isNotEqualTo(stagingRows.get(1)[3]);
+    assertThat(stagingRows.get(3)[5]).isEqualTo("BLOCKED");
+    assertThat(stagingRows.get(4)[5]).isEqualTo("BLOCKED");
+    assertThat(stagingRows.get(5)[5]).isEqualTo("BLOCKED");
+    assertThat(stagingRows.get(6)[5]).isEqualTo("BLOCKED");
+    assertThat(stagingRows.get(7)[5]).isEqualTo("VALID");
+    assertThat(stagingRows.get(8)[5]).isEqualTo("VALID");
+    assertThat(stagingRows.get(9)[5]).isEqualTo("BLOCKED");
+    assertThat(stagingRows.get(10)[5]).isEqualTo("BLOCKED");
+    assertThat(stagingRows.get(11)[5]).isEqualTo("VALID");
+    assertThat(stagingRows.get(12)[5]).isEqualTo("VALID");
+    JsonNode genericData = new ObjectMapper().readTree((String) stagingRows.get(9)[6]);
     assertThat(genericData.path("materialCode").asText()).isEmpty();
-    assertThat(genericData.path("description").asText()).isEqualTo("通用商品说明");
+    assertThat(genericData.path("customerType").asText()).isEqualTo("ALL");
+    assertThat(genericData.path("rebateStatus").asText()).isEqualTo("ALL");
   }
 
   @Test

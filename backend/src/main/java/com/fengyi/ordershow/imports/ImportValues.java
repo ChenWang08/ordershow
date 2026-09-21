@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import com.fengyi.ordershow.common.ProductBusinessKey;
 import com.fengyi.ordershow.common.TextNormalizer;
 
 
@@ -15,7 +16,8 @@ final class ImportValues {
   }
 
   static String productKey(Map<String, Object> data) {
-    return text(data.get("customerType")) + ":" + text(data.get("rebateStatus")) + ":" + normalize(text(data.get("materialName")));
+    return ProductBusinessKey.businessKey(text(data.get("customerType")), text(data.get("rebateStatus")),
+        text(data.get("materialName")), text(data.get("materialCode")));
   }
 
   static BigDecimal decimal(Object value) {

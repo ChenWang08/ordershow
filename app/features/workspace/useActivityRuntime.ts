@@ -7,6 +7,7 @@ import type { ActivityStatus } from "../shared/types";
 import { runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
 
 export function useActivityRuntime(adminActivity?: RuntimeActivity) {
+  const adminActivityId = adminActivity?.id;
   const [lotteryRounds, setLotteryRounds] = useState<LotteryRound[]>(initialLotteryRounds);
   const [activityName, setActivityName] = useState(adminActivity?.name || "2026年中秋订货会");
   const [activityId, setActivityId] = useState(String(adminActivity?.id || 1));
@@ -28,17 +29,17 @@ export function useActivityRuntime(adminActivity?: RuntimeActivity) {
       if (rule) setLotteryRounds(mapLotteryRule(rule));
     }).catch(() => { if (active) setRuntimeConnected(false); });
     return () => { active = false; };
-  }, []);
+  }, [adminActivity]);
   useEffect(() => {
     let active = true;
     const timer = window.setInterval(() => {
-      void (adminActivity ? loadAdminActivity(adminActivity.id) : loadActivity()).then((activity) => {
+      void (adminActivityId != null ? loadAdminActivity(adminActivityId) : loadActivity()).then((activity) => {
         if (!active) return;
         setRuntimeActivity(activity);
         setActivityStatus(runtimeActivityStatus(activity.status));
       }).catch(() => undefined);
     }, 15_000);
     return () => { active = false; window.clearInterval(timer); };
-  }, []);
+  }, [adminActivityId]);
   return { lotteryRounds, setLotteryRounds, activityName, setActivityName, activityId, setActivityId, activityStatus, setActivityStatus, activityStartAt, setActivityStartAt, activityEndAt, setActivityEndAt, activityEventEndAt, setActivityEventEndAt, runtimeActivity, runtimeConnected };
 }

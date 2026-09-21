@@ -33,7 +33,7 @@ final class ImportStagingWriter {
         INSERT INTO import_staging_row(import_task_id, sheet_name, source_row_number, row_key, diff_type,
           validation_status, raw_data_json, normalized_data_json, sensitive_data_ciphertext)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, taskId, sheet, rowNo, truncate(rowKey, 250), diffType, validation, writeJson(data), writeJson(data), sensitive);
+        """, taskId, sheet, rowNo, truncate(rowKey, 500), diffType, validation, writeJson(data), writeJson(data), sensitive);
   }
 
   void issue(long taskId, String severity, String code, String sheet, int rowNo, String field,

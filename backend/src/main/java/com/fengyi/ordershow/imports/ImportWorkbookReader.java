@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.DataFormatter;
@@ -92,17 +93,13 @@ final class ImportWorkbookReader {
     }
     if (parsed.isEmpty()) throw DomainException.unprocessable("PRODUCT_EMPTY", "Excel 中没有找到商品数据行");
 
-    Map<String, Integer> nameCounts = new HashMap<>();
-    for (ParsedProductRow row : parsed) {
-      String nameKey = productNameMatchKey(row.data());
-      if (!nameKey.endsWith(":")) nameCounts.merge(nameKey, 1, Integer::sum);
-    }
+    Set<Integer> duplicateProductIndexes = duplicateProductRowIndexes(parsed.stream().map(ParsedProductRow::data).toList());
     int warnings = 0, blocking = 0, added = 0;
-    for (ParsedProductRow row : parsed) {
+    for (int index = 0; index < parsed.size(); index++) {
+      ParsedProductRow row = parsed.get(index);
       Map<String, Object> data = row.data();
       String materialName = text(data.get("materialName"));
-      String nameKey = productNameMatchKey(data);
-      boolean duplicateName = !nameKey.endsWith(":") && nameCounts.getOrDefault(nameKey, 0) > 1;
+      boolean duplicateIdentity = duplicateProductIndexes.contains(index);
       String validation;
       String diffType;
       if (materialName.isBlank()) {
@@ -116,10 +113,10 @@ final class ImportWorkbookReader {
         validation = "BLOCKED"; diffType = "ADDED"; blocking++;
         issue(taskId, "BLOCKING", "PRODUCT_REBATE_INVALID", row.sheet(), row.rowNo(), "rebateStatus", null,
             "是否返利只允许“是”“否”或空");
-      } else if (duplicateName) {
+      } else if (duplicateIdentity) {
         validation = "BLOCKED"; diffType = "PENDING_CONFIRMATION"; blocking++;
         issue(taskId, "BLOCKING", "PRODUCT_NAME_DUPLICATE", row.sheet(), row.rowNo(), "materialName", materialName,
-            "同一客户类型、同一返利类型下商品名称重复，请编辑或删除重复行");
+            "同一客户类型、同一返利类型下商品名称与物料代码组合重复；任一物料代码为空时按名称判重，请编辑或删除重复行");
       } else if (optionalProductMissing(data)) {
         validation = "WARNING"; diffType = "ADDED"; warnings++; added++;
         issue(taskId, "WARNING", "PRODUCT_INCOMPLETE", row.sheet(), row.rowNo(), null, null,

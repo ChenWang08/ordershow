@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fengyi.ordershow.security.CryptoService;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,12 +53,13 @@ final class ImportPreviewValidator {
       }
     }
     boolean whitelistTypeMixed = whitelistHasAll && whitelistHasTyped;
-    Map<String, Integer> productNameCounts = new HashMap<>();
+    Set<Long> duplicateProductRowIds = new HashSet<>();
     if ("PRODUCT".equals(importType)) {
-      for (ReviewRow row : rows) {
-        if (row.deleted()) continue;
-        String nameKey = productNameMatchKey(row.data());
-        if (!nameKey.endsWith(":")) productNameCounts.merge(nameKey, 1, Integer::sum);
+      List<ReviewRow> activeProducts = rows.stream().filter(row -> !row.deleted()).toList();
+      List<Map<String, Object>> productData = activeProducts.stream().map(ReviewRow::data).toList();
+      Set<Integer> duplicateIndexes = duplicateProductRowIndexes(productData);
+      for (int index = 0; index < activeProducts.size(); index++) {
+        if (duplicateIndexes.contains(index)) duplicateProductRowIds.add(activeProducts.get(index).id());
       }
     }
 
@@ -72,8 +74,7 @@ final class ImportPreviewValidator {
       if (!row.deleted()) {
         if ("PRODUCT".equals(importType)) {
           rowKey = productKey(row.data());
-          String nameKey = productNameMatchKey(row.data());
-          boolean duplicateName = !nameKey.endsWith(":") && productNameCounts.getOrDefault(nameKey, 0) > 1;
+          boolean duplicateIdentity = duplicateProductRowIds.contains(row.id());
           boolean invalidCustomerType = bool(row.data().get("customerTypeInvalid"));
           boolean invalidRebateStatus = bool(row.data().get("rebateStatusInvalid"));
           if (text(row.data().get("materialName")).isBlank()) {
@@ -87,10 +88,10 @@ final class ImportPreviewValidator {
             validation = "BLOCKED"; blocking++;
             staging.issue(taskId, "BLOCKING", "PRODUCT_REBATE_INVALID", row.sheet(), row.rowNo(), "rebateStatus", null,
                 "是否返利只允许“是”“否”或空");
-          } else if (duplicateName) {
+          } else if (duplicateIdentity) {
             validation = "BLOCKED"; diffType = "PENDING_CONFIRMATION"; blocking++;
             staging.issue(taskId, "BLOCKING", "PRODUCT_NAME_DUPLICATE", row.sheet(), row.rowNo(), "materialName",
-                text(row.data().get("materialName")), "同一客户类型、同一返利类型下商品名称重复，请编辑或删除重复行");
+                text(row.data().get("materialName")), "同一客户类型、同一返利类型下商品名称与物料代码组合重复；任一物料代码为空时按名称判重，请编辑或删除重复行");
           } else if (priceTierError(row.data()) != null) {
             validation = "BLOCKED"; blocking++;
             staging.issue(taskId, "BLOCKING", "PRODUCT_PRICE_TIER_INVALID", row.sheet(), row.rowNo(), "priceTier",
@@ -134,7 +135,7 @@ final class ImportPreviewValidator {
       }
       if (rowKey == null) jdbc.update("UPDATE import_staging_row SET validation_status = ?, diff_type = ? WHERE id = ?", validation, diffType, row.id());
       else jdbc.update("UPDATE import_staging_row SET validation_status = ?, diff_type = ?, row_key = ? WHERE id = ?",
-          validation, diffType, truncate(rowKey, 250), row.id());
+          validation, diffType, truncate(rowKey, 500), row.id());
     }
     jdbc.update("UPDATE import_task SET added_count = ?, warning_count = ?, error_count = ? WHERE id = ?", added, warnings, blocking, taskId);
   }
