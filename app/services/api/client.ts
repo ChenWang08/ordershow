@@ -11,7 +11,7 @@ export function apiAssetUrl(path?: string) {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, public code: string, message: string, public traceId?: string) { super(message); }
+  constructor(public status: number, public code: string, message: string, public traceId?: string, public retryAfterMs?: number) { super(message); }
 }
 
 function cookie(name: string) {
@@ -39,6 +39,12 @@ export async function api<T>(path: string, init: RequestInit = {}, csrfKind?: "a
       && (lostReadAccess || missingActivity)) {
     window.dispatchEvent(new Event("admin-access-invalid"));
   }
-  if (!response.ok) throw new ApiError(response.status, errorBody?.code || "REQUEST_FAILED", errorBody?.detail || errorBody?.message || "请求失败", errorBody?.traceId);
+  if (!response.ok) {
+    const retryAfter = response.headers.get("Retry-After");
+    const retryAfterMs = retryAfter == null ? undefined : /^\d+$/.test(retryAfter)
+      ? Number(retryAfter) * 1000 : Math.max(0, Date.parse(retryAfter) - Date.now());
+    throw new ApiError(response.status, errorBody?.code || "REQUEST_FAILED", errorBody?.detail || errorBody?.message || "请求失败", errorBody?.traceId,
+      Number.isFinite(retryAfterMs) ? retryAfterMs : undefined);
+  }
   return body as T;
 }

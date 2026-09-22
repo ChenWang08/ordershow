@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 
 @Service
 public class AuditService {
+  public static final String IDEMPOTENT_REPLAY_ATTRIBUTE = "orderShowIdempotentReplay";
   public static final String REASON_REQUEST_ATTRIBUTE = "orderShowAuditReason";
   private static final Logger log = LoggerFactory.getLogger(AuditService.class);
   private static final Pattern ACTIVITY_ID = Pattern.compile("/activities/(\\d+)");
@@ -38,6 +39,7 @@ public class AuditService {
   }
 
   public void record(HttpServletRequest request, HttpServletResponse response, Exception exception) {
+    if (Boolean.TRUE.equals(request.getAttribute(IDEMPOTENT_REPLAY_ATTRIBUTE)) && exception == null && response.getStatus() < 400) return;
     if (isRead(request.getMethod())) return;
     try {
       AdminPrincipal admin = request.getAttribute(AuthService.ADMIN_REQUEST_ATTRIBUTE) instanceof AdminPrincipal value ? value : null;

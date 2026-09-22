@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, loadH5Order, loadH5OrderDraft, loadH5Products, saveH5Order, verifyPhone, withdrawH5Order, type RuntimeIdentity, type RuntimeOrder, type RuntimeProduct } from "../../api";
 import type { WhitelistRow } from "../../domain/import-domain";
 import { maskPhone, normalizePhone } from "../shared/utils";
 import { useH5Draft } from "./useH5Draft";
+import { createH5SubmissionManager, submissionNeedsRecovery } from "./h5-submission";
 import { productRowToProduct, runtimeProductToProduct, priceBreakdown, groupByProductLine, summarizeOrderLineAmounts, h5QuantitySignature, h5OrderItems, type H5Props, type H5Step, type H5Channel, type H5OrderStatus, type Product, type RebateFilter, type SubmittedOrderItem } from "./h5-domain";
 
 export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelistRows, runtimeActivity }: H5Props) {
@@ -18,6 +19,12 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const [runtimeBusy, setRuntimeBusy] = useState(false);
   const [runtimeMessage, setRuntimeMessage] = useState("");
   const [orderNeedsRefresh, setOrderNeedsRefresh] = useState(false);
+  const [pendingSubmission, setPendingSubmission] = useState(false);
+  const submissionBusy = useRef(false);
+  const [submission] = useState(() => createH5SubmissionManager({
+    storage: () => typeof window === "undefined" ? undefined : window.sessionStorage,
+    send: (pending, signal) => saveH5Order(pending.body.expectedVersion, pending.body.items, pending.key, pending.scope.activityCode, pending.scope.customerId, signal),
+  }));
   const catalog = useMemo(() => runtimeProducts ? runtimeProducts.map(runtimeProductToProduct) : importedRows ? importedRows.map(productRowToProduct) : [], [runtimeProducts, importedRows]);
   const [step, setStep] = useState<H5Step>(() => unspecifiedWhitelist ? "verify" : "channel");
   const [channel, setChannel] = useState<H5Channel>("");
@@ -100,7 +107,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const displayBranch = runtimeIdentity?.branchName || identityBranch;
   const displayPhone = runtimeIdentity?.phoneMasked || (importedIdentity ? maskPhone(importedIdentity.dealerPhone) : "—");
 
-  const { setDraftReady, draftMessage, setDraftMessage, draftOwnerIdRef, lastSavedDraftSignatureRef, latestDraftSnapshotRef, draftSaveTimerRef, draftSaveChainRef, queueDraftSync } = useH5Draft({ activityClosed, catalog, quantities, runtimeIdentity, runtimeOrder });
+  const { setDraftReady, draftMessage, setDraftMessage, draftOwnerIdRef, lastSavedDraftSignatureRef, latestDraftSnapshotRef, draftSaveTimerRef, draftSaveChainRef, queueDraftSync } = useH5Draft({ activityClosed: activityClosed || pendingSubmission || runtimeBusy, catalog, quantities, runtimeIdentity, runtimeOrder });
   const applyRuntimeOrder = (order: RuntimeOrder | null, liveCatalog: Product[], preserveDraft = false) => {
     setOrderNeedsRefresh(false);
     setRuntimeOrder(order);
@@ -147,7 +154,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   };
 
   useEffect(() => {
-    if (!runtimeIdentity || runtimeBusy || (step !== "submitted" && step !== "success")) return;
+    if (!runtimeIdentity || runtimeBusy || pendingSubmission || orderNeedsRefresh || (step !== "submitted" && step !== "success")) return;
     let active = true;
     let loading = false;
     const refresh = async () => {
@@ -165,7 +172,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
     const timer = window.setInterval(() => void refresh(), 15000);
     window.addEventListener("focus", refresh);
     return () => { active = false; window.clearInterval(timer); window.removeEventListener("focus", refresh); };
-  }, [runtimeIdentity, runtimeBusy, step, runtimeOrder, catalog]);
+  }, [runtimeIdentity, runtimeBusy, pendingSubmission, orderNeedsRefresh, step, runtimeOrder, catalog]);
 
   const startEditingOrder = () => {
     if (orderStatus === "withdrawn") setQuantities({ ...submittedQuantities });
@@ -182,6 +189,16 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
         if (latestDraftSnapshotRef.current) await queueDraftSync(latestDraftSnapshotRef.current, false);
         setDraftReady(false);
         const identity = await verifyPhone(unspecifiedWhitelist ? "ALL" : channel === "综合客户" ? "GENERAL" : "SPECIAL", unspecifiedWhitelist ? "" : region, normalizedPhone);
+        let recoveryNeedsRefresh = false;
+        setPendingSubmission(false); setOrderNeedsRefresh(false);
+        try {
+          const recovered = await submission.recover({ activityCode: runtimeActivity.code, customerId: identity.customerId });
+          if (recovered) setRuntimeMessage("已确认上次提交成功，正在显示最新订单。");
+        } catch (error) {
+          setPendingSubmission(true);
+          setRuntimeMessage(error instanceof ApiError ? error.message : "上次提交结果待确认，请重试确认。");
+          recoveryNeedsRefresh = error instanceof ApiError && ["SUBMISSION_RECOVERY_EXPIRED", "IDEMPOTENCY_RESULT_UNAVAILABLE", "ORDER_VERSION_CONFLICT"].includes(error.code);
+        }
         const preserveDraft = runtimeIdentity?.activityId === identity.activityId
           && runtimeIdentity.customerId === identity.customerId;
         const liveRows = await loadH5Products();
@@ -192,6 +209,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
         const validDraft = draft?.baseOrderVersion === baseVersion ? draft : null;
         setRuntimeIdentity(identity); setRuntimeProducts(liveRows); setVerifiedBranch(identity.branchName || "");
         applyRuntimeOrder(order, liveCatalog, preserveDraft);
+        setOrderNeedsRefresh(recoveryNeedsRefresh);
         draftOwnerIdRef.current = identity.customerId;
         if (validDraft) {
           const availableIds = new Set(liveCatalog.filter((product) => product.isOrderable).map((product) => product.id));
@@ -237,15 +255,21 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
     setVerifyError("订货服务暂不可用，请稍后刷新页面重试。");
   };
 
-  const submitOrder = async () => {
-    if (runtimeActivity) {
+  const submitOrder = async (recover = false) => {
+    if (submissionBusy.current || runtimeBusy) return;
+    if (runtimeActivity && runtimeIdentity) {
+      submissionBusy.current = true;
       setRuntimeBusy(true); setRuntimeMessage("");
+      const scope = { activityCode: runtimeActivity.code, customerId: runtimeIdentity.customerId };
+      const body = { expectedVersion: runtimeOrder?.currentVersion || 0,
+        items: selected.map((product) => ({ productId: Number(product.id), quantity: quantities[product.id] })) };
       try {
         if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
         await draftSaveChainRef.current.catch(() => undefined);
         const isFirstSubmit = !runtimeOrder;
-        const order = await saveH5Order(runtimeOrder?.currentVersion || 0,
-          selected.map((product) => ({ productId: Number(product.id), quantity: quantities[product.id] })));
+        const order = recover ? await submission.recover(scope) : await submission.submit(scope,body);
+        if (!order) { setPendingSubmission(false); setOrderNeedsRefresh(true); return; }
+        setPendingSubmission(false); setOrderNeedsRefresh(false);
         setSubmitMode(isFirstSubmit ? "first" : "update");
         setSubmittedIdentity(verifiedIdentity ? { ...verifiedIdentity } : null);
         applyRuntimeOrder(order, catalog);
@@ -253,15 +277,20 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
         setDraftMessage("");
         setStep("success");
       } catch (error) {
-        setRuntimeMessage(error instanceof ApiError ? error.message : "订单提交失败，请稍后重试。");
-        if (error instanceof ApiError && error.code === "ORDER_VERSION_CONFLICT") setOrderNeedsRefresh(true);
-      } finally { setRuntimeBusy(false); }
+        setPendingSubmission(submissionNeedsRecovery(error) || (error instanceof ApiError && [401,403].includes(error.status)));
+        setRuntimeMessage(error instanceof ApiError ? error.message : "网络连接异常，提交结果待确认，请重试确认。");
+        if (error instanceof ApiError && ["ORDER_VERSION_CONFLICT", "SUBMISSION_RECOVERY_EXPIRED", "IDEMPOTENCY_RESULT_UNAVAILABLE"].includes(error.code)) setOrderNeedsRefresh(true);
+      } finally { submissionBusy.current = false; setRuntimeBusy(false); }
       return;
     }
     setRuntimeMessage("订货服务暂不可用，订单未提交，请稍后重试。");
   };
 
   const withdrawOrder = async () => {
+    if (runtimeBusy || submissionBusy.current || pendingSubmission) {
+      if (pendingSubmission) setRuntimeMessage("请先确认上次提交结果，再撤回订单。");
+      return;
+    }
     if (runtimeActivity && runtimeOrder) {
       setRuntimeBusy(true); setRuntimeMessage("");
       try {
@@ -279,18 +308,21 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   };
 
   const reloadLatestOrder = async () => {
+                if (submissionBusy.current || runtimeBusy) return;
                 setRuntimeBusy(true);
                 try {
                   const rows = await loadH5Products();
                   const current = await loadH5Order();
                   setRuntimeProducts(rows);
                   applyRuntimeOrder(current, rows.map(runtimeProductToProduct));
+                  if (runtimeActivity && runtimeIdentity) submission.clear({ activityCode: runtimeActivity.code, customerId: runtimeIdentity.customerId });
+                  setPendingSubmission(false); setOrderNeedsRefresh(false);
                   setRuntimeMessage("已加载最新订单，请重新核对后修改。此前未提交的修改已清除。");
                   setStep("submitted");
                 } catch { setRuntimeMessage("最新订单加载失败，请重试。"); }
                 finally { setRuntimeBusy(false); }
                 };
-  return { activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
+  return { pendingSubmission, recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
 }
 
 export type H5OrderModel = ReturnType<typeof useH5OrderFlow>;

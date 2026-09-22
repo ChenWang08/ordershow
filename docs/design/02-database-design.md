@@ -111,7 +111,9 @@ Excel 解析、标准化、校验和人工编辑只写入 staging，不修改当
 
 `h5_order_draft` 只保存商品 ID 与数量 JSON、草稿所基于的 `base_order_version`、草稿锁版本、更新时间和过期时间，不保存手机号、客户名称、价格或订单金额。保存、读取和删除必须同时满足 H5 会话中的 `activityId` 与 `activityCustomerId`；请求体中的客户 ID 仅作一致性校验，不能改变会话身份。草稿商品每次保存都重新校验当前商品版本、客户类型、分公司范围、可见和可订状态。
 
-草稿不属于正式订单事实：首次提交前可以存在 `h5_order_draft`，但不存在 `customer_order`、订单号和订单版本。草稿 `base_order_version` 必须等于客户当前订单版本，防止旧页面覆盖已经提交或修改的订单；成功提交、幂等重放确认成功或撤回后删除草稿。`expires_at` 不晚于活动截止时间，过期草稿不再恢复。
+草稿不属于正式订单事实：首次提交前可以存在 `h5_order_draft`，但不存在 `customer_order`、订单号和订单版本。草稿 `base_order_version` 必须等于客户当前订单版本，防止旧页面覆盖已经提交或修改的订单；首次执行提交或撤回成功后删除草稿。H5 提交的成功幂等重放只返回原快照，不删除后来保存的新草稿。`expires_at` 不晚于活动截止时间，过期草稿不再恢复。
+
+H5 ORDER_SUBMIT 的 response_json 使用 format=2，保存 orderId、orderVersion、resultJson（订单响应 JSON 字符串，保留十进制精度）；沿用现有唯一约束，无结构迁移。expires_at 至少覆盖活动结束后 30 天，清理还检查 completed_at 及当前活动结束时间，每小时最多 500 条，仅处理新格式已完成的 H5 提交。详见 [幂等重试与清理](../testing/h5-idempotency-retry.md)。
 
 V010 新增草稿表；V011 将早期受 MySQL `Asia/Shanghai` 会话默认值影响的明显未来时间校正为 UTC；V020 统一商品导入字段并增加产品说明；V021 增加白名单所属分公司身份键和不区分客户类型 `ALL`；V022 增加管理员订单创建、调整、作废所需的来源、管理员、原因和版本操作字段；V023 增加手机号明文业务列并配合应用启动迁移旧密文。后续草稿写入显式使用 `UTC_TIMESTAMP(3)`，API 返回 ISO 8601 UTC，页面按 `Asia/Shanghai` 展示。
 
@@ -207,13 +209,13 @@ api_idempotency(activity_id, actor_type, actor_id, endpoint_code, idempotency_ke
 
 ### 9.1 订单提交
 
-1. 校验活动、凭证、商品范围和 `lock_version`；
-2. 检查或创建幂等记录；
-3. 锁定订单主记录或依赖乐观锁；
+1. 校验活动绑定和凭证，依次获取活动共享锁和客户独占锁；
+2. 规范化请求指纹，检查或创建幂等记录；已完成的 H5 提交直接返回首次响应快照；
+3. 新请求检查活动可写状态、商品范围和 `expectedVersion`，锁定订单主记录；
 4. 后端计算当前明细；
 5. 写订单主表、当前明细、新版本和版本明细；
 6. 写订单操作和 outbox 事件；
-7. 提交事务后缓存结果并通知 SSE。
+7. 同一事务保存订单 ID、版本和响应快照并标记幂等完成；事务提交后由 outbox 发布 SSE 通知。
 
 ### 9.2 导入确认
 

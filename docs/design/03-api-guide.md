@@ -151,6 +151,10 @@ H5 商品展示按当前可见商品目录动态处理返利页签：只有同�
 
 关键幂等记录、请求指纹、任务 ID 和可重放响应摘要最终保存于 MySQL 的 `api_idempotency`。Redis 可以在命中时加速重复请求和互斥，但缓存丢失、过期或重启后必须回到 MySQL，不得因此重新执行订单版本、导入发布或抽奖结果。
 
+H5 提交已实现同次请求复用幂等键及首次成功响应快照。指纹固定包含 expectedVersion、includeHistory 和按 productId 排序的商品/数量；同键异载荷返回 IDEMPOTENCY_KEY_REUSED。新记录保存 orderId、orderVersion 和精确订单数据快照，重放不读取当前订单、不删除新草稿、不重复业务操作和通知。旧记录缺失快照时返回 IDEMPOTENCY_RESULT_UNAVAILABLE，客户端须查询订单。
+
+前端待确认请求按活动/客户保存在 sessionStorage，恢复窗口 24 小时；每次最多自动重试一次并遵守 Retry-After。服务端只对新 H5 提交快照启用有界清理，至少保留至活动结束和成功提交各满 30 天；PROCESSING、旧格式和其他接口不在此次清理范围。鉴权失败仍拒绝访问。实现与验收见 [H5 幂等重试说明](../testing/h5-idempotency-retry.md)。
+
 ### 6.2 乐观锁
 
 - 订单提交请求包含 `expectedVersion`；
@@ -293,6 +297,7 @@ data: {"scope":"ACTIVITY","activityId":12,"version":938201,"eventCount":1200,"ev
 | 409 | `ACTIVITY_CLOSED` | 活动已截止或整场已结束 |
 | 409 | `ORDER_VERSION_CONFLICT` | 订单已被其他请求更新 |
 | 409 | `IDEMPOTENCY_KEY_REUSED` | 幂等键被不同载荷复用 |
+| 409 | `IDEMPOTENCY_RESULT_UNAVAILABLE` | 历史请求已成功但缺少原响应快照，加载最新订单核对 |
 | 409 | `IMPORT_HAS_BLOCKING_ERRORS` | 导入存在未处理阻断错误 |
 | 409 | `IMPORT_STATE_CONFLICT` | 导入任务状态不允许该操作 |
 | 400 | `IMAGE_DECISION_MULTIPLE_PRODUCTS` | 一张图片确认给了多个不同商品名称 |

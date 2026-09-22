@@ -62,24 +62,29 @@ public class OrderService {
 
   @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public OrderView submit(String activityCode, H5Principal customer, SubmitRequest request, String idempotencyKey, String traceId, boolean includeHistory) {
+    return submit(activityCode, customer, request, idempotencyKey, traceId, includeHistory, () -> {});
+  }
+
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+  public OrderView submit(String activityCode, H5Principal customer, SubmitRequest request, String idempotencyKey,
+                          String traceId, boolean includeHistory, Runnable onReplay) {
     var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
-    activities.requireWritable(activity.id());
     repository.lockCustomerSubmission(activity.id(), customer.customerId());
-    activities.requireWritable(activity.id());
     if (request.items() == null || request.items().isEmpty()) throw DomainException.unprocessable("ORDER_EMPTY", "请至少选择一种商品");
     if (request.items().size() > 1000) throw DomainException.unprocessable("ORDER_TOO_MANY_ITEMS", "订单商品种类过多");
     Map<Long, Long> quantities = new LinkedHashMap<>();
     for (SubmitItem item : request.items()) {
-      if (item.productId() <= 0 || item.quantity() <= 0 || item.quantity() > 999_999) throw DomainException.unprocessable("ORDER_ITEM_INVALID", "商品和订货箱数必须有效");
+      if (item == null || item.productId() <= 0 || item.quantity() <= 0 || item.quantity() > 999_999) throw DomainException.unprocessable("ORDER_ITEM_INVALID", "商品和订货箱数必须有效");
       if (quantities.put(item.productId(), item.quantity()) != null) throw DomainException.unprocessable("ORDER_ITEM_DUPLICATE", "同一商品不能重复提交");
     }
-    byte[] requestHash = hash(request);
-    IdempotencyResult replay = repository.beginIdempotency(activity.id(), customer.customerId(), "ORDER_SUBMIT", idempotencyKey, requestHash);
-    if (replay.replay()) {
-      repository.deleteDraft(activity.id(), customer.customerId());
-      return repository.findByCustomer(activity.id(), customer.customerId(), includeHistory);
+    OrderView replay = repository.beginH5Submission(activity.id(), customer.customerId(), idempotencyKey,
+        H5SubmitFingerprint.digest(request, includeHistory), hash(request));
+    if (replay != null) {
+      onReplay.run();
+      return replay;
     }
+    activities.requireWritable(activity.id());
 
     OrderRow current = repository.lockOrder(activity.id(), customer.customerId());
     int currentVersion = current == null ? 0 : current.version();
@@ -88,9 +93,10 @@ public class OrderService {
       throw DomainException.conflict("ORDER_VOIDED", "订单已由管理员作废，请联系管理员处理");
     }
     if (current != null && "SUBMITTED".equals(current.status()) && repository.sameItems(current.id(), quantities)) {
-      repository.completeIdempotency(activity.id(), customer.customerId(), "ORDER_SUBMIT", idempotencyKey, current.id());
       repository.deleteDraft(activity.id(), customer.customerId());
-      return repository.order(current.id(), includeHistory);
+      OrderView result = repository.order(current.id(), includeHistory);
+      repository.completeH5Submission(activity.id(), customer.customerId(), idempotencyKey, result);
+      return result;
     }
 
     List<ProductSnapshot> products = repository.loadProducts(activity.id(), customer.customerType(), customer.branchName(), quantities.keySet());
@@ -128,9 +134,10 @@ public class OrderService {
     repository.insertVersionItems(versionId, items);
     repository.insertH5Submission(activity.id(), orderId, first ? "FIRST_SUBMIT" : resubmit ? "RESUBMIT" : "MODIFY_SUBMIT", nextVersion, traceId);
     repository.writeOutbox(activity.id(), orderId, "ORDER_SUBMITTED", Map.of("orderId", orderId, "version", nextVersion));
-    repository.completeIdempotency(activity.id(), customer.customerId(), "ORDER_SUBMIT", idempotencyKey, orderId);
     repository.deleteDraft(activity.id(), customer.customerId());
-    return repository.order(orderId, includeHistory);
+    OrderView result = repository.order(orderId, includeHistory);
+    repository.completeH5Submission(activity.id(), customer.customerId(), idempotencyKey, result);
+    return result;
   }
 
   @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)

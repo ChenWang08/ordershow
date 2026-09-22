@@ -11,14 +11,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 /** Keeps H5 writes from occupying every DB connection while reads are waiting. */
 @Component
-@Order(Ordered.HIGHEST_PRECEDENCE + 10)
+@Order(0) // Run after Spring Security's CORS handling, including for rejected writes.
 public class H5WriteAdmissionFilter extends OncePerRequestFilter {
   private final Semaphore permits;
   private final long timeoutMs;

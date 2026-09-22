@@ -368,6 +368,54 @@ public class OrderRepository {
     return beginIdempotency(activityId, "H5_CUSTOMER", actorId, endpoint, key, hash);
   }
 
+  /** Caller holds the activity/customer locks in the order shared by all order writers. */
+  OrderView beginH5Submission(long activityId, long customerId, String key, byte[] fingerprint, byte[] legacyHash) {
+    if (key == null || key.isBlank() || key.length() > 128)
+      throw DomainException.badRequest("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的 Idempotency-Key");
+    int inserted = jdbc.update("""
+        INSERT IGNORE INTO api_idempotency(activity_id,actor_type,actor_id,endpoint_code,idempotency_key,
+          request_hash,status,response_json,expires_at)
+        SELECT id,'H5_CUSTOMER',?,'ORDER_SUBMIT',?,?,'PROCESSING',JSON_OBJECT('format',2),
+          DATE_ADD(GREATEST(UTC_TIMESTAMP(3),COALESCE(event_ends_at,ends_at)), INTERVAL 30 DAY)
+        FROM activity WHERE id=?
+        """, customerId,key,fingerprint,activityId);
+    if (inserted == 1) return null;
+    var rows = jdbc.queryForList("""
+        SELECT request_hash,status,response_json FROM api_idempotency
+        WHERE activity_id=? AND actor_type='H5_CUSTOMER' AND actor_id=?
+          AND endpoint_code='ORDER_SUBMIT' AND idempotency_key=? FOR UPDATE
+        """, activityId,customerId,key);
+    if (rows.size() != 1) throw new IllegalStateException("Missing idempotency row");
+    var row = rows.getFirst();
+    try {
+      var saved = json.readTree(row.get("response_json") == null ? "{}" : row.get("response_json").toString());
+      boolean modern = saved.path("format").asInt() == 2;
+      if (!MessageDigest.isEqual((byte[]) row.get("request_hash"), modern ? fingerprint : legacyHash))
+        throw DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "同一幂等键不能用于不同请求");
+      if (!"COMPLETED".equals(row.get("status")))
+        throw DomainException.conflict("REQUEST_IN_PROGRESS", "相同请求正在处理中，请稍后重试");
+      // Legacy records cannot truthfully reproduce the original response. Never re-execute them.
+      if (!modern || !saved.hasNonNull("resultJson"))
+        throw DomainException.conflict("IDEMPOTENCY_RESULT_UNAVAILABLE", "此前提交已成功，请加载最新订单核对");
+      return json.readValue(saved.get("resultJson").asText(), OrderView.class);
+    } catch (java.io.IOException error) { throw new IllegalStateException("Invalid submission snapshot",error); }
+  }
+
+  void completeH5Submission(long activityId, long customerId, String key, OrderView result) {
+    try {
+      // Keep monetary decimals inside a JSON string; MySQL JSON numeric coercion must not round a snapshot.
+      String snapshot = json.writeValueAsString(Map.of("format",2,"orderId",result.id(),
+          "orderVersion",result.currentVersion(),"resultJson",json.writeValueAsString(result)));
+      int changed = jdbc.update("""
+          UPDATE api_idempotency SET status='COMPLETED',http_status=200,resource_type='ORDER',
+            resource_id=?,response_json=?,completed_at=UTC_TIMESTAMP(3)
+          WHERE activity_id=? AND actor_type='H5_CUSTOMER' AND actor_id=?
+            AND endpoint_code='ORDER_SUBMIT' AND idempotency_key=? AND status='PROCESSING'
+          """,result.id(),snapshot,activityId,customerId,key);
+      if (changed != 1) throw new IllegalStateException("Submission result was not saved");
+    } catch (java.io.IOException error) { throw new IllegalStateException("Cannot save submission snapshot",error); }
+  }
+
   IdempotencyResult beginIdempotency(long activityId, String actorType, long actorId, String endpoint,
                                               String key, byte[] hash) {
     if (key == null || key.isBlank() || key.length() > 128) throw DomainException.badRequest("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的 Idempotency-Key");

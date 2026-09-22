@@ -26,6 +26,13 @@ export function H5Ordering(props: H5Props) {
       <div className="phone-shell">
         <div className="phone-screen">
           <FestivalDecor />
+          {(model.pendingSubmission || model.orderNeedsRefresh) && <div className="h5-submit-recovery" role="alert">
+            <p>{model.runtimeMessage || "上次提交结果待确认，请先确认后再修改订单。"}</p>
+            {model.pendingSubmission && !model.orderNeedsRefresh && <button disabled={model.runtimeBusy} onClick={() => void model.recoverSubmission()}>
+              {model.runtimeBusy ? "正在确认…" : "确认上次提交结果"}
+            </button>}
+            {model.orderNeedsRefresh && <button disabled={model.runtimeBusy} onClick={() => void model.reloadLatestOrder()}>加载最新订单并核对</button>}
+          </div>}
           <H5EntryPages model={model} />
           <H5CatalogPage model={model} />
           <H5ConfirmPage model={model} />

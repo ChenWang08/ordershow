@@ -60,8 +60,14 @@ public class OrderController {
 
   @PutMapping("/h5/activities/{activityCode}/order")
   ApiResponse<OrderService.OrderView> submit(@PathVariable String activityCode, @RequestBody OrderService.SubmitRequest body,
-      @RequestHeader("Idempotency-Key") String idempotencyKey, @RequestParam(defaultValue = "true") boolean includeHistory, HttpServletRequest request) {
-    return ApiResponse.of(service.submit(activityCode, auth.requireH5(request), body, idempotencyKey, TraceFilter.id(request), includeHistory), TraceFilter.id(request));
+      @RequestHeader("Idempotency-Key") String idempotencyKey,
+      @RequestHeader(value = "X-H5-Customer-Id", required = false) Long expectedCustomerId,
+      @RequestParam(defaultValue = "true") boolean includeHistory, HttpServletRequest request) {
+    var customer = auth.requireH5(request);
+    if (expectedCustomerId != null && expectedCustomerId.longValue() != customer.customerId())
+      throw com.fengyi.ordershow.common.DomainException.forbidden("H5_CUSTOMER_CHANGED", "客户身份已变化，请重新验证原客户后确认提交结果");
+    return ApiResponse.of(service.submit(activityCode, customer, body, idempotencyKey, TraceFilter.id(request),
+        includeHistory, () -> request.setAttribute(AuditService.IDEMPOTENT_REPLAY_ATTRIBUTE, true)), TraceFilter.id(request));
   }
 
   @PostMapping("/h5/activities/{activityCode}/order/withdraw")

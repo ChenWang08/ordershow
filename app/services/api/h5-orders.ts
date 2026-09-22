@@ -34,9 +34,10 @@ export async function deleteH5OrderDraft(customerId: number, keepalive = false) 
   }, "h5")).data;
 }
 
-export async function saveH5Order(expectedVersion: number, items: Array<{ productId: number; quantity: number }>) {
-  return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order?includeHistory=false`, {
-    method: "PUT", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ expectedVersion, items }),
+export async function saveH5Order(expectedVersion: number, items: Array<{ productId: number; quantity: number }>,
+    idempotencyKey: string, activityCode: string, customerId: number, signal?: AbortSignal) {
+  return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${encodeURIComponent(activityCode)}/order?includeHistory=false`, {
+    method: "PUT", headers: { "Idempotency-Key": idempotencyKey, "X-H5-Customer-Id": String(customerId) }, body: JSON.stringify({ expectedVersion, items }), signal,
   }, "h5")).data;
 }
 

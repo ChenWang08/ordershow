@@ -168,6 +168,7 @@ paths:
       operationId: submitH5Order
       tags: [H5]
       summary: 首次提交、修改或撤回后重新提交订单
+      description: 同次网络异常、超时或503重试必须复用原Idempotency-Key、expectedVersion、items及includeHistory。指纹忽略JSON属性及商品列表顺序。成功重放返回首次订单版本响应快照且无写副作用；同键异载荷返回IDEMPOTENCY_KEY_REUSED。历史记录缺失快照返回IDEMPOTENCY_RESULT_UNAVAILABLE，应查询订单。
       security:
         - h5Cookie: []
       parameters:
@@ -175,6 +176,13 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CsrfToken'
         - $ref: '#/components/parameters/IncludeOrderHistory'
+        - name: X-H5-Customer-Id
+          in: header
+          required: false
+          description: 新版H5发送本次提交绑定的客户ID；与会话客户不一致时返回403 H5_CUSTOMER_CHANGED。兼容历史客户端省略。
+          schema:
+            type: integer
+            format: int64
       requestBody:
         required: true
         content:
@@ -183,13 +191,7 @@ paths:
               $ref: '#/components/schemas/SubmitOrderRequest'
       responses:
         '200':
-          description: 修改或重新提交成功
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CurrentOrderResponse'
-        '201':
-          description: 首次提交成功
+          description: 首次提交、修改、重新提交成功，或回放首次成功快照
           content:
             application/json:
               schema:
@@ -198,6 +200,23 @@ paths:
           $ref: '#/components/responses/Problem'
         '422':
           $ref: '#/components/responses/Problem'
+        '503':
+          description: 写入准入等待超时，本次请求未进入订单业务处理；可使用原键重试
+          headers:
+            Retry-After:
+              schema:
+                type: string
+              description: 重试前至少等待的秒数
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  code:
+                    type: string
+                    enum: [H5_WRITE_BUSY]
+                  message:
+                    type: string
   /h5/activities/{activityCode}/order-draft:
     get:
       operationId: getH5OrderDraft

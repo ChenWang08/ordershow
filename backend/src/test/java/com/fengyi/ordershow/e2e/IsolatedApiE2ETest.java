@@ -59,6 +59,8 @@ class IsolatedApiE2ETest {
   private long productWithoutTonsId;
   private long orderId;
   private String orderNo;
+  private String firstSubmissionKey;
+  private JsonNode firstSubmissionResult;
 
   @BeforeAll
   void guardEnvironment() {
@@ -253,8 +255,27 @@ class IsolatedApiE2ETest {
     HttpResponse<String> missingCsrf = send(h5, "PUT", "/h5/activities/" + activityCode + "/order", first, null, null, firstKey);
     assertEquals(403, missingCsrf.statusCode());
 
-    HttpResponse<String> submitted = send(h5, "PUT", "/h5/activities/" + activityCode + "/order", first, h5Csrf, null, firstKey);
+    var ready = new java.util.concurrent.CountDownLatch(4);
+    var start = new java.util.concurrent.CountDownLatch(1);
+    var duplicates = new ArrayList<CompletableFuture<HttpResponse<String>>>();
+    for (int i=0;i<4;i++) duplicates.add(CompletableFuture.supplyAsync(() -> {
+      ready.countDown();
+      try { start.await(); return send(h5,"PUT","/h5/activities/"+activityCode+"/order",first,h5Csrf,null,firstKey); }
+      catch (Exception error) { throw new java.util.concurrent.CompletionException(error); }
+    }));
+    try { assertTrue(ready.await(10,java.util.concurrent.TimeUnit.SECONDS)); }
+    finally { start.countDown(); }
+    HttpResponse<String> submitted = duplicates.getFirst().join();
     assertEquals(200, submitted.statusCode(), submitted.body());
+    for (var duplicate : duplicates) {
+      var response = duplicate.join();
+      assertEquals(200,response.statusCode(),response.body());
+      assertEquals(data(submitted),data(response));
+    }
+    firstSubmissionKey = firstKey;
+    firstSubmissionResult = data(submitted).deepCopy();
+    assertEquals(1,firstSubmissionResult.path("versions").size());
+    assertEquals(1,firstSubmissionResult.path("operations").size());
     JsonNode order = data(submitted);
     orderId = order.path("id").asLong();
     orderNo = order.path("orderNo").asText();
@@ -291,11 +312,24 @@ class IsolatedApiE2ETest {
     assertEquals(200, modified.statusCode(), modified.body());
     assertEquals(orderNo, data(modified).path("orderNo").asText());
     assertEquals(2, data(modified).path("currentVersion").asInt());
+    assertEquals(2,data(modified).path("versions").size());
     assertEquals("300.00", data(modified).path("totalAmount").decimalValue().setScale(2).toPlainString());
     HttpResponse<String> clearedModificationDraft = send(h5, "GET",
         "/h5/activities/" + activityCode + "/order-draft", null, null, null);
     assertTrue(json(clearedModificationDraft).path("data").isMissingNode()
         || json(clearedModificationDraft).path("data").isNull());
+
+    var newerDraft = send(h5,"PUT","/h5/activities/"+activityCode+"/order-draft",
+        draftBody(h5CustomerId,2,productId,5),h5Csrf,null);
+    assertEquals(200,newerDraft.statusCode());
+    var oldReplay = send(h5,"PUT","/h5/activities/"+activityCode+"/order",first,h5Csrf,null,firstKey);
+    assertEquals(200,oldReplay.statusCode(),oldReplay.body());
+    assertEquals(firstSubmissionResult,data(oldReplay));
+    var preservedDraft = send(h5,"GET","/h5/activities/"+activityCode+"/order-draft",null,null,null);
+    assertEquals(5,data(preservedDraft).path("items").get(0).path("quantity").asInt());
+    var latestAfterReplay = send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null);
+    assertEquals(2,data(latestAfterReplay).path("currentVersion").asInt());
+    assertEquals(2,data(latestAfterReplay).path("operations").size());
 
     HttpResponse<String> stale = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
         orderBody(1, productId, 4), h5Csrf, null, UUID.randomUUID().toString());
@@ -482,6 +516,11 @@ class IsolatedApiE2ETest {
         adminCsrf, Integer.toString(latestActivity.path("version").asInt()));
     assertEquals(200, closed.statusCode(), closed.body());
     assertEquals("CLOSED", data(closed).path("status").asText());
+
+    var replayAfterClose = send(h5,"PUT","/h5/activities/"+activityCode+"/order",
+        orderBody(0,productId,2),h5Csrf,null,firstSubmissionKey);
+    assertEquals(200,replayAfterClose.statusCode(),replayAfterClose.body());
+    assertEquals(firstSubmissionResult,data(replayAfterClose));
 
     HttpResponse<String> afterClose = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
         orderBody(3, productId, 2), h5Csrf, null, UUID.randomUUID().toString());

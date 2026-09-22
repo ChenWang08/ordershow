@@ -254,3 +254,6 @@
 .success-note { padding: 12px; color: #826c60; border-radius: 10px; background: #f3dfbd; font-size: 9px; line-height: 1.7; text-align: left; }
 .success-page .primary-btn { margin-top: 20px; }
 .ghost-btn { width: 100%; margin-top: 8px; padding: 12px; color: #a22220; border: 1px solid #d7bcb0; border-radius: 11px; background: transparent; font-size: 11px; font-weight: 700; }
+.h5-submit-recovery { position: sticky; top: 0; z-index: 30; padding: 12px 16px; background: #fff2d9; color: #714323; font-size: 12px; }
+.h5-submit-recovery p { margin: 0 0 8px; }
+.h5-submit-recovery button { border: 1px solid #b82121; border-radius: 6px; background: white; color: #b82121; padding: 7px 12px; }
