@@ -97,7 +97,7 @@ public class OrderDraftService {
     Set<Long> ids = quantities.keySet();
     String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
     List<Object> args = new ArrayList<>();
-    args.add(activityId); args.add(customer.customerType()); args.add(customer.customerType()); args.add(normalize(customer.branchName())); args.addAll(ids);
+    args.add(activityId); args.add(customer.customerType()); args.add(customer.customerType()); args.add(normalize(customer.branchName())); args.add(customer.customerId()); args.addAll(ids);
     List<Long> validIds = jdbc.queryForList("""
         SELECT p.id FROM activity_product p
         JOIN activity_data_binding b ON b.current_version_id = p.data_version_id
@@ -106,7 +106,7 @@ public class OrderDraftService {
           AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id)
                OR EXISTS (SELECT 1 FROM activity_product_branch_scope s
                  WHERE s.activity_product_id = p.id AND s.normalized_branch_name = ?))
-          AND p.id IN (""" + placeholders + ")", Long.class, args.toArray());
+          """ + com.fengyi.ordershow.catalog.ProductDealerScopeService.ALLOWED_SQL + " AND p.id IN (" + placeholders + ")", Long.class, args.toArray());
     if (validIds.size() != ids.size()) {
       throw DomainException.unprocessable("DRAFT_PRODUCT_NOT_ORDERABLE", "草稿中包含已失效或不属于当前客户的商品");
     }

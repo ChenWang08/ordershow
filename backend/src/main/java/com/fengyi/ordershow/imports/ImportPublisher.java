@@ -62,6 +62,7 @@ public class ImportPublisher {
     switch (task.importType()) {
       case "PRODUCT" -> {
         productWriter.write(activityId, taskId, versionId, rows);
+        new com.fengyi.ordershow.catalog.ProductDealerScopeService(jdbc).inherit(activityId, versionId);
         Long imageArchiveId = jdbc.queryForObject("SELECT auxiliary_file_id FROM import_task WHERE id = ?", Long.class, taskId);
         String decisionsJson = jdbc.queryForObject("SELECT image_decisions_json FROM import_task WHERE id = ?", String.class, taskId);
         if (imageArchiveId != null) products.attachZipToVersion(activityId, versionId, imageArchiveId, adminId,

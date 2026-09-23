@@ -62,6 +62,8 @@ final class ImportWorkbookReader {
     Sheet sheet = nonEmptySheets.getFirst();
     int headerRow = findHeader(sheet, "物料名称", 30);
     Map<String, Integer> indexes = indexes(sheet.getRow(headerRow), headers);
+    int branchColumn = findColumn(sheet.getRow(headerRow), List.of("分公司限制", "分公司定制品"));
+    indexes.put("分公司定制品", branchColumn);
     requireHeaders(sheet.getSheetName(), indexes, headers);
     for (int rowNo = headerRow + 1; rowNo <= Math.min(sheet.getLastRowNum(), headerRow + 20_000); rowNo++) {
       Row row = sheet.getRow(rowNo);

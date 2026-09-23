@@ -1,5 +1,12 @@
 import { api } from "./client";
-import type { Envelope, ProductImageReview, RuntimeProduct } from "./types";
+import type { Envelope, ProductImageReview, RuntimeProduct, DealerCandidate, DealerScopeSummary } from "./types";
+
+export async function loadDealerCandidates(activityId: number) {
+  return (await api<Envelope<DealerCandidate[]>>(`/admin/activities/${activityId}/product-dealer-candidates`)).data;
+}
+export async function loadScopeHistory(activityId: number, productId: number) {
+  return (await api<Envelope<Array<{ before_json: string; after_json: string; reason: string; created_at: string; display_name: string }>>>(`/admin/activities/${activityId}/products/${productId}/scope-history`)).data;
+}
 
 export async function loadAdminProducts(activityId: number, filters: {
   activityCustomerId?: number;
@@ -12,7 +19,14 @@ export async function loadAdminProducts(activityId: number, filters: {
     if (value !== undefined && value !== "") query.set(key, String(value));
   });
   const suffix = query.toString() ? `?${query.toString()}` : "";
-  return (await api<Envelope<RuntimeProduct[]>>(`/admin/activities/${activityId}/products${suffix}`)).data;
+  const [products, scopes] = await Promise.all([
+    api<Envelope<RuntimeProduct[]>>(`/admin/activities/${activityId}/products${suffix}`),
+    api<Envelope<Record<string, DealerScopeSummary>>>(`/admin/activities/${activityId}/product-dealer-scopes`),
+  ]);
+  return products.data.map(p => {
+    const scope=scopes.data[String(p.id)];
+    return { ...p, dealerScope: scope?.scopes ?? [], effectiveDealerCount: scope?.effectiveCount, dealerScopeRestricted: scope?.restricted };
+  });
 }
 export async function loadProductImageReviews(activityId: number) {
   return (await api<Envelope<ProductImageReview[]>>(`/admin/activities/${activityId}/product-image-reviews`)).data;

@@ -24,7 +24,7 @@ class ProductCatalogReaderBatchTest {
     assertThat(new ProductCatalogReader(jdbc,activities).h5Products("A",customer,null,null)).isEmpty();
     verify(jdbc).query(argThat((String sql) -> sql.contains("b.current_version_id = p.data_version_id")
         && sql.contains("p.activity_id = ?") && sql.contains("p.customer_type = ?") && sql.contains("s.normalized_branch_name = ?")),
-        any(org.springframework.jdbc.core.RowMapper.class), aryEq(new Object[]{3L,"SPECIAL","SPECIAL",null,null,null,null,null,null,null,"上海分"}));
+        any(org.springframework.jdbc.core.RowMapper.class), aryEq(new Object[]{3L,"SPECIAL","SPECIAL",null,null,null,null,null,null,null,"上海分",4L}));
     verifyNoMoreInteractions(jdbc);
     var wrong = new com.fengyi.ordershow.security.H5Principal(1,9,4,"B","SPECIAL",null,null,null,null,null);
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> new ProductCatalogReader(jdbc,activities).h5Products("A",wrong,null,null))

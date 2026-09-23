@@ -22,6 +22,10 @@ function attendanceCompanyKey(value: string) {
 }
 
 export type ProductImportRow = {
+  dealerScope?: import("../services/api/types").DealerScope[];
+  effectiveDealerCount?: number;
+  dealerScopeRestricted?: boolean;
+  dealerScopeEdited?: boolean;
   id: string;
   serverVersion?: number;
   sequence: number;

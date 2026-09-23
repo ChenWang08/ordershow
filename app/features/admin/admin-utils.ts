@@ -11,7 +11,7 @@ export function normalizeMaterialCode(value: string) {
 export function runtimeProductToImportRow(product: RuntimeProduct): ProductImportRow {
   const selectedImages = [...product.images].sort((a, b) => Number(b.primary) - Number(a.primary) || a.sortNo - b.sortNo || a.id - b.id);
   return {
-    id: String(product.id), serverVersion: product.version, sequence: product.sortNo,
+    id: String(product.id), serverVersion: product.version, sequence: product.sortNo, dealerScope: product.dealerScope ?? [], effectiveDealerCount: product.effectiveDealerCount, dealerScopeRestricted: product.dealerScopeRestricted,
     customerType: product.customerType === "GENERAL" ? "综合" : product.customerType === "SPECIAL" ? "特渠" : "",
     rebate: product.rebateStatus === "PARTICIPATING" ? "参与" : product.rebateStatus === "NOT_PARTICIPATING" ? "不参与" : "",
     category: product.categoryName || "", line: product.productLine || "", materialCode: product.materialCode || "",
@@ -141,9 +141,10 @@ export async function parseProductWorkbook(file: File): Promise<ProductImportPar
   if (headerIndex < 0) throw new Error(`${sheetName} 未找到“物料名称”表头。`);
   const expectedHeaders = ["客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明"];
   const header = (matrix[headerIndex] ?? []).map(textCell);
-  const missingHeaders = expectedHeaders.filter((field) => findHeaderIndex(header, [field]) < 0);
+  const aliases = (field: string) => field === "分公司定制品" ? ["分公司限制", "分公司定制品"] : [field];
+  const missingHeaders = expectedHeaders.filter((field) => findHeaderIndex(header, aliases(field)) < 0);
   if (missingHeaders.length > 0) throw new Error(`${sheetName} 缺少字段：${missingHeaders.join("、")}`);
-  const indexes = Object.fromEntries(expectedHeaders.map((field) => [field, findHeaderIndex(header, [field])]));
+  const indexes = Object.fromEntries(expectedHeaders.map((field) => [field, findHeaderIndex(header, aliases(field))]));
   const parsed: ProductImportRow[] = [];
   for (let index = headerIndex + 1; index < matrix.length; index += 1) {
     const values = matrix[index] ?? [];

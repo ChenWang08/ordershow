@@ -18,6 +18,9 @@ export type RuntimeIdentity = {
 };
 
 export type RuntimeProduct = {
+  dealerScope?: DealerScope[];
+  effectiveDealerCount?: number;
+  dealerScopeRestricted?: boolean;
   id: number; materialCode?: string; materialName: string; description?: string; categoryName?: string; productLine?: string; brandName?: string;
   varietyName?: string; specification?: string; casePack?: string; bottlePrice?: number; casePrice?: number;
   tonCaseFactor?: number; customerType: "GENERAL" | "SPECIAL" | "ALL"; rebateStatus: "PARTICIPATING" | "NOT_PARTICIPATING" | "ALL";
@@ -26,6 +29,11 @@ export type RuntimeProduct = {
   images: Array<{ id: number; fileId: number; url: string; primary: boolean; sortNo: number;
     sourceType: "ZIP_IMPORT" | "MANUAL"; matchStatus: "MATCHED" | "PENDING" | "UNMATCHED" | "CONFIRMED" }>;
 };
+
+export type DealerMember = { customerId: number; dealerFullName: string; customerType: string; active: boolean };
+export type DealerScope = { branchName: string; members: DealerMember[] };
+export type DealerScopeSummary = { scopes: DealerScope[]; effectiveCount: number; selectedCount: number; restricted: boolean };
+export type DealerCandidate = { customerId: number; dealerFullName: string; dealerShortName?: string; branchName: string; customerType: string };
 
 export type ProductImageReview = {
   id: number; fileId: number; url: string; archivePath: string; materialCode?: string; materialName: string; status: "PENDING";

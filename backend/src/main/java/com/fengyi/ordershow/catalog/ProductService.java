@@ -52,6 +52,7 @@ public class ProductService {
     if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(activity.status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后商品只读");
     if ("SCHEDULED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品已锁定，请先撤回发布");
     ProductView current = product(activityId, productId);
+    if (patch.dealerScope() != null || patch.branchScope() != null || patch.customerType() != null) requireEditReason(activity.status(), patch.reason());
     List<String> branchScopes = patch.branchScope() == null ? current.branchScope() : splitBranchScope(patch.branchScope());
     String name = value(patch.materialName(), current.materialName());
     BigDecimal casePrice = patch.casePriceSet() ? patch.casePrice() : current.casePrice();
@@ -90,6 +91,8 @@ public class ProductService {
         productId, activityId, expectedVersion);
       if (changed != 1) throw DomainException.conflict("PRODUCT_VERSION_CONFLICT", "商品已被其他页面修改，请刷新后重试");
       replaceBranchScopes(productId, branchScopes);
+      new ProductDealerScopeService(jdbc).replace(activityId, productId, customerType, branchScopes, patch.dealerScope());
+      new ProductDealerScopeService(jdbc).pruneBranches(productId, branchScopes);
       if (patch.priceTierSet()) replacePriceTier(productId, priceTier);
       if (!samePrice(casePrice,current.casePrice()) || !sameTier(priceTier,current.priceTier())) {
         prices.sync(activityId,productId,casePrice,priceTier==null?null:priceTier.minQuantity(),priceTier==null?null:priceTier.casePrice(),priceTier==null?null:priceTier.pricingMode());
@@ -141,6 +144,7 @@ public class ProductService {
       Long id = jdbc.queryForObject("SELECT id FROM activity_product WHERE activity_id = ? AND data_version_id = ? AND business_key = ?",
           Long.class, activityId, source.versionId(), businessKey(customerType, rebateStatus, name, code));
       if (id != null) replaceBranchScopes(id, branchScopes);
+      if (id != null) new ProductDealerScopeService(jdbc).replace(activityId, id, customerType, branchScopes, request.dealerScope());
       if (id != null) replacePriceTier(id, priceTier);
       return product(activityId, id);
     } catch (DuplicateKeyException exception) {
@@ -309,11 +313,13 @@ public class ProductService {
       String varietyName, String specification, String casePack, BigDecimal bottlePrice, boolean bottlePriceSet,
       BigDecimal casePrice, boolean casePriceSet, BigDecimal tonCaseFactor, boolean tonCaseFactorSet,
       Boolean giftBox, Boolean visible, Boolean orderable, String branchScope, String reason,
-      Long priceTierMinQuantity, BigDecimal priceTierCasePrice, String priceTierPricingMode, boolean priceTierSet) {}
+      Long priceTierMinQuantity, BigDecimal priceTierCasePrice, String priceTierPricingMode, boolean priceTierSet,
+      List<ProductDealerScopeService.Selection> dealerScope) {}
   public record ProductCreate(String customerType, String rebateStatus, String materialCode, String materialName, String description,
       String categoryName, String productLine, String brandName, String varietyName, String specification, String casePack,
       BigDecimal bottlePrice, BigDecimal casePrice, BigDecimal tonCaseFactor, Boolean giftBox, Boolean visible, Boolean orderable,
-      String branchScope, String reason, Long priceTierMinQuantity, BigDecimal priceTierCasePrice, String priceTierPricingMode) {}
+      String branchScope, String reason, Long priceTierMinQuantity, BigDecimal priceTierCasePrice, String priceTierPricingMode,
+      List<ProductDealerScopeService.Selection> dealerScope) {}
   public record ZipMatch(String filename, String materialName, Long productId, String status) {}
   public record ZipPreview(int imageCount, int matchedCount, int ambiguousCount, int unmatchedCount, List<ZipMatch> matches, boolean committed) {}
   public record ZipDecision(String entryPath, String status, List<String> targetMaterialNames) {}

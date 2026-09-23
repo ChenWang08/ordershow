@@ -32,10 +32,11 @@ public class ProductCatalogReader {
           AND (? IS NULL OR ? = '' OR p.material_name LIKE CONCAT('%', ?, '%') OR p.material_code LIKE CONCAT('%', ?, '%'))
           AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id)
                OR EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id AND s.normalized_branch_name = ?))
+        """ + ProductDealerScopeService.ALLOWED_SQL + """
         ORDER BY p.sort_no, p.id
         """;
     return withDetails(jdbc.query(sql, this::map, activity.id(), customer.customerType(), customer.customerType(), rebateStatus, rebateStatus, rebateStatus,
-        keyword, keyword, keyword, keyword, normalize(customer.branchName())));
+        keyword, keyword, keyword, keyword, normalize(customer.branchName()), customer.customerId()));
   }
 
   public List<ProductView> adminProducts(long activityId, String customerType, String status, String keyword) {
@@ -50,7 +51,7 @@ public class ProductCatalogReader {
     String resolvedCustomerType = customer == null ? customerType : customer.customerType();
     String resolvedBranchName = customer == null ? null : normalize(customer.branchName());
     Boolean orderableOnly = customer == null ? null : Boolean.TRUE;
-    return withDetails(jdbc.query("""
+    List<ProductView> result = withDetails(jdbc.query("""
         SELECT p.* FROM activity_product p WHERE p.activity_id = ? AND p.data_version_id = ? AND p.is_visible = TRUE
           AND (? IS NULL OR ? = '' OR ? = 'ALL' OR p.customer_type = ? OR p.customer_type = 'ALL')
           AND (? IS NULL OR ? = '' OR p.data_status = ?)
@@ -62,6 +63,11 @@ public class ProductCatalogReader {
         """, this::map, activityId, version, resolvedCustomerType, resolvedCustomerType, resolvedCustomerType, resolvedCustomerType,
         status, status, status, orderableOnly, resolvedBranchName, resolvedBranchName,
         keyword, keyword, keyword, keyword));
+    if (activityCustomerId == null || result.isEmpty()) return result;
+    List<Long> allowed = jdbc.queryForList("SELECT p.id FROM activity_product p WHERE p.activity_id=? "
+        + ProductDealerScopeService.ALLOWED_SQL, Long.class, activityId, activityCustomerId);
+    var ids = new java.util.HashSet<>(allowed);
+    return result.stream().filter(p -> ids.contains(p.id())).toList();
   }
 
   List<ProductView> productsForVersion(long activityId, long versionId) {

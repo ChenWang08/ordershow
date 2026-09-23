@@ -1,0 +1,47 @@
+.order-drawer.form-drawer { width: min(1100px, calc(100vw - 32px)) !important; max-width: none !important; flex: 0 0 auto; }
+.product-scope-editor { min-width: 0; width: 100%; padding: 12px; border: 1px solid #e5d8d0; border-radius: 8px; background: #fffdfb; box-sizing: border-box; }
+.scope-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.scope-title-row b { color: #3f302a; font-size: 13px; }
+.scope-title-row small { color: #a08d82; font-size: 10px; }
+.scope-help { margin: 7px 0 10px; color: #826f63; font-size: 10px; line-height: 1.55; }
+.scope-layout { display: flex; min-width: 0; flex-direction: column; gap: 14px; }
+.scope-branch-column,.scope-dealer-column { min-width: 0; width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #eee1da; border-radius: 8px; background: #fffaf7; }
+.scope-branch-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid #eaded7; border-radius: 7px; background: #fff8f4; }
+.scope-branch-toolbar small { color: #a08d82; font-size: 10px; }
+.scope-all-branch { display: inline-flex; align-items: center; gap: 7px; color: #5c463d; font-size: 11px; font-weight: 700; }
+.scope-all-branch input,.scope-branch-chip input,.scope-dealer-row input { width: 15px; height: 15px; margin: 0; flex: 0 0 15px; accent-color: #b32623; }
+.scope-branch-list { display: grid; max-height: 190px; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 8px; overflow: auto; padding: 1px; }
+.scope-branch-chip { display: flex; min-width: 0; align-items: center; gap: 7px; padding: 7px 8px; border: 1px solid #eaded7; border-radius: 6px; background: #fff; cursor: pointer; }
+.scope-branch-chip.active { border-color: #d99b91; background: #fff5f1; }
+.scope-branch-chip > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; cursor: pointer; }
+.scope-branch-chip b { overflow: hidden; color: #5b463d; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.scope-branch-chip small { color: #a18d82; font-size: 9px; }
+.scope-dealer-title { margin: 0 0 8px; }
+.scope-dealer-panel { margin-top: 8px; padding: 9px; border: 1px solid #eaded7; border-radius: 7px; background: #fff; }
+.scope-active-branches { display: flex; gap: 5px; overflow-x: auto; padding-bottom: 7px; }
+.scope-active-branches button,.scope-dealer-actions button,.scope-history-button { padding: 5px 8px; color: #98413a; border: 1px solid #e2bdb5; border-radius: 5px; background: #fff8f4; font-size: 10px; cursor: pointer; white-space: nowrap; }
+.scope-active-branches button.active { color: #fff; border-color: #af2b28; background: #af2b28; }
+.scope-dealer-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 2px 0 7px; }
+.scope-dealer-heading strong { color: #5b3e36; font-size: 12px; }
+.scope-dealer-heading span { color: #a08d82; font-size: 10px; }
+.scope-dealer-search { box-sizing: border-box; width: 100%; padding: 8px 10px; border: 1px solid #e0d2ca; border-radius: 6px; color: #5c463d; background: #fff; font-size: 11px; outline: none; }
+.scope-dealer-search:focus { border-color: #c88073; box-shadow: 0 0 0 2px rgba(190,72,60,.1); }
+.scope-dealer-actions { display: flex; flex-wrap: wrap; gap: 5px; margin: 7px 0; }
+.scope-dealer-list { display: grid; max-height: 330px; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 12px; overflow: auto; border-top: 1px solid #f0e5df; }
+.scope-dealer-row { display: flex; align-items: center; gap: 8px; padding: 8px 3px; border-bottom: 1px solid #f2e9e4; cursor: pointer; }
+.scope-dealer-row > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.scope-dealer-row b { overflow: hidden; color: #5b463d; font-size: 11px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.scope-dealer-row small { color: #a18d82; font-size: 9px; }
+.scope-loading,.scope-empty { margin: 8px 0; color: #a18d82; font-size: 10px; line-height: 1.5; }
+.scope-branch-search { box-sizing: border-box; width: 100%; height: 32px; margin-top: 8px; padding: 0 9px; color: #5c463d; border: 1px solid #e0d2ca; border-radius: 6px; outline: 0; background: #fff; font-size: 10px; }.scope-branch-search:focus { border-color: #c88073; box-shadow: 0 0 0 2px rgba(190,72,60,.1); }
+.product-scope-editor .field-error { margin: 7px 0; color: #b32a25; font-size: 10px; line-height: 1.5; }
+.scope-history-button { margin-top: 10px; }
+.scope-history { margin-top: 8px; color: #806b61; font-size: 10px; }
+.scope-history details { padding: 7px 0; border-top: 1px solid #eee3dd; }
+.scope-history summary { cursor: pointer; }
+@media (max-width: 760px) {
+  .order-drawer.form-drawer { width: 100vw !important; }
+  .scope-branch-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .scope-dealer-list { grid-template-columns: 1fr; }
+  .scope-dealer-list { max-height: 220px; }
+}

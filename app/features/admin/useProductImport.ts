@@ -6,7 +6,7 @@ import {
   loadImportRows, uploadImport, waitForImport, type ImportStagingRow,
 } from "../../api";
 import {
-  bindProductStaging, cloneProductRows, summarizeProductImportRows,
+  bindProductStaging, cloneProductRows, summarizeProductImportRows, productImportIdentityKey,
   type ProductImportRow, type ProductImageAsset, type ProductImageStats,
 } from "../../domain/import-domain";
 import {
@@ -107,6 +107,11 @@ export function useProductImport({
       return;
     }
     const imageWarningCount = productImageStats.pendingProducts + productImageStats.unmatchedProducts;
+    const previousRestricted = (pendingProductRollbackRows ?? []).filter(row => (row.dealerScope?.length ?? 0) > 0);
+    const identity = productImportIdentityKey;
+    const newIdentities = new Set(productRows.map(identity));
+    const notInherited = previousRestricted.filter(row => !newIdentities.has(identity(row)));
+    if (notInherited.length && !window.confirm(`有 ${notInherited.length} 个原商品的经销商限制无法按商品身份继承：${notInherited.slice(0,5).map(row => row.materialName).join("、")}。新商品以本次 Excel 分公司限制为准，需在确认导入后重新设置经销商限制。是否继续？`)) return;
     if (imageWarningCount > 0 && !window.confirm(`本批次有 ${productImageStats.pendingProducts} 个商品图片待确认、${productImageStats.unmatchedProducts} 个商品图片未匹配。发布后这些商品将使用默认图片，是否继续？`)) return;
     const taskId = serverImportTasks.PRODUCT;
     let publishedRows: ProductImportRow[] | null = null;

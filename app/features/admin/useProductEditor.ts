@@ -57,6 +57,7 @@ export function useProductEditor({
       priceTierMinQuantity: numeric(nextRow.priceTierMinQuantity), priceTierCasePrice: numeric(nextRow.priceTierCasePrice),
       priceTierPricingMode: nextRow.priceTierPricingMode,
       visible: true, orderable: Number(nextRow.casePrice) > 0, branchScope: nextRow.branchScope, reason,
+      ...(nextRow.dealerScopeEdited ? { dealerScope: (nextRow.dealerScope ?? []).map(s => ({ branchName: s.branchName, customerIds: s.members.map(m => m.customerId) })) } : {}),
     };
     if (editingProductRow) {
       if (!productImportCompleted && editingProductRow.serverRowId && serverImportTasks.PRODUCT) {

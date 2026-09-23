@@ -61,10 +61,10 @@ public class OrderRepository {
         """, this::mapOperation, orderId);
   }
 
-  List<ProductSnapshot> loadProducts(long activityId, String customerType, String branchName, Set<Long> ids) {
+  List<ProductSnapshot> loadProducts(long activityId, long activityCustomerId, String customerType, String branchName, Set<Long> ids) {
     if (ids.isEmpty()) return List.of();
     String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
-    List<Object> args = new ArrayList<>(); args.add(activityId); args.add(customerType); args.add(customerType); args.add(normalize(branchName)); args.addAll(ids);
+    List<Object> args = new ArrayList<>(); args.add(activityId); args.add(customerType); args.add(customerType); args.add(normalize(branchName)); args.add(activityCustomerId); args.addAll(ids);
     return jdbc.query("""
         SELECT p.*, (SELECT sf.object_key FROM product_image pi JOIN stored_file sf ON sf.id = pi.stored_file_id
           WHERE pi.activity_product_id = p.id AND pi.deleted_at IS NULL ORDER BY pi.is_primary DESC, pi.sort_no, pi.id LIMIT 1) image_key
@@ -75,7 +75,7 @@ public class OrderRepository {
         WHERE p.activity_id = ? AND (? = 'ALL' OR p.customer_type = ? OR p.customer_type = 'ALL') AND p.is_visible = TRUE AND p.is_orderable = TRUE
           AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id)
                OR EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id AND s.normalized_branch_name = ?))
-          AND p.id IN (""" + placeholders + ") ORDER BY p.sort_no, p.id", this::mapProduct, args.toArray());
+          """ + com.fengyi.ordershow.catalog.ProductDealerScopeService.ALLOWED_SQL + " AND p.id IN (" + placeholders + ") ORDER BY p.sort_no, p.id", this::mapProduct, args.toArray());
   }
 
   CustomerSnapshot adminCustomer(long activityId, long activityCustomerId) {

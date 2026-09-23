@@ -16,6 +16,7 @@ type WhitelistImportOptions = CustomerImportOptions & {
   attendanceRows: AttendanceRow[];
   setAttendanceRows: Dispatch<SetStateAction<AttendanceRow[]>>;
   pendingAttendanceImport: AttendanceImportDraft | null;
+  refreshProductScopes?: () => Promise<void>;
 };
 
 // The admin shell owns mounting so switching tabs retains the current preview.
@@ -23,7 +24,7 @@ export function useWhitelistImport({
   activityId, activityStatus, whitelistRows, setWhitelistRows, whitelistImportHasRun,
   setWhitelistImportCompleted, onWhitelistImportCommitted, attendanceRows, setAttendanceRows,
   pendingAttendanceImport, serverImportTasks, serverImportBlocking, setServerImportTasks,
-  setServerImportBlocking, setActionNotice, recordOperation, refreshServerImportPreview,
+  setServerImportBlocking, setActionNotice, recordOperation, refreshServerImportPreview, refreshProductScopes,
 }: WhitelistImportOptions) {
   const activityPublished = activityStatus !== "draft";
   const [whitelistFileName, setWhitelistFileName] = useState("");
@@ -87,6 +88,7 @@ export function useWhitelistImport({
     setPendingWhitelistRollbackRows(null);
     setWhitelistImportCompleted(true);
     onWhitelistImportCommitted();
+    await refreshProductScopes?.();
     let refreshedAttendance = attendanceRows;
     if (taskId && attendanceRows.length > 0) {
       refreshedAttendance = mapAdminAttendanceRows(await loadAdminAttendees(Number(activityId)));

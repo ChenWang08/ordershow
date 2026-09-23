@@ -21,8 +21,36 @@ import org.springframework.web.multipart.MultipartFile;
 public class ProductController {
   private final ProductService service;
   private final AuthService auth;
+  private final ProductDealerScopeService scopes;
+  private final org.springframework.jdbc.core.JdbcTemplate jdbc;
+  private final com.fasterxml.jackson.databind.ObjectMapper json;
 
-  public ProductController(ProductService service, AuthService auth) { this.service = service; this.auth = auth; }
+  public ProductController(ProductService service, AuthService auth, ProductDealerScopeService scopes,
+      org.springframework.jdbc.core.JdbcTemplate jdbc, com.fasterxml.jackson.databind.ObjectMapper json) {
+    this.service = service; this.auth = auth; this.scopes=scopes; this.jdbc=jdbc; this.json=json;
+  }
+
+  @GetMapping("/admin/activities/{activityId}/product-dealer-scopes")
+  ApiResponse<java.util.Map<Long,ProductDealerScopeService.ScopeSummary>> scopes(@PathVariable long activityId, HttpServletRequest request) {
+    auth.requireAdmin(request);
+    return ApiResponse.of(scopes.summaries(activityId), TraceFilter.id(request));
+  }
+
+  @GetMapping("/admin/activities/{activityId}/product-dealer-candidates")
+  ApiResponse<List<ProductDealerScopeService.Candidate>> candidates(@PathVariable long activityId, HttpServletRequest request) {
+    auth.requireAdmin(request);
+    return ApiResponse.of(scopes.candidates(activityId), TraceFilter.id(request));
+  }
+
+  @GetMapping("/admin/activities/{activityId}/products/{productId}/scope-history")
+  ApiResponse<List<java.util.Map<String,Object>>> history(@PathVariable long activityId, @PathVariable long productId, HttpServletRequest request) {
+    auth.requireAdmin(request);
+    return ApiResponse.of(jdbc.queryForList("""
+        SELECT l.before_json,l.after_json,l.reason,l.created_at,u.display_name
+        FROM product_scope_change_log l LEFT JOIN admin_user u ON u.id=l.admin_user_id
+        WHERE l.activity_id=? AND l.activity_product_id=? ORDER BY l.id DESC LIMIT 100
+        """,activityId,productId),TraceFilter.id(request));
+  }
 
   @GetMapping("/h5/activities/{activityCode}/products")
   ApiResponse<List<ProductService.ProductView>> h5(@PathVariable String activityCode,
@@ -47,11 +75,27 @@ public class ProductController {
   }
 
   @PatchMapping("/admin/activities/{activityId}/products/{productId}")
+  @org.springframework.transaction.annotation.Transactional
   ApiResponse<ProductService.ProductView> update(@PathVariable long activityId, @PathVariable long productId,
       @RequestHeader("If-Match") String ifMatch, @RequestBody ProductService.ProductPatch body, HttpServletRequest request) {
-    auth.requireAdmin(request);
+    var admin=auth.requireAdmin(request);
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE",activityId);
+    String before=scopeSnapshot(activityId,productId);
     request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason());
-    return ApiResponse.of(service.update(activityId, productId, Integer.parseInt(ifMatch.replace("\"", "")), body), TraceFilter.id(request));
+    var saved=service.update(activityId, productId, Integer.parseInt(ifMatch.replace("\"", "")), body);
+    String after=scopeSnapshot(activityId,productId);
+    if(!before.equals(after)) jdbc.update("""
+        INSERT INTO product_scope_change_log(activity_id,activity_product_id,admin_user_id,before_json,after_json,reason)
+        VALUES (?,?,?,?,?,?)
+        """,activityId,productId,admin.id(),before,after,java.util.Objects.requireNonNullElse(body.reason(),""));
+    return ApiResponse.of(saved, TraceFilter.id(request));
+  }
+
+  private String scopeSnapshot(long activityId,long productId) {
+    var p=service.product(activityId,productId);
+    try { return json.writeValueAsString(java.util.Map.of("customerType",p.customerType(),"branchScope",p.branchScope(),
+        "dealerScope",scopes.read(activityId,List.of(productId)).getOrDefault(productId,List.of()))); }
+    catch(Exception e) { throw new IllegalStateException("范围日志序列化失败",e); }
   }
 
   @DeleteMapping("/admin/activities/{activityId}/products/{productId}")

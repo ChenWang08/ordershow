@@ -92,6 +92,8 @@ public class OrderService {
     if (current != null && "VOIDED".equals(current.status())) {
       throw DomainException.conflict("ORDER_VOIDED", "订单已由管理员作废，请联系管理员处理");
     }
+    List<ProductSnapshot> products = repository.loadProducts(activity.id(), customer.customerId(), customer.customerType(), customer.branchName(), quantities.keySet());
+    if (products.size() != quantities.size()) throw DomainException.unprocessable("PRODUCT_NOT_ORDERABLE", "订单中包含不可订、已删除或不属于当前客户的商品");
     if (current != null && "SUBMITTED".equals(current.status()) && repository.sameItems(current.id(), quantities)) {
       repository.deleteDraft(activity.id(), customer.customerId());
       OrderView result = repository.order(current.id(), includeHistory);
@@ -99,8 +101,6 @@ public class OrderService {
       return result;
     }
 
-    List<ProductSnapshot> products = repository.loadProducts(activity.id(), customer.customerType(), customer.branchName(), quantities.keySet());
-    if (products.size() != quantities.size()) throw DomainException.unprocessable("PRODUCT_NOT_ORDERABLE", "订单中包含不可订、已删除或不属于当前客户的商品");
     List<CalculatedItem> items = new ArrayList<>();
     long totalQuantity = 0;
     BigDecimal totalAmount = BigDecimal.ZERO.setScale(2);
@@ -317,7 +317,7 @@ public class OrderService {
   }
 
   private CalculatedOrder calculate(long activityId, CustomerSnapshot customer, Map<Long, Long> quantities) {
-    List<ProductSnapshot> products = repository.loadProducts(activityId, customer.customerType(), customer.branchName(), quantities.keySet());
+    List<ProductSnapshot> products = repository.loadProducts(activityId, customer.id(), customer.customerType(), customer.branchName(), quantities.keySet());
     if (products.size() != quantities.size()) {
       throw DomainException.unprocessable("PRODUCT_NOT_ORDERABLE", "订单中包含不可订、已删除或不属于当前客户的商品");
     }

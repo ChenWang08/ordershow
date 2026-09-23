@@ -35,6 +35,14 @@ class ImportWorkbookReaderTest {
   }
 
   @Test
+  void acceptsNewBranchHeaderAndPreservesExcelScope() throws Exception {
+    String[] headers=HEADERS.clone(); headers[14]="分公司限制";
+    var parsed=ImportWorkbookReader.read(7,"PRODUCT",workbook("商品目录",headers,
+      new String[]{"综合","是","调味品","酱油","P001","商品","品牌","原味","500ml","12瓶","8","100","10","否","上海分、安徽分","说明"}));
+    assertThat(((ParsedWorkbook.Staging) parsed.entries().getFirst()).data()).containsEntry("branchScope","上海分、安徽分");
+  }
+
+  @Test
   void preservesIssueAndStagingOrderForBlockedRows() throws Exception {
     var parsed = ImportWorkbookReader.read(7, "PRODUCT", product(""));
     assertThat(parsed.summary().blocking()).isEqualTo(1);
