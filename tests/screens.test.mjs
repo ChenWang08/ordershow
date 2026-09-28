@@ -40,7 +40,7 @@ test("trend range stops at actual close time", () => {
   assert.equal(trend.at(-1).bucket, "2026-09-07T10:00:00.000Z");
 });
 
-test("product line colors remain consistent across dashboard sections", () => {
+test("project group colors remain consistent across dashboard sections", () => {
   const data = {
     dashboard: { totals: { total_amount: 120, total_tons: null }, productLines: [{ productLine: "酱油", amount: 120 }], branches: [], companies: [], generatedAt: "2026-09-07T10:00:00Z" },
     customerTypes: [], regions: [], trend: [], specialProductLines: [],
@@ -68,7 +68,7 @@ test("untyped activities retain the all-customer donut and hide channel sections
   const html = renderToStaticMarkup(React.createElement(OrderDashboard, { activity: { ...activity, whitelistCustomerTypeMode: "UNSPECIFIED" } }));
   assert.match(html, /订单额占比/);
   assert.match(html, /全部客户/);
-  assert.doesNotMatch(html, /渠道订单额占比|各渠道产线订单额对比|综合渠道 · 各大区/);
+  assert.doesNotMatch(html, /渠道订单额占比|各渠道项目组订单额对比|综合渠道 · 各大区/);
 });
 
 test("single customer type hides channel comparison and expands the trend", () => {
@@ -83,7 +83,7 @@ test("single customer type hides channel comparison and expands the trend", () =
     "./useOrderDashboard": { useOrderDashboard: () => ({ data: singleTypeReport, error: "", refreshing: false, historical: false, refresh: () => {} }) },
   });
   const html = renderToStaticMarkup(React.createElement(OrderDashboard, { activity: { ...activity, availableCustomerTypes: ["SPECIAL"] } }));
-  assert.doesNotMatch(html, /渠道订单额占比|各渠道产线订单额对比|综合客户 · 大区订单额分布/);
+  assert.doesNotMatch(html, /渠道订单额占比|各渠道项目组订单额对比|综合客户 · 大区订单额分布/);
   assert.match(html, /订单额占比|特渠专业客户/);
   assert.match(html, /order-dashboard-channel-summary/);
   assert.match(html, /order-dashboard-product-line/);
@@ -107,13 +107,13 @@ test("order dashboard uses district terminology without changing region rows", (
   });
   const html = renderToStaticMarkup(React.createElement(OrderDashboard, { activity }));
   assert.match(html, /综合客户 · 大区订单额分布/);
-  assert.match(html, /综合渠道 · 各大区产线订单额明细/);
+  assert.match(html, /综合渠道 · 各大区项目组订单额明细/);
   assert.match(html, /华东/);
   assert.match(html, /未分大区/);
   assert.doesNotMatch(html, /片区/);
 });
 
-for (const selected of ["综合客户各大区金额及合计", "综合客户大区金额与产品线金额同屏展示"]) {
+for (const selected of ["综合客户各大区金额及合计", "综合客户大区金额与项目组金额同屏展示"]) {
   test(`report selection renders district amounts: ${selected}`, () => {
     const { ReportBoard } = loadModule("app/features/screens/ReportBoard.tsx", {
       react: { ...React, useState: (initial) => [initial === "总战绩" ? selected : initial === null ? regionalReport : initial, () => {}] },

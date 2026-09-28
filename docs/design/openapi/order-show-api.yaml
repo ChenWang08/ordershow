@@ -2129,7 +2129,7 @@ paths:
         - $ref: '#/components/parameters/ActivityCode'
       responses:
         '200':
-          description: 订单总览、渠道产线对比、动态综合渠道片区产线明细、排行和小时趋势；data.generalRegions 为自描述片区数组，空数组表示活动不分片区。
+          description: 订单总览、渠道项目组对比、动态综合渠道片区项目组明细、排行和小时趋势；data.generalRegions 为自描述片区数组，空数组表示活动不分片区。
           content:
             application/json:
               schema:

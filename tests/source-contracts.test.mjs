@@ -288,7 +288,8 @@ test("derives H5 and dashboard regions from the current whitelist", async () => 
   assert.match(prototype, /value: "ALL", label: "全部客户"/);
   assert.match(prototype, /loadDashboard\(\{ customerType, regionCode \}\)/);
   assert.match(prototype, /订单额占比/);
-  assert.match(prototype, /全部客户 <b>\{dashboardCompactAmount\(amount\)\} · \{amount > 0 \? "100%" : "0%"\}<\/b>/);
+  assert.match(prototype, /const singleTypeLabel = unspecifiedCustomerType \? "全部客户"/);
+  assert.match(prototype, /\{singleTypeLabel\} <b>\{dashboardCompactAmount\(amount\)\} · \{amount > 0 \? "100%" : "0%"\}<\/b>/);
   assert.doesNotMatch(prototype, /暂不展示订货排行数据/);
   assert.match(prototype, /暂不展示专题战报数据/);
   assert.match(prototype, /全部客户.*综合客户.*特渠专业客户/s);

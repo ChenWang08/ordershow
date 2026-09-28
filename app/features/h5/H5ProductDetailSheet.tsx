@@ -28,7 +28,7 @@ export function H5ProductDetailSheet({ product, onClose, onViewImages }: { produ
           <div className="h5-product-detail-art"><ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} /></div>
           <div className="h5-product-detail-meta">
             <p className="h5-product-detail-price">¥{money(product.price)}<small>/箱</small></p>
-            <p><span>产品线</span><b>{product.line || "—"}</b></p>
+            <p><span>项目组</span><b>{product.line || "—"}</b></p>
             <p><span>规格</span><b>{product.spec || "—"}</b></p>
             <p><span>箱规</span><b>{product.casePack || "—"}</b></p>
             {product.materialCode && <p><span>物料编码</span><b>{product.materialCode}</b></p>}

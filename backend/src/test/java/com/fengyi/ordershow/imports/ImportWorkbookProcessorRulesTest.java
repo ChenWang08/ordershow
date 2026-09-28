@@ -21,7 +21,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 class ImportWorkbookProcessorRulesTest {
   private static final List<String> HEADERS = List.of(
-      "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规",
+      "客户类型", "是否返利", "产品大类", "项目组", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规",
       "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明");
 
   @Test

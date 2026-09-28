@@ -14,9 +14,9 @@ const reports = [
   "特渠专业客户金额、综合客户金额及合计",
   "综合客户各大区金额及合计",
   "礼盒：特渠专业客户金额、综合客户金额及合计",
-  "综合客户各产品线金额及合计",
-  "特渠专业客户与综合客户各产品线金额及合计",
-  "综合客户大区金额与产品线金额同屏展示",
+  "综合客户各项目组金额及合计",
+  "特渠专业客户与综合客户各项目组金额及合计",
+  "综合客户大区金额与项目组金额同屏展示",
 ];
 
 export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) {
@@ -49,8 +49,8 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
   const displayTitles: Record<string, string> = {
     "特渠专业客户金额、综合客户金额及合计": "特渠专业客户+综合客户",
     "礼盒：特渠专业客户金额、综合客户金额及合计": "礼盒",
-    "综合客户各产品线金额及合计": "综合客户",
-    "特渠专业客户与综合客户各产品线金额及合计": "特渠专业客户+综合客户",
+    "综合客户各项目组金额及合计": "综合客户",
+    "特渠专业客户与综合客户各项目组金额及合计": "特渠专业客户+综合客户",
   };
   const displayTitle = displayTitles[report] ?? report;
   const typeValues = (report.includes("礼盒") ? data?.giftCustomerTypes : data?.customerTypes) ?? [];
@@ -60,7 +60,7 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
     amount: Number(data?.regions.find((item) => item.regionCode === region.code)?.amount ?? 0), productLines: [] }));
   const regionLabels = reportRegions.map((region) => region.regionName);
   const regionValues = reportRegions.map((region) => Number(region.amount));
-  const productLineRows = report === "综合客户各产品线金额及合计"
+  const productLineRows = report === "综合客户各项目组金额及合计"
     ? data?.generalProductLines ?? []
     : data?.dashboard.productLines ?? [];
   const topRows = report.startsWith("特渠") ? data?.topSpecial ?? [] : data?.topGeneral ?? [];
@@ -91,9 +91,9 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
         ) : isDual ? (
           <>
             <MetricTable kind="area" title="综合客户 · 大区" labels={regionLabels} values={regionValues} />
-            <MetricTable kind="product" title="综合客户 · 产品线" labels={(data?.generalProductLines ?? []).map((item) => item.productLine)} values={(data?.generalProductLines ?? []).map((item) => Number(item.amount))} />
+            <MetricTable kind="product" title="综合客户 · 项目组" labels={(data?.generalProductLines ?? []).map((item) => item.productLine)} values={(data?.generalProductLines ?? []).map((item) => Number(item.amount))} />
           </>
-        ) : report.includes("产品线") ? (
+        ) : report.includes("项目组") ? (
           <MetricTable kind="product" title={displayTitle} labels={productLineRows.map((item) => item.productLine)} values={productLineRows.map((item) => Number(item.amount))} />
         ) : report.includes("各大区") ? (
           <MetricTable kind="area" title="综合客户" labels={regionLabels} values={regionValues} />

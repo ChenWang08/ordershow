@@ -84,7 +84,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                       <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
                       <div className="cart-item-info">
                         <button type="button" className="cart-item-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button>
-                        <small className="product-line-label">产线：{group.line}</small>
+                        <small className="product-line-label">项目组：{group.line}</small>
                         <span>¥{money(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span>
                         <strong>小计 ¥{money(priceBreakdown(product, quantities[product.id]).amount)}</strong>
                       </div>

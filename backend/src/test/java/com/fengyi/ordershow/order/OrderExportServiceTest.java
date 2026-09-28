@@ -40,11 +40,13 @@ class OrderExportServiceTest {
       assertThat(summary.getCell(10).getStringCellValue()).isEmpty();
       assertThat(summary.getCell(11).getStringCellValue()).isEqualTo("203998.00");
       var item = workbook.getSheetAt(1).getRow(1);
+      assertThat(workbook.getSheetAt(1).getRow(0).getCell(12).getStringCellValue()).isEqualTo("项目组");
       assertThat(item.getCell(16).getStringCellValue()).isEqualTo("INCREMENTAL");
       assertThat(item.getCell(18).getStringCellValue()).isEqualTo("1499");
       assertThat(item.getCell(20).getStringCellValue()).isEqualTo("1");
       assertThat(item.getCell(22).getStringCellValue()).isEqualTo("是");
       assertThat(workbook.getSheetAt(1).getPaneInformation().isFreezePane()).isTrue();
+      assertThat(workbook.getSheetAt(2).getRow(0).getCell(2).getStringCellValue()).isEqualTo("项目组");
     }
   }
 

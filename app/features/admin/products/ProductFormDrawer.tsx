@@ -33,7 +33,7 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
           <label><span>客户类型</span><select value={form.customerType} onChange={(e) => update("customerType", e.target.value)}><option value="">未指定</option><option>特渠</option><option>综合</option></select></label>
           <label><span>是否参与返利</span><select value={form.rebate} onChange={(e) => update("rebate", e.target.value)}><option value="">未指定</option><option>参与</option><option>不参与</option></select></label>
           <label><span>产品大类</span><input value={form.category} onChange={(e) => update("category", e.target.value)} placeholder="例如：特渠定制产品" /></label>
-          <label><span>产品线</span><input value={form.line} onChange={(e) => update("line", e.target.value)} placeholder="例如：调味油" /></label>
+          <label><span>项目组</span><input value={form.line} onChange={(e) => update("line", e.target.value)} placeholder="例如：调味油" /></label>
           <label><span>物料代码</span><input value={form.materialCode} onChange={(e) => update("materialCode", e.target.value)} /><small>同名商品可用不同代码区分；代码为空时按名称判重</small></label>
           <label className="wide-field"><span>物料名称 *</span><input value={form.materialName} onChange={(e) => update("materialName", e.target.value)} /></label>
           <label className="wide-field"><span>产品说明</span><textarea value={form.description ?? ""} onChange={(e) => update("description", e.target.value)} placeholder="填写后可在 H5 商品详情展示" rows={3} /></label>

@@ -5,7 +5,7 @@
 `ScreenBoards.tsx` 保留三个公开页面的兼容导出，页面实现分别位于 `OrderDashboard.tsx`、`RankingBoard.tsx` 和 `ReportBoard.tsx`。
 
 - `useOrderDashboard`：订单看板远端加载、手动刷新、15 秒轮询及 SSE；历史模式不建立轮询和 SSE。
-- `dashboard-domain`：数值显示、时间桶、趋势补零、曲线路径、产线颜色和看板展示数据计算。
+- `dashboard-domain`：数值显示、时间桶、趋势补零、曲线路径、项目组颜色和看板展示数据计算。
 - `DashboardCharts`：条形图和榜单。
 - `DashboardTrendChart`：趋势显示、点位详情和横向拖动，独立持有交互状态。
 - `ReportMetricTable`：战报数据表。

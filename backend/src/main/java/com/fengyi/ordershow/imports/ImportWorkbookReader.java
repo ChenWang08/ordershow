@@ -47,7 +47,7 @@ final class ImportWorkbookReader {
   }
 
   private ParseSummary parseProducts(long taskId, Workbook workbook) {
-    List<String> headers = List.of("客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明");
+    List<String> headers = List.of("客户类型", "是否返利", "产品大类", "项目组", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明");
     List<ParsedProductRow> parsed = new ArrayList<>();
     List<Sheet> nonEmptySheets = new ArrayList<>();
     for (int index = 0; index < workbook.getNumberOfSheets(); index++) {
@@ -62,6 +62,7 @@ final class ImportWorkbookReader {
     Sheet sheet = nonEmptySheets.getFirst();
     int headerRow = findHeader(sheet, "物料名称", 30);
     Map<String, Integer> indexes = indexes(sheet.getRow(headerRow), headers);
+    indexes.put("项目组", findColumn(sheet.getRow(headerRow), List.of("项目组", "产品线")));
     int branchColumn = findColumn(sheet.getRow(headerRow), List.of("分公司限制", "分公司定制品"));
     indexes.put("分公司定制品", branchColumn);
     requireHeaders(sheet.getSheetName(), indexes, headers);
@@ -78,7 +79,7 @@ final class ImportWorkbookReader {
       data.put("customerTypeInvalid", !customerTypeRaw.isBlank() && "ALL".equals(customerType));
       data.put("rebateStatusInvalid", !rebateRaw.isBlank() && "ALL".equals(rebateStatus));
       data.put("categoryName", cell(row, indexes.get("产品大类")));
-      data.put("productLine", cell(row, indexes.get("产品线")));
+      data.put("productLine", cell(row, indexes.get("项目组")));
       data.put("materialCode", cell(row, indexes.get("物料代码")));
       data.put("materialName", cell(row, indexes.get("物料名称")));
       data.put("description", cell(row, indexes.get("产品说明")));

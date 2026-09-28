@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 class ImportWorkbookReaderTest {
-  private static final String[] HEADERS = {"客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明"};
+  private static final String[] HEADERS = {"客户类型", "是否返利", "产品大类", "项目组", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明"};
 
   @Test
   void readsAProductWithoutDatabaseOrCryptoDependencies() throws Exception {
@@ -40,6 +40,15 @@ class ImportWorkbookReaderTest {
     var parsed=ImportWorkbookReader.read(7,"PRODUCT",workbook("商品目录",headers,
       new String[]{"综合","是","调味品","酱油","P001","商品","品牌","原味","500ml","12瓶","8","100","10","否","上海分、安徽分","说明"}));
     assertThat(((ParsedWorkbook.Staging) parsed.entries().getFirst()).data()).containsEntry("branchScope","上海分、安徽分");
+  }
+
+  @Test
+  void acceptsLegacyProductLineHeader() throws Exception {
+    String[] headers = HEADERS.clone();
+    headers[3] = "产品线";
+    var parsed = ImportWorkbookReader.read(7, "PRODUCT", workbook("商品目录", headers,
+        new String[]{"综合", "是", "调味品", "酱油", "P001", "商品", "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明"}));
+    assertThat(((ParsedWorkbook.Staging) parsed.entries().getFirst()).data()).containsEntry("productLine", "酱油");
   }
 
   @Test

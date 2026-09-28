@@ -36,7 +36,7 @@ public class OrderExportService {
       }
       for (int i = 0; i < headers.length; i++) sheet.autoSizeColumn(i);
       Sheet detailSheet = workbook.createSheet("订单商品明细");
-      String[] detailHeaders = {"订单编号", "状态", "来源", "客户类型", "大区", "分公司", "经销商", "电话", "订单版本", "行号", "物料代码", "物料名称", "产品线", "规格", "箱规", "订货箱数", "计价模式", "基础箱价", "基础价箱数", "阶梯箱价", "阶梯箱数", "阶梯起订箱数", "是否命中阶梯", "金额", "吨数", "最后提交"};
+      String[] detailHeaders = {"订单编号", "状态", "来源", "客户类型", "大区", "分公司", "经销商", "电话", "订单版本", "行号", "物料代码", "物料名称", "项目组", "规格", "箱规", "订货箱数", "计价模式", "基础箱价", "基础价箱数", "阶梯箱价", "阶梯箱数", "阶梯起订箱数", "是否命中阶梯", "金额", "吨数", "最后提交"};
       writeHeaders(detailSheet, detailHeaders);
       int detailRowNo = 1;
       for (Map<String, Object> item : details) {
@@ -50,7 +50,7 @@ public class OrderExportService {
             item.get("line_tons"), item.get("last_submitted_at"));
       }
       Sheet productSheet = workbook.createSheet("有效商品汇总");
-      writeHeaders(productSheet, new String[]{"物料代码", "物料名称", "产品线", "规格", "箱规", "订货箱数", "订货金额", "订货吨数", "下单客户数"});
+      writeHeaders(productSheet, new String[]{"物料代码", "物料名称", "项目组", "规格", "箱规", "订货箱数", "订货金额", "订货吨数", "下单客户数"});
       int productRowNo = 1;
       for (Map<String, Object> item : productTotals) writeValues(productSheet.createRow(productRowNo++), item.get("material_code"), item.get("material_name"),
           item.get("product_line"), item.get("specification"), item.get("case_pack"), item.get("total_quantity"), item.get("total_amount"),

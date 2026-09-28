@@ -752,7 +752,7 @@ class IsolatedApiE2ETest {
   }
 
   private byte[] productWorkbook() throws Exception {
-    List<String> headers = List.of("客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明");
+    List<String> headers = List.of("客户类型", "是否返利", "产品大类", "项目组", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明");
     try (XSSFWorkbook workbook = new XSSFWorkbook(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
       Sheet product = sheet(workbook, "商品目录", headers);
       row(product, "综合", "是", "调味品", "酱油", "P001", "AUTOTEST_综合商品一", "测试品牌", "原味", "500ml", "12瓶", "8.00", "100.00", "10", "否", "", "综合返利商品说明");

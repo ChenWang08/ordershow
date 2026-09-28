@@ -20,7 +20,7 @@ export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [imagePreview, setImagePreview] = useState<{ productName: string; images: ProductImageAsset[]; status: string } | null>(null);
-  const heads = ["序号", "客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "产品说明", "商品图片", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "每吨箱数（箱/吨）", "是否礼盒", "分公司限制", "经销商限制", "状态", "操作"];
+  const heads = ["序号", "客户类型", "是否返利", "产品大类", "项目组", "物料代码", "物料名称", "产品说明", "商品图片", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "每吨箱数（箱/吨）", "是否礼盒", "分公司限制", "经销商限制", "状态", "操作"];
   const filteredRows = useMemo(() => {
     const normalizedKeyword = normalizeSearchText(searchKeyword);
     const normalizedCodeKeyword = normalizeMaterialCode(searchKeyword);

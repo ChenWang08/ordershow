@@ -139,9 +139,9 @@ export async function parseProductWorkbook(file: File): Promise<ProductImportPar
   const { name: sheetName, matrix } = nonEmptySheets[0];
   const headerIndex = matrix.findIndex((values) => values.some((value) => normalizedHeader(value) === "物料名称"));
   if (headerIndex < 0) throw new Error(`${sheetName} 未找到“物料名称”表头。`);
-  const expectedHeaders = ["客户类型", "是否返利", "产品大类", "产品线", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明"];
+  const expectedHeaders = ["客户类型", "是否返利", "产品大类", "项目组", "物料代码", "物料名称", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "吨箱转换系数", "是否为标品礼盒", "分公司定制品", "产品说明"];
   const header = (matrix[headerIndex] ?? []).map(textCell);
-  const aliases = (field: string) => field === "分公司定制品" ? ["分公司限制", "分公司定制品"] : [field];
+  const aliases = (field: string) => field === "分公司定制品" ? ["分公司限制", "分公司定制品"] : field === "项目组" ? ["项目组", "产品线"] : [field];
   const missingHeaders = expectedHeaders.filter((field) => findHeaderIndex(header, aliases(field)) < 0);
   if (missingHeaders.length > 0) throw new Error(`${sheetName} 缺少字段：${missingHeaders.join("、")}`);
   const indexes = Object.fromEntries(expectedHeaders.map((field) => [field, findHeaderIndex(header, aliases(field))]));
@@ -158,7 +158,7 @@ export async function parseProductWorkbook(file: File): Promise<ProductImportPar
     if (rebateRaw && !rebate) warnings.push(`${sheetName} 第 ${index + 1} 行是否返利“${rebateRaw}”无效，只允许“是”“否”或空。`);
     parsed.push({
       id: createImportRowId("product"), sequence: parsed.length + 1, customerType, rebate,
-      category: get("产品大类"), line: get("产品线"), materialCode: get("物料代码"), materialName: get("物料名称"),
+      category: get("产品大类"), line: get("项目组"), materialCode: get("物料代码"), materialName: get("物料名称"),
       description: get("产品说明"), brand: get("品牌"), variety: get("品种"), spec: get("规格"), casePack: get("箱规"),
       unitPrice: get("元/瓶"), casePrice: get("元/箱"), priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER",
       conversion: get("吨箱转换系数"), gift: get("是否为标品礼盒") === "是" ? "是" : "否", branchScope: get("分公司定制品"),
