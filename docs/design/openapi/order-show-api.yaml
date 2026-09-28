@@ -39,6 +39,12 @@ paths:
           in: query
           schema:
             type: string
+        - name: metric
+          in: query
+          schema:
+            type: string
+            enum: [AMOUNT, TONS]
+            default: AMOUNT
       responses:
         '200':
           description: 活动统计
@@ -2111,6 +2117,14 @@ paths:
           description: 活动配置的动态片区编码；不分片区活动无需传入。
           schema:
             type: string
+        - name: metric
+          in: query
+          required: false
+          description: 排行口径；AMOUNT 按订单金额排序，TONS 按可计算吨数排序；不传时默认为 AMOUNT。
+          schema:
+            type: string
+            enum: [AMOUNT, TONS]
+            default: AMOUNT
       responses:
         '200':
           description: 排行榜

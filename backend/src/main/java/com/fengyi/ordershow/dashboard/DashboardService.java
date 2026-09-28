@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fengyi.ordershow.activity.ActivityFinishedEvent;
 import com.fengyi.ordershow.activity.ActivityService;
+import com.fengyi.ordershow.common.DomainException;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -22,6 +23,16 @@ public class DashboardService {
   private final ActivityService activities;
   private final ObjectMapper json;
 
+  public enum RankingMetric {
+    AMOUNT, TONS;
+
+    static RankingMetric from(String value) {
+      if (value == null || value.isBlank() || "AMOUNT".equalsIgnoreCase(value.trim())) return AMOUNT;
+      if ("TONS".equalsIgnoreCase(value.trim())) return TONS;
+      throw DomainException.badRequest("RANKING_METRIC_INVALID", "排行口径只支持 AMOUNT 或 TONS");
+    }
+  }
+
   public DashboardService(JdbcTemplate jdbc, ActivityService activities, ObjectMapper json) {
     this.jdbc = jdbc; this.activities = activities; this.json = json;
   }
@@ -31,13 +42,21 @@ public class DashboardService {
   }
 
   public Dashboard ranking(String activityCode, String customerType, String regionCode) {
+    return ranking(activityCode, customerType, regionCode, RankingMetric.AMOUNT);
+  }
+
+  public Dashboard ranking(String activityCode, String customerType, String regionCode, String metric) {
+    return ranking(activityCode, customerType, regionCode, RankingMetric.from(metric));
+  }
+
+  private Dashboard ranking(String activityCode, String customerType, String regionCode, RankingMetric metric) {
     var activity = activities.byCode(activityCode);
     String normalizedCustomerType = normalizeRankingCustomerType(customerType);
     if (isHistorical(activity.status())) {
-      return snapshot(rankingKey(normalizedCustomerType, regionCode), activity.id(), Dashboard.class,
-          () -> liveRanking(activity, normalizedCustomerType, regionCode));
+      return snapshot(rankingKey(metric, normalizedCustomerType, regionCode), activity.id(), Dashboard.class,
+          () -> liveRanking(activity, normalizedCustomerType, regionCode, 0, metric));
     }
-    return liveRanking(activity, normalizedCustomerType, regionCode);
+    return liveRanking(activity, normalizedCustomerType, regionCode, 0, metric);
   }
 
   static String normalizeRankingCustomerType(String customerType) {
@@ -47,10 +66,15 @@ public class DashboardService {
   }
 
   private Dashboard liveRanking(ActivityService.ActivityView activity, String customerType, String regionCode) {
-    return liveRanking(activity, customerType, regionCode, 0);
+    return liveRanking(activity, customerType, regionCode, 0, RankingMetric.AMOUNT);
   }
 
   private Dashboard liveRanking(ActivityService.ActivityView activity, String customerType, String regionCode, int minimumTopN) {
+    return liveRanking(activity, customerType, regionCode, minimumTopN, RankingMetric.AMOUNT);
+  }
+
+  private Dashboard liveRanking(ActivityService.ActivityView activity, String customerType, String regionCode,
+                                int minimumTopN, RankingMetric metric) {
     Map<String, Object> totals = new LinkedHashMap<>(jdbc.queryForMap("""
         SELECT COUNT(*) order_count, COALESCE(SUM(total_quantity), 0) total_quantity,
           COALESCE(SUM(total_amount), 0) total_amount,
@@ -76,7 +100,19 @@ public class DashboardService {
           AND (? IS NULL OR ? = '' OR o.region_code = ?)
         """, Long.class, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode);
     totals.put("sku_count", skuCount == null ? 0L : skuCount);
-    List<RankRow> companies = jdbc.query("""
+    List<RankRow> companies = metric == RankingMetric.TONS ? jdbc.query("""
+        SELECT o.id, o.dealer_full_name_snapshot name, o.branch_name_snapshot branch, o.total_amount amount,
+          o.total_quantity quantity, item_tons.tons
+        FROM customer_order o
+        JOIN (SELECT order_id, SUM(line_tons) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
+        WHERE o.activity_id = ? AND o.status = 'SUBMITTED' AND item_tons.tons IS NOT NULL
+          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
+          AND (? IS NULL OR ? = '' OR o.region_code = ?)
+        ORDER BY item_tons.tons DESC, o.total_amount DESC, o.last_submitted_at, o.id LIMIT ?
+        """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), rs.getString("branch"),
+        rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
+        customerType, customerType, customerType, regionCode, regionCode, regionCode, Math.max(activity.companyRankingTopN(), minimumTopN))
+        : jdbc.query("""
         SELECT o.id, o.dealer_full_name_snapshot name, o.branch_name_snapshot branch, o.total_amount amount,
           o.total_quantity quantity, item_tons.tons
         FROM customer_order o
@@ -88,7 +124,21 @@ public class DashboardService {
         """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), rs.getString("branch"),
         rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
         customerType, customerType, customerType, regionCode, regionCode, regionCode, Math.max(activity.companyRankingTopN(), minimumTopN));
-    List<RankRow> branches = jdbc.query("""
+    List<RankRow> branches = metric == RankingMetric.TONS ? jdbc.query("""
+        SELECT o.branch_name_snapshot name, SUM(o.total_amount) amount, SUM(o.total_quantity) quantity,
+          SUM(item_tons.tons) tons
+        FROM customer_order o
+        JOIN (SELECT order_id, SUM(line_tons) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
+        WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
+          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
+          AND (? IS NULL OR ? = '' OR o.region_code = ?)
+        GROUP BY o.branch_name_snapshot
+        HAVING SUM(item_tons.tons) IS NOT NULL
+        ORDER BY tons DESC, amount DESC, name LIMIT ?
+        """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), null,
+        rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
+        customerType, customerType, customerType, regionCode, regionCode, regionCode, Math.max(activity.branchRankingTopN(), minimumTopN))
+        : jdbc.query("""
         SELECT o.branch_name_snapshot name, SUM(o.total_amount) amount, SUM(o.total_quantity) quantity,
           SUM(item_tons.tons) tons
         FROM customer_order o
@@ -212,17 +262,20 @@ public class DashboardService {
   }
 
   private void replaceFinalSnapshots(ActivityService.ActivityView activity) {
-    replaceSnapshot(activity.id(), rankingKey(null, null), liveRanking(activity, null, null));
-    replaceSnapshot(activity.id(), rankingKey("GENERAL", null), liveRanking(activity, "GENERAL", null));
-    replaceSnapshot(activity.id(), rankingKey("SPECIAL", null), liveRanking(activity, "SPECIAL", null));
-    for (var region : activity.regions()) {
-      replaceSnapshot(activity.id(), rankingKey("GENERAL", region.code()), liveRanking(activity, "GENERAL", region.code()));
+    for (var metric : RankingMetric.values()) {
+      replaceSnapshot(activity.id(), rankingKey(metric, null, null), liveRanking(activity, null, null, 0, metric));
+      replaceSnapshot(activity.id(), rankingKey(metric, "GENERAL", null), liveRanking(activity, "GENERAL", null, 0, metric));
+      replaceSnapshot(activity.id(), rankingKey(metric, "SPECIAL", null), liveRanking(activity, "SPECIAL", null, 0, metric));
+      for (var region : activity.regions()) {
+        replaceSnapshot(activity.id(), rankingKey(metric, "GENERAL", region.code()), liveRanking(activity, "GENERAL", region.code(), 0, metric));
+      }
     }
     replaceSnapshot(activity.id(), "REPORT", liveReport(activity, "FINAL"));
   }
 
-  private String rankingKey(String customerType, String regionCode) {
-    return "RANKING:" + (customerType == null ? "ALL" : customerType) + ":" + (regionCode == null ? "ALL" : regionCode);
+  private String rankingKey(RankingMetric metric, String customerType, String regionCode) {
+    String suffix = (customerType == null ? "ALL" : customerType) + ":" + (regionCode == null ? "ALL" : regionCode);
+    return metric == RankingMetric.AMOUNT ? "RANKING:" + suffix : "RANKING_TONS:" + suffix;
   }
 
   private boolean isHistorical(String status) {

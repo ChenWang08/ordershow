@@ -496,6 +496,10 @@ class IsolatedApiE2ETest {
     assertEquals("0.100000", data(dashboard).path("totals").path("total_tons").decimalValue().setScale(6).toPlainString());
     assertEquals("0.100000", data(dashboard).path("companies").get(0).path("tons").decimalValue().setScale(6).toPlainString());
     assertEquals("0.100000", data(dashboard).path("branches").get(0).path("tons").decimalValue().setScale(6).toPlainString());
+    HttpResponse<String> tonsDashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking?metric=TONS", null, null, null);
+    assertEquals(200, tonsDashboard.statusCode(), tonsDashboard.body());
+    assertEquals("0.100000", data(tonsDashboard).path("companies").get(0).path("tons").decimalValue().setScale(6).toPlainString());
+    assertEquals("0.100000", data(tonsDashboard).path("branches").get(0).path("tons").decimalValue().setScale(6).toPlainString());
 
     HttpResponse<String> orderDashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/dashboard", null, null, null);
     assertEquals(200, orderDashboard.statusCode(), orderDashboard.body());

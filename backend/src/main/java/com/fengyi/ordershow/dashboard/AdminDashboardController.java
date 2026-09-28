@@ -22,8 +22,9 @@ public class AdminDashboardController {
 
   @GetMapping("/admin/activities/{activityId}/ranking")
   ApiResponse<DashboardService.Dashboard> ranking(@PathVariable long activityId,
-      @RequestParam(required = false) String customerType, HttpServletRequest request) {
+      @RequestParam(required = false) String customerType, @RequestParam(required = false) String metric,
+      HttpServletRequest request) {
     access.requireActivityAccess(auth.requireAdmin(request), activityId);
-    return ApiResponse.of(dashboards.ranking(activities.byId(activityId).code(), customerType, null), TraceFilter.id(request));
+    return ApiResponse.of(dashboards.ranking(activities.byId(activityId).code(), customerType, null, metric), TraceFilter.id(request));
   }
 }

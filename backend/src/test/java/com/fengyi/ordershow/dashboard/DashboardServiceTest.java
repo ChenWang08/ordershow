@@ -1,6 +1,7 @@
 package com.fengyi.ordershow.dashboard;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
@@ -44,5 +45,15 @@ class DashboardServiceTest {
     assertThat(DashboardService.normalizeRankingCustomerType(" ")).isNull();
     assertThat(DashboardService.normalizeRankingCustomerType("GENERAL")).isEqualTo("GENERAL");
     assertThat(DashboardService.normalizeRankingCustomerType(" special ")).isEqualTo("SPECIAL");
+  }
+
+  @Test
+  void defaultsRankingMetricToAmountAndAcceptsTons() {
+    assertThat(DashboardService.RankingMetric.from(null)).isEqualTo(DashboardService.RankingMetric.AMOUNT);
+    assertThat(DashboardService.RankingMetric.from(" amount ")).isEqualTo(DashboardService.RankingMetric.AMOUNT);
+    assertThat(DashboardService.RankingMetric.from("TONS")).isEqualTo(DashboardService.RankingMetric.TONS);
+    assertThatThrownBy(() -> DashboardService.RankingMetric.from("QUANTITY"))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("AMOUNT 或 TONS");
   }
 }

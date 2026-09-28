@@ -27,8 +27,9 @@ public class DashboardController {
   @GetMapping("/ranking")
   ApiResponse<DashboardService.Dashboard> ranking(@PathVariable String activityCode,
       @RequestParam(required = false) String customerType, @RequestParam(required = false) String regionCode,
+      @RequestParam(required = false) String metric,
       HttpServletRequest request) {
-    return ApiResponse.of(dashboards.ranking(activityCode, customerType, regionCode), TraceFilter.id(request));
+    return ApiResponse.of(dashboards.ranking(activityCode, customerType, regionCode, metric), TraceFilter.id(request));
   }
 
   @GetMapping("/dashboard")

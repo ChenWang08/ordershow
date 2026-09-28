@@ -1,5 +1,6 @@
 export type Envelope<T> = { data: T; traceId: string };
 export type PageEnvelope<T> = { data: T[]; page: { number: number; size: number; totalElements: number; totalPages: number }; traceId: string };
+export type RankingMetric = "AMOUNT" | "TONS";
 
 export type RuntimeActivity = {
   id: number; departmentId: number; departmentName?: string; code: string; name: string; description?: string; status: string; configuredStatus: string;
@@ -98,8 +99,8 @@ export type AdminOrderSummary = Omit<RuntimeOrder, "activityCustomerId" | "items
 export type DashboardData = {
   activityId: number; activityName: string; status: string;
   totals: { order_count?: number; dealer_count?: number; total_quantity?: number; total_amount?: number; total_tons?: number; branch_count?: number; sku_count?: number };
-  companies: Array<{ rank: number; name: string; branch?: string; amount: number; quantity: number; tons?: number }>;
-  branches: Array<{ rank: number; name: string; branch?: string; amount: number; quantity: number; tons?: number }>;
+  companies: Array<{ rank: number; name: string; branch?: string; amount: number; quantity: number; tons?: number | null }>;
+  branches: Array<{ rank: number; name: string; branch?: string; amount: number; quantity: number; tons?: number | null }>;
   productLines: Array<{ productLine: string; amount: number; quantity: number }>;
   latestOrders: Array<{ orderNo: string; dealerName: string; branchName?: string; amount: number; submittedAt: string }>;
   version: string; generatedAt: string;

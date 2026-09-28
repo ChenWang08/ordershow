@@ -113,6 +113,20 @@ test("order dashboard uses district terminology without changing region rows", (
   assert.doesNotMatch(html, /片区/);
 });
 
+test("ranking board exposes amount and tonnage ranking modes", () => {
+  const { RankingBoard } = loadModule("app/features/screens/RankingBoard.tsx", {
+    "../../api": {
+      ApiError: class ApiError extends Error {}, apiBase: () => "http://test/api", getActiveActivityCode: () => "fixture",
+      loadDashboard: async () => null,
+    },
+  });
+  const html = renderToStaticMarkup(React.createElement(RankingBoard, { activity: { ...activity, status: "ACTIVE", availableCustomerTypes: ["GENERAL", "SPECIAL"] } }));
+  assert.match(html, /金额排行/);
+  assert.match(html, /吨数排行/);
+  assert.match(html, /公司订单金额排行/);
+  assert.match(html, /分公司订货榜/);
+});
+
 for (const selected of ["综合客户各大区金额及合计", "综合客户大区金额与项目组金额同屏展示"]) {
   test(`report selection renders district amounts: ${selected}`, () => {
     const { ReportBoard } = loadModule("app/features/screens/ReportBoard.tsx", {
