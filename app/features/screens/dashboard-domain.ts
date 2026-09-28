@@ -4,6 +4,13 @@ export function isUnspecifiedCustomerTypeActivity(activity: RuntimeActivity | nu
   return activity?.whitelistCustomerTypeMode === "UNSPECIFIED";
 }
 
+function dashboardCustomerTypes(data: DashboardReport | null, activity: RuntimeActivity | null) {
+  if (isUnspecifiedCustomerTypeActivity(activity)) return [] as Array<"GENERAL" | "SPECIAL">;
+  const configured = activity?.availableCustomerTypes?.filter((type): type is "GENERAL" | "SPECIAL" => type === "GENERAL" || type === "SPECIAL") ?? [];
+  if (configured.length > 0) return [...new Set(configured)];
+  return [...new Set((data?.customerTypes ?? []).map(item => item.customerType).filter((type): type is "GENERAL" | "SPECIAL" => type === "GENERAL" || type === "SPECIAL"))];
+}
+
 export function dashboardCompactAmount(value: number) {
   if (value >= 100000000) return `${(value / 100000000).toFixed(2)}亿`;
   if (value >= 10000) return `${(value / 10000).toFixed(1)}万`;
@@ -78,6 +85,11 @@ export type DashboardRankingRow = { rank: number; name: string; branch?: string;
 
 export function dashboardMetrics(data: DashboardReport | null, activity: RuntimeActivity | null) {
   const dashboard = data?.dashboard;
+  const unspecifiedCustomerType = isUnspecifiedCustomerTypeActivity(activity);
+  const customerTypes = dashboardCustomerTypes(data, activity);
+  const hasGeneralCustomerType = customerTypes.includes("GENERAL");
+  const hasSpecialCustomerType = customerTypes.includes("SPECIAL");
+  const showChannelComparison = hasGeneralCustomerType && hasSpecialCustomerType;
   const totals = dashboard?.totals ?? {};
   const amount = Number(totals.total_amount ?? 0);
   const types = data?.customerTypes ?? [];
@@ -123,5 +135,6 @@ export function dashboardMetrics(data: DashboardReport | null, activity: Runtime
     { icon: "司", label: "参与分公司", value: Number(totals.branch_count ?? 0).toLocaleString(), unit: "家", tone: "red" },
     { icon: "品", label: "成交 SKU", value: Number(totals.sku_count ?? 0).toLocaleString(), unit: "种", tone: "yellow" },
   ];
-  return { amount, generalAmount, specialAmount, generalShare, generalRegions, regions, trend, productLineRows, specialChannelProductRows, generalChannelProductRows, regionProductCards, regionProductMax, branchRankingRows, dealerRankingRows, generatedAt, activityTimeZone, cards };
+  return { amount, generalAmount, specialAmount, generalShare, generalRegions, regions, trend, productLineRows, specialChannelProductRows, generalChannelProductRows, regionProductCards, regionProductMax, branchRankingRows, dealerRankingRows, generatedAt, activityTimeZone, cards,
+    unspecifiedCustomerType, hasGeneralCustomerType, hasSpecialCustomerType, showChannelComparison };
 }

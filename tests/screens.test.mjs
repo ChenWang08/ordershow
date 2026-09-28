@@ -71,6 +71,25 @@ test("untyped activities retain the all-customer donut and hide channel sections
   assert.doesNotMatch(html, /渠道订单额占比|各渠道产线订单额对比|综合渠道 · 各大区/);
 });
 
+test("single customer type hides channel comparison and expands the trend", () => {
+  const singleTypeReport = {
+    ...regionalReport,
+    customerTypes: [{ customerType: "SPECIAL", amount: 80 }],
+    generalProductLines: [],
+    specialProductLines: [{ productLine: "酱油", amount: 80 }],
+    generalRegions: [],
+  };
+  const { OrderDashboard } = loadModule("app/features/screens/OrderDashboard.tsx", {
+    "./useOrderDashboard": { useOrderDashboard: () => ({ data: singleTypeReport, error: "", refreshing: false, historical: false, refresh: () => {} }) },
+  });
+  const html = renderToStaticMarkup(React.createElement(OrderDashboard, { activity: { ...activity, availableCustomerTypes: ["SPECIAL"] } }));
+  assert.doesNotMatch(html, /渠道订单额占比|各渠道产线订单额对比|综合客户 · 大区订单额分布/);
+  assert.match(html, /订单额占比|特渠专业客户/);
+  assert.match(html, /order-dashboard-channel-summary/);
+  assert.match(html, /order-dashboard-product-line/);
+  assert.match(html, /order-dashboard-trend-full/);
+});
+
 const regionalReport = {
   dashboard: { totals: { total_amount: 220, total_tons: 1 }, productLines: [{ productLine: "酱油", amount: 140 }], branches: [], companies: [], generatedAt: "2026-09-07T10:00:00Z" },
   customerTypes: [{ customerType: "GENERAL", amount: 140 }, { customerType: "SPECIAL", amount: 80 }],
