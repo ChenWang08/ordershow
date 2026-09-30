@@ -416,6 +416,11 @@ public class OrderRepository {
     } catch (java.io.IOException error) { throw new IllegalStateException("Cannot save submission snapshot",error); }
   }
 
+  void cancelH5Submission(long activityId, long customerId, String key) {
+    jdbc.update("DELETE FROM api_idempotency WHERE activity_id = ? AND actor_type = 'H5_CUSTOMER' AND actor_id = ? AND endpoint_code = 'ORDER_SUBMIT' AND idempotency_key = ? AND status = 'PROCESSING'",
+        activityId, customerId, key);
+  }
+
   IdempotencyResult beginIdempotency(long activityId, String actorType, long actorId, String endpoint,
                                               String key, byte[] hash) {
     if (key == null || key.isBlank() || key.length() > 128) throw DomainException.badRequest("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的 Idempotency-Key");
@@ -529,6 +534,14 @@ public class OrderRepository {
           last_modified_at = UTC_TIMESTAMP(3), last_modified_source = 'H5', lock_version = lock_version + 1
         WHERE id = ? AND status = 'SUBMITTED' AND current_version_no = ? AND lock_version = ?
         """, order.id(), expectedVersion, order.lockVersion());
+  }
+
+  int withdrawOrderByAdmin(long activityId, long orderId, OrderRow order, String reason, long adminId) {
+    return jdbc.update("""
+        UPDATE customer_order SET status = 'WITHDRAWN', withdrawn_at = UTC_TIMESTAMP(3), withdrawn_reason = ?,
+          last_modified_at = UTC_TIMESTAMP(3), last_modified_source = 'ADMIN', last_modified_admin_id = ?, lock_version = lock_version + 1
+        WHERE id = ? AND activity_id = ? AND status = 'SUBMITTED' AND current_version_no = ? AND lock_version = ?
+        """, reason, adminId, orderId, activityId, order.version(), order.lockVersion());
   }
 
   void insertH5Withdrawal(long activityId, long orderId, int expectedVersion, String traceId) {

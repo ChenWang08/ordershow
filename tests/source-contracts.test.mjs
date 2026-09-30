@@ -246,6 +246,10 @@ test("keeps admin order management scoped and wires the formal runtime APIs", as
 
   assert.match(api, /saveH5Order/);
   assert.match(api, /withdrawH5Order/);
+  assert.match(api, /createH5OrderChangeRequest/);
+  assert.match(api, /loadAdminOrderChangeRequests/);
+  assert.match(api, /createH5OrderChangeRequest/);
+  assert.match(api, /loadAdminOrderChangeRequests/);
   assert.match(api, /loadAdminOrders/);
   assert.match(api, /drawLotteryRound/);
   assert.match(api, /loadOrderDashboard/);

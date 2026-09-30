@@ -117,7 +117,7 @@ H5 商品展示按当前可见商品目录动态处理返利页签：只有同�
 
 前端在购物车变化后短暂防抖保存，并在 `pagehide` 时使用 keepalive 尽力提交最后一次快照。刷新、关闭页面或重新验证同一客户后，先加载正式订单和当前商品目录，再恢复版本一致且仍可订的草稿；无效商品不恢复。切换到其他客户前先尽力提交旧客户快照，但新会话始终只能读取新客户自己的草稿。
 
-草稿按 `activityId + activityCustomerId` 唯一隔离，不接受客户端借 `customerId` 操作其他客户。`baseOrderVersion` 与当前订单版本不一致时返回 409 `DRAFT_BASE_ORDER_VERSION_CONFLICT`；商品失效或越权时返回 422。正式订单提交或撤回成功后，后端在订单事务中清除草稿。
+草稿按 `activityId + activityCustomerId` 唯一隔离，不接受客户端借 `customerId` 操作其他客户。`baseOrderVersion` 与当前订单版本不一致时返回 409 `DRAFT_BASE_ORDER_VERSION_CONFLICT`；商品失效或越权时返回 422。首次正式提交或创建订单变更申请成功后，后端在对应事务中清除草稿；变更申请的审核不会读取草稿。
 
 草稿的 `updatedAt`、`expiresAt` 与其他 API 时间一样返回 ISO 8601 UTC；H5 恢复提示显式使用 `Asia/Shanghai` 格式化，避免数据库、JVM和浏览器重复进行 UTC+8 转换。
 
@@ -131,12 +131,13 @@ H5 商品展示按当前可见商品目录动态处理返利页签：只有同�
 
 ## 6. 幂等和并发
 
+审核工作台新增管理员 GET `order-change-requests/page`（status/type/keyword/page/size/newest）、`order-change-requests/pending`（待审核申请 ID 与订单 ID，供数量和订单标记使用）、`order-change-requests/{requestId}`（完整申请及原订单快照）。路径均以 `/admin/activities/{activityId}/` 开头并校验部门权限；分页摘要不包含商品明细。H5 创建申请同时原子替代已有待审核申请，重复幂等键返回原申请。审核通过接口遇到订单版本变化返回成功响应中的 REJECTED 状态，前端必须检查结果状态。
+
 ### 6.1 幂等键
 
 以下命令必须携带 `Idempotency-Key`：
 
-- H5 提交/修改订单；
-- H5 撤回订单；
+- H5 首次提交订单、订单变更申请和撤回申请；
 - 确认导入；
 - 开始抽奖、完成轮次和重置轮次；
 - 创建导出任务。
@@ -151,7 +152,7 @@ H5 商品展示按当前可见商品目录动态处理返利页签：只有同�
 
 关键幂等记录、请求指纹、任务 ID 和可重放响应摘要最终保存于 MySQL 的 `api_idempotency`。Redis 可以在命中时加速重复请求和互斥，但缓存丢失、过期或重启后必须回到 MySQL，不得因此重新执行订单版本、导入发布或抽奖结果。
 
-H5 提交已实现同次请求复用幂等键及首次成功响应快照。指纹固定包含 expectedVersion、includeHistory 和按 productId 排序的商品/数量；同键异载荷返回 IDEMPOTENCY_KEY_REUSED。新记录保存 orderId、orderVersion 和精确订单数据快照，重放不读取当前订单、不删除新草稿、不重复业务操作和通知。旧记录缺失快照时返回 IDEMPOTENCY_RESULT_UNAVAILABLE，客户端须查询订单。
+H5 首次提交已实现同次请求复用幂等键及首次成功响应快照。指纹固定包含 expectedVersion、includeHistory 和按 productId 排序的商品/数量；同键异载荷返回 IDEMPOTENCY_KEY_REUSED。已有订单的修改/撤回使用 `ORDER_CHANGE_REQUEST` 幂等记录，同一申请重复提交返回原申请，不重复创建待审核记录。旧记录缺失快照时返回 IDEMPOTENCY_RESULT_UNAVAILABLE，客户端须查询订单。
 
 前端待确认请求按活动/客户保存在 sessionStorage，恢复窗口 24 小时；每次最多自动重试一次并遵守 Retry-After。服务端只对新 H5 提交快照启用有界清理，至少保留至活动结束和成功提交各满 30 天；PROCESSING、旧格式和其他接口不在此次清理范围。鉴权失败仍拒绝访问。实现与验收见 [H5 幂等重试说明](../testing/h5-idempotency-retry.md)。
 

@@ -1,6 +1,6 @@
 import { api, ApiError } from "./client";
 import { activeActivityPath } from "./context";
-import type { Envelope, RuntimeIdentity, RuntimeOrder, RuntimeOrderDraft, RuntimeProduct } from "./types";
+import type { Envelope, OrderChangeRequest, RuntimeIdentity, RuntimeOrder, RuntimeOrderDraft, RuntimeProduct } from "./types";
 
 export async function verifyPhone(customerType: "GENERAL" | "SPECIAL" | "ALL" | "", regionCode: string, phone: string) {
   return (await api<Envelope<{ customer: RuntimeIdentity; csrfToken: string }>>(`/public/activities/${activeActivityPath()}/verify-phone`, {
@@ -44,5 +44,17 @@ export async function saveH5Order(expectedVersion: number, items: Array<{ produc
 export async function withdrawH5Order(expectedVersion: number) {
   return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order/withdraw?includeHistory=false`, {
     method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ expectedVersion }),
+  }, "h5")).data;
+}
+
+export async function loadH5OrderChangeRequest() {
+  return (await api<Envelope<OrderChangeRequest | null>>(`/h5/activities/${activeActivityPath()}/order-change-requests/current`)).data;
+}
+
+export async function createH5OrderChangeRequest(activityCode: string, customerId: number, expectedVersion: number,
+    requestType: "MODIFY" | "WITHDRAW", items: Array<{ productId: number; quantity: number }>, customerNote = "", idempotencyKey = crypto.randomUUID()) {
+  return (await api<Envelope<OrderChangeRequest>>(`/h5/activities/${encodeURIComponent(activityCode)}/order-change-requests`, {
+    method: "POST", headers: { "Idempotency-Key": idempotencyKey, "X-H5-Customer-Id": String(customerId) },
+    body: JSON.stringify({ expectedVersion, requestType, items, customerNote }),
   }, "h5")).data;
 }

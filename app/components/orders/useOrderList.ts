@@ -15,9 +15,12 @@ export function useOrderList(activityId: number, activityName: string) {
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [selectedNo, setSelectedNo] = useState<string | null>(null);
+  const [linkedOrder, setLinkedOrder] = useState<OrderRecord | null>(null);
   const [expandedVersion, setExpandedVersion] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
-  const selected = orders.find((order) => order.no === selectedNo) ?? null;
+  const listedOrder = orders.find((order) => order.no === selectedNo);
+  const selected = linkedOrder?.no === selectedNo && (!listedOrder || linkedOrder.lockVersion >= listedOrder.lockVersion)
+    ? linkedOrder : listedOrder ?? null;
 
   useEffect(() => {
     let active = true;
@@ -60,6 +63,7 @@ export function useOrderList(activityId: number, activityName: string) {
   }), [customerType, orderFilter, orders, search]);
 
   const openOrder = async (order: OrderRecord) => {
+    setLinkedOrder(null);
     setSelectedNo(order.no);
     setExpandedVersion(null);
     if (!order.id) return;
@@ -71,6 +75,17 @@ export function useOrderList(activityId: number, activityName: string) {
     }
   };
 
+  const openOrderById = async (id: number) => {
+    try {
+      const detail = toOrderRecord(await loadAdminOrder(activityId,id));
+      setLinkedOrder(detail); setSelectedNo(detail.no); setExpandedVersion(null);
+      return true;
+    } catch (reason) {
+      setLoadError(reason instanceof ApiError ? reason.message : "订单详情加载失败");
+      return false;
+    }
+  };
+
   const exportOrders = () => exportAdminOrders(activityId, {
     status: orderFilter === "已提交" ? "SUBMITTED" : orderFilter === "已撤回" ? "WITHDRAWN" : orderFilter === "已作废" ? "VOIDED" : undefined,
     customerType: customerType === "综合" ? "GENERAL" : customerType === "特渠" ? "SPECIAL" : customerType === "不区分客户类型" ? "ALL" : undefined,
@@ -79,5 +94,5 @@ export function useOrderList(activityId: number, activityName: string) {
 
 
   const operationRecords = selected?.operationRecords ?? [];
-  return { selected, setSelectedNo, expandedVersion, setExpandedVersion, orderCounts, loading, loadError, setLoadError, orderFilter, setOrderFilter, customerType, setCustomerType, search, setSearch, page, setPage, totalPages, filteredOrders, openOrder, exportOrders, operationRecords, setOrders, setReloadKey };
+  return { selected, setSelectedNo, expandedVersion, setExpandedVersion, orderCounts, loading, loadError, setLoadError, orderFilter, setOrderFilter, customerType, setCustomerType, search, setSearch, page, setPage, totalPages, filteredOrders, openOrder, openOrderById, exportOrders, operationRecords, setOrders, setReloadKey };
 }

@@ -307,13 +307,41 @@ class IsolatedApiE2ETest {
         draftBody(h5CustomerId, 1, productId, 3), h5Csrf, null);
     assertEquals(200, modificationDraft.statusCode(), modificationDraft.body());
 
-    HttpResponse<String> modified = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
-        orderBody(1, productId, 3), h5Csrf, null, UUID.randomUUID().toString());
-    assertEquals(200, modified.statusCode(), modified.body());
-    assertEquals(orderNo, data(modified).path("orderNo").asText());
-    assertEquals(2, data(modified).path("currentVersion").asInt());
-    assertEquals(2,data(modified).path("versions").size());
-    assertEquals("300.00", data(modified).path("totalAmount").decimalValue().setScale(2).toPlainString());
+    ObjectNode modificationRequestBody = JSON.createObjectNode().put("expectedVersion", 1).put("requestType", "MODIFY");
+    modificationRequestBody.putArray("items").addObject().put("productId", productId).put("quantity", 3);
+    HttpResponse<String> modificationRequest = send(h5, "POST", "/h5/activities/" + activityCode + "/order-change-requests",
+        modificationRequestBody, h5Csrf, null, UUID.randomUUID().toString());
+    assertEquals(200, modificationRequest.statusCode(), modificationRequest.body());
+    assertEquals("PENDING", data(modificationRequest).path("status").asText());
+    assertEquals(1, data(modificationRequest).path("currentVersion").asInt());
+    assertEquals("300.00", data(modificationRequest).path("requestedTotalAmount").decimalValue().setScale(2).toPlainString());
+    long replacedId=data(modificationRequest).path("id").asLong();
+    String replacementKey=UUID.randomUUID().toString();
+    var replacement=send(h5,"POST","/h5/activities/"+activityCode+"/order-change-requests",modificationRequestBody,h5Csrf,null,replacementKey);
+    assertEquals(200,replacement.statusCode(),replacement.body());
+    assertEquals(2,data(replacement).path("originalOrder").path("totalQuantity").asInt());
+    var replacementReplay=send(h5,"POST","/h5/activities/"+activityCode+"/order-change-requests",modificationRequestBody,h5Csrf,null,replacementKey);
+    assertEquals(data(replacement).path("id"),data(replacementReplay).path("id"));
+    var replaced=send(admin,"GET","/admin/activities/"+activityId+"/order-change-requests/"+replacedId,null,null,null);
+    assertEquals("REJECTED",data(replaced).path("status").asText());
+    assertTrue(data(replaced).path("reviewReason").asText().contains("替代"));
+    assertEquals(409,send(admin,"POST","/admin/activities/"+activityId+"/order-change-requests/"+replacedId+"/approve",JSON.createObjectNode(),adminCsrf,null,UUID.randomUUID().toString()).statusCode());
+    var reviewPage=send(admin,"GET","/admin/activities/"+activityId+"/order-change-requests/page?status=PENDING&size=1",null,null,null);
+    assertEquals(200,reviewPage.statusCode(),reviewPage.body());
+    assertEquals(1,json(reviewPage).path("page").path("totalElements").asInt());
+    assertFalse(data(reviewPage).get(0).has("items"));
+    HttpResponse<String> pendingRequests = send(admin, "GET", "/admin/activities/" + activityId + "/order-change-requests?status=PENDING", null, null, null);
+    assertEquals(200, pendingRequests.statusCode(), pendingRequests.body());
+    long modificationRequestId = data(pendingRequests).get(0).path("id").asLong();
+    HttpResponse<String> approvedModification = send(admin, "POST", "/admin/activities/" + activityId + "/order-change-requests/" + modificationRequestId + "/approve",
+        JSON.createObjectNode().put("reason", "AUTOTEST 审核通过修改申请"), adminCsrf, null, UUID.randomUUID().toString());
+    assertEquals(200, approvedModification.statusCode(), approvedModification.body());
+    assertEquals("APPROVED", data(approvedModification).path("status").asText());
+    JsonNode modified = data(send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null));
+    assertEquals(orderNo, modified.path("orderNo").asText());
+    assertEquals(2, modified.path("currentVersion").asInt());
+    assertEquals(2, modified.path("versions").size());
+    assertEquals("300.00", modified.path("totalAmount").decimalValue().setScale(2).toPlainString());
     HttpResponse<String> clearedModificationDraft = send(h5, "GET",
         "/h5/activities/" + activityCode + "/order-draft", null, null, null);
     assertTrue(json(clearedModificationDraft).path("data").isMissingNode()
@@ -329,31 +357,48 @@ class IsolatedApiE2ETest {
     assertEquals(5,data(preservedDraft).path("items").get(0).path("quantity").asInt());
     var latestAfterReplay = send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null);
     assertEquals(2,data(latestAfterReplay).path("currentVersion").asInt());
-    assertEquals(2,data(latestAfterReplay).path("operations").size());
+    assertEquals(5,data(latestAfterReplay).path("operations").size());
 
-    HttpResponse<String> stale = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
-        orderBody(1, productId, 4), h5Csrf, null, UUID.randomUUID().toString());
+    ObjectNode staleRequestBody = JSON.createObjectNode().put("expectedVersion", 1).put("requestType", "MODIFY");
+    staleRequestBody.putArray("items").addObject().put("productId", productId).put("quantity", 4);
+    HttpResponse<String> stale = send(h5, "POST", "/h5/activities/" + activityCode + "/order-change-requests",
+        staleRequestBody, h5Csrf, null, UUID.randomUUID().toString());
     assertEquals(409, stale.statusCode());
     assertEquals("ORDER_VERSION_CONFLICT", json(stale).path("code").asText());
 
-    ObjectNode withdrawBody = JSON.createObjectNode().put("expectedVersion", 2);
-    HttpResponse<String> withdrawn = send(h5, "POST", "/h5/activities/" + activityCode + "/order/withdraw",
-        withdrawBody, h5Csrf, null, UUID.randomUUID().toString());
-    assertEquals(200, withdrawn.statusCode(), withdrawn.body());
-    assertEquals("WITHDRAWN", data(withdrawn).path("status").asText());
-    assertEquals(2, data(withdrawn).path("versions").size());
-    assertEquals(1, data(withdrawn).path("items").size());
+    ObjectNode withdrawRequestBody = JSON.createObjectNode().put("expectedVersion", 2).put("requestType", "WITHDRAW");
+    withdrawRequestBody.putArray("items");
+    HttpResponse<String> withdrawRequest = send(h5, "POST", "/h5/activities/" + activityCode + "/order-change-requests",
+        withdrawRequestBody, h5Csrf, null, UUID.randomUUID().toString());
+    assertEquals(200, withdrawRequest.statusCode(), withdrawRequest.body());
+    assertEquals("PENDING", data(withdrawRequest).path("status").asText());
+    long withdrawRequestId = data(withdrawRequest).path("id").asLong();
+    HttpResponse<String> approvedWithdraw = send(admin, "POST", "/admin/activities/" + activityId + "/order-change-requests/" + withdrawRequestId + "/approve",
+        JSON.createObjectNode().put("reason", "AUTOTEST 审核通过撤回申请"), adminCsrf, null, UUID.randomUUID().toString());
+    assertEquals(200, approvedWithdraw.statusCode(), approvedWithdraw.body());
+    JsonNode withdrawn = data(send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null));
+    assertEquals("WITHDRAWN", withdrawn.path("status").asText());
+    assertEquals(2, withdrawn.path("versions").size());
+    assertEquals(1, withdrawn.path("items").size());
 
     HttpResponse<String> withdrawnDashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null);
     assertEquals(200, withdrawnDashboard.statusCode(), withdrawnDashboard.body());
     assertEquals(0, data(withdrawnDashboard).path("totals").path("order_count").asInt());
 
-    HttpResponse<String> resubmitted = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
-        mixedOrderBody(2, productId, 1, productWithoutTonsId, 1), h5Csrf, null, UUID.randomUUID().toString());
-    assertEquals(200, resubmitted.statusCode(), resubmitted.body());
-    assertEquals("SUBMITTED", data(resubmitted).path("status").asText());
-    assertEquals(3, data(resubmitted).path("currentVersion").asInt());
-    assertEquals(orderNo, data(resubmitted).path("orderNo").asText());
+    ObjectNode resubmitRequestBody = JSON.createObjectNode().put("expectedVersion", 2).put("requestType", "MODIFY");
+    resubmitRequestBody.putArray("items").addObject().put("productId", productId).put("quantity", 1);
+    resubmitRequestBody.withArray("items").addObject().put("productId", productWithoutTonsId).put("quantity", 1);
+    HttpResponse<String> resubmitRequest = send(h5, "POST", "/h5/activities/" + activityCode + "/order-change-requests",
+        resubmitRequestBody, h5Csrf, null, UUID.randomUUID().toString());
+    assertEquals(200, resubmitRequest.statusCode(), resubmitRequest.body());
+    long resubmitRequestId = data(resubmitRequest).path("id").asLong();
+    HttpResponse<String> approvedResubmit = send(admin, "POST", "/admin/activities/" + activityId + "/order-change-requests/" + resubmitRequestId + "/approve",
+        JSON.createObjectNode().put("reason", "AUTOTEST 审核通过重新提交申请"), adminCsrf, null, UUID.randomUUID().toString());
+    assertEquals(200, approvedResubmit.statusCode(), approvedResubmit.body());
+    JsonNode resubmitted = data(send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null));
+    assertEquals("SUBMITTED", resubmitted.path("status").asText());
+    assertEquals(3, resubmitted.path("currentVersion").asInt());
+    assertEquals(orderNo, resubmitted.path("orderNo").asText());
   }
 
   @Test
@@ -486,7 +531,7 @@ class IsolatedApiE2ETest {
 
     HttpResponse<String> detail = send(admin, "GET", "/admin/activities/" + activityId + "/orders/" + orderId, null, null, null);
     assertEquals(3, data(detail).path("versions").size());
-    assertEquals(4, data(detail).path("operations").size());
+    assertEquals(9, data(detail).path("operations").size());
     assertTrue(detail.body().contains(GENERAL_PHONE));
 
     HttpResponse<String> dashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null);
@@ -516,10 +561,19 @@ class IsolatedApiE2ETest {
 
     JsonNode latestActivity = data(send(admin, "GET", "/admin/activities/" + activityId, null, null, null));
     ObjectNode closeBody = JSON.createObjectNode().put("reason", "AUTOTEST 验证截止只读");
+    var cutoffRequestBody=JSON.createObjectNode().put("expectedVersion",3).put("requestType","WITHDRAW");
+    cutoffRequestBody.putArray("items");
+    var cutoffRequest=send(h5,"POST","/h5/activities/"+activityCode+"/order-change-requests",cutoffRequestBody,h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,cutoffRequest.statusCode(),cutoffRequest.body());
+    long cutoffRequestId=data(cutoffRequest).path("id").asLong();
     HttpResponse<String> closed = send(admin, "POST", "/admin/activities/" + activityId + "/close", closeBody,
         adminCsrf, Integer.toString(latestActivity.path("version").asInt()));
     assertEquals(200, closed.statusCode(), closed.body());
     assertEquals("CLOSED", data(closed).path("status").asText());
+    assertEquals(409,send(h5,"POST","/h5/activities/"+activityCode+"/order-change-requests",cutoffRequestBody,h5Csrf,null,UUID.randomUUID().toString()).statusCode());
+    var cutoffReject=send(admin,"POST","/admin/activities/"+activityId+"/order-change-requests/"+cutoffRequestId+"/reject",JSON.createObjectNode().put("reason","截止后仍可审核"),adminCsrf,null,UUID.randomUUID().toString());
+    assertEquals(200,cutoffReject.statusCode(),cutoffReject.body());
+    assertEquals("REJECTED",data(cutoffReject).path("status").asText());
 
     var replayAfterClose = send(h5,"PUT","/h5/activities/"+activityCode+"/order",
         orderBody(0,productId,2),h5Csrf,null,firstSubmissionKey);
@@ -877,11 +931,29 @@ class IsolatedApiE2ETest {
     assertEquals(422,invalid.statusCode(),invalid.body());
     assertEquals(product,findProduct(data(send(admin,"GET",base+"/products",null,null,null)),"P001"));
     assertEquals(updated,data(send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null)));
-    var withdrawn=send(h5,"POST","/h5/activities/"+activityCode+"/order/withdraw",JSON.createObjectNode().put("expectedVersion",1),h5Csrf,null,UUID.randomUUID().toString());
-    assertEquals(200,withdrawn.statusCode(),withdrawn.body());
+    ObjectNode withdrawRequestBody = JSON.createObjectNode().put("expectedVersion", 1).put("requestType", "WITHDRAW");
+    withdrawRequestBody.putArray("items");
+    var withdrawnRequest=send(h5,"POST","/h5/activities/"+activityCode+"/order-change-requests",withdrawRequestBody,h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,withdrawnRequest.statusCode(),withdrawnRequest.body());
+    long withdrawRequestId=data(withdrawnRequest).path("id").asLong();
+    var withdrawnApproval=send(admin,"POST",base+"/order-change-requests/"+withdrawRequestId+"/approve",JSON.createObjectNode().put("reason","AUTOTEST 审核撤回申请"),adminCsrf,null,UUID.randomUUID().toString());
+    assertEquals(200,withdrawnApproval.statusCode(),withdrawnApproval.body());
+    JsonNode withdrawn=data(send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null));
+    assertEquals("WITHDRAWN",withdrawn.path("status").asText());
     patch.put("casePrice",120).put("orderable",true);
     assertEquals(200,send(admin,"PATCH",base+"/products/"+productId,patch,adminCsrf,product.path("version").asText()).statusCode());
-    assertEquals(data(withdrawn),data(send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null)));
+    assertEquals(withdrawn,data(send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null)));
+    var restoreRequestBody=JSON.createObjectNode().put("expectedVersion",withdrawn.path("currentVersion").asInt()).put("requestType","MODIFY");
+    restoreRequestBody.putArray("items").addObject().put("productId",productId).put("quantity",2);
+    var restoreRequest=send(h5,"POST","/h5/activities/"+activityCode+"/order-change-requests",restoreRequestBody,h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,restoreRequest.statusCode(),restoreRequest.body());
+    var adminRestore=JSON.createObjectNode().put("expectedVersion",withdrawn.path("currentVersion").asInt()).put("expectedLockVersion",withdrawn.path("lockVersion").asInt()).put("reason","验证管理员调整自动驳回");
+    adminRestore.putArray("items").addObject().put("productId",productId).put("quantity",3);
+    var restoredByAdmin=send(admin,"PUT",base+"/orders/"+withdrawn.path("id").asLong(),adminRestore,adminCsrf,null,UUID.randomUUID().toString());
+    assertEquals(200,restoredByAdmin.statusCode(),restoredByAdmin.body());
+    var invalidated=send(admin,"GET",base+"/order-change-requests/"+data(restoreRequest).path("id").asLong(),null,null,null);
+    assertEquals("REJECTED",data(invalidated).path("status").asText());
+    assertTrue(data(invalidated).path("reviewReason").asText().contains("订单已发生变化"));
   }
 
   @Test

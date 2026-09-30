@@ -60,6 +60,22 @@ export type RuntimeOrder = {
   operations: Array<{ type: string; source: string; adminName?: string; orderVersion?: number; reason?: string; occurredAt: string }>;
 };
 
+export type OrderChangeRequestItem = {
+  productId: number; materialCode?: string; materialName: string; productLine?: string; quantity: number;
+  casePrice?: number; lineAmount?: number; lineTons?: number;
+};
+
+export type OrderChangeRequest = {
+  id: number; orderId: number; orderNo: string; dealerName: string; phoneMasked?: string;
+  requestType: "MODIFY" | "WITHDRAW"; status: "PENDING" | "APPROVED" | "REJECTED";
+  phone?: string; itemCount?: number;
+  originalOrder?: RuntimeOrder;
+  baseVersion: number; currentVersion: number; currentTotalQuantity: number; currentTotalTons?: number;
+  currentTotalAmount: number; requestedTotalQuantity?: number; requestedTotalTons?: number;
+  requestedTotalAmount?: number; items: OrderChangeRequestItem[]; customerNote?: string; reviewReason?: string;
+  reviewedByName?: string; requestedAt: string; reviewedAt?: string;
+};
+
 export type AdminOrderPreview = {
   totalQuantity: number; totalTons?: number; totalAmount: number;
   items: Array<{ productId: number; materialCode?: string; materialName: string; productLine?: string;

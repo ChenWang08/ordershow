@@ -313,13 +313,71 @@ paths:
                   minimum: 1
       responses:
         '200':
-          description: 撤回成功，明细和订单号保留
+          description: 兼容旧入口；已有订单的撤回需要改用订单变更申请，直接调用返回 ORDER_CHANGE_REVIEW_REQUIRED
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CurrentOrderResponse'
         '409':
           $ref: '#/components/responses/Problem'
+  /h5/activities/{activityCode}/order-change-requests:
+    post:
+      operationId: createH5OrderChangeRequest
+      tags: [H5]
+      summary: 提交已有订单的修改或撤回申请
+      description: 首次下单仍使用订单 PUT 接口；已有订单修改商品、数量或取消本次订货均创建待审核申请，当前订单在审核前保持不变。
+      security:
+        - h5Cookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedVersion, requestType, items]
+              properties:
+                expectedVersion:
+                  type: integer
+                  minimum: 1
+                requestType:
+                  type: string
+                  enum: [MODIFY, WITHDRAW]
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/SubmitOrderItem'
+                customerNote:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: 变更申请已创建
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /h5/activities/{activityCode}/order-change-requests/current:
+    get:
+      operationId: getCurrentH5OrderChangeRequest
+      tags: [H5]
+      summary: 查询当前订单最近的变更申请
+      security:
+        - h5Cookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      responses:
+        '200':
+          description: 当前待审核、已驳回或冲突的申请；没有时 data 为 null
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
   /admin/auth/login:
     post:
       operationId: loginAdmin
@@ -1750,6 +1808,142 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/order-change-requests:
+    get:
+      operationId: listOrderChangeRequests
+      tags: [Orders]
+      summary: 查询待审核订单变更
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, APPROVED, REJECTED]
+            default: PENDING
+      responses:
+        '200':
+          description: 订单变更申请列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericListResponse'
+  /admin/activities/{activityId}/order-change-requests/page:
+    get:
+      operationId: pageOrderChangeRequests
+      tags: [Orders]
+      summary: 分页查询申请摘要，不包含商品明细
+      security: [{adminCookie: []}]
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - {name: status, in: query, schema: {type: string, enum: [PENDING, APPROVED, REJECTED, ALL], default: PENDING}}
+        - {name: type, in: query, schema: {type: string, enum: [MODIFY, WITHDRAW, ALL], default: ALL}}
+        - {name: keyword, in: query, schema: {type: string}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: size, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 20}}
+        - {name: newest, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: data 为申请摘要，page 包含 number/size/totalElements/totalPages
+  /admin/activities/{activityId}/order-change-requests/pending:
+    get:
+      operationId: pendingOrderChangeRequests
+      tags: [Orders]
+      summary: 查询待审核申请与订单的对应关系，供待审核数量和订单标记使用
+      security: [{adminCookie: []}]
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: data 为 id 和 orderId 数组
+  /admin/activities/{activityId}/order-change-requests/{requestId}:
+    get:
+      operationId: orderChangeRequestDetail
+      tags: [Orders]
+      summary: 查询完整申请商品及 originalOrder 原订单快照，旧申请快照可为空
+      security: [{adminCookie: []}]
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - {name: requestId, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: 申请状态仅为 PENDING/APPROVED/REJECTED
+        '404':
+          description: 申请不存在
+  /admin/activities/{activityId}/order-change-requests/{requestId}/approve:
+    post:
+      operationId: approveOrderChangeRequest
+      tags: [Orders]
+      summary: 审核通过订单变更
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: 审核通过并应用新订单版本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/order-change-requests/{requestId}/reject:
+    post:
+      operationId: rejectOrderChangeRequest
+      tags: [Orders]
+      summary: 驳回订单变更
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '200':
+          description: 申请已驳回，当前订单不变
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
   /admin/activities/{activityId}/lottery/rules:
     get:
       operationId: listLotteryRules

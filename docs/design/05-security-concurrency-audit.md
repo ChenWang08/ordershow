@@ -21,8 +21,8 @@
 | 手机号白名单验证 | ✓ | — | — | — | — |
 | 查看商品目录 | — | 本人通道/分公司 | 全部 | — | ✓ |
 | 查看订单 | — | 仅本人 | 当前活动全部 | — | ✓ |
-| 客户提交/修改订单 | — | 仅本人且活动进行中 | — | — | — |
-| 撤回订单 | — | 仅本人且未截止 | — | — | — |
+| 客户首次提交订单 | — | 仅本人且活动进行中 | — | — | — |
+| 客户订单变更/撤回申请 | — | 仅本人且未截止；截止前已创建申请不自动过期 | — | — | — |
 | 后台新增/调整/恢复/作废订单 | — | — | `ACTIVE`、`CLOSED`、`FINISHED` 按部门权限；必须原因和幂等键 | — | — |
 | 活动创建与状态迁移 | — | — | ✓ | — | 自动开始/截止 |
 | 商品/白名单全量导入 | — | — | 活动开始前 ✓ | — | 执行任务 |
@@ -224,7 +224,8 @@ WHERE id = ? AND lock_version = ? AND current_version_no = ?;
 | `IMPORT_UPLOADED/CONFIRMED/FAILED` | 文件摘要、统计和错误 |
 | `PRODUCT_UPDATED/DEACTIVATED` | 单条紧急变更前后值和原因；价格变更的相关当前订单金额由同一商品变更事务更新，不另写订单操作 |
 | `CUSTOMER_UPDATED/DEACTIVATED` | 白名单变更前后值和原因 |
-| `ORDER_WITHDRAWN` | 客户在 H5 撤回订单的订单号、原状态和操作时间 |
+| `ORDER_WITHDRAWN` | 订单变更申请审核通过后撤回订单的订单号、原状态和操作时间 |
+| `H5_CHANGE_REQUESTED/APPROVED/REJECTED` | 客户变更申请快照、审核结果、管理员和原因 |
 | `EXPORT_CREATED/DOWNLOADED` | 导出类型、筛选和文件，不记录下载内容 |
 | `LOTTERY_RULE_PUBLISHED` | 规则快照 |
 | `LOTTERY_DRAWN` | 轮次、候选数、结果哈希 |

@@ -1,5 +1,5 @@
 import { api, apiBase, ApiError } from "./client";
-import type { AdminOrderPreview, AdminOrderSummary, Envelope, PageEnvelope, RuntimeOrder } from "./types";
+import type { AdminOrderPreview, AdminOrderSummary, Envelope, OrderChangeRequest, PageEnvelope, RuntimeOrder } from "./types";
 
 export async function loadAdminOrders(activityId: number, filters: { status?: string; customerType?: string; keyword?: string; page?: number; size?: number } = {}) {
   const query = new URLSearchParams();
@@ -39,6 +39,33 @@ export async function voidAdminOrder(activityId: number, orderId: number, expect
   return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders/${orderId}/void`, {
     method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
     body: JSON.stringify({ expectedVersion, expectedLockVersion, reason }),
+  }, "admin")).data;
+}
+
+export async function loadAdminOrderChangeRequests(activityId: number, status = "PENDING") {
+  return (await api<Envelope<OrderChangeRequest[]>>(`/admin/activities/${activityId}/order-change-requests?status=${encodeURIComponent(status)}`)).data;
+}
+
+export function loadOrderChangePage(activityId: number, filters: { status: string; type: string; keyword: string; page: number; size: number; newest: boolean }) {
+  const query = new URLSearchParams(Object.entries(filters).map(([key,value]) => [key,String(value)]));
+  return api<PageEnvelope<OrderChangeRequest>>(`/admin/activities/${activityId}/order-change-requests/page?${query}`);
+}
+export async function loadPendingOrderChanges(activityId: number) {
+  return (await api<Envelope<Array<{id:number;orderId:number}>>>(`/admin/activities/${activityId}/order-change-requests/pending`)).data;
+}
+export async function loadOrderChangeDetail(activityId: number, id: number) {
+  return (await api<Envelope<OrderChangeRequest>>(`/admin/activities/${activityId}/order-change-requests/${id}`)).data;
+}
+
+export async function approveAdminOrderChangeRequest(activityId: number, requestId: number, reason = "") {
+  return (await api<Envelope<OrderChangeRequest>>(`/admin/activities/${activityId}/order-change-requests/${requestId}/approve`, {
+    method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ reason }),
+  }, "admin")).data;
+}
+
+export async function rejectAdminOrderChangeRequest(activityId: number, requestId: number, reason: string) {
+  return (await api<Envelope<OrderChangeRequest>>(`/admin/activities/${activityId}/order-change-requests/${requestId}/reject`, {
+    method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ reason }),
   }, "admin")).data;
 }
 

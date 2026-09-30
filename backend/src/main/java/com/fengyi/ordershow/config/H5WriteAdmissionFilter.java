@@ -41,7 +41,7 @@ public class H5WriteAdmissionFilter extends OncePerRequestFilter {
     String method=request.getMethod();
     if(!(method.equals("PUT") || method.equals("POST") || method.equals("DELETE")))return true;
     String path=request.getRequestURI().substring(request.getContextPath().length());
-    return !path.matches("/h5/activities/[^/]+/(?:order(?:/withdraw)?|order-draft)");
+    return !path.matches("/h5/activities/[^/]+/(?:order(?:/withdraw)?|order-draft|order-change-requests)");
   }
 
   @Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain)

@@ -41,7 +41,12 @@ class OpenApiContractTest {
         "/admin/activities/{activityId}/attendees/{attendeeId}",
         "/h5/activities/{activityCode}/order",
         "/h5/activities/{activityCode}/order-draft",
-        "/h5/activities/{activityCode}/order/withdraw");
+        "/h5/activities/{activityCode}/order/withdraw",
+        "/h5/activities/{activityCode}/order-change-requests",
+        "/h5/activities/{activityCode}/order-change-requests/current",
+        "/admin/activities/{activityId}/order-change-requests",
+        "/admin/activities/{activityId}/order-change-requests/{requestId}/approve",
+        "/admin/activities/{activityId}/order-change-requests/{requestId}/reject");
     assertThat(paths.keySet()).noneMatch(path -> path.startsWith("/admin/") && path.endsWith("/withdraw"));
     @SuppressWarnings("unchecked")
     Map<String, Object> orderCollection = (Map<String, Object>) paths.get("/admin/activities/{activityId}/orders");

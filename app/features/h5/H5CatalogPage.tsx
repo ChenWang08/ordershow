@@ -20,7 +20,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                 <b>{dealerName}</b>
                 <small>{identityLabel} · {displayBranch || "未标注分公司"} · {importedIdentity?.dealerName || "已验证客户"} · 手机 {displayPhone}</small>
               </div>
-              <div className="policy-note"><b>订货提示</b><span>{activityClosed ? "活动已截止，当前订单仅可查看。" : "所有商品按箱订购，提交后可在截止时间前修改或取消本次订货。"}</span></div>
+              <div className="policy-note"><b>订货提示</b><span>{activityClosed ? "活动已截止，当前订单仅可查看。" : orderStatus === "none" ? "所有商品按箱订购，首次提交后如需修改或取消本次订货，需要提交后台审核。" : "当前订单的商品、数量或取消操作需要提交后台审核，审核通过后才会更新。"}</span></div>
               {draftMessage && <div className="h5-draft-status" role="status">{draftMessage}</div>}
               <div className="product-toolbar">
                 <div className={`segment${hasRebateSplit ? "" : " single"}`} role="tablist" aria-label="商品返利类型">

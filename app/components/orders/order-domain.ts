@@ -158,6 +158,9 @@ export function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRec
     ADMIN_ADJUST: "管理员调整订单",
     ADMIN_VOID: "管理员作废订单",
     ADMIN_RESTORE: "管理员恢复订单",
+    H5_CHANGE_REQUESTED: "客户提交变更申请",
+    H5_CHANGE_APPROVED: "管理员审核通过订单变更",
+    H5_CHANGE_REJECTED: "订单变更申请已驳回",
   };
   const status: OrderStatus = order.status === "WITHDRAWN" ? "已撤回" : order.status === "VOIDED" ? "已作废" : "已提交";
   return {
@@ -205,7 +208,7 @@ export function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRec
     operationRecords: (detail.operations ?? []).map((operation) => ({
       time: formatDate(operation.occurredAt),
       title: operationLabels[operation.type] || operation.type,
-      detail: `${operation.source === "H5" ? "客户" : operation.source === "ADMIN" ? "管理员" : operation.source}${operation.adminName ? `（${operation.adminName}）` : ""}${operation.orderVersion ? ` · V${operation.orderVersion}` : ""}${operation.reason ? ` · ${operation.reason}` : ""}`,
+      detail: `${operation.source === "H5" ? "客户" : operation.source === "ADMIN" ? "管理员" : operation.source === "SYSTEM" ? "系统" : operation.source}${operation.adminName ? `（${operation.adminName}）` : ""}${operation.orderVersion ? ` · V${operation.orderVersion}` : ""}${operation.reason ? ` · ${operation.reason}` : ""}`,
     })),
   };
 }

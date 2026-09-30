@@ -3,6 +3,7 @@ package com.fengyi.ordershow.order;
 import static com.fengyi.ordershow.order.OrderData.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.common.PageResponse;
@@ -32,15 +33,17 @@ public class OrderService {
   private final ObjectMapper json;
   private final OrderQueryService queries;
   private final OrderExportService exports;
+  private final OrderChangeRequestRepository changeRequests;
 
   public OrderService(OrderRepository repository, ActivityService activities, DashboardService dashboards, ObjectMapper json,
-                      OrderQueryService queries, OrderExportService exports) {
+                      OrderQueryService queries, OrderExportService exports, OrderChangeRequestRepository changeRequests) {
     this.repository = repository;
     this.activities = activities;
     this.dashboards = dashboards;
     this.json = json;
     this.queries = queries;
     this.exports = exports;
+    this.changeRequests = changeRequests;
   }
 
   @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
@@ -85,8 +88,11 @@ public class OrderService {
       return replay;
     }
     activities.requireWritable(activity.id());
-
     OrderRow current = repository.lockOrder(activity.id(), customer.customerId());
+    if (current != null) {
+      repository.cancelH5Submission(activity.id(), customer.customerId(), idempotencyKey);
+      throw DomainException.conflict("ORDER_CHANGE_REVIEW_REQUIRED", "已有订单的修改需要提交后台审核");
+    }
     int currentVersion = current == null ? 0 : current.version();
     if (request.expectedVersion() != currentVersion) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单已在其他页面更新，请刷新后重试");
     if (current != null && "VOIDED".equals(current.status())) {
@@ -151,28 +157,141 @@ public class OrderService {
     requireIdentity(activity.id(), customer);
     activities.requireWritable(activity.id());
     repository.lockCustomerSubmission(activity.id(), customer.customerId());
-    activities.requireWritable(activity.id());
-    byte[] requestHash = hash(Map.of("expectedVersion", expectedVersion));
-    IdempotencyResult replay = repository.beginIdempotency(activity.id(), customer.customerId(), "ORDER_WITHDRAW", idempotencyKey, requestHash);
-    if (replay.replay()) {
-      repository.deleteDraft(activity.id(), customer.customerId());
-      return repository.findByCustomer(activity.id(), customer.customerId(), includeHistory);
-    }
     OrderRow order = repository.lockOrder(activity.id(), customer.customerId());
     if (order == null) throw DomainException.notFound("ORDER_NOT_FOUND", "尚未提交订单");
-    if (order.version() != expectedVersion) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单版本已变化，请刷新后重试");
-    if ("WITHDRAWN".equals(order.status())) {
-      repository.completeIdempotency(activity.id(), customer.customerId(), "ORDER_WITHDRAW", idempotencyKey, order.id());
-      repository.deleteDraft(activity.id(), customer.customerId());
-      return repository.order(order.id(), includeHistory);
+    throw DomainException.conflict("ORDER_CHANGE_REVIEW_REQUIRED", "已有订单的撤回需要提交后台审核");
+  }
+
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+  public ChangeRequestView createH5ChangeRequest(String activityCode, H5Principal customer, ChangeRequestRequest request,
+                                                 String idempotencyKey, String traceId) {
+    var activity = activities.orderingActivity(activityCode);
+    requireIdentity(activity.id(), customer);
+    if (request == null) throw DomainException.badRequest("ORDER_CHANGE_REQUEST_INVALID", "订单变更申请不能为空");
+    repository.lockCustomerSubmission(activity.id(), customer.customerId());
+    String requestType = normalizeChangeRequestType(request.requestType());
+    IdempotencyResult replay = repository.beginIdempotency(activity.id(), "H5_CUSTOMER", customer.customerId(),
+        "ORDER_CHANGE_REQUEST", idempotencyKey, hash(request));
+    if (replay.replay()) {
+      OrderChangeRequestRow existing = changeRequests.byIdempotency(activity.id(), customer.customerId(), idempotencyKey);
+      if (existing == null) throw DomainException.conflict("REQUEST_REPLAY_RESULT_MISSING", "此前申请结果不存在，请刷新订单");
+      return changeRequestView(existing);
     }
-    int changed = repository.withdrawOrder(order, expectedVersion);
-    if (changed != 1) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单状态已变化，请刷新后重试");
-    repository.insertH5Withdrawal(activity.id(), order.id(), expectedVersion, traceId);
-    repository.writeOutbox(activity.id(), order.id(), "ORDER_WITHDRAWN", Map.of("orderId", order.id(), "version", expectedVersion));
-    repository.completeIdempotency(activity.id(), customer.customerId(), "ORDER_WITHDRAW", idempotencyKey, order.id());
+    activities.requireWritable(activity.id());
+    repository.lockCustomerSubmission(activity.id(), customer.customerId());
+    OrderRow current = repository.lockOrder(activity.id(), customer.customerId());
+    if (current == null) throw DomainException.notFound("ORDER_NOT_FOUND", "尚未提交订单");
+    if (current.version() != request.expectedVersion()) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单版本已变化，请刷新后重试");
+    if ("VOIDED".equals(current.status())) throw DomainException.conflict("ORDER_VOIDED", "订单已由管理员作废，请联系管理员处理");
+    if ("WITHDRAW".equals(requestType) && "WITHDRAWN".equals(current.status())) {
+      throw DomainException.conflict("ORDER_ALREADY_WITHDRAWN", "订单已经撤回");
+    }
+    CustomerSnapshot customerSnapshot = repository.orderCustomer(activity.id(), customer.customerId());
+    CalculatedOrder calculated;
+    if ("MODIFY".equals(requestType)) {
+      calculated = calculate(activity.id(), customerSnapshot, request.items());
+    } else {
+      calculated = new CalculatedOrder(List.of(), 0, null, null);
+    }
+    String itemsJson = writeChangeItems(calculated.items());
+    changeRequests.rejectPending(current.id(), "已被客户新申请替代");
+    long requestId = changeRequests.insert(activity.id(), current.id(), customer.customerId(), requestType, current.version(), current.lockVersion(),
+        "MODIFY".equals(requestType) ? calculated.totalQuantity() : null,
+        "MODIFY".equals(requestType) ? calculated.totalTons() : null,
+        "MODIFY".equals(requestType) ? calculated.totalAmount() : null,
+        itemsJson, optionalReason(request.customerNote()), idempotencyKey);
+    try { changeRequests.saveOriginal(requestId,json.writeValueAsString(repository.order(current.id(),false))); }
+    catch (java.io.IOException e) { throw new IllegalStateException("原订单快照保存失败",e); }
     repository.deleteDraft(activity.id(), customer.customerId());
-    return repository.order(order.id(), includeHistory);
+    repository.insertOperation(activity.id(), current.id(), "H5_CHANGE_REQUESTED", "H5", null, current.version(),
+        "MODIFY".equals(requestType) ? "提交订单修改申请" : "提交订单撤回申请", traceId);
+    repository.completeIdempotency(activity.id(), "H5_CUSTOMER", customer.customerId(), "ORDER_CHANGE_REQUEST", idempotencyKey, requestId);
+    return changeRequestView(changeRequests.byIdForUpdate(activity.id(), requestId));
+  }
+
+  @Transactional(readOnly = true)
+  public ChangeRequestView currentH5ChangeRequest(String activityCode, H5Principal customer) {
+    var activity = activities.orderingActivity(activityCode);
+    requireIdentity(activity.id(), customer);
+    return changeRequestView(changeRequests.pendingForCustomer(activity.id(), customer.customerId()));
+  }
+
+  @Transactional(readOnly = true)
+  public List<ChangeRequestView> adminChangeRequests(long activityId, String status) {
+    requireAdminOrderWritable(activityId);
+    return changeRequests.list(activityId, status, 200).stream().map(this::changeRequestView).toList();
+  }
+
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+  public ChangeRequestView approveChangeRequest(long activityId, long requestId, String reviewReason, AdminPrincipal admin,
+                                                String idempotencyKey, String traceId) {
+    ActivityService.ActivityView activity = requireAdminOrderWritable(activityId);
+    repository.lockPricing(activityId);
+    String note = optionalReason(reviewReason);
+    IdempotencyResult replay = repository.beginIdempotency(activityId, "ADMIN", admin.id(), "ORDER_CHANGE_APPROVE",
+        idempotencyKey, hash(Map.of("requestId", requestId, "reason", note == null ? "" : note)));
+    if (replay.replay()) {
+      OrderChangeRequestRow existing = changeRequests.byIdForUpdate(activityId, requestId);
+      if (existing == null) throw DomainException.notFound("ORDER_CHANGE_REQUEST_NOT_FOUND", "订单变更申请不存在");
+      return changeRequestView(existing);
+    }
+    OrderChangeRequestRow request = changeRequests.byIdForUpdate(activityId, requestId);
+    if (request == null) throw DomainException.notFound("ORDER_CHANGE_REQUEST_NOT_FOUND", "订单变更申请不存在");
+    if (!"PENDING".equals(request.status())) throw DomainException.conflict("ORDER_CHANGE_REQUEST_STATUS", "该申请已处理");
+    OrderRow current = repository.lockOrderById(activityId, request.orderId());
+    if (current == null) throw DomainException.notFound("ORDER_NOT_FOUND", "订单不存在");
+    if (current.version()!=request.baseVersion() || current.lockVersion()!=request.baseLockVersion() || "VOIDED".equals(current.status())) {
+      changeRequests.conflict(request.id(), "订单已发生变化，本次申请失效，请重新提交");
+      repository.completeIdempotency(activityId,"ADMIN",admin.id(),"ORDER_CHANGE_APPROVE",idempotencyKey,request.id());
+      return changeRequestView(changeRequests.byIdForUpdate(activityId,request.id()));
+    }
+    CustomerSnapshot customer = repository.orderCustomer(activityId, request.customerId());
+    int version = current.version();
+    String reason = "H5订单变更申请 #" + request.id() + " 审核通过" + (note == null ? "" : "：" + note);
+    if ("MODIFY".equals(request.requestType())) {
+      CalculatedOrder calculated = calculate(activityId, customer, requestItems(request));
+      int changed = repository.adjustOrder(activityId, request.orderId(), current, version + 1, calculated, admin.id());
+      if (changed != 1) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单已被其他操作更新，请刷新后重试");
+      repository.deleteCurrentItems(request.orderId());
+      repository.insertCurrentItems(request.orderId(), calculated.items());
+      long versionId = repository.insertVersion(activityId, request.orderId(), version + 1, customer, calculated.totalQuantity(), calculated.totalTons(),
+          calculated.totalAmount(), "ADMIN", admin.id(), reason, idempotencyKey);
+      repository.insertVersionItems(versionId, calculated.items());
+      repository.insertOperation(activityId, request.orderId(), "H5_CHANGE_APPROVED", "ADMIN", admin.id(), version + 1, reason, traceId);
+      afterAdminOrderChange(activity, request.orderId(), "ORDER_CHANGE_APPROVED", version + 1);
+    } else {
+      int changed = repository.withdrawOrderByAdmin(activityId, request.orderId(), current, reason, admin.id());
+      if (changed != 1) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单已被其他操作更新，请刷新后重试");
+      repository.insertOperation(activityId, request.orderId(), "H5_CHANGE_APPROVED", "ADMIN", admin.id(), version, reason, traceId);
+      afterAdminOrderChange(activity, request.orderId(), "ORDER_CHANGE_APPROVED", version);
+    }
+    changeRequests.review(request.id(), "APPROVED", note, admin.id());
+    repository.completeIdempotency(activityId, "ADMIN", admin.id(), "ORDER_CHANGE_APPROVE", idempotencyKey, request.id());
+    return changeRequestView(changeRequests.byIdForUpdate(activityId, request.id()));
+  }
+
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+  public ChangeRequestView rejectChangeRequest(long activityId, long requestId, String reviewReason, AdminPrincipal admin,
+                                               String idempotencyKey, String traceId) {
+    ActivityService.ActivityView activity = requireAdminOrderWritable(activityId);
+    String reason = requireReason(reviewReason);
+    repository.lockPricing(activityId);
+    IdempotencyResult replay = repository.beginIdempotency(activityId, "ADMIN", admin.id(), "ORDER_CHANGE_REJECT",
+        idempotencyKey, hash(Map.of("requestId", requestId, "reason", reason)));
+    if (replay.replay()) {
+      OrderChangeRequestRow existing = changeRequests.byIdForUpdate(activityId, requestId);
+      if (existing == null) throw DomainException.notFound("ORDER_CHANGE_REQUEST_NOT_FOUND", "订单变更申请不存在");
+      return changeRequestView(existing);
+    }
+    OrderChangeRequestRow request = changeRequests.byIdForUpdate(activityId, requestId);
+    if (request == null) throw DomainException.notFound("ORDER_CHANGE_REQUEST_NOT_FOUND", "订单变更申请不存在");
+    if (!"PENDING".equals(request.status())) throw DomainException.conflict("ORDER_CHANGE_REQUEST_STATUS", "该申请已处理");
+    OrderRow current = repository.lockOrderById(activityId, request.orderId());
+    if (current == null) throw DomainException.notFound("ORDER_NOT_FOUND", "订单不存在");
+    repository.insertOperation(activityId, request.orderId(), "H5_CHANGE_REJECTED", "ADMIN", admin.id(), current.version(), reason, traceId);
+    changeRequests.review(request.id(), "REJECTED", reason, admin.id());
+    repository.completeIdempotency(activityId, "ADMIN", admin.id(), "ORDER_CHANGE_REJECT", idempotencyKey, request.id());
+    return changeRequestView(changeRequests.byIdForUpdate(activityId, request.id()));
   }
 
   public OrderPreview adminPreview(long activityId, AdminPreviewRequest request, AdminPrincipal admin) {
@@ -241,6 +360,7 @@ public class OrderService {
       }
       if (!changedPrices.isEmpty()) {
         repository.saveRepriced(activityId, orderId, changedPrices, admin.id(), "价格同步：" + reason, idempotencyKey);
+        changeRequests.rejectPending(orderId, "订单已发生变化，本次申请失效，请重新提交");
         dashboards.refreshFinalSnapshots(activityId);
       }
       repository.completeIdempotency(activityId, "ADMIN", admin.id(), "ADMIN_ORDER_ADJUST", idempotencyKey, orderId);
@@ -260,6 +380,7 @@ public class OrderService {
     repository.insertOperation(activityId, orderId, operation, "ADMIN", admin.id(), nextVersion, reason, traceId);
     repository.completeIdempotency(activityId, "ADMIN", admin.id(), "ADMIN_ORDER_ADJUST", idempotencyKey, orderId);
     afterAdminOrderChange(activity, orderId, "ORDER_ADMIN_ADJUSTED", nextVersion);
+    changeRequests.rejectPending(orderId, "订单已发生变化，本次申请失效，请重新提交");
     return repository.adminOrder(activityId, orderId);
   }
 
@@ -282,6 +403,7 @@ public class OrderService {
       if (changed != 1) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单已被其他操作更新，请刷新后重试");
       repository.insertOperation(activityId, orderId, "ADMIN_VOID", "ADMIN", admin.id(), current.version(), reason, traceId);
       afterAdminOrderChange(activity, orderId, "ORDER_ADMIN_VOIDED", current.version());
+      changeRequests.rejectPending(orderId, "订单已发生变化，本次申请失效，请重新提交");
     }
     repository.completeIdempotency(activityId, "ADMIN", admin.id(), "ADMIN_ORDER_VOID", idempotencyKey, orderId);
     return repository.adminOrder(activityId, orderId);
@@ -365,6 +487,57 @@ public class OrderService {
     return value;
   }
 
+  private static String optionalReason(String reason) {
+    if (reason == null || reason.trim().isEmpty()) return null;
+    String value = reason.trim();
+    if (value.length() > 500) throw DomainException.badRequest("ORDER_REASON_TOO_LONG", "说明不能超过 500 个字符");
+    return value;
+  }
+
+  private static String normalizeChangeRequestType(String type) {
+    String value = type == null ? "" : type.trim().toUpperCase();
+    if (!List.of("MODIFY", "WITHDRAW").contains(value)) throw DomainException.badRequest("ORDER_CHANGE_TYPE_INVALID", "订单变更类型不正确");
+    return value;
+  }
+
+  private String writeChangeItems(List<CalculatedItem> items) {
+    try {
+      return json.writeValueAsString(items.stream().map(item -> new ChangeRequestItem(item.product().id(), item.product().materialCode(),
+          item.product().materialName(), item.product().productLine(), item.quantity(), item.pricing().casePriceSnapshot(),
+          item.pricing().lineAmount(), item.lineTons())).toList());
+    } catch (Exception exception) {
+      throw new IllegalStateException("订单变更申请快照保存失败", exception);
+    }
+  }
+
+  private List<SubmitItem> requestItems(OrderChangeRequestRow request) {
+    try {
+      List<ChangeRequestItem> items = json.readValue(request.requestedItemsJson(), new TypeReference<>() {});
+      return items.stream().map(item -> new SubmitItem(item.productId(), item.quantity())).toList();
+    } catch (Exception exception) {
+      throw new IllegalStateException("订单变更申请快照无法读取", exception);
+    }
+  }
+
+  public ChangeRequestView changeRequestDetail(long activityId,long requestId) {
+    var row=changeRequests.detail(activityId,requestId);
+    if(row==null) throw DomainException.notFound("ORDER_CHANGE_REQUEST_NOT_FOUND","申请不存在");
+    return changeRequestView(row);
+  }
+
+  private ChangeRequestView changeRequestView(OrderChangeRequestRow row) {
+    if (row == null) return null;
+    try {
+      List<ChangeRequestItem> items = json.readValue(row.requestedItemsJson(), new TypeReference<>() {});
+      return new ChangeRequestView(row.id(), row.orderId(), row.orderNo(), row.dealerName(), row.phoneMasked(), row.requestType(), row.status(),
+          row.baseVersion(), row.currentVersion(), row.currentTotalQuantity(), row.currentTotalTons(), row.currentTotalAmount(),
+          row.requestedTotalQuantity(), row.requestedTotalTons(), row.requestedTotalAmount(), items, row.customerNote(), row.reviewReason(),
+          row.reviewedByName(), row.requestedAt(), row.reviewedAt(), row.originalOrderJson()==null?null:json.readValue(row.originalOrderJson(),OrderView.class));
+    } catch (Exception exception) {
+      throw new IllegalStateException("订单变更申请无法读取", exception);
+    }
+  }
+
 
   private void afterAdminOrderChange(ActivityService.ActivityView activity, long orderId, String event, int version) {
     if (!"ARCHIVED".equals(activity.status())) {
@@ -389,6 +562,8 @@ public class OrderService {
   public record SubmitItem(long productId, long quantity) {}
   public record SubmitRequest(int expectedVersion, List<SubmitItem> items) {}
   public record WithdrawRequest(int expectedVersion) {}
+  public record ChangeRequestRequest(int expectedVersion, String requestType, List<SubmitItem> items, String customerNote) {}
+  public record ChangeRequestReviewRequest(String reason) {}
   public record AdminPreviewRequest(long activityCustomerId, List<SubmitItem> items) {}
   public record AdminCreateRequest(long activityCustomerId, List<SubmitItem> items, String reason) {}
   public record AdminAdjustRequest(int expectedVersion, int expectedLockVersion, List<SubmitItem> items, String reason) {}
@@ -399,6 +574,13 @@ public class OrderService {
                             BigDecimal tierCasePrice, Long tierMinQuantity, long tierPriceQuantity,
                             String pricingMode, BigDecimal lineAmount, BigDecimal lineTons) {}
   public record OrderPreview(long totalQuantity, BigDecimal totalTons, BigDecimal totalAmount, List<PreviewItem> items) {}
+  public record ChangeRequestItem(long productId, String materialCode, String materialName, String productLine, long quantity,
+                                  BigDecimal casePrice, BigDecimal lineAmount, BigDecimal lineTons) {}
+  public record ChangeRequestView(long id, long orderId, String orderNo, String dealerName, String phoneMasked, String requestType,
+                                  String status, int baseVersion, int currentVersion, long currentTotalQuantity, BigDecimal currentTotalTons,
+                                  BigDecimal currentTotalAmount, Long requestedTotalQuantity, BigDecimal requestedTotalTons,
+                                  BigDecimal requestedTotalAmount, List<ChangeRequestItem> items, String customerNote, String reviewReason,
+                                  String reviewedByName, Instant requestedAt, Instant reviewedAt, OrderView originalOrder) {}
   public record ItemView(long id, Long productId, int lineNo, String materialCode, String materialName, String productLine, String specification, String casePack, long quantity, BigDecimal casePrice, Long appliedTierMinQuantity, BigDecimal baseCasePrice, Long basePriceQuantity, BigDecimal tierCasePrice, Long tierMinQuantity, Long tierPriceQuantity, String pricingMode, BigDecimal lineAmount, BigDecimal tonCaseFactor, BigDecimal lineTons) {}
   public record OrderVersionView(long id, int version, long totalQuantity, BigDecimal totalTons, BigDecimal totalAmount,
                                  Instant submittedAt, String submittedSource, String submittedByAdminName,
