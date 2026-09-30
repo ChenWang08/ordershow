@@ -3177,7 +3177,7 @@ components:
           format: date-time
     LotteryRoundWriteRequest:
       type: object
-      required: [roundNo, name, winnerCount, candidateScope, customerType, excludePreviousWinners]
+      required: [roundNo, name, winnerCount, candidateScope, customerType, excludePreviousWinners, probabilityMode]
       properties:
         roundNo:
           type: integer
@@ -3197,6 +3197,11 @@ components:
         customerType:
           type: string
           enum: [ALL, GENERAL, SPECIAL]
+        probabilityMode:
+          type: string
+          enum: [EQUAL, ORDER_AMOUNT_WEIGHTED]
+          default: ORDER_AMOUNT_WEIGHTED
+          description: 不勾选时等概率；按订单金额加权时使用开奖前当前有效 SUBMITTED 订单金额占候选有效订单金额总和的比例。
         minimumOrderAmount:
           $ref: '#/components/schemas/Decimal'
         excludePreviousWinners:

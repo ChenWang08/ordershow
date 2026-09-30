@@ -819,6 +819,7 @@ CREATE TABLE lottery_round (
   customer_type VARCHAR(16) NOT NULL DEFAULT 'ALL',
   minimum_order_amount DECIMAL(18,2) NOT NULL DEFAULT 0,
   qualification_metric VARCHAR(20) NOT NULL DEFAULT 'AMOUNT',
+  probability_mode VARCHAR(32) NOT NULL DEFAULT 'EQUAL',
   minimum_order_box_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
   qualification_cutoff_at DATETIME(3) NULL,
   exclude_previous_winners BOOLEAN NOT NULL DEFAULT TRUE,
@@ -848,6 +849,7 @@ CREATE TABLE lottery_round (
   CONSTRAINT ck_lottery_round_scope CHECK (candidate_scope IN ('ALL_CUSTOMERS', 'ATTENDEES', 'VALID_ORDERS')),
   CONSTRAINT ck_lottery_round_customer CHECK (customer_type IN ('ALL', 'GENERAL', 'SPECIAL')),
   CONSTRAINT ck_lottery_round_qualification_metric CHECK (qualification_metric IN ('AMOUNT', 'BOX_COUNT')),
+  CONSTRAINT ck_lottery_round_probability_mode CHECK (probability_mode IN ('EQUAL', 'ORDER_AMOUNT_WEIGHTED')),
   CONSTRAINT ck_lottery_round_status CHECK (status IN ('DRAFT', 'READY', 'DRAWING', 'DRAWN', 'COMPLETED', 'RESET')),
   CONSTRAINT ck_lottery_round_count CHECK (winner_count > 0 AND minimum_order_amount >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

@@ -41,6 +41,8 @@
 
 2026-09-07 已同步商品自动计价规则：管理员保存基础箱价或阶梯优惠规则后，系统在同一事务内按每张订单的商品箱数更新当前活动 `SUBMITTED` 订单的 `order_item` 价格、小计和 `customer_order.total_amount`，不新增订单版本或订单操作记录；客户提交/管理员数量调整产生的原有版本规则不变。订单管理、H5、看板、排行和导出均读取当前金额，历史 `order_version_item` 仅作为提交时价格记录。
 
+2026-09-29 已同步抽奖金额加权规则：每轮可选择等概率或按当前有效 `SUBMITTED` 订单金额加权；新建轮次默认加权，历史轮次保持等概率；后台候选预览显示两位小数概率，现场抽奖大屏不展示概率。数据库迁移、接口口径、状态锁定和测试场景分别见 `02-database-design.md`、`03-api-guide.md`、`04-state-machines.md`、`../../db/migrations/V032__lottery_order_amount_weighting.sql` 和 `../testing/automation-test-plan.md`。
+
 ### 2.2 当前实现边界
 
 | 能力 | 当前状态 |

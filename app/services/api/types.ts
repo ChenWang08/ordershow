@@ -126,7 +126,7 @@ export type LotteryRoundApi = {
   prizeImageFileId?: number | null; prizeImageUrl?: string | null;
   winnerCount: number; candidateScope: "ALL_CUSTOMERS" | "ATTENDEES" | "VALID_ORDERS";
   customerType: "ALL" | "GENERAL" | "SPECIAL"; minimumOrderAmount: number;
-  qualificationMetric: "AMOUNT" | "BOX_COUNT"; minimumOrderBoxCount: number;
+  qualificationMetric: "AMOUNT" | "BOX_COUNT"; probabilityMode: "EQUAL" | "ORDER_AMOUNT_WEIGHTED"; minimumOrderBoxCount: number;
   excludePreviousWinners: boolean; displayNameType: "SHORT_NAME" | "FULL_NAME"; status: string;
   currentAttemptNo: number; candidateCount?: number; resultHash?: string; drawnAt?: string; completedAt?: string; lockVersion: number;
 };
@@ -139,9 +139,9 @@ export type LotteryDrawResult = { roundId: number; attemptId: number; attemptNo:
   winners: LotteryWinnerApi[]; resultHash: string; drawnAt: string };
 export type LotteryCandidatePreviewItem = { activityCustomerId: number; dealerFullName: string; customerType: string;
   regionCode?: string; branchName?: string; phoneMasked?: string; qualificationSource: string;
-  qualifyingOrderAmount?: number; qualifyingOrderBoxCount?: number };
+  qualifyingOrderAmount?: number; qualifyingOrderBoxCount?: number; probabilityPercent: number };
 export type LotteryCandidatePreview = { calculatedAt: string; candidateCount: number; configuredWinnerCount: number;
-  actualWinnerCount: number; unawardedCount: number; candidates: LotteryCandidatePreviewItem[] };
+  actualWinnerCount: number; unawardedCount: number; totalCandidateOrderAmount: number; candidates: LotteryCandidatePreviewItem[] };
 export type LotteryWinnerStatistics = { validWinnerRecords: number; validWinnerCustomers: number; invalidatedWinnerRecords: number };
 
 export type AdminCustomer = {

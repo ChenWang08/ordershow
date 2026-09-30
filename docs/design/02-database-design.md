@@ -115,11 +115,11 @@ Excel 解析、标准化、校验和人工编辑只写入 staging，不修改当
 
 H5 ORDER_SUBMIT 的 response_json 使用 format=2，保存 orderId、orderVersion、resultJson（订单响应 JSON 字符串，保留十进制精度）；沿用现有唯一约束，无结构迁移。expires_at 至少覆盖活动结束后 30 天，清理还检查 completed_at 及当前活动结束时间，每小时最多 500 条，仅处理新格式已完成的 H5 提交。详见 [幂等重试与清理](../testing/h5-idempotency-retry.md)。
 
-V010 新增草稿表；V011 将早期受 MySQL `Asia/Shanghai` 会话默认值影响的明显未来时间校正为 UTC；V020 统一商品导入字段并增加产品说明；V021 增加白名单所属分公司身份键和不区分客户类型 `ALL`；V022 增加管理员订单创建、调整、作废所需的来源、管理员、原因和版本操作字段；V023 增加手机号明文业务列并配合应用启动迁移旧密文。后续草稿写入显式使用 `UTC_TIMESTAMP(3)`，API 返回 ISO 8601 UTC，页面按 `Asia/Shanghai` 展示。
+ V010 新增草稿表；V011 将早期受 MySQL `Asia/Shanghai` 会话默认值影响的明显未来时间校正为 UTC；V020 统一商品导入字段并增加产品说明；V021 增加白名单所属分公司身份键和不区分客户类型 `ALL`；V022 增加管理员订单创建、调整、作废所需的来源、管理员、原因和版本操作字段；V023 增加手机号明文业务列并配合应用启动迁移旧密文；V032 增加抽奖轮次概率模式，历史轮次默认为等概率。后续草稿写入显式使用 `UTC_TIMESTAMP(3)`，API 返回 ISO 8601 UTC，页面按 `Asia/Shanghai` 展示。
 
 业务状态只有：
 
-- `SUBMITTED`：参加统计和抽奖；
+- `SUBMITTED`：参加统计和抽奖；金额加权抽奖使用当前 `customer_order.total_amount`；
 - `WITHDRAWN`：保留最近一次非空明细，但不参加统计和抽奖；
 - `VOIDED`：管理员逻辑作废，保留订单号、明细、版本和操作记录，不参加统计和抽奖。
 
@@ -143,6 +143,8 @@ V010 新增草稿表；V011 将早期受 MySQL `Asia/Shanghai` 会话默认值�
 抽奖候选的业务主体始终是 `activity_customer`。当候选范围为 `ATTENDEES` 时，只选取当前到场发布版本中 `match_status=MATCHED`、且仍指向当前有效白名单版本的活动客户，并按 `activity_customer.id` 去重；`PENDING_CONFIRMATION` 和 `UNMATCHED` 不进入候选池。
 
 `activity_attendee.match_method` 新关联仅记录名称精确关联依据：`FULL_NAME_BRANCH`（客户类型 + 分公司 + 经销商全称）、`FULL_NAME`（无分公司范围时的历史/兼容全称匹配）、`SHORT_NAME` 或 `MANUAL`；`PHONE` 仅为兼容历史记录保留，新计算不再产生。现场手机号只作联系信息，不参与客户身份关联。Excel 发布不更新上一版本行，而是创建新版本并重新计算全部关联。白名单版本切换后，当前到场版本也必须在同一发布事务中重新计算，不能保留旧白名单关联。
+
+金额加权抽奖不创建实体奖券。`lottery_round.probability_mode = EQUAL` 时候选客户等概率；`ORDER_AMOUNT_WEIGHTED` 时只保留当前 `SUBMITTED` 且 `customer_order.total_amount > 0` 的候选，使用客户金额占候选金额总和的比例计算权重。开奖快照的规则 JSON 保存概率模式和候选订单金额总和，候选快照保存开奖时使用的订单金额。V032 为历史轮次写入等概率默认值。
 
 ### 4.7 审计
 

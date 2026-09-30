@@ -9,6 +9,7 @@ import { normalizeSearchText } from "../shared/utils";
 
 export type CandidateScope = "all" | "attended" | "ordered";
 export type QualificationMetric = "AMOUNT" | "BOX_COUNT";
+export type LotteryProbabilityMode = "EQUAL" | "ORDER_AMOUNT_WEIGHTED";
 export type LotteryRoundStatus = "draft" | "published" | "completed";
 export type LotteryRound = {
   id: number;
@@ -21,6 +22,7 @@ export type LotteryRound = {
   scope: CandidateScope;
   minAmount: number;
   qualificationMetric: QualificationMetric;
+  probabilityMode: LotteryProbabilityMode;
   minBoxCount: number;
   prizeImageFileId?: number;
   prizeImageUrl?: string;
@@ -42,7 +44,7 @@ const dealerNames = [
 ];
 
 export const initialLotteryRounds: LotteryRound[] = [
-  { id: -1, name: "第一轮", prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, qualificationMetric: "AMOUNT", minBoxCount: 0, excludeWinners: false, status: "draft", candidateCount: 0 },
+  { id: -1, name: "第一轮", prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, qualificationMetric: "AMOUNT", probabilityMode: "ORDER_AMOUNT_WEIGHTED", minBoxCount: 0, excludeWinners: false, status: "draft", candidateCount: 0 },
 ];
 
 function lotteryCustomerTypeCode(customerType: LotteryRound["customerType"]) {
@@ -56,6 +58,7 @@ export function mapLotteryRule(rule: LotteryRuleApi): LotteryRound[] {
     scope: round.candidateScope === "ATTENDEES" ? "attended" : round.candidateScope === "VALID_ORDERS" ? "ordered" : "all",
     minAmount: Number(round.minimumOrderAmount),
     qualificationMetric: round.qualificationMetric ?? "AMOUNT",
+    probabilityMode: round.probabilityMode ?? "EQUAL",
     minBoxCount: Number(round.minimumOrderBoxCount ?? 0),
     prizeImageFileId: round.prizeImageFileId ?? undefined,
     prizeImageUrl: round.prizeImageUrl ? apiAssetUrl(round.prizeImageUrl) : undefined,
@@ -73,11 +76,17 @@ export function groupLotteryWinnersByRound(winners: LotteryWinnerApi[]) {
 }
 
 function qualifyingOrderDisplay(candidate: LotteryCandidatePreview["candidates"][number], round: LotteryRound) {
-  if (round.scope !== "ordered") return "";
-  if (round.qualificationMetric === "BOX_COUNT") {
-    return candidate.qualifyingOrderBoxCount == null ? "" : " · " + Number(candidate.qualifyingOrderBoxCount).toLocaleString() + " 箱";
+  const details: string[] = [];
+  if (round.scope === "ordered" && round.qualificationMetric === "BOX_COUNT" && candidate.qualifyingOrderBoxCount != null) {
+    details.push(Number(candidate.qualifyingOrderBoxCount).toLocaleString() + " 箱");
   }
-  return candidate.qualifyingOrderAmount == null ? "" : " · ¥" + Number(candidate.qualifyingOrderAmount).toLocaleString();
+  if ((round.scope === "ordered" && round.qualificationMetric === "AMOUNT") || round.probabilityMode === "ORDER_AMOUNT_WEIGHTED") {
+    if (candidate.qualifyingOrderAmount != null) details.push("订单 ¥" + Number(candidate.qualifyingOrderAmount).toLocaleString());
+  }
+  if (candidate.probabilityPercent != null) {
+    details.push("概率 " + Number(candidate.probabilityPercent ?? 0).toFixed(2) + "%");
+  }
+  return details.length > 0 ? " · " + details.join(" · ") : "";
 }
 
 type LotteryDisplayCandidate = {
@@ -301,10 +310,11 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
       void previewLotteryCandidates(activityId, {
         roundNo: selectedIndex + 1, winnerCount: selected.winnerCount,
         candidateScope: selected.scope === "attended" ? "ATTENDEES" : selected.scope === "ordered" ? "VALID_ORDERS" : "ALL_CUSTOMERS",
-        customerType: lotteryCustomerTypeCode(effectiveSelectedCustomerType),
-        minimumOrderAmount: selected.scope === "ordered" ? selected.minAmount : 0,
-        qualificationMetric: selected.qualificationMetric,
-        minimumOrderBoxCount: selected.scope === "ordered" ? selected.minBoxCount : 0,
+         customerType: lotteryCustomerTypeCode(effectiveSelectedCustomerType),
+         minimumOrderAmount: selected.scope === "ordered" ? selected.minAmount : 0,
+         qualificationMetric: selected.qualificationMetric,
+         probabilityMode: selected.probabilityMode,
+         minimumOrderBoxCount: selected.scope === "ordered" ? selected.minBoxCount : 0,
         excludePreviousWinners: selectedIndex > 0 && selected.excludeWinners,
       }).then(setPreview).catch((error) => setSaveError(error instanceof ApiError ? error.message : "候选名单试算失败"))
         .finally(() => setPreviewLoading(false));
@@ -318,7 +328,7 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
   const addRound = () => {
     if (prizeImageUploading) return;
     const id = Math.min(-1, ...rounds.map((item) => item.id - 1));
-    const next: LotteryRound = { id, name: `第${rounds.length + 1}轮`, prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, qualificationMetric: "AMOUNT", minBoxCount: 0, excludeWinners: true, status: "draft", candidateCount: 0 };
+    const next: LotteryRound = { id, name: `第${rounds.length + 1}轮`, prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, qualificationMetric: "AMOUNT", probabilityMode: "ORDER_AMOUNT_WEIGHTED", minBoxCount: 0, excludeWinners: true, status: "draft", candidateCount: 0 };
     onChange([...rounds, next]);
     setSelectedId(id);
   };
@@ -334,9 +344,10 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
       const body = { name: "订货会幸运抽奖规则", rounds: rounds.map((round, index) => ({ name: round.name, prizeName: round.prize,
         winnerCount: round.winnerCount, candidateScope: round.scope === "attended" ? "ATTENDEES" : round.scope === "ordered" ? "VALID_ORDERS" : "ALL_CUSTOMERS",
          customerType: lotteryCustomerTypeCode(customerTypeMode === "UNSPECIFIED" ? "全部客户" : round.customerType),
-        minimumOrderAmount: round.scope === "ordered" ? round.minAmount : 0,
-        qualificationMetric: round.qualificationMetric,
-        minimumOrderBoxCount: round.scope === "ordered" ? round.minBoxCount : 0,
+         minimumOrderAmount: round.scope === "ordered" ? round.minAmount : 0,
+         qualificationMetric: round.qualificationMetric,
+         probabilityMode: round.probabilityMode,
+         minimumOrderBoxCount: round.scope === "ordered" ? round.minBoxCount : 0,
         prizeImageFileId: round.prizeImageFileId ?? null,
         excludePreviousWinners: index === 0 ? false : round.excludeWinners, displayNameType: "FULL_NAME" })) };
       const existingRuleId = rounds.find((round) => round.ruleId && ["DRAFT", "READY", "DRAWN", "COMPLETED", "RESET"].includes(round.serverStatus || ""))?.ruleId;
@@ -363,6 +374,7 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
   const ruleSummary = effectiveSelectedCustomerType + " · "
     + (selected.scope === "all" ? "活动白名单" : selected.scope === "attended" ? "现场已到场" : "有效下单")
     + thresholdSummary + " · "
+    + (selected.probabilityMode === "ORDER_AMOUNT_WEIGHTED" ? "按订单金额加权" : "等概率") + " · "
     + (selectedIndex === 0 ? "第一轮不涉及历史中奖" : selected.excludeWinners ? "排除已中奖" : "允许重复中奖");
   const resolvedCandidateCount = preview?.candidateCount ?? 0;
   const candidateSteps: [string, number][] = [["当前有效白名单", customerCount], [selected.scope === "attended" ? "已匹配到场客户" : selected.scope === "ordered" ? "有效订单客户" : "客户类型匹配", resolvedCandidateCount], ...(selectedIndex > 0 && selected.excludeWinners ? [["排除已中奖", resolvedCandidateCount] as [string, number]] : [])];
@@ -404,6 +416,7 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
           <label><span>中奖人数</span><input type="number" min="1" value={selected.winnerCount} disabled={selectedLocked} onChange={(e) => updateSelected({ winnerCount: Number(e.target.value) })} /></label>
           <label><span>客户类型</span><select value={effectiveSelectedCustomerType} disabled={selectedLocked || customerTypeMode === "UNSPECIFIED"} onChange={(e) => updateSelected({ customerType: e.target.value as LotteryRound["customerType"] })}>{customerTypeOptions.map((x) => <option key={x}>{x}</option>)}</select></label>
           <fieldset className="candidate-scope"><legend>候选客户范围</legend>{scopeOptions.map((option) => <button type="button" key={option.key} className={selected.scope === option.key ? "active" : ""} disabled={selectedLocked} onClick={() => updateSelected({ scope: option.key })}><i>{selected.scope === option.key ? "✓" : ""}</i><span><b>{option.title}</b><small>{option.detail}</small></span></button>)}</fieldset>
+          <label className="check-setting weighted-setting"><input type="checkbox" checked={selected.probabilityMode === "ORDER_AMOUNT_WEIGHTED"} disabled={selectedLocked} onChange={(e) => updateSelected({ probabilityMode: e.target.checked ? "ORDER_AMOUNT_WEIGHTED" : "EQUAL" })} /><span><b>按订单金额加权计算中奖概率</b><small>{selected.probabilityMode === "ORDER_AMOUNT_WEIGHTED" ? "按开奖前当前有效订单金额占比计算；金额为0的客户不进入加权池" : "候选范围内所有客户等概率"}</small></span></label>
           {selected.scope === "ordered" && <>
             <label><span>门槛依据</span><select value={selected.qualificationMetric} disabled={selectedLocked} onChange={(e) => updateSelected({ qualificationMetric: e.target.value as QualificationMetric })}><option value="AMOUNT">最低订单金额</option><option value="BOX_COUNT">最低订货箱数</option></select></label>
             {selected.qualificationMetric === "AMOUNT"
@@ -412,7 +425,7 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
           </>}
           <label className="check-setting repeat-setting"><input type="checkbox" checked={selectedIndex === 0 ? false : selected.excludeWinners} disabled={selectedLocked || selectedIndex === 0} onChange={(e) => updateSelected({ excludeWinners: e.target.checked })} /><span><b>排除本活动已中奖客户</b><small>{selectedIndex === 0 ? "第一轮暂无历史中奖客户，无需设置" : "按白名单客户 ID 避免跨轮次重复中奖"}</small></span></label>
           <div className="rule-summary"><span>当前规则</span><p>{ruleSummary}</p></div>
-          <div className="candidate-preview"><div><span>实时候选池</span><strong>{previewLoading ? "…" : resolvedCandidateCount}<small> 人</small></strong><p>后端实时试算 · 按白名单客户 ID 去重 · {preview ? new Date(preview.calculatedAt).toLocaleString("zh-CN", { hour12: false }) : "等待试算"}</p>{preview && preview.unawardedCount > 0 && <small className="field-error">配置中奖 {preview.configuredWinnerCount} 人，当前将由全部 {preview.actualWinnerCount} 名候选中奖，空缺 {preview.unawardedCount} 个名额</small>}</div><button disabled={previewLoading || !preview} onClick={() => setPreviewOpen(true)}>查看候选名单</button></div>
+           <div className="candidate-preview"><div><span>实时候选池</span><strong>{previewLoading ? "…" : resolvedCandidateCount}<small> 人</small></strong><p>后端实时试算 · 按白名单客户 ID 去重 · {preview ? new Date(preview.calculatedAt).toLocaleString("zh-CN", { hour12: false }) : "等待试算"}</p>{selected.probabilityMode === "ORDER_AMOUNT_WEIGHTED" && preview && <small className="field-help">加权订单总额 ¥{Number(preview.totalCandidateOrderAmount ?? 0).toLocaleString()}</small>}{preview && preview.unawardedCount > 0 && <small className="field-error">配置中奖 {preview.configuredWinnerCount} 人，当前将由全部 {preview.actualWinnerCount} 名候选中奖，空缺 {preview.unawardedCount} 个名额</small>}</div><button disabled={previewLoading || !preview} onClick={() => setPreviewOpen(true)}>查看候选名单</button></div>
         </section>
       </div>
       {previewOpen && preview && <div className="order-drawer-backdrop" onClick={() => setPreviewOpen(false)}><aside className="order-drawer candidate-drawer" onClick={(e) => e.stopPropagation()}><header><div><span>实时候选池预览</span><h2>{selected.name} · {resolvedCandidateCount} 人</h2></div><button onClick={() => setPreviewOpen(false)}>×</button></header><div className="candidate-funnel">{candidateSteps.map(([label, count]) => <div key={label}><span>{label}</span><b>{count}</b></div>)}</div><div className="candidate-table">{preview.candidates.map((candidate, index) => <div key={candidate.activityCustomerId}><span>{String(index + 1).padStart(3, "0")}</span><b>{candidate.dealerFullName}</b><em>{candidate.customerType === "SPECIAL" ? "特渠" : candidate.customerType === "GENERAL" ? "综合" : "全部客户"}</em><small>ID {candidate.activityCustomerId} · {candidate.branchName || candidate.regionCode || "—"}{qualifyingOrderDisplay(candidate, selected)}</small></div>)}{preview.candidates.length === 0 && <div className="table-empty">当前没有符合条件的候选客户</div>}</div><footer><small>正式候选将在点击开始抽奖时再次校验并固定</small><button className="admin-primary" onClick={() => setPreviewOpen(false)}>关闭</button></footer></aside></div>}

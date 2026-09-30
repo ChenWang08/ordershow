@@ -462,11 +462,12 @@ test("cancels superseded import previews and only blocks publication for newer p
 });
 
 test("uses server-calculated lottery candidates and ordered, shortage-safe draws", async () => {
-  const [prototype, api, service, controller] = await Promise.all([
+  const [prototype, api, service, controller, migration] = await Promise.all([
     readFrontendSource(),
     readApiSource(),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/lottery/LotteryService.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/lottery/LotteryController.java", import.meta.url), "utf8"),
+    readFile(new URL("../db/migrations/V032__lottery_order_amount_weighting.sql", import.meta.url), "utf8"),
   ]);
 
   assert.match(api, /previewLotteryCandidates/);
@@ -478,6 +479,14 @@ test("uses server-calculated lottery candidates and ordered, shortage-safe draws
   assert.match(service, /LOTTERY_ROUND_OUT_OF_ORDER/);
   assert.match(service, /deduplicationKey", "activity_customer\.id/);
   assert.match(service, /LOTTERY_PRIZE_REQUIRED/);
+  assert.match(prototype, /ORDER_AMOUNT_WEIGHTED/);
+  assert.match(prototype, /概率/);
+  assert.match(prototype, /toFixed\(2\)/);
+  assert.match(service, /weightedOrder/);
+  assert.match(service, /probabilityMode/);
+  assert.match(service, /o\.total_amount > 0/);
+  assert.match(service, /totalCandidateOrderAmount/);
+  assert.match(migration, /probability_mode/);
 });
 
 test("uses live overview data, full admin phones, Chinese regions, and linked attendance candidates", async () => {
