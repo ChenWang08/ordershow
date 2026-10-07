@@ -128,7 +128,7 @@ export function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRec
       at: formatDate(version.submittedAt),
       amount: formatMoney(version.totalAmount),
       detail: `${version.totalQuantity} 箱 · ${version.items?.length ?? 0} 种商品`,
-      operator: version.submittedSource === "ADMIN" ? "管理员" : "客户",
+      operator: version.submittedSource === "ADMIN" ? version.submittedByAdminName || "后台账号" : "客户",
       reason: version.reason,
       items: (version.items ?? []).map((item) => ({
         productId: item.productId,

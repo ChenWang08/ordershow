@@ -46,7 +46,7 @@ public class OrderRepository {
   List<OrderVersionView> versions(long activityId, long orderId) {
     requireOrderAccess(activityId, orderId);
     return withVersionItems(jdbc.query("""
-        SELECT v.*, u.display_name submitted_by_admin_name FROM order_version v
+        SELECT v.*, COALESCE(v.actor_identity_snapshot,u.display_name) submitted_by_admin_name FROM order_version v
         LEFT JOIN admin_user u ON u.id = v.submitted_by_admin_id
         WHERE v.order_id = ? ORDER BY v.version_no DESC
         """, this::mapVersion, orderId));
@@ -55,7 +55,7 @@ public class OrderRepository {
   List<OperationView> operations(long activityId, long orderId) {
     requireOrderAccess(activityId, orderId);
     return jdbc.query("""
-        SELECT o.operation_type, o.source, u.display_name admin_name, o.order_version_no, o.reason, o.occurred_at
+        SELECT o.operation_type, o.source, COALESCE(o.actor_identity_snapshot,u.display_name) admin_name, o.order_version_no, o.reason, o.occurred_at
         FROM order_operation o LEFT JOIN admin_user u ON u.id = o.admin_user_id
         WHERE o.order_id = ? ORDER BY o.occurred_at DESC, o.id DESC
         """, this::mapOperation, orderId);
@@ -130,9 +130,11 @@ public class OrderRepository {
                                Integer version, String reason, String traceId) {
     jdbc.update("""
         INSERT INTO order_operation(activity_id, order_id, operation_type, source, admin_user_id,
-          order_version_no, reason, trace_id, occurred_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(3))
-        """, activityId, orderId, operation, source, adminId, version, reason, traceId);
+          order_version_no, reason, trace_id, occurred_at, actor_identity_snapshot, actor_role_snapshot)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(3),
+          (SELECT CONCAT(display_name,'（',username,'）') FROM admin_user WHERE id=?),
+          (SELECT role_code FROM admin_user WHERE id=?))
+        """, activityId, orderId, operation, source, adminId, version, reason, traceId, adminId, adminId);
   }
 
   boolean sameItems(long orderId, Map<Long, Long> expected) {
@@ -175,6 +177,7 @@ public class OrderRepository {
           'ADMIN',?,?,UTC_TIMESTAMP(3),? FROM customer_order WHERE id=?
         """, adminId, reason, batchId, orderId);
     long versionId = jdbc.queryForObject("SELECT id FROM order_version WHERE order_id=? AND request_idempotency_key=?", Long.class, orderId, batchId);
+    snapshotVersionActor(versionId, adminId);
     jdbc.update("""
         INSERT INTO order_version_item(order_version_id,line_no,activity_product_id,material_code,material_name,
           category_name,product_line,brand_name,variety_name,specification,case_pack,customer_type,rebate_status,
@@ -237,7 +240,13 @@ public class OrderRepository {
       ps.setBigDecimal(++i, totalAmount); ps.setString(++i, source); ps.setObject(++i, adminId); ps.setString(++i, reason);
       ps.setString(++i, idempotencyKey); return ps;
     }, keys);
-    return keys.getKey().longValue();
+    long versionId = keys.getKey().longValue();
+    snapshotVersionActor(versionId, adminId);
+    return versionId;
+  }
+
+  private void snapshotVersionActor(long versionId, Long adminId) {
+    if (adminId != null) jdbc.update("UPDATE order_version SET actor_identity_snapshot=(SELECT CONCAT(display_name,'（',username,'）') FROM admin_user WHERE id=?) WHERE id=?", adminId, versionId);
   }
 
   void insertVersionItems(long versionId, List<CalculatedItem> items) {
@@ -314,12 +323,12 @@ public class OrderRepository {
     long orderId = order.id();
     List<ItemView> items = jdbc.query("SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no", this::mapItem, orderId);
     List<OrderVersionView> versions = includeHistory ? withVersionItems(jdbc.query("""
-        SELECT v.*, u.display_name submitted_by_admin_name FROM order_version v
+        SELECT v.*, COALESCE(v.actor_identity_snapshot,u.display_name) submitted_by_admin_name FROM order_version v
         LEFT JOIN admin_user u ON u.id = v.submitted_by_admin_id
         WHERE v.order_id = ? ORDER BY v.version_no DESC
         """, this::mapVersion, orderId)) : List.of();
     List<OperationView> operations = includeHistory ? jdbc.query("""
-        SELECT o.operation_type, o.source, u.display_name admin_name, o.order_version_no, o.reason, o.occurred_at
+        SELECT o.operation_type, o.source, COALESCE(o.actor_identity_snapshot,u.display_name) admin_name, o.order_version_no, o.reason, o.occurred_at
         FROM order_operation o LEFT JOIN admin_user u ON u.id = o.admin_user_id
         WHERE o.order_id = ? ORDER BY o.occurred_at DESC, o.id DESC
         """, this::mapOperation, orderId) : List.of();

@@ -24,3 +24,13 @@
 启动、生成数据、执行k6/SSE及清理方法见 [load/README.md](load/README.md)。
 执行范围见[性能计划](../docs/testing/performance-test-plan.md)，本机实测与未验收项见[性能报告](../docs/testing/performance-test-report.md)。
 性能测试不由 `npm test` 自动启动，避免常规回归意外产生高负载。
+
+## 部门成员权限（2026-10-07）
+
+- 新增权限、私有文件下载、导航和初始化行为测试；活动概览成员只读，订单独立权限支持商品及客户选择。
+- 隔离后端启动后运行 `node scripts/test-department-members.mjs`。脚本固定访问 8180，创建独立测试部门和账号，验证六项权限、跨部门隔离、成员管理范围、商品/白名单导入、手动到场、订单创建/审核/作废、改名后的身份快照、收权以及密码/停用会话失效。
+- 此脚本已接入 `scripts/run-automated-tests.ps1`，在 Java E2E 后执行。验证数据均为脚本内合成数据，不读取业务 Excel。
+- 本次通过前端构建、类型检查、lint、126 项既有及新增前端行为测试、3 项补充导航渲染测试、Java 单元/契约测试及 10 项原有 API E2E；成员脚本通过 142 项 API 状态断言及身份/数据断言。V035 在隔离 MySQL 上迁移成功。
+- 本次没有可用浏览器连接，未完成真实浏览器视觉及交互验收；组件静态渲染测试不等同于浏览器验收。
+
+成员使用规则及账号边界以 [项目规则](../PROJECT.md)、[权限矩阵](../docs/design/05-security-concurrency-audit.md) 和 [ADR-009](../docs/design/adr/ADR-009-department-shared-account-isolation.md) 为准。专项验收同时发现并修复了手动新增到场人员 SQL 占位符数量错误，成员实际补录接口已通过验证。当前本地部署状态及迁移备份见 [根 README](../README.md)。

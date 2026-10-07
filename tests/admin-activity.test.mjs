@@ -4,7 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { loadModule } from "./helpers/load-ts-module.mjs";
 
-const { ActivityOverview } = loadModule("app/features/admin/ActivityOverview.tsx");
+const { ActivityOverview } = loadModule("app/features/admin/ActivityOverview.tsx", { "../../admin-context": { useAdminIdentity: () => ({ roleCode: "DEPARTMENT_ADMIN" }) } });
 const noop = () => {};
 const viewProps = {
   activityCode: "HD-TEST", activityName: "测试活动", departmentName: "测试部门",
@@ -114,4 +114,15 @@ test("failed settings save does not proceed to publication", async () => {
   await harness.render().publishCurrentActivity();
   assert.deepEqual(harness.calls, ["load"]);
   assert.match(harness.notices[0], /活动配置保存失败/);
+});
+
+test('member overview never exposes activity lifecycle controls even with all permissions', () => {
+  const { ActivityOverview: MemberOverview } = loadModule('app/features/admin/ActivityOverview.tsx', {
+    '../../admin-context': { useAdminIdentity: () => ({ roleCode: 'DEPARTMENT_MEMBER', permissions: ['OVERVIEW','PRODUCT','WHITELIST','ATTENDANCE','ORDER','LOTTERY'] }) },
+  });
+  for (const activityStatus of ['draft','scheduled','running','closed','finished']) {
+    const html = renderToStaticMarkup(React.createElement(MemberOverview, { ...viewProps, activityStatus }));
+    for (const action of ['发布活动','撤回发布','立即截止订货','结束整场活动','保存活动设置','保存延长时间']) assert.equal(html.includes('>' + action + '</button>'), false);
+    assert.equal((html.match(/<input\b[^>]*type="datetime-local"[^>]*disabled=""[^>]*>/g) || []).length, 3);
+  }
 });

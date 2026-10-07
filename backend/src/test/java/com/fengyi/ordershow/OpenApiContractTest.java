@@ -27,6 +27,10 @@ class OpenApiContractTest {
     @SuppressWarnings("unchecked")
     Map<String, Object> paths = (Map<String, Object>) document.get("paths");
     assertThat(paths).containsKeys(
+        "/admin/members", "/admin/members/{id}",
+        "/admin/activities/{activityId}/module-context",
+        "/admin/activities/{activityId}/orders/customer-options",
+        "/admin/activities/{activityId}/orders/product-options",
         "/admin/activities/{activityId}/orders",
         "/admin/activities/{activityId}/orders/preview",
         "/admin/activities/{activityId}/publish",

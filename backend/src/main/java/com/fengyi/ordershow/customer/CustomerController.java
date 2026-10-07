@@ -23,7 +23,7 @@ public class CustomerController {
 
   public CustomerController(CustomerService service, AuthService auth) { this.service = service; this.auth = auth; }
 
-  @GetMapping("/admin/activities/{activityId}/customers")
+  @GetMapping({"/admin/activities/{activityId}/customers", "/admin/activities/{activityId}/orders/customer-options"})
   PageResponse<CustomerService.CustomerView> customers(@PathVariable long activityId,
       @RequestParam(required = false) String customerType, @RequestParam(required = false) String regionCode,
       @RequestParam(required = false) String keyword,

@@ -1,5 +1,7 @@
 "use client";
 
+import { useAdminIdentity } from "../../admin-context";
+import { canUse, isManager } from "./permissions";
 import { useEffect, type Dispatch, type SetStateAction } from "react";
 import { ApiError, loadAdminActivity, loadAdminProducts, loadProductImageReviews, loadAdminCustomers, loadAdminAttendees, loadLotteryRules, loadAuditLogs, loadImportTasks, loadImportRows, loadAttendanceMatchPreview, type ImportTask } from "../../api";
 import { cloneProductRows, cloneWhitelistRows, type WhitelistRow } from "../../domain/import-domain";
@@ -43,12 +45,14 @@ export function useAdminInitialization({
     setRegionCodesByName, setOperationLogs, setServerImportTasks,
     setServerImportBlocking, setActionNotice,
 }: AdminInitializationOptions) {
+  const identity = useAdminIdentity();
+  const product = canUse(identity, "PRODUCT"), whitelist = canUse(identity, "WHITELIST"), attendance = canUse(identity, "ATTENDANCE"), lottery = canUse(identity, "LOTTERY"), manager = isManager(identity);
   useEffect(() => {
     const numericActivityId = Number(activityId);
     if (!Number.isFinite(numericActivityId)) return;
     let active = true;
-    void Promise.all([loadAdminActivity(Number(activityId)), loadAdminProducts(numericActivityId), loadProductImageReviews(numericActivityId), loadAdminCustomers(numericActivityId),
-      loadAdminAttendees(numericActivityId), loadLotteryRules(numericActivityId), loadAuditLogs(numericActivityId), loadImportTasks(numericActivityId)]).then(async ([activity, serverProducts, imageReviews, customers, attendees, rules, auditLogs, importTasks]) => {
+    void Promise.all([loadAdminActivity(Number(activityId)), product ? loadAdminProducts(numericActivityId) : Promise.resolve([]), product ? loadProductImageReviews(numericActivityId) : Promise.resolve([]), whitelist ? loadAdminCustomers(numericActivityId) : Promise.resolve([]),
+      attendance ? loadAdminAttendees(numericActivityId) : Promise.resolve([]), lottery ? loadLotteryRules(numericActivityId) : Promise.resolve([]), manager ? loadAuditLogs(numericActivityId) : Promise.resolve([]), (product || whitelist || attendance) ? loadImportTasks(numericActivityId) : Promise.resolve([])]).then(async ([activity, serverProducts, imageReviews, customers, attendees, rules, auditLogs, importTasks]) => {
       if (!active) return;
       const regionNames = new Map(activity.regions.map((region) => [region.code, region.name]));
       setRegionCodesByName(Object.fromEntries(activity.regions.map((region) => [region.name, region.code])));
@@ -109,7 +113,7 @@ export function useAdminInitialization({
       if (pendingTasks.length > 0) setActionNotice("已恢复服务器中尚未确认的导入预览，请确认或取消后再发布活动。");
     }).catch((reason) => { if (active) setActionNotice(reason instanceof ApiError ? reason.message : "后台数据加载失败"); });
     return () => { active = false; };
-  }, [activityId, onAttendanceFileNameChange, onLotteryChange, onProductImportCommitted, onProductImportCompleted,
+  }, [product, whitelist, attendance, lottery, manager, activityId, onAttendanceFileNameChange, onLotteryChange, onProductImportCommitted, onProductImportCompleted,
     onWhitelistImportCommitted, onWhitelistImportCompleted, setAttendanceRows, setProductRows, setWhitelistRows,
     setPendingProductRollbackRows, setProductFileName, setProductImportInputCount, setProductSheetCounts,
     setPendingWhitelistRollbackRows, setWhitelistFileName, setWhitelistImportInputCount, setWhitelistSheetCounts,

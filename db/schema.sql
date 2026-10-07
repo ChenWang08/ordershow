@@ -38,11 +38,21 @@ CREATE TABLE admin_user (
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   UNIQUE KEY uk_admin_user_username (username),
-  UNIQUE KEY uk_admin_user_department (department_id),
+  department_admin_scope BIGINT UNSIGNED GENERATED ALWAYS AS (CASE WHEN role_code = 'DEPARTMENT_ADMIN' THEN department_id ELSE NULL END) STORED,
+  KEY idx_admin_user_department (department_id),
+  UNIQUE KEY uk_department_admin_scope (department_admin_scope),
   CONSTRAINT fk_admin_user_department FOREIGN KEY (department_id) REFERENCES department (id),
-  CONSTRAINT ck_admin_user_role CHECK (role_code IN ('SUPER_ADMIN', 'DEPARTMENT_ADMIN')),
-  CONSTRAINT ck_admin_user_department_role CHECK ((role_code = 'SUPER_ADMIN' AND department_id IS NULL) OR (role_code = 'DEPARTMENT_ADMIN' AND department_id IS NOT NULL)),
+  CONSTRAINT ck_admin_user_role CHECK (role_code IN ('SUPER_ADMIN', 'DEPARTMENT_ADMIN', 'DEPARTMENT_MEMBER')),
+  CONSTRAINT ck_admin_user_department_role CHECK ((role_code = 'SUPER_ADMIN' AND department_id IS NULL) OR (role_code IN ('DEPARTMENT_ADMIN', 'DEPARTMENT_MEMBER') AND department_id IS NOT NULL)),
   CONSTRAINT ck_admin_user_status CHECK (status IN ('ACTIVE', 'DISABLED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE admin_user_permission (
+  admin_user_id BIGINT UNSIGNED NOT NULL,
+  permission_code VARCHAR(32) NOT NULL,
+  PRIMARY KEY (admin_user_id, permission_code),
+  CONSTRAINT fk_member_permission_user FOREIGN KEY (admin_user_id) REFERENCES admin_user(id),
+  CONSTRAINT ck_member_permission CHECK (permission_code IN ('OVERVIEW','PRODUCT','WHITELIST','ATTENDANCE','ORDER','LOTTERY'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
 CREATE TABLE admin_session (
@@ -654,6 +664,7 @@ CREATE TABLE order_version (
   total_amount DECIMAL(18,2) NOT NULL,
   submitted_source VARCHAR(20) NOT NULL,
   submitted_by_admin_id BIGINT UNSIGNED NULL,
+  actor_identity_snapshot VARCHAR(255) NULL,
   reason VARCHAR(500) NULL,
   submitted_at DATETIME(3) NOT NULL,
   request_idempotency_key VARCHAR(128) NOT NULL,
@@ -728,6 +739,8 @@ CREATE TABLE order_operation (
   operation_type VARCHAR(24) NOT NULL,
   source VARCHAR(20) NOT NULL,
   admin_user_id BIGINT UNSIGNED NULL,
+  actor_identity_snapshot VARCHAR(255) NULL,
+  actor_role_snapshot VARCHAR(32) NULL,
   order_version_no INT UNSIGNED NULL,
   reason VARCHAR(500) NULL,
   trace_id VARCHAR(64) NULL,
@@ -970,6 +983,8 @@ CREATE TABLE audit_log (
   activity_id BIGINT UNSIGNED NULL,
   actor_type VARCHAR(16) NOT NULL,
   admin_user_id BIGINT UNSIGNED NULL,
+  actor_identity_snapshot VARCHAR(255) NULL,
+  actor_role_snapshot VARCHAR(32) NULL,
   action_code VARCHAR(64) NOT NULL,
   object_type VARCHAR(64) NOT NULL,
   object_id VARCHAR(128) NULL,
@@ -1030,6 +1045,7 @@ CREATE TABLE order_change_request (
   customer_note VARCHAR(500) NULL,
   review_reason VARCHAR(500) NULL,
   reviewed_by_admin_id BIGINT UNSIGNED NULL,
+  reviewer_identity_snapshot VARCHAR(255) NULL,
   requested_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   reviewed_at DATETIME(3) NULL,
   idempotency_key VARCHAR(128) NOT NULL,

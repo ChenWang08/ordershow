@@ -74,12 +74,12 @@ public class AuthService {
     AdminPrincipal principal = new AdminPrincipal(id, user.get("username").toString(), user.get("display_name").toString(),
         user.get("role_code").toString(), nullableLong(user.get("department_id")),
         user.get("department_name") == null ? null : user.get("department_name").toString(),
-        mustChangePassword);
+        mustChangePassword, permissions(id));
     request.setAttribute(ADMIN_REQUEST_ATTRIBUTE, principal);
     return new LoginResult(id, user.get("username").toString(), user.get("display_name").toString(),
         user.get("role_code").toString(), nullableLong(user.get("department_id")),
         user.get("department_name") == null ? null : user.get("department_name").toString(),
-        mustChangePassword, csrf);
+        mustChangePassword, csrf, principal.permissions());
   }
 
   @Transactional
@@ -107,9 +107,16 @@ public class AuthService {
         rs.getObject("department_id", Long.class), rs.getString("department_name"),
         rs.getBoolean("must_change_password")), crypto.sha256(token));
     if (rows.size() != 1) throw DomainException.unauthorized("登录已失效，请重新登录");
-    AdminPrincipal principal = rows.getFirst();
+    AdminPrincipal row = rows.getFirst();
+    AdminPrincipal principal = new AdminPrincipal(row.id(), row.username(), row.displayName(), row.roleCode(),
+        row.departmentId(), row.departmentName(), row.mustChangePassword(), permissions(row.id()));
     request.setAttribute(ADMIN_REQUEST_ATTRIBUTE, principal);
     return principal;
+  }
+
+  public java.util.Set<AdminPermission> permissions(long userId) {
+    return java.util.Set.copyOf(jdbc.queryForList("SELECT permission_code FROM admin_user_permission WHERE admin_user_id = ?",
+        String.class, userId).stream().map(AdminPermission::valueOf).toList());
   }
 
   public H5Principal requireH5(HttpServletRequest request) {
@@ -278,6 +285,6 @@ public class AuthService {
   }
 
   public record LoginResult(long id, String username, String displayName, String roleCode,
-                            Long departmentId, String departmentName, boolean mustChangePassword, String csrfToken) {}
+                            Long departmentId, String departmentName, boolean mustChangePassword, String csrfToken, java.util.Set<AdminPermission> permissions) {}
   public record H5LoginResult(H5Principal customer, String csrfToken) {}
 }

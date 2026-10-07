@@ -8,7 +8,8 @@ export type AdminDepartment = {
 };
 
 export type AdminUser = {
-  id: number; username: string; displayName: string; roleCode: "SUPER_ADMIN" | "DEPARTMENT_ADMIN";
+  id: number; username: string; displayName: string; roleCode: "SUPER_ADMIN" | "DEPARTMENT_ADMIN" | "DEPARTMENT_MEMBER";
+  permissions?: import("../../features/admin/permissions").MemberPermission[];
   departmentId?: number | null; departmentName?: string | null; status: "ACTIVE" | "DISABLED";
   mustChangePassword: boolean; lastLoginAt?: string | null; lockVersion: number;
 };

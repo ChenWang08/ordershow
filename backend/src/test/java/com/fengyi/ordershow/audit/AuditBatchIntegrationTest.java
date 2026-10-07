@@ -41,7 +41,7 @@ class AuditBatchIntegrationTest {
         for(int n=0;n<4;n++) {
           int id=n;
           jobs.add(pool.submit(()->writer.write(new Object[]{null,"SYSTEM",null,"TEST","ORDER",String.valueOf(id),null,
-              id==1?"INVALID":"SUCCESS",null,"batch-test-"+id,"127.0.0.1","test",timestamp})));
+              id==1?"INVALID":"SUCCESS",null,"batch-test-"+id,"127.0.0.1","test",timestamp,null,null})));
           if(n==0) assertThat(entered.await(3,TimeUnit.SECONDS)).isTrue();
         }
         try {

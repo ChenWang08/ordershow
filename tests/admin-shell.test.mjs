@@ -100,13 +100,14 @@ test("creation failure leaves the drawer open and allows retry", async () => {
   assert.equal(harness.calls.length, 0);
 });
 
-function initializationHarness(apiOverrides = {}) {
+function initializationHarness(apiOverrides = {}, identity = { roleCode: "SUPER_ADMIN" }) {
   const state = {};
   const notices = [];
   const calls = [];
   let effect;
   const { useAdminInitialization } = loadModule("app/features/admin/useAdminInitialization.ts", {
     react: { useEffect: (callback) => { effect = callback; } },
+    "../../admin-context": { useAdminIdentity: () => identity },
     "../lottery/Lottery": { mapLotteryRule: (rule) => [rule.id] },
     "../../api": {
       ApiError: class ApiError extends Error {},
@@ -196,4 +197,26 @@ test("initialization reports load failure without replacing existing data", asyn
   assert.deepEqual(harness.calls, []);
   assert.match(harness.notices.at(-1), /后台数据加载失败/);
   cleanup();
+});
+
+for (const permission of ['OVERVIEW', 'PRODUCT', 'WHITELIST', 'ATTENDANCE', 'ORDER', 'LOTTERY']) {
+  test('member initialization loads only granted module: ' + permission, async () => {
+    const requested = [];
+    const methods = { loadAdminProducts: 'PRODUCT', loadProductImageReviews: 'PRODUCT', loadAdminCustomers: 'WHITELIST',
+      loadAdminAttendees: 'ATTENDANCE', loadLotteryRules: 'LOTTERY', loadAuditLogs: 'AUDIT', loadImportTasks: 'IMPORT' };
+    const overrides = Object.fromEntries(Object.entries(methods).map(([method, module]) => [method, async () => { requested.push(module); return []; }]));
+    const h = initializationHarness(overrides, { roleCode: 'DEPARTMENT_MEMBER', permissions: [permission] });
+    h.mount(); await settle();
+    assert.deepEqual(h.notices, []);
+    assert.ok(requested.every(module => module === permission || module === 'IMPORT' && ['PRODUCT', 'WHITELIST', 'ATTENDANCE'].includes(permission)));
+    assert.equal(requested.includes('AUDIT'), false);
+  });
+}
+test('members cannot open or submit new activities', async () => {
+  const h = activitiesHarness({ role: 'DEPARTMENT_MEMBER' });
+  h.render().openNewActivity();
+  assert.equal(h.render().newActivityOpen, false);
+  h.render().setNewActivity(validDraft);
+  await h.render().submitNewActivity();
+  assert.equal(h.calls.some(c => c[0] === 'create'), false);
 });

@@ -56,7 +56,8 @@ public class AuditService {
       String ip = remoteIp(request);
       writer.write(new Object[]{activityId, actorType, admin == null ? null : admin.id(), action, objectType, objectId, truncate(reason, 500),
           success ? "SUCCESS" : "FAILURE", success ? null : "HTTP_" + response.getStatus(), TraceFilter.id(request), ip,
-          truncate(request.getHeader("User-Agent"), 500), java.sql.Timestamp.from(Instant.now())});
+          truncate(request.getHeader("User-Agent"), 500), java.sql.Timestamp.from(Instant.now()),
+          admin == null ? null : admin.displayName() + "（" + admin.username() + "）", admin == null ? null : admin.roleCode()});
     } catch (Exception auditFailure) {
       log.warn("Failed to persist audit event for {} {}", request.getMethod(), request.getRequestURI(), auditFailure);
     }
@@ -69,6 +70,7 @@ public class AuditService {
   public PageResponse<AuditView> listForAdmin(AdminPrincipal admin, Long activityId, String actionCode, String objectType,
                                                int page, int size, String traceId) {
     if (admin.isSuperAdmin()) return list(activityId, actionCode, objectType, page, size, traceId);
+    admin.requireManager();
     if (activityId != null) departmentAccess.requireActivityAccess(admin, activityId);
     return listScoped(activityId, actionCode, objectType, page, size, traceId, admin.departmentId());
   }
@@ -85,7 +87,7 @@ public class AuditService {
     Long total = jdbc.queryForObject("SELECT COUNT(*) FROM audit_log l" + where, Long.class, args);
     List<Object> paged = new ArrayList<>(Arrays.asList(args)); paged.add(safeSize); paged.add((safePage - 1) * safeSize);
     List<AuditView> rows = jdbc.query("""
-        SELECT l.id, l.actor_type, u.display_name, l.action_code, l.object_type, l.object_id, l.reason,
+        SELECT l.id, l.actor_type, COALESCE(l.actor_identity_snapshot, u.display_name), l.action_code, l.object_type, l.object_id, l.reason,
           l.result, l.error_code, l.trace_id, l.occurred_at
         FROM audit_log l LEFT JOIN admin_user u ON u.id = l.admin_user_id
         """ + where + " ORDER BY l.occurred_at DESC, l.id DESC LIMIT ? OFFSET ?", this::map, paged.toArray());
@@ -100,6 +102,8 @@ public class AuditService {
   private static Long activityId(String uri) { Matcher matcher = ACTIVITY_ID.matcher(uri); return matcher.find() ? Long.valueOf(matcher.group(1)) : null; }
   private static String lastId(String uri) { Matcher matcher = LAST_ID.matcher(uri); return matcher.find() ? matcher.group(1) : null; }
   private static String objectType(String uri) {
+    if (uri.contains("/members")) return "ADMIN_USER";
+    if (uri.contains("/order-change-requests")) return "ORDER_CHANGE_REQUEST";
     if (uri.contains("/orders")) return "ORDER"; if (uri.contains("/products")) return "PRODUCT";
     if (uri.contains("/customers")) return "CUSTOMER"; if (uri.contains("/attendees")) return "ATTENDEE";
     if (uri.contains("/imports")) return "IMPORT"; if (uri.contains("/lottery")) return "LOTTERY";
@@ -109,6 +113,10 @@ public class AuditService {
     if (uri.contains("/activities")) return "ACTIVITY"; return "SESSION";
   }
   private static String action(String method, String uri) {
+    if (uri.endsWith("/admin/members")) return "MEMBER_CREATED";
+    if (uri.contains("/admin/members/")) return "MEMBER_UPDATED";
+    if (uri.contains("/order-change-requests/") && uri.endsWith("/approve")) return "ORDER_CHANGE_APPROVED";
+    if (uri.contains("/order-change-requests/") && uri.endsWith("/reject")) return "ORDER_CHANGE_REJECTED";
     if (uri.endsWith("/admin/auth/login")) return "ADMIN_LOGIN";
     if (uri.endsWith("/admin/auth/change-password")) return "ADMIN_PASSWORD_CHANGED";
     if (uri.endsWith("/admin/auth/logout")) return "ADMIN_LOGOUT";

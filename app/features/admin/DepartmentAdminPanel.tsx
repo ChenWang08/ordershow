@@ -35,7 +35,7 @@ export function DepartmentAdminPanel() {
   const refresh = useCallback(async () => {
     const [nextDepartments, nextUsers] = await Promise.all([loadAdminDepartments(), loadAdminUsers()]);
     setDepartments(nextDepartments);
-    setUsers(nextUsers);
+    setUsers(nextUsers.filter(user => user.roleCode !== "DEPARTMENT_MEMBER"));
   }, []);
 
   useEffect(() => {
@@ -43,7 +43,7 @@ export function DepartmentAdminPanel() {
     void Promise.all([loadAdminDepartments(), loadAdminUsers()]).then(([nextDepartments, nextUsers]) => {
       if (!active) return;
       setDepartments(nextDepartments);
-      setUsers(nextUsers);
+      setUsers(nextUsers.filter(user => user.roleCode !== "DEPARTMENT_MEMBER"));
     }).catch((reason) => {
       if (active) setError(reason instanceof ApiError ? reason.message : "部门数据加载失败");
     });
@@ -159,7 +159,7 @@ export function DepartmentAdminPanel() {
       <div className="panel-title">
         <div>
           <h2>部门与账号管理</h2>
-          <p>每个部门绑定一个后台共享账号；部门账号的登录密码由超级管理员统一设置和重置。</p>
+          <p>每个部门绑定一个部门管理员账号，可在“成员管理”中新增成员。部门管理员密码由超级管理员统一设置和重置。</p>
         </div>
       </div>
       {error && <div className="warning-box"><b>操作失败</b><span>{error}</span></div>}

@@ -1,5 +1,7 @@
 "use client";
 
+import { MemberAdminPanel } from "./MemberAdminPanel";
+import { isManager } from "./permissions";
 import { useEffect, useState } from "react";
 import { ApiError, loadAdminActivities, loadAdminActivity, setActiveActivityCode, getPreferredAdminActivityCode, setPreferredAdminActivityCode, type RuntimeActivity } from "../../api";
 import { useAdminIdentity } from "../../admin-context";
@@ -57,7 +59,7 @@ export function AuthorizedWorkspace() {
   }, [requestKey]);
   if (loading || error) return <PendingAdminWorkspace loading={loading} error={error} onRetry={() => setRetry((value) => value + 1)} />;
   if (!activity) return <EmptyAdminWorkspace />;
-  return <ActivityWorkspaceProvider key={(identity?.id ?? "") + ":" + activity.id} adminActivity={activity}><AdminWorkspace /></ActivityWorkspaceProvider>;
+  return <ActivityWorkspaceProvider key={(identity?.id ?? "") + ":" + activity.id + ":" + (identity?.permissions || []).slice().sort().join(",")} adminActivity={activity}><AdminWorkspace /></ActivityWorkspaceProvider>;
 }
 
 export function EmptyAdminWorkspace() {
@@ -69,17 +71,17 @@ export function EmptyAdminWorkspace() {
     <AdminLayout tab={tab} onTabChange={setTab} hasActivity={false} header={
       <header className="admin-empty-header"><div className="admin-heading">
         <div className="admin-no-activity"><span>当前活动</span><b>暂无活动</b></div><strong>{tab}</strong>
-        <button type="button" className="admin-primary" onClick={activities.openNewActivity}>＋ 新建活动</button>
+        {isManager(identity) && <button type="button" className="admin-primary" onClick={activities.openNewActivity}>＋ 新建活动</button>}
       </div><AdminAccountSummary /></header>
     }>
-      {tab === "部门与账号" && identity?.roleCode === "SUPER_ADMIN" ? <DepartmentAdminPanel /> :
+      {tab === "成员管理" && isManager(identity) ? <MemberAdminPanel /> : tab === "部门与账号" && identity?.roleCode === "SUPER_ADMIN" ? <DepartmentAdminPanel /> :
         <section className="admin-panel admin-empty-panel">
           <div className="admin-empty-content">
             <div className="admin-empty-symbol" aria-hidden="true">＋</div>
             <h2>{identity?.roleCode === "SUPER_ADMIN" ? "暂无活动" : "本部门暂无活动"}</h2>
-            <p>创建第一场订货活动，即可导入商品和白名单，管理订单与抽奖。</p>
-            <button type="button" className="admin-primary" onClick={activities.openNewActivity}>新建活动</button>
-            <small>{identity?.roleCode === "SUPER_ADMIN" ? "创建时请选择活动所属部门" : `新活动将自动归属${identity?.departmentName || "本部门"}`}</small>
+            <p>{isManager(identity) ? "创建第一场订货活动，即可导入商品和白名单，管理订单与抽奖。" : "请联系部门管理员创建活动并分配功能权限。"}</p>
+            {isManager(identity) && <button type="button" className="admin-primary" onClick={activities.openNewActivity}>新建活动</button>}
+            {isManager(identity) && <small>{identity?.roleCode === "SUPER_ADMIN" ? "创建时请选择活动所属部门" : `新活动将自动归属${identity?.departmentName || "本部门"}`}</small>}
           </div>
         </section>}
     </AdminLayout>
@@ -94,7 +96,7 @@ function PendingAdminWorkspace({ loading, error, onRetry }: { loading: boolean; 
   return <AdminLayout tab={tab} onTabChange={setTab} hasActivity={false} header={
     <header className="admin-empty-header"><div className="admin-heading"><strong>{tab}</strong></div><AdminAccountSummary /></header>
   }>
-    {tab === "部门与账号" && identity?.roleCode === "SUPER_ADMIN" ? <DepartmentAdminPanel /> :
+    {tab === "成员管理" && isManager(identity) ? <MemberAdminPanel /> : tab === "部门与账号" && identity?.roleCode === "SUPER_ADMIN" ? <DepartmentAdminPanel /> :
       <section className="admin-panel admin-empty-panel" aria-busy={loading}><div className="admin-empty-content">
         <h2>{loading ? "正在加载活动…" : "活动加载失败"}</h2>
         <p role={loading ? "status" : "alert"}>{loading ? "正在获取当前账号可访问的活动" : error}</p>

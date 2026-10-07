@@ -119,6 +119,7 @@ public class ActivityService {
   public ActivityView create(ActivityWrite request, AdminPrincipal admin) {
     validateTime(request.startsAt(), request.endsAt(), request.eventEndsAt());
     requireFutureStart(request.startsAt());
+    admin.requireManager();
     long departmentId = departmentAccess.requireDepartmentForCreate(admin, request.departmentId());
     String temporaryCode = "PENDING-" + UUID.randomUUID();
     jdbc.update("""
@@ -138,6 +139,7 @@ public class ActivityService {
 
   @Transactional
   public ActivityView update(long id, int expectedVersion, ActivityWrite request, AdminPrincipal admin) {
+    admin.requireManager();
     departmentAccess.requireActivityAccess(admin, id);
     validateTime(request.startsAt(), request.endsAt(), request.eventEndsAt());
     ActivityView current = byId(id);
@@ -194,6 +196,7 @@ public class ActivityService {
 
   @Transactional
   public ActivityView publish(long id, int expectedVersion, AdminPrincipal admin) {
+    admin.requireManager();
     departmentAccess.requireActivityAccess(admin, id);
     ActivityView current = byId(id);
     if (!"DRAFT".equals(current.configuredStatus())) {
@@ -214,6 +217,7 @@ public class ActivityService {
 
   @Transactional
   public ActivityView withdrawPublication(long id, int expectedVersion, AdminPrincipal admin) {
+    admin.requireManager();
     departmentAccess.requireActivityAccess(admin, id);
     ActivityView current = byId(id);
     if (!"SCHEDULED".equals(current.configuredStatus()) || !now().isBefore(current.startsAt())) {
@@ -230,6 +234,7 @@ public class ActivityService {
 
   @Transactional
   public ActivityView closeNow(long id, int expectedVersion, AdminPrincipal admin) {
+    admin.requireManager();
     departmentAccess.requireActivityAccess(admin, id);
     ActivityView current = byId(id);
     if (!"ACTIVE".equals(current.status())) {
@@ -247,6 +252,7 @@ public class ActivityService {
 
   @Transactional
   public ActivityView finishNow(long id, int expectedVersion, AdminPrincipal admin) {
+    admin.requireManager();
     departmentAccess.requireActivityAccess(admin, id);
     ActivityView current = byId(id);
     if (!"CLOSED".equals(current.status())) {

@@ -47,14 +47,14 @@ public class AdminAuthController {
   ApiResponse<MeResponse> me(HttpServletRequest request) {
     AdminPrincipal principal = auth.requireAdmin(request);
     return ApiResponse.of(new MeResponse(principal.id(), principal.username(), principal.displayName(), principal.roleCode(),
-        principal.departmentId(), principal.departmentName(), principal.mustChangePassword(), auth.csrfFromCookie(request)), TraceFilter.id(request));
+        principal.departmentId(), principal.departmentName(), principal.mustChangePassword(), auth.csrfFromCookie(request), principal.permissions()), TraceFilter.id(request));
   }
 
   @PostMapping("/auth/change-password")
   ApiResponse<Boolean> changePassword(@Valid @RequestBody ChangePasswordRequest body, HttpServletRequest request) {
     AdminPrincipal principal = auth.requireAdmin(request);
-    if ("DEPARTMENT_ADMIN".equals(principal.roleCode())) {
-      throw DomainException.forbidden("DEPARTMENT_PASSWORD_MANAGED", "部门账号密码由超级管理员统一管理");
+    if (!principal.isSuperAdmin()) {
+      throw DomainException.forbidden("DEPARTMENT_PASSWORD_MANAGED", "账号密码由管理员统一管理");
     }
     String currentHash = jdbc.queryForObject("SELECT password_hash FROM admin_user WHERE id = ?", String.class, principal.id());
     if (currentHash == null || !passwordEncoder.matches(body.currentPassword(), currentHash)) {
@@ -73,5 +73,5 @@ public class AdminAuthController {
   public record LoginRequest(@NotBlank String username, @NotBlank String password) {}
   public record ChangePasswordRequest(@NotBlank String currentPassword, @NotBlank @Size(min = 8, max = 100) String newPassword) {}
   public record MeResponse(long id, String username, String displayName, String roleCode, Long departmentId,
-                           String departmentName, boolean mustChangePassword, String csrfToken) {}
+                           String departmentName, boolean mustChangePassword, String csrfToken, java.util.Set<com.fengyi.ordershow.security.AdminPermission> permissions) {}
 }

@@ -14,7 +14,7 @@ async function loadAllPages<T>(path: string) {
 export async function loadAdminCustomers(activityId: number) { return loadAllPages<AdminCustomer>(`/admin/activities/${activityId}/customers`); }
 export async function searchAdminCustomers(activityId: number, keyword: string) {
   const query = new URLSearchParams({ keyword, page: "1", size: "50" });
-  return (await api<PageEnvelope<AdminCustomer>>(`/admin/activities/${activityId}/customers?${query.toString()}`)).data;
+  return (await api<PageEnvelope<AdminCustomer>>(`/admin/activities/${activityId}/orders/customer-options?${query.toString()}`)).data;
 }
 export async function loadAdminAttendees(activityId: number) { return loadAllPages<AdminAttendee>(`/admin/activities/${activityId}/attendees`); }
 export async function createAdminCustomer(activityId: number, body: Record<string, unknown>) {

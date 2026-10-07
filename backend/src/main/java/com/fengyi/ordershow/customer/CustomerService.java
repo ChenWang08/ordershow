@@ -252,7 +252,7 @@ public class CustomerService {
           participant_name, gender, participant_type,
           dealer_name_snapshot, branch_name_snapshot, phone, phone_lookup_hash, phone_masked,
           data_version_id, is_active, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?)
         """, activityId, match.customerId(), match.status(), match.method(), match.reasonCode(),
         blankToNull(request.participantName()), blankToNull(request.gender()),
         blankToNull(request.participantType()), required(request.dealerName(), "经销商名称不能为空"),

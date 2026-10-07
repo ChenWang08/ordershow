@@ -79,7 +79,7 @@ function editorHarness(overrides = {}) {
   const state = { orders: [], selectedNo: null, reload: 0, error: "" };
   const api = {
     ApiError: class ApiError extends Error {},
-    loadAdminProducts: async () => [product],
+    loadOrderProducts: async () => [product],
     loadAdminOrder: async () => runtimeOrder,
     createAdminOrder: async (...args) => { calls.push(["create", ...args]); return runtimeOrder; },
     adjustAdminOrder: async (...args) => { calls.push(["adjust", ...args]); return runtimeOrder; },

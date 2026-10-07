@@ -25,13 +25,15 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 @Configuration
 public class SecurityConfiguration implements WebMvcConfigurer {
+  private final com.fengyi.ordershow.security.MemberPermissionService memberPermissions;
   private final AuthService authService;
   private final OrderShowProperties properties;
   private final AuditService auditService;
   private final DepartmentAccessService departmentAccess;
 
   public SecurityConfiguration(AuthService authService, OrderShowProperties properties, AuditService auditService,
-      DepartmentAccessService departmentAccess) {
+      DepartmentAccessService departmentAccess, com.fengyi.ordershow.security.MemberPermissionService memberPermissions) {
+    this.memberPermissions = memberPermissions;
     this.authService = authService;
     this.properties = properties;
     this.auditService = auditService;
@@ -92,6 +94,14 @@ public class SecurityConfiguration implements WebMvcConfigurer {
         return true;
       }
     }).addPathPatterns("/admin/activities/**");
+
+    registry.addInterceptor(new HandlerInterceptor() {
+      @Override
+      public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        memberPermissions.requireAccess(authService.requireAdmin(request), request);
+        return true;
+      }
+    }).addPathPatterns("/admin/**").excludePathPatterns("/admin/auth/login");
 
     registry.addInterceptor(new HandlerInterceptor() {
       @Override

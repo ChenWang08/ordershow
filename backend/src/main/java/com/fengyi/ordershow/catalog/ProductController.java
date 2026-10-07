@@ -58,7 +58,7 @@ public class ProductController {
     return ApiResponse.of(service.h5Products(activityCode, auth.requireH5(request), rebateStatus, keyword), TraceFilter.id(request));
   }
 
-  @GetMapping("/admin/activities/{activityId}/products")
+  @GetMapping({"/admin/activities/{activityId}/products", "/admin/activities/{activityId}/orders/product-options"})
   ApiResponse<List<ProductService.ProductView>> admin(@PathVariable long activityId,
       @RequestParam(required = false) String customerType, @RequestParam(required = false) String status,
       @RequestParam(required = false) String keyword, @RequestParam(required = false) Long activityCustomerId,

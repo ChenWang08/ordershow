@@ -2,7 +2,8 @@ import { api } from "./client";
 import type { Envelope } from "./types";
 
 export type AdminIdentity = {
-  id: number; username: string; displayName: string; roleCode: "SUPER_ADMIN" | "DEPARTMENT_ADMIN";
+  id: number; username: string; displayName: string; roleCode: "SUPER_ADMIN" | "DEPARTMENT_ADMIN" | "DEPARTMENT_MEMBER";
+  permissions?: import("../../features/admin/permissions").MemberPermission[];
   departmentId?: number | null; departmentName?: string | null; mustChangePassword: boolean; csrfToken: string;
 };
 

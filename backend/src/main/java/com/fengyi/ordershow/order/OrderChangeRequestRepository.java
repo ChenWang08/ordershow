@@ -75,9 +75,10 @@ public class OrderChangeRequestRepository {
 
   void review(long requestId, String status, String reason, long adminId) {
     jdbc.update("""
-        UPDATE order_change_request SET status = ?, review_reason = ?, reviewed_by_admin_id = ?, reviewed_at = UTC_TIMESTAMP(3)
+        UPDATE order_change_request SET status = ?, review_reason = ?, reviewed_by_admin_id = ?, reviewed_at = UTC_TIMESTAMP(3),
+          reviewer_identity_snapshot = (SELECT CONCAT(display_name,'（',username,'）') FROM admin_user WHERE id=?)
         WHERE id = ? AND status = 'PENDING'
-        """, status, reason, adminId, requestId);
+        """, status, reason, adminId, adminId, requestId);
   }
 
   void conflict(long requestId, String reason) {
@@ -92,7 +93,7 @@ public class OrderChangeRequestRepository {
     return """
         SELECT r.*, o.order_no, o.status order_status, o.current_version_no current_version, o.lock_version current_lock_version,
           o.total_quantity current_total_quantity, o.total_tons current_total_tons, o.total_amount current_total_amount,
-          o.dealer_full_name_snapshot dealer_name, c.phone_masked, u.display_name reviewed_by_name
+          o.dealer_full_name_snapshot dealer_name, c.phone_masked, COALESCE(r.reviewer_identity_snapshot,u.display_name) reviewed_by_name
         FROM order_change_request r
         JOIN customer_order o ON o.id = r.order_id
         JOIN activity_customer c ON c.id = r.activity_customer_id

@@ -323,3 +323,21 @@
 .order-type-filter { display: inline-flex; align-items: center; gap: 6px; padding: 0 5px 0 8px; color: #7e6e66; border: 1px solid #e0d6d0; border-radius: 6px; background: #fff; font-size: 8px; }
 .order-type-filter select { padding: 6px 16px 6px 0; color: #493b35; border: 0; outline: 0; background: transparent; font-size: 8px; }
 .order-workbench-tabs{display:flex;gap:20px;border-bottom:1px solid #eaded8;margin-bottom:22px}.order-workbench-tabs button{border:0;background:none;padding:14px;color:#776b64}.order-workbench-tabs .active{color:#af2424;border-bottom:3px solid #af2424}.order-workbench-tabs b{border-radius:16px;background:#f8e6df;padding:3px 8px}.review-filters{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}.review-filters input{min-width:260px;flex:1}.review-filters input,.review-filters select,.review-filters button{border:1px solid #e7dcd6;border-radius:8px;padding:10px;background:white}.review-table-scroll{overflow:auto}.review-table{width:100%;border-collapse:collapse;text-align:left;font-size:13px}.review-table th{background:#f8f5f2;color:#81756a}.review-table th,.review-table td{padding:14px 12px;border-bottom:1px solid #eee5df;vertical-align:top}.review-table small{display:block;color:#887b72;margin-top:5px}.review-table button,.review-link{color:#ad2424;background:none;border:0;cursor:pointer;text-align:left}.review-drawer{margin-left:auto;width:min(1100px,96vw);height:100%;display:flex;flex-direction:column;background:white;box-shadow:-8px 0 40px #0002}.review-drawer header,.review-drawer footer{padding:20px 26px;display:flex;gap:12px;justify-content:space-between;border-bottom:1px solid #eee}.review-drawer-body{padding:24px 26px;overflow:auto;flex:1}.review-drawer textarea{display:block;width:100%;min-height:85px;border:1px solid #dccfc6;border-radius:8px;margin-top:10px;padding:12px}.review-drawer footer{border-top:1px solid #eee}.review-drawer button{cursor:pointer;border-radius:7px;padding:9px 16px}.review-workbench>p{color:#85766b}.review-drawer-body>p{margin-bottom:16px}
+
+.member-panel { padding: 24px; }
+.member-table-scroll { overflow-x: auto; margin-top: 20px; }
+.member-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 13px; }
+.member-table th, .member-table td { padding: 14px 12px; border-bottom: 1px solid #eee5df; vertical-align: top; }
+.member-table th { background: #f8f5f2; }
+.member-row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.member-row-actions button, .member-panel select { padding: 8px 12px; border: 1px solid #dfd4cd; border-radius: 6px; cursor: pointer; }
+.member-modal-backdrop { position: fixed; inset: 0; z-index: 1000; background: #0006; display: flex; align-items: center; justify-content: center; padding: 20px; }
+.member-modal { width: min(560px, 100%); max-height: 90vh; overflow-y: auto; background: white; padding: 28px; border-radius: 12px; box-shadow: 0 20px 60px #0003; }
+.member-modal h2 { margin: 0 0 20px; }
+.member-modal form { display: grid; gap: 16px; }
+.member-modal form > label { display: grid; gap: 8px; }
+.member-modal input:not([type=checkbox]), .member-modal select { width: 100%; padding: 10px; border: 1px solid #dfd4cd; border-radius: 6px; }
+.member-modal p, .member-modal small { color: #786b62; font-size: 13px; line-height: 1.6; }
+.member-modal fieldset { border: 1px solid #dfd4cd; border-radius: 6px; padding: 14px; }
+.member-permissions { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.member-permissions label { display: flex; align-items: center; gap: 8px; }

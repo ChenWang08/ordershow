@@ -62,6 +62,7 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice }
   }, []);
 
   const openNewActivity = () => {
+    if (adminIdentity?.roleCode === "DEPARTMENT_MEMBER") return;
     const startsAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
     startsAt.setSeconds(0, 0);
     const endsAt = new Date(startsAt.getTime() + 2 * 24 * 60 * 60 * 1000);
@@ -74,6 +75,7 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice }
   };
 
   const submitNewActivity = async () => {
+    if (adminIdentity?.roleCode === "DEPARTMENT_MEMBER") return;
     if (!newActivity.name.trim() || !newActivity.startsAt || !newActivity.endsAt || !newActivity.eventEndsAt) {
       setActionNotice("请完整填写活动名称、订货时间和整场活动结束时间。");
       return;

@@ -33,7 +33,9 @@ export async function api<T>(path: string, init: RequestInit = {}, csrfKind?: "a
   const requestPath = path.split("?")[0];
   const requestMethod = (init.method || "GET").toUpperCase();
   const isReadRequest = requestMethod === "GET" || requestMethod === "HEAD";
-  const lostReadAccess = isReadRequest && [401, 403].includes(response.status);
+  const permissionChanged = response.status === 403 && errorBody?.code === "MODULE_PERMISSION_REQUIRED";
+  if (permissionChanged && typeof window !== "undefined") window.dispatchEvent(new Event("admin-permissions-changed"));
+  const lostReadAccess = isReadRequest && [401, 403].includes(response.status) && !permissionChanged;
   const missingActivity = isReadRequest && response.status === 404 && /^\/admin\/activities\/\d+\/?$/.test(requestPath);
   if (!response.ok && typeof window !== "undefined" && path.startsWith("/admin/activities/")
       && (lostReadAccess || missingActivity)) {

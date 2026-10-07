@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ApiError, adjustAdminOrder, createAdminOrder, loadAdminOrder, loadAdminProducts, previewAdminOrder, searchAdminCustomers, voidAdminOrder, type AdminCustomer, type AdminOrderPreview, type RuntimeProduct } from "../../api";
+import { ApiError, adjustAdminOrder, createAdminOrder, loadAdminOrder, loadOrderProducts, previewAdminOrder, searchAdminCustomers, voidAdminOrder, type AdminCustomer, type AdminOrderPreview, type RuntimeProduct } from "../../api";
 import { estimateLineAmount, editorErrorMessage, editorCustomerFromOrder, toOrderRecord, formatMoney, type OrderRecord, type OrderVersionItem } from "./order-domain";
 import type { useOrderList } from "./useOrderList";
 
@@ -102,7 +102,7 @@ export function useOrderEditor({ activityId, selected, setOrders, setLoadError, 
   }, [activityId, editorCustomer, editorItems, editorMode]);
 
   const loadEditorResources = async (activityCustomerId?: number) => {
-    const productRows = await loadAdminProducts(activityId, activityCustomerId ? { activityCustomerId } : {});
+    const productRows = await loadOrderProducts(activityId, activityCustomerId ? { activityCustomerId } : {});
     setProducts(productRows);
     return { productRows };
   };

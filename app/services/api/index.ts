@@ -12,3 +12,5 @@ export * from "./lottery";
 export * from "./products";
 export * from "./customers";
 export * from "./audit";
+
+export * from "./members";

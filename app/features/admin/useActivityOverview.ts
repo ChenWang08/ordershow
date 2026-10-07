@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { loadAdminDashboard, type DashboardData } from "../../api";
+import { loadAdminDashboard, type ModuleContext, type DashboardData } from "../../api";
 import { type WhitelistRow, whitelistCustomerTypeMode } from "../../domain/import-domain";
 import { money } from "../shared/utils";
 
 // Keep this hook mounted with the admin shell so tab changes preserve polling state.
-export function useActivityOverview(activityId: string, whitelistRows: WhitelistRow[]) {
-  const whitelistMode = whitelistCustomerTypeMode(whitelistRows);
+export function useActivityOverview(activityId: string, whitelistRows: WhitelistRow[], enabled = true, context: ModuleContext | null = null) {
+  const whitelistMode = context?.customerTypeMode || whitelistCustomerTypeMode(whitelistRows);
   const [overviewDashboard, setOverviewDashboard] = useState<DashboardData | null>(null);
   const [overviewByType, setOverviewByType] = useState<{ GENERAL: DashboardData | null; SPECIAL: DashboardData | null }>({ GENERAL: null, SPECIAL: null });
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
     const refreshOverview = async () => {
       try {
@@ -28,16 +29,16 @@ export function useActivityOverview(activityId: string, whitelistRows: Whitelist
     void refreshOverview();
     const timer = window.setInterval(refreshOverview, 10_000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [activityId]);
+  }, [activityId, enabled]);
   const overviewTotals = overviewDashboard?.totals;
   const submittedCustomers = Number(overviewTotals?.order_count ?? 0);
-  const totalActiveCustomers = whitelistRows.filter((row) => row.status === "有效").length;
+  const totalActiveCustomers = context?.customerCount ?? whitelistRows.filter((row) => row.status === "有效").length;
   const progressRows = ([
     ["全部客户", "ALL"], ["综合客户", "GENERAL"], ["特渠专业客户", "SPECIAL"],
   ] as const).map(([label, type]) => {
     if (type === "ALL") return { label, total: totalActiveCustomers, submitted: submittedCustomers, percentage: totalActiveCustomers > 0 ? Math.min(100, submittedCustomers / totalActiveCustomers * 100) : 0 };
     if (whitelistMode === "UNSPECIFIED") return { label, total: 0, submitted: 0, percentage: 0 };
-    const total = whitelistRows.filter((row) => row.status === "有效" && (type === "GENERAL" ? row.customerType === "综合客户" : row.customerType === "特渠专业客户")).length;
+    const total = context?.customersByType[type] ?? whitelistRows.filter((row) => row.status === "有效" && (type === "GENERAL" ? row.customerType === "综合客户" : row.customerType === "特渠专业客户")).length;
     const submitted = Number(overviewByType[type]?.totals.order_count ?? 0);
     return { label, total, submitted, percentage: total > 0 ? Math.min(100, submitted / total * 100) : 0 };
   });

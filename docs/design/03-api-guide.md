@@ -81,9 +81,28 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 2. 服务端设置 HttpOnly 会话 Cookie，并返回 CSRF Token；
 3. 任何修改请求同时携带 `X-CSRF-Token`；
 4. `POST /admin/auth/logout` 撤销当前会话；
-5. 禁用管理员账号时撤销其全部会话。
+5. 停用账号或重置密码时撤销其全部会话；停用部门撤销所属全部账号会话。超级管理员自行改密保留当前会话、撤销其他会话。
 
-管理员手机号返回规则：
+登录及 `GET /admin/me` 返回 roleCode、departmentId、departmentName、permissions。角色为 SUPER_ADMIN、DEPARTMENT_ADMIN、DEPARTMENT_MEMBER；成员权限为 OVERVIEW、PRODUCT、WHITELIST、ATTENDANCE、ORDER、LOTTERY。管理员按角色具有范围内全部模块权限，不依赖 permissions 数组。
+
+成员使用本部门全部活动，不需要活动成员授权关系。读活动列表及基本详情支持筛选器；活动写操作始终仅限管理员。其他接口还检查模块权限及业务状态。成员不能自行改密，部门管理员同样不能自行改密。
+
+| 接口 | 权限及语义 |
+| --- | --- |
+| GET /admin/members | 管理员查询成员；超级管理员可按 departmentId 筛选，部门管理员强制限定本部门 |
+| POST /admin/members | 管理员创建成员；超级管理员指定部门，部门管理员自动绑定本部门；默认无权限 |
+| PATCH /admin/members/{id} | 编辑姓名、替换权限、重置密码或启停；必须携带 lockVersion，冲突返回 409；不能改角色、用户名或部门 |
+| GET /admin/activities/{activityId}/module-context | 至少一项模块权限；仅提供辅助计数、客户类型模式、白名单发布状态，不含个人明细 |
+| GET /admin/activities/{activityId}/orders/customer-options | ORDER 权限，订单编辑所需客户查询，不授予白名单写权限 |
+| GET /admin/activities/{activityId}/orders/product-options | ORDER 权限，订单编辑所需商品查询，不授予商品写权限 |
+
+成员更新省略 permissions 保留原权限，传入数组整体替换，空数组收回全部权限；后续请求立即使用最新授权。成员姓名支持中英文或混合，非空且最多 100 字符；用户名为 3–64 位，以英文字母或数字开头，其余允许英文字母、数字及 `_ . @ -`。密码长度 8–100 位。
+
+导入列表按授权模块过滤，单个导入任务依据数据库 import_type 校验；私有导入源文件校验所属活动和模块，公开商品图及奖品图沿用原公开规则。未授权返回 MODULE_PERMISSION_REQUIRED（403），仅限管理员操作返回 MANAGER_REQUIRED（403），访问其他部门资源返回 404，成员版本冲突返回 MEMBER_VERSION_CONFLICT（409）。
+
+订单审核及历史响应中的 reviewedByName、submittedByAdminName、adminName 优先采用操作时身份快照，展示具体姓名及用户名；新审计记录同样保存账号身份与角色。旧共享账号记录不补造个人身份。
+
+通过部门及相应模块授权的后台账号手机号返回规则：
 
 - 白名单列表/详情可返回完整 `phone` 和 `confirmerPhone`，现场到场列表/详情可返回完整 `phone`；
 - 订单列表、订单详情及导出可返回完整 `phone`，同时保留 `phoneMasked` 作为非明文兜底；
@@ -131,7 +150,7 @@ H5 商品展示按当前可见商品目录动态处理返利页签：只有同�
 
 ## 6. 幂等和并发
 
-审核工作台新增管理员 GET `order-change-requests/page`（status/type/keyword/page/size/newest）、`order-change-requests/pending`（待审核申请 ID 与订单 ID，供数量和订单标记使用）、`order-change-requests/{requestId}`（完整申请及原订单快照）。路径均以 `/admin/activities/{activityId}/` 开头并校验部门权限；分页摘要不包含商品明细。H5 创建申请同时原子替代已有待审核申请，重复幂等键返回原申请。审核通过接口遇到订单版本变化返回成功响应中的 REJECTED 状态，前端必须检查结果状态。
+审核工作台新增管理员 GET `order-change-requests/page`（status/type/keyword/page/size/newest）、`order-change-requests/pending`（待审核申请 ID 与订单 ID，供数量和订单标记使用）、`order-change-requests/{requestId}`（完整申请及原订单快照）。路径均以 `/admin/activities/{activityId}/` 开头并校验部门范围及 ORDER 权限；分页摘要不包含商品明细。H5 创建申请同时原子替代已有待审核申请，重复幂等键返回原申请。审核通过接口遇到订单版本变化返回成功响应中的 REJECTED 状态，前端必须检查结果状态。
 
 ### 6.1 幂等键
 
@@ -327,7 +346,7 @@ data: {"scope":"ACTIVITY","activityId":12,"version":938201,"eventCount":1200,"ev
 
 ### 12.2 管理员
 
-- 登录、退出、当前管理员、修改密码；
+- 三类后台账号统一登录、退出、当前身份及权限；仅超级管理员自行改密；部门与账号管理、成员创建/授权/重置密码/启停；
 - 活动列表、创建、编辑、状态迁移和二维码；
 - 商品、白名单、到场名单列表与单条紧急编辑；
 - 导入上传、预览、错误、确认和取消；

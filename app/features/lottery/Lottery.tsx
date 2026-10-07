@@ -250,7 +250,7 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
 
 
 
-export function LotterySettings({ rounds, attendanceRows, activityId, customerCount, customerTypeMode = "TYPED", readOnly, onChange }: { rounds: LotteryRound[]; attendanceRows: AttendanceRow[]; activityId: number; customerCount: number; customerTypeMode?: "TYPED" | "UNSPECIFIED"; readOnly: boolean; onChange: (rounds: LotteryRound[]) => void }) {
+export function LotterySettings({ rounds, attendanceRows, attendeeCount = attendanceRows.length, activityId, customerCount, customerTypeMode = "TYPED", readOnly, onChange }: { rounds: LotteryRound[]; attendanceRows: AttendanceRow[]; activityId: number; customerCount: number; attendeeCount?: number; customerTypeMode?: "TYPED" | "UNSPECIFIED"; readOnly: boolean; onChange: (rounds: LotteryRound[]) => void }) {
   const [selectedId, setSelectedId] = useState(rounds.find((item) => item.status === "published")?.id ?? rounds[0]?.id ?? -1);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -380,12 +380,12 @@ export function LotterySettings({ rounds, attendanceRows, activityId, customerCo
   const candidateSteps: [string, number][] = [["当前有效白名单", customerCount], [selected.scope === "attended" ? "已匹配到场客户" : selected.scope === "ordered" ? "有效订单客户" : "客户类型匹配", resolvedCandidateCount], ...(selectedIndex > 0 && selected.excludeWinners ? [["排除已中奖", resolvedCandidateCount] as [string, number]] : [])];
   return (
     <div className="admin-panel lottery-settings">
-      <div className="panel-title"><div><h2>抽奖规则工作台</h2><p>{readOnly ? "整场活动已结束，抽奖规则和结果只读" : "候选按白名单客户 ID 去重并严格按轮次执行；已开始轮次自动锁定"}</p></div><div className="panel-actions"><span className="attendance-not-linked">现场名单已同步 {attendanceRows.length} 名</span><button className="admin-primary" disabled={readOnly || saving || prizeImageUploading || rounds.length === 0} onClick={saveAndPublish}>{readOnly ? "活动已结束" : saving ? "正在保存…" : rounds.some((round) => round.serverStatus === "READY") ? "保存规则修改" : "保存并发布"}</button></div></div>
+      <div className="panel-title"><div><h2>抽奖规则工作台</h2><p>{readOnly ? "整场活动已结束，抽奖规则和结果只读" : "候选按白名单客户 ID 去重并严格按轮次执行；已开始轮次自动锁定"}</p></div><div className="panel-actions"><span className="attendance-not-linked">现场名单已同步 {attendeeCount} 名</span><button className="admin-primary" disabled={readOnly || saving || prizeImageUploading || rounds.length === 0} onClick={saveAndPublish}>{readOnly ? "活动已结束" : saving ? "正在保存…" : rounds.some((round) => round.serverStatus === "READY") ? "保存规则修改" : "保存并发布"}</button></div></div>
       {saveError && <div className="warning-box"><b>抽奖规则未发布</b><span>{saveError}</span></div>}
       <div className="lottery-overview">
         <article><span>抽奖轮次</span><strong>{rounds.length}</strong><small>{rounds.filter((x) => x.status === "completed").length} 轮已完成</small></article>
         <article><span>活动客户</span><strong>{customerCount.toLocaleString()}</strong><small>白名单有效客户</small></article>
-        <article><span>现场到场</span><strong>{attendanceRows.length}</strong><small>当前到场名单</small></article>
+        <article><span>现场到场</span><strong>{attendeeCount}</strong><small>当前到场名单</small></article>
         <article><span>已中奖客户</span><strong>{statistics.validWinnerCustomers}</strong><small>数据库当前有效 · {statistics.invalidatedWinnerRecords} 条已作废</small></article>
       </div>
       <div className="lottery-config-grid">

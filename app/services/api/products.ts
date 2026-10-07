@@ -68,3 +68,8 @@ export async function deleteAdminProduct(activityId: number, productId: number, 
     method: "DELETE", headers: { "If-Match": String(version) },
   }, "admin")).data;
 }
+
+export async function loadOrderProducts(activityId: number, filters: { activityCustomerId?: number } = {}) {
+  const query = filters.activityCustomerId ? '?activityCustomerId=' + filters.activityCustomerId : '';
+  return (await api<Envelope<RuntimeProduct[]>>('/admin/activities/' + activityId + '/orders/product-options' + query)).data;
+}

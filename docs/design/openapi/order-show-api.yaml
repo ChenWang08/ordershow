@@ -22,6 +22,151 @@ tags:
   - name: Exports
   - name: Audit
 paths:
+  /admin/members:
+    get:
+      operationId: listDepartmentMembers
+      tags: [AdminAuth]
+      summary: 管理员查询成员；部门管理员强制限定本部门
+      security:
+        - adminCookie: []
+      parameters:
+        - name: departmentId
+          in: query
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 成员列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/DepartmentMember' }
+                  traceId: { type: string }
+        '403': { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createDepartmentMember
+      tags: [AdminAuth]
+      summary: 创建独立成员账号，默认无模块权限
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberCreate' }
+      responses:
+        '200':
+          description: 成员已创建
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberResponse' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/members/{id}:
+    patch:
+      operationId: updateDepartmentMember
+      tags: [AdminAuth]
+      summary: 编辑成员、替换权限、启停或重置密码
+      description: 仅管理员可操作。部门管理员只能管理本部门成员。权限提交后后续请求立即生效；停用或重置密码撤销全部已有会话。姓名可修改，用户名、角色及部门不可修改。
+      security:
+        - adminCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MemberUpdate' }
+      responses:
+        '200':
+          description: 成员已更新
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberResponse' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/activities/{activityId}/module-context:
+    get:
+      operationId: getModuleContext
+      tags: [Activities]
+      summary: 模块辅助计数与客户类型模式，不包含客户个人信息
+      description: 至少具有一项模块权限；部门范围由后端检查。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 业务辅助信息
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      customerCount: { type: integer }
+                      customersByType: { type: object, additionalProperties: { type: integer } }
+                      customerTypeMode: { type: string, enum: [TYPED, UNSPECIFIED] }
+                      attendeeCount: { type: integer }
+                      whitelistPublished: { type: boolean }
+                  traceId: { type: string }
+        '403': { $ref: '#/components/responses/Problem' }
+  /admin/activities/{activityId}/orders/customer-options:
+    get:
+      operationId: searchOrderCustomerOptions
+      tags: [Orders]
+      summary: 订单编辑所需的客户查询，仅需 ORDER 权限
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: keyword
+          in: query
+          schema: { type: string }
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: size
+          in: query
+          schema: { type: integer, default: 20, maximum: 200 }
+      responses:
+        '200':
+          description: 分页客户选择数据，与客户列表格式一致，不开放白名单写入权限
+          content:
+            application/json:
+              schema: { type: object }
+        '403': { $ref: '#/components/responses/Problem' }
+  /admin/activities/{activityId}/orders/product-options:
+    get:
+      operationId: listOrderProductOptions
+      tags: [Orders]
+      summary: 订单编辑所需的商品查询，仅需 ORDER 权限
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: activityCustomerId
+          in: query
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 商品选择数据，与商品列表格式一致，不开放商品写入权限
+          content:
+            application/json:
+              schema: { type: object }
+        '403': { $ref: '#/components/responses/Problem' }
   /admin/activities/{activityId}/ranking:
     get:
       operationId: getAdminActivityRanking
@@ -1616,7 +1761,7 @@ paths:
       operationId: createAdminOrder
       tags: [Orders]
       summary: 管理员为尚未下单的客户创建订单
-      description: 仅活动处于 ACTIVE、CLOSED 或 FINISHED 时可用；SUPER_ADMIN 和本部门 DEPARTMENT_ADMIN 可操作。创建 V1，来源为 ADMIN。
+      description: 仅活动处于 ACTIVE、CLOSED 或 FINISHED 时可用；SUPER_ADMIN、本部门 DEPARTMENT_ADMIN 和拥有 ORDER 权限的本部门 DEPARTMENT_MEMBER 可操作。创建 V1，来源为 ADMIN。
       security:
         - adminCookie: []
       parameters:
@@ -2498,6 +2643,58 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    MemberPermission:
+      type: string
+      enum: [OVERVIEW, PRODUCT, WHITELIST, ATTENDANCE, ORDER, LOTTERY]
+      description: 六项独立模块权限；不包含活动生命周期或账号管理。
+    DepartmentMember:
+      type: object
+      required: [id, username, displayName, departmentId, departmentName, status, lockVersion, permissions]
+      properties:
+        id: { type: integer, format: int64 }
+        username: { type: string }
+        displayName: { type: string }
+        departmentId: { type: integer, format: int64 }
+        departmentName: { type: string }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        lockVersion: { type: integer }
+        lastLoginAt: { type: [string, 'null'], format: date-time }
+        permissions:
+          type: array
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/MemberPermission' }
+    MemberCreate:
+      type: object
+      required: [username, displayName, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64 }
+        displayName: { type: string, minLength: 1, maxLength: 100 }
+        departmentId: { type: integer, format: int64, description: 超级管理员必填；部门管理员自动绑定本部门 }
+        password: { type: string, format: password, minLength: 8, maxLength: 100, writeOnly: true }
+        permissions:
+          type: array
+          uniqueItems: true
+          default: []
+          items: { $ref: '#/components/schemas/MemberPermission' }
+    MemberUpdate:
+      type: object
+      required: [lockVersion]
+      properties:
+        lockVersion: { type: integer, description: 当前成员版本，避免覆盖其他管理员的修改 }
+        displayName: { type: string, minLength: 1, maxLength: 100 }
+        status: { type: string, enum: [ACTIVE, DISABLED] }
+        password: { type: string, format: password, minLength: 8, maxLength: 100, writeOnly: true }
+        permissions:
+          type: array
+          uniqueItems: true
+          description: 传入时整体替换权限，空数组收回全部权限，省略保留原权限
+          items: { $ref: '#/components/schemas/MemberPermission' }
+    MemberResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data: { $ref: '#/components/schemas/DepartmentMember' }
+        traceId: { type: string }
     Id:
       type: string
       pattern: '^[1-9][0-9]*$'
@@ -2703,6 +2900,11 @@ components:
           type: object
           required: [csrfToken, expiresAt, customer, activity]
           properties:
+            permissions:
+              type: array
+              uniqueItems: true
+              items:
+                $ref: '#/components/schemas/MemberPermission'
             csrfToken:
               type: string
             expiresAt:
@@ -3140,7 +3342,7 @@ components:
       properties:
         data:
           type: object
-          required: [id, username, displayName, roleCode, departmentId, mustChangePassword, csrfToken]
+          required: [id, username, displayName, roleCode, departmentId, mustChangePassword, csrfToken, permissions]
           properties:
             id:
               $ref: '#/components/schemas/Id'
@@ -3150,7 +3352,7 @@ components:
               type: string
             roleCode:
               type: string
-              enum: [SUPER_ADMIN, DEPARTMENT_ADMIN]
+              enum: [SUPER_ADMIN, DEPARTMENT_ADMIN, DEPARTMENT_MEMBER]
             departmentId:
               oneOf:
                 - $ref: '#/components/schemas/Id'
@@ -3199,7 +3401,7 @@ components:
           type: string
         roleCode:
           type: string
-          enum: [SUPER_ADMIN, DEPARTMENT_ADMIN]
+          enum: [SUPER_ADMIN, DEPARTMENT_ADMIN, DEPARTMENT_MEMBER]
         departmentId:
           oneOf:
             - $ref: '#/components/schemas/Id'

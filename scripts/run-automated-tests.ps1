@@ -57,6 +57,9 @@ try {
       maven:3.9.11-eclipse-temurin-21 `
       mvn -f backend/pom.xml test
     if ($LASTEXITCODE -ne 0) { throw "Backend unit/contract/E2E tests failed." }
+
+    & node scripts/test-department-members.mjs
+    if ($LASTEXITCODE -ne 0) { throw "Department member permission tests failed." }
   } finally {
     Pop-Location
   }
