@@ -52,7 +52,7 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
   const tonnageRanking = metric === "TONS";
   const rankingTitle = tonnageRanking ? "订货吨数排行" : "订货排行";
   const rankingValue = (row: { amount: number; tons?: number | null }) => {
-    if (tonnageRanking) return row.tons == null ? "待完善" : `${Number(row.tons).toLocaleString("zh-CN", { maximumFractionDigits: 3 })}吨`;
+    if (tonnageRanking) return `${Number(row.tons ?? 0).toLocaleString("zh-CN", { maximumFractionDigits: 3 })}吨`;
     return `${Number(row.amount).toLocaleString()}元`;
   };
 
@@ -73,7 +73,7 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
             </select>
           </label>
         </div>
-        <div className="screen-metric"><span>累计订货</span><strong>{totalTons == null ? "待完善" : Number(totalTons).toLocaleString("zh-CN", { maximumFractionDigits: 3 })}<small>{totalTons == null ? "" : "吨"}</small></strong></div>
+        <div className="screen-metric"><span>累计订货</span><strong>{Number(totalTons ?? 0).toLocaleString("zh-CN", { maximumFractionDigits: 3 })}<small>吨</small></strong></div>
       </header>
       {error && <div className="warning-box"><b>{historical ? "历史看板加载异常" : "实时数据连接异常"}</b><span>{error}</span></div>}
       <div className="ranking-layout">

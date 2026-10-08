@@ -111,7 +111,6 @@ public class OrderService {
     long totalQuantity = 0;
     BigDecimal totalAmount = BigDecimal.ZERO.setScale(2);
     BigDecimal totalTons = BigDecimal.ZERO.setScale(6);
-    boolean tonsAvailable = true;
     int line = 0;
     for (ProductSnapshot product : products) {
       long quantity = quantities.get(product.id());
@@ -120,9 +119,8 @@ public class OrderService {
       items.add(new CalculatedItem(++line, product, quantity, pricing, lineTons));
       totalQuantity += quantity;
       totalAmount = totalAmount.add(pricing.lineAmount());
-      if (lineTons == null) tonsAvailable = false; else totalTons = totalTons.add(lineTons);
+      totalTons = totalTons.add(lineTons);
     }
-    if (!tonsAvailable) totalTons = null;
     int nextVersion = currentVersion + 1;
     boolean first = current == null;
     boolean resubmit = current != null && "WITHDRAWN".equals(current.status());
@@ -447,7 +445,6 @@ public class OrderService {
     long totalQuantity = 0;
     BigDecimal totalAmount = BigDecimal.ZERO.setScale(2);
     BigDecimal totalTons = BigDecimal.ZERO.setScale(6);
-    boolean tonsAvailable = true;
     int line = 0;
     for (ProductSnapshot product : products) {
       long quantity = quantities.get(product.id());
@@ -457,9 +454,9 @@ public class OrderService {
       items.add(new CalculatedItem(++line, product, quantity, pricing, lineTons));
       totalQuantity += quantity;
       totalAmount = totalAmount.add(pricing.lineAmount());
-      if (lineTons == null) tonsAvailable = false; else totalTons = totalTons.add(lineTons);
+      totalTons = totalTons.add(lineTons);
     }
-    return new CalculatedOrder(items, totalQuantity, tonsAvailable ? totalTons : null, totalAmount);
+    return new CalculatedOrder(items, totalQuantity, totalTons, totalAmount);
   }
 
   private OrderPreview preview(CalculatedOrder calculated) {

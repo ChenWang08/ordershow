@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useDrawerClose } from "../../../components/useDrawerClose";
 import { attendanceCustomerType, createImportRowId, type AttendanceFieldKey, type AttendanceRow } from "../../../domain/import-domain";
 
 export function AttendanceFormDrawer({ rows, initialRow, onClose, onSave }: { rows: AttendanceRow[]; initialRow?: AttendanceRow; onClose: () => void; onSave: (row: AttendanceRow) => Promise<boolean> }) {
@@ -10,10 +11,11 @@ export function AttendanceFormDrawer({ rows, initialRow, onClose, onSave }: { ro
   const [saveError, setSaveError] = useState("");
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.map((row) => row.sequence)) + 1;
   const update = (field: AttendanceFieldKey, value: string) => setForm((current) => ({ ...current, [field]: value, ...(field === "participantType" ? { customerType: attendanceCustomerType(value) } : {}) }));
+  const requestClose = useDrawerClose(form, onClose, saving);
   return (
-    <div className="order-drawer-backdrop" onClick={() => { if (!saving) onClose(); }}>
+    <div className="order-drawer-backdrop">
       <aside className="order-drawer form-drawer attendance-form-drawer" onClick={(event) => event.stopPropagation()}>
-        <header><div><span>现场到场客户</span><h2>{isEditing ? "编辑到场客户" : "手动添加到场客户"}</h2></div><button type="button" aria-label="关闭" disabled={saving} onClick={onClose}>×</button></header>
+        <header><div><span>现场到场客户</span><h2>{isEditing ? "编辑到场客户" : "手动添加到场客户"}</h2></div><button type="button" aria-label="关闭" disabled={saving} onClick={requestClose}>×</button></header>
         <div className="auto-sequence-note"><span>{isEditing ? "当前记录" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>当前仅用于到场名单页面展示</small></div>
         <div className="drawer-form-body"><div className="drawer-form-grid">
           <label><span>分公司</span><input value={form.branch} onChange={(event) => update("branch", event.target.value)} placeholder="请输入分公司" /></label>
@@ -23,7 +25,7 @@ export function AttendanceFormDrawer({ rows, initialRow, onClose, onSave }: { ro
           <label className="wide-field"><span>经销商名称</span><input value={form.dealerCompany} onChange={(event) => update("dealerCompany", event.target.value)} placeholder="请输入经销商名称" /></label>
           <label className="wide-field"><span>参会人员类型</span><input value={form.participantType} onChange={(event) => update("participantType", event.target.value)} placeholder="例如：综合经销商 / 特渠专业经销商" /></label>
         </div><p className="drawer-form-note">抽奖大屏只显示经销商名称；客户类型由参会人员类型自动识别。</p></div>
-        <footer><div className="drawer-save-error">{saveError && <small className="field-error">{saveError}</small>}</div><button type="button" disabled={saving} onClick={onClose}>取消</button><button type="button" className="admin-primary" disabled={saving} onClick={async () => {
+        <footer><div className="drawer-save-error">{saveError && <small className="field-error">{saveError}</small>}</div><button type="button" disabled={saving} onClick={requestClose}>取消</button><button type="button" className="admin-primary" disabled={saving} onClick={async () => {
           setSaving(true); setSaveError("");
           try {
             const saved = await onSave({ ...form, sequence: nextSequence, manuallyEdited: true });

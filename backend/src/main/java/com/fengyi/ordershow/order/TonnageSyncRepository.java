@@ -34,7 +34,7 @@ public class TonnageSyncRepository {
     jdbc.update("""
         UPDATE customer_order
         SET total_tons = (
-          SELECT CASE WHEN COUNT(*) = COUNT(line_tons) THEN SUM(line_tons) ELSE NULL END
+          SELECT COALESCE(SUM(line_tons), 0)
           FROM order_item WHERE order_id = ?
         ), lock_version = lock_version + 1, last_modified_at = UTC_TIMESTAMP(3)
         WHERE id = ?

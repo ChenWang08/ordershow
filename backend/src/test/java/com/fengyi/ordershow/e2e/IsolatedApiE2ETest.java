@@ -399,6 +399,12 @@ class IsolatedApiE2ETest {
     assertEquals("SUBMITTED", resubmitted.path("status").asText());
     assertEquals(3, resubmitted.path("currentVersion").asInt());
     assertEquals(orderNo, resubmitted.path("orderNo").asText());
+    assertEquals("0.100000", resubmitted.path("totalTons").decimalValue().setScale(6).toPlainString());
+    ObjectNode zeroTonsBody = JSON.createObjectNode().put("activityCustomerId", h5CustomerId);
+    zeroTonsBody.putArray("items").addObject().put("productId", productWithoutTonsId).put("quantity", 20);
+    var zeroTons = send(admin, "POST", "/admin/activities/" + activityId + "/orders/preview", zeroTonsBody, adminCsrf, null);
+    assertEquals(200, zeroTons.statusCode(), zeroTons.body());
+    assertEquals("0.000000", data(zeroTons).path("totalTons").decimalValue().setScale(6).toPlainString());
   }
 
   @Test
@@ -896,6 +902,7 @@ class IsolatedApiE2ETest {
     importAndPublishProductAndWhitelistFixtures();
     publishActivityAndVerifyH5IdentityAndCatalogIsolation();
     var submitted=send(h5,"PUT","/h5/activities/"+activityCode+"/order",mixedOrderBody(0,productId,200,productWithoutTonsId,1),h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals("20.000000", data(submitted).path("totalTons").decimalValue().setScale(6).toPlainString());
     assertEquals(200,submitted.statusCode(),submitted.body());
     JsonNode original=data(submitted);
     String base="/admin/activities/"+activityId;

@@ -5,7 +5,7 @@ import type { OrderManagementModel } from "./OrderManagement";
 export function OrderDetailDrawer({ model }: { model: OrderManagementModel }) {
   const { activityStarted, activityClosed, selected, setSelectedNo, expandedVersion, setExpandedVersion, operationRecords, editorBusy, openAdjustEditor, voidSelected } = model;
   return <>
-      {selected && <div className="order-drawer-backdrop" onClick={() => { setSelectedNo(null); setExpandedVersion(null); }}><aside className="order-drawer" onClick={(event) => event.stopPropagation()}>
+      {selected && <div className="order-drawer-backdrop"><aside className="order-drawer" onClick={(event) => event.stopPropagation()}>
         <header><div><span>订单详情 · {selected.status}</span><h2>{selected.no}</h2></div><button onClick={() => { setSelectedNo(null); setExpandedVersion(null); }}>×</button></header>
         <div className="order-summary-grid">
           <p><span>经销商</span><b>{selected.dealer}</b><small>{selected.company} · {selected.dealerPhone}</small></p><p><span>客户类型</span><b>{selected.type}</b><small>{selected.status}</small></p><p><span>订单来源</span><b>{selected.source}</b><small>当前 V{selected.currentVersion}</small></p><p><span>订货箱数</span><b>{selected.boxes} 箱</b><small>{selected.tons} 吨</small></p><p><span>订单金额</span><b className="red">{selected.amount}</b><small>含税经销价</small></p><p><span>创建 / 首次提交</span><b>{selected.createdAt}</b><small>{selected.submittedAt}</small></p><p><span>最后修改 / 客户权限</span><b>{selected.updatedAt}</b><small>{activityClosed ? "客户只读" : selected.permission}</small></p>

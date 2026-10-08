@@ -42,12 +42,12 @@ class TonnageSyncServiceTest {
   }
 
   @Test
-  void clearingTheFactorClearsTheLineAndOrderTonnage() {
+  void clearingTheFactorContributesZeroToTheOrderTonnage() {
     when(tonnage.submittedItems(7, 21)).thenReturn(List.of(item(10, 101, 10, "5", "2")));
 
     assertThat(service.sync(7, 21, null)).isEqualTo(1);
 
-    verify(tonnage).updateItem(10, null, null);
+    verify(tonnage).updateItem(10, null, new BigDecimal("0.000000"));
     verify(tonnage).updateOrderTotal(101);
     verify(orders).writeOutbox(7, 101, "ORDER_TONS_UPDATED", Map.of("orderId", 101L));
     verify(dashboards).refreshFinalSnapshots(7);

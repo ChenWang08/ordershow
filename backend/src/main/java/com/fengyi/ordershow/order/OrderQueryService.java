@@ -53,14 +53,14 @@ public class OrderQueryService {
     List<Map<String, Object>> productTotals = jdbc.queryForList("""
         SELECT i.material_code, i.material_name, i.product_line, i.specification, i.case_pack,
           SUM(i.quantity) total_quantity, SUM(i.line_amount) total_amount,
-          CASE WHEN COUNT(i.line_tons) = COUNT(*) THEN SUM(i.line_tons) ELSE NULL END total_tons,
+          COALESCE(SUM(i.line_tons), 0) total_tons,
           COUNT(DISTINCT o.id) order_count
         FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
         JOIN order_item i ON i.order_id = o.id
         """ + effectiveWhere + " GROUP BY i.material_code, i.material_name, i.product_line, i.specification, i.case_pack ORDER BY i.product_line, i.material_code", effectiveArgs);
     List<Map<String, Object>> branchTotals = jdbc.queryForList("""
         SELECT o.region_code, o.branch_name_snapshot, COUNT(*) order_count, SUM(o.total_quantity) total_quantity,
-          CASE WHEN COUNT(o.total_tons) = COUNT(*) THEN SUM(o.total_tons) ELSE NULL END total_tons,
+          COALESCE(SUM(o.total_tons), 0) total_tons,
           SUM(o.total_amount) total_amount
         FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
         """ + effectiveWhere + " GROUP BY o.region_code, o.branch_name_snapshot ORDER BY o.region_code, o.branch_name_snapshot", effectiveArgs);

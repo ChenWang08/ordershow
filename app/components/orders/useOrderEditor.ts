@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ApiError, adjustAdminOrder, createAdminOrder, loadAdminOrder, loadOrderProducts, previewAdminOrder, searchAdminCustomers, voidAdminOrder, type AdminCustomer, type AdminOrderPreview, type RuntimeProduct } from "../../api";
 import { estimateLineAmount, editorErrorMessage, editorCustomerFromOrder, toOrderRecord, formatMoney, type OrderRecord, type OrderVersionItem } from "./order-domain";
 import type { useOrderList } from "./useOrderList";
+import { confirmDrawerClose, formSignature } from "../useDrawerClose";
 
 type EditorOptions = Pick<ReturnType<typeof useOrderList>, "selected" | "setOrders" | "setLoadError" | "setSelectedNo" | "setReloadKey"> & { activityId: number };
 
@@ -17,6 +18,8 @@ export function useOrderEditor({ activityId, selected, setOrders, setLoadError, 
   const [editorCustomerSearch, setEditorCustomerSearch] = useState("");
   const [customerSearchBusy, setCustomerSearchBusy] = useState(false);
   const [editorQuantities, setEditorQuantities] = useState<Record<number, number>>({});
+  const [editingQuantityId, setEditingQuantityId] = useState<number | null>(null);
+  const [initialEditorSignature, setInitialEditorSignature] = useState("");
   const [editorExistingItems, setEditorExistingItems] = useState<OrderVersionItem[]>([]);
   const [editorProductSearch, setEditorProductSearch] = useState("");
   const [editorReason, setEditorReason] = useState("");
@@ -40,12 +43,16 @@ export function useOrderEditor({ activityId, selected, setOrders, setLoadError, 
     return customerProductMatches.filter((product) => !keyword || product.materialName.toLowerCase().includes(keyword) || (product.materialCode || "").toLowerCase().includes(keyword));
   }, [customerProductMatches, editorProductSearch]);
   const existingProductIds = useMemo(() => new Set(editorExistingItems.map((item) => item.productId).filter((id): id is number => id != null)), [editorExistingItems]);
-  const editorAddedProducts = useMemo(() => customerProductMatches.filter((product) => !existingProductIds.has(product.id) && (editorQuantities[product.id] || 0) > 0), [customerProductMatches, editorQuantities, existingProductIds]);
-  const editorAddProducts = useMemo(() => editorProducts.filter((product) => !existingProductIds.has(product.id) && !(editorQuantities[product.id] > 0)), [editorProducts, editorQuantities, existingProductIds]);
+  const editorAddedProducts = useMemo(() => customerProductMatches.filter((product) => !existingProductIds.has(product.id) && ((editorQuantities[product.id] || 0) > 0 || editingQuantityId === product.id)), [customerProductMatches, editorQuantities, existingProductIds, editingQuantityId]);
+  const editorAddProducts = useMemo(() => editorProducts.filter((product) => !existingProductIds.has(product.id)), [editorProducts, existingProductIds]);
   const editorItems = useMemo(() => Object.entries(editorQuantities)
     .map(([productId, quantity]) => ({ productId: Number(productId), quantity: Math.floor(Number(quantity)) }))
     .filter((item) => item.quantity > 0), [editorQuantities]);
   const editorTotalQuantity = useMemo(() => editorItems.reduce((total, item) => total + item.quantity, 0), [editorItems]);
+  const editorSignature = (customerId: string, quantities: Record<number, number>, reason: string) => formSignature({
+    customerId, quantities: Object.fromEntries(Object.entries(quantities).filter(([, quantity]) => quantity > 0)), reason,
+  });
+  const editorDirty = editorSignature(editorCustomerId, editorQuantities, editorReason) !== initialEditorSignature;
   const editorEstimatedAmount = useMemo(() => {
     if (editorItems.length === 0) return 0;
     let total = 0;
@@ -113,6 +120,7 @@ export function useOrderEditor({ activityId, selected, setOrders, setLoadError, 
       await loadEditorResources();
       setEditorMode("create"); setEditorOrder(null); setEditorCustomerId(""); setEditorCustomerSnapshot(null); setCustomers([]); setEditorCustomerSearch(""); setCustomerSearchBusy(false);
       setEditorQuantities({}); setEditorExistingItems([]);
+      setEditingQuantityId(null); setInitialEditorSignature(editorSignature("", {}, ""));
       setEditorProductSearch(""); setEditorReason(""); setEditorPreview(null); setEditorPreviewBusy(false);
     } catch (reason) {
       setLoadError(editorErrorMessage(reason, "订单编辑数据加载失败"));
@@ -129,6 +137,7 @@ export function useOrderEditor({ activityId, selected, setOrders, setLoadError, 
       const quantities = Object.fromEntries((detail.items || []).filter((item) => item.productId).map((item) => [item.productId, Number(item.quantity)]));
       setEditorMode("adjust"); setEditorOrder(record); setEditorCustomerId(String(detail.activityCustomerId)); setEditorCustomerSnapshot(editorCustomerFromOrder(detail)); setCustomers([]); setEditorCustomerSearch(""); setCustomerSearchBusy(false);
       setEditorExistingItems(record.items);
+      setEditingQuantityId(null); setInitialEditorSignature(editorSignature(String(detail.activityCustomerId), quantities, ""));
       setEditorQuantities(quantities); setEditorProductSearch(""); setEditorReason(""); setEditorPreview(null); setEditorPreviewBusy(false);
       setOrders((current) => current.map((item) => item.no === record.no ? record : item));
     } catch (reason) {
@@ -137,16 +146,24 @@ export function useOrderEditor({ activityId, selected, setOrders, setLoadError, 
   };
 
   const closeEditor = () => {
-    if (editorBusy) return;
+    if (!confirmDrawerClose(editorDirty, editorBusy)) return;
     setEditorMode(null); setEditorOrder(null); setEditorCustomerId(""); setEditorCustomerSnapshot(null); setEditorCustomerSearch(""); setEditorExistingItems([]);
     setEditorError(""); setEditorPreview(null); setEditorPreviewBusy(false);
   };
 
   const setEditorQuantity = (productId: number, value: number) => {
+    if (editorBusy) return;
     const quantity = Math.min(999999, Math.max(0, Number.isFinite(value) ? Math.floor(value) : 0));
     setEditorQuantities((current) => ({ ...current, [productId]: quantity }));
     setEditorPreview(null); setEditorPreviewBusy(false);
     setEditorError("");
+  };
+
+  const changeEditorCustomer = () => {
+    if (editorBusy || (editorItems.length > 0 && !window.confirm("更换客户将清空已选商品，确定继续？"))) return;
+    setEditorCustomerSnapshot(null); setEditorCustomerId(""); setEditorCustomerSearch(""); setCustomers([]);
+    setCustomerSearchBusy(false); setEditorQuantities({}); setEditingQuantityId(null); setProducts([]);
+    setEditorProductSearch(""); setEditorPreview(null); setEditorPreviewBusy(false); setEditorError("");
   };
 
   const saveEditor = async () => {
@@ -197,8 +214,8 @@ export function useOrderEditor({ activityId, selected, setOrders, setLoadError, 
           ? "试算失败"
           : "待试算";
   const editorTonsLabel = editorPreview
-    ? editorPreview.totalTons == null ? "—" : Number(editorPreview.totalTons).toFixed(3)
-    : editorTotalQuantity === 0 ? "—" : editorPreviewBusy ? "试算中…" : "待试算";
+    ? Number(editorPreview.totalTons ?? 0).toFixed(3)
+    : editorTotalQuantity === 0 ? "0.000" : editorPreviewBusy ? "试算中…" : "待试算";
 
-  return { editorMode, editorOrder, setCustomers, setEditorCustomerId, setEditorCustomerSnapshot, editorCustomerSearch, setEditorCustomerSearch, customerSearchBusy, setCustomerSearchBusy, editorQuantities, setEditorQuantities, editorExistingItems, editorProductSearch, setEditorProductSearch, editorReason, setEditorReason, editorPreview, setEditorPreview, editorPreviewBusy, setEditorPreviewBusy, editorBusy, editorError, setEditorError, editorCustomer, editorCustomerResults, editorProducts, editorAddedProducts, editorAddProducts, editorItems, editorTotalQuantity, editorEstimatedAmount, openCreateEditor, openAdjustEditor, closeEditor, setEditorQuantity, saveEditor, voidSelected, selectEditorCustomer, editorAmountLabel, editorTonsLabel };
+  return { editingQuantityId, setEditingQuantityId, changeEditorCustomer, editorMode, editorOrder, setCustomers, setEditorCustomerId, setEditorCustomerSnapshot, editorCustomerSearch, setEditorCustomerSearch, customerSearchBusy, setCustomerSearchBusy, editorQuantities, setEditorQuantities, editorExistingItems, editorProductSearch, setEditorProductSearch, editorReason, setEditorReason, editorPreview, setEditorPreview, editorPreviewBusy, setEditorPreviewBusy, editorBusy, editorError, setEditorError, editorCustomer, editorCustomerResults, editorProducts, editorAddedProducts, editorAddProducts, editorItems, editorTotalQuantity, editorEstimatedAmount, openCreateEditor, openAdjustEditor, closeEditor, setEditorQuantity, saveEditor, voidSelected, selectEditorCustomer, editorAmountLabel, editorTonsLabel };
 }

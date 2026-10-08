@@ -84,7 +84,7 @@ public class DashboardService {
           AND (? IS NULL OR ? = '' OR region_code = ?)
         """, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode));
     BigDecimal totalTons = jdbc.queryForObject("""
-        SELECT SUM(i.line_tons)
+        SELECT COALESCE(SUM(i.line_tons), 0)
         FROM order_item i JOIN customer_order o ON o.id = i.order_id
         WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
           AND (? IS NULL OR ? = '' OR o.customer_type = ?)
@@ -104,7 +104,7 @@ public class DashboardService {
         SELECT o.id, o.dealer_full_name_snapshot name, o.branch_name_snapshot branch, o.total_amount amount,
           o.total_quantity quantity, item_tons.tons
         FROM customer_order o
-        JOIN (SELECT order_id, SUM(line_tons) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
+        JOIN (SELECT order_id, COALESCE(SUM(line_tons), 0) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
         WHERE o.activity_id = ? AND o.status = 'SUBMITTED' AND item_tons.tons IS NOT NULL
           AND (? IS NULL OR ? = '' OR o.customer_type = ?)
           AND (? IS NULL OR ? = '' OR o.region_code = ?)
@@ -116,7 +116,7 @@ public class DashboardService {
         SELECT o.id, o.dealer_full_name_snapshot name, o.branch_name_snapshot branch, o.total_amount amount,
           o.total_quantity quantity, item_tons.tons
         FROM customer_order o
-        LEFT JOIN (SELECT order_id, SUM(line_tons) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
+        LEFT JOIN (SELECT order_id, COALESCE(SUM(line_tons), 0) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
         WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
           AND (? IS NULL OR ? = '' OR o.customer_type = ?)
           AND (? IS NULL OR ? = '' OR o.region_code = ?)
@@ -128,7 +128,7 @@ public class DashboardService {
         SELECT o.branch_name_snapshot name, SUM(o.total_amount) amount, SUM(o.total_quantity) quantity,
           SUM(item_tons.tons) tons
         FROM customer_order o
-        JOIN (SELECT order_id, SUM(line_tons) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
+        JOIN (SELECT order_id, COALESCE(SUM(line_tons), 0) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
         WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
           AND (? IS NULL OR ? = '' OR o.customer_type = ?)
           AND (? IS NULL OR ? = '' OR o.region_code = ?)
@@ -142,7 +142,7 @@ public class DashboardService {
         SELECT o.branch_name_snapshot name, SUM(o.total_amount) amount, SUM(o.total_quantity) quantity,
           SUM(item_tons.tons) tons
         FROM customer_order o
-        LEFT JOIN (SELECT order_id, SUM(line_tons) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
+        LEFT JOIN (SELECT order_id, COALESCE(SUM(line_tons), 0) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
         WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
           AND (? IS NULL OR ? = '' OR o.customer_type = ?)
           AND (? IS NULL OR ? = '' OR o.region_code = ?)

@@ -13,7 +13,7 @@ final class OrderPricingCalculator {
   }
 
   static BigDecimal calculateTons(long quantity, BigDecimal tonCaseFactor) {
-    return tonCaseFactor == null ? null
+    return tonCaseFactor == null || tonCaseFactor.signum() <= 0 ? BigDecimal.ZERO.setScale(6)
         : BigDecimal.valueOf(quantity).divide(tonCaseFactor, 6, RoundingMode.HALF_UP);
   }
 

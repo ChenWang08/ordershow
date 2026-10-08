@@ -173,7 +173,7 @@ export function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRec
     type: customerType,
     amount: formatMoney(order.totalAmount),
     boxes: Number(order.totalQuantity),
-    tons: order.totalTons == null ? "—" : Number(order.totalTons).toFixed(3),
+    tons: Number(order.totalTons ?? 0).toFixed(3),
     createdAt: formatDate(order.firstSubmittedAt),
     submittedAt: formatDate(order.lastSubmittedAt),
     updatedAt: formatDate(order.lastModifiedAt),

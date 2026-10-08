@@ -129,7 +129,7 @@ export function dashboardMetrics(data: DashboardReport | null, activity: Runtime
   const activityTimeZone = activity?.timezone || "Asia/Shanghai";
   const cards = [
     { icon: "¥", label: "订单总额", value: dashboardCompactAmount(amount), unit: "元", tone: "mint" },
-    { icon: "△", label: "订单总吨数", value: totals.total_tons == null ? "待完善" : Number(totals.total_tons).toLocaleString("zh-CN", { maximumFractionDigits: 3 }), unit: totals.total_tons == null ? "" : "吨", tone: "blue" },
+    { icon: "△", label: "订单总吨数", value: Number(totals.total_tons ?? 0).toLocaleString("zh-CN", { maximumFractionDigits: 3 }), unit: "吨", tone: "blue" },
     { icon: "单", label: "订单总笔数", value: Number(totals.order_count ?? 0).toLocaleString(), unit: "笔", tone: "orange" },
     { icon: "商", label: "参与经销商", value: Number(totals.dealer_count ?? totals.order_count ?? 0).toLocaleString(), unit: "家", tone: "purple" },
     { icon: "司", label: "参与分公司", value: Number(totals.branch_count ?? 0).toLocaleString(), unit: "家", tone: "red" },

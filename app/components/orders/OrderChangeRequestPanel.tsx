@@ -1,14 +1,17 @@
 "use client";
+import { confirmDrawerClose } from "../useDrawerClose";
 import type { OrderManagementModel } from "./OrderManagement";
 
 const money=(v?:number)=>v==null?"—":`¥${Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
-const tons=(v?:number)=>v==null?"待完善":`${Number(v).toFixed(3)} 吨`;
+const tons=(v?:number)=>`${Number(v ?? 0).toFixed(3)} 吨`;
 const date=(v:string)=>new Date(v).toLocaleString("zh-CN",{hour12:false,timeZone:"Asia/Shanghai"});
 const labels={PENDING:"待审核",APPROVED:"已通过",REJECTED:"已驳回"};
 export function OrderChangeRequestPanel({model,detailOnly=false}:{model:OrderManagementModel;detailOnly?:boolean}) {
   const r=model.changeRequests;
   const s=r.selected;
   const old=r.original;
+  const canLeave = () => confirmDrawerClose(s?.status === "PENDING" && Boolean(r.reason), r.busyId !== null);
+  const requestClose = () => { if (canLeave()) { r.setSelected(null); r.setReason(""); } };
   const base=s?.originalOrder || old?.versions.find(v=>v.version===s?.baseVersion);
   const before=base?.items || old?.items || [];
   const ids=new Set([...before.map(i=>i.productId),...(s?.items||[]).map(i=>i.productId)]);
@@ -30,8 +33,8 @@ export function OrderChangeRequestPanel({model,detailOnly=false}:{model:OrderMan
       </tbody></table></div>
       <div className="order-pagination"><span>共 {r.total} 条 · 第 {r.filters.page} / {pages} 页</span><div><select aria-label="每页数量" value={r.filters.size} onChange={e=>r.setFilters({...r.filters,size:Number(e.target.value),page:1})}><option value={20}>20 条/页</option><option value={50}>50 条/页</option></select><button disabled={r.filters.page<=1||r.loading} onClick={()=>r.setFilters({...r.filters,page:r.filters.page-1})}>上一页</button><button disabled={r.filters.page>=pages||r.loading} onClick={()=>r.setFilters({...r.filters,page:r.filters.page+1})}>下一页</button></div></div>
     </section>}
-    {s&&old&&<div className="drawer-backdrop" onClick={()=>{if(!r.busyId)r.setSelected(null);}}><aside className="review-drawer" role="dialog" aria-modal="true" aria-label="变更申请详情" onClick={e=>e.stopPropagation()}>
-      <header><div><h2>{s.requestType==="WITHDRAW"?"撤回订单申请":"修改订单申请"} · {labels[s.status]}</h2><p>{s.orderNo} · {s.dealerName}</p></div><button disabled={r.busyId!==null} onClick={()=>r.setSelected(null)}>关闭</button></header>
+    {s&&old&&<div className="drawer-backdrop"><aside className="review-drawer" role="dialog" aria-modal="true" aria-label="变更申请详情" onClick={e=>e.stopPropagation()}>
+      <header><div><h2>{s.requestType==="WITHDRAW"?"撤回订单申请":"修改订单申请"} · {labels[s.status]}</h2><p>{s.orderNo} · {s.dealerName}</p></div><button disabled={r.busyId!==null} onClick={requestClose}>关闭</button></header>
       <div className="review-drawer-body"><p>申请时间：{date(s.requestedAt)} · 基于 V{s.baseVersion} · 当前 V{old.currentVersion}</p>
         <p>当前订单：{({SUBMITTED:"已提交",WITHDRAWN:"已撤回",VOIDED:"已作废"})[old.status]} · {money(old.totalAmount)} · {old.totalQuantity} 箱 · {tons(old.totalTons)}</p>
         <p>申请前 V{s.baseVersion}：{money(base?.totalAmount??old.totalAmount)} → {s.requestType==="WITHDRAW"?"撤回订单":money(s.requestedTotalAmount)}</p>
@@ -41,7 +44,7 @@ export function OrderChangeRequestPanel({model,detailOnly=false}:{model:OrderMan
         {s.status==="PENDING"?<label>审核备注（通过选填，驳回必填）<textarea maxLength={500} value={r.reason} onChange={e=>r.setReason(e.target.value)}/></label>:<p>处理人：{s.reviewedByName||"系统"} · {s.reviewedAt?date(s.reviewedAt):""}<br/>处理说明：{s.reviewReason||"审核通过"}</p>}
         {r.error&&<p role="alert" className="verify-error">{r.error}</p>}
       </div>
-      <footer><button onClick={async()=>{if(await model.openOrderById(s.orderId))r.setSelected(null);else r.setError("原订单加载失败，请重试");}}>查看完整原订单</button>{s.status==="PENDING"&&<><button disabled={r.busyId!==null} onClick={()=>void r.review(false)}>驳回</button><button className="admin-primary" disabled={r.busyId!==null} onClick={()=>void r.review(true)}>审核通过</button></>}</footer>
+      <footer><button disabled={r.busyId!==null} onClick={async()=>{if(!canLeave())return;if(await model.openOrderById(s.orderId)){r.setSelected(null);r.setReason("");}else r.setError("原订单加载失败，请重试");}}>查看完整原订单</button>{s.status==="PENDING"&&<><button disabled={r.busyId!==null} onClick={()=>void r.review(false)}>驳回</button><button className="admin-primary" disabled={r.busyId!==null} onClick={()=>void r.review(true)}>审核通过</button></>}</footer>
     </aside></div>}
   </>;
 }

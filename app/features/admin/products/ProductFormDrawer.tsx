@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useDrawerClose } from "../../../components/useDrawerClose";
 import { createImportRowId, productImportRowsConflict, type ProductImportRow } from "../../../domain/import-domain";
 import { ProductImageEditor } from "../products/ProductImageEditor";
 import { ProductScopeEditor } from "./ProductScopeEditor";
@@ -12,6 +13,7 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
   const [tierEnabled, setTierEnabled] = useState(() => Boolean(initialRow?.priceTierMinQuantity || initialRow?.priceTierCasePrice));
   const [editReason, setEditReason] = useState("");
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value, ...(field === "customerType" && scopeEnabled ? { dealerScopeEdited: true } : {}) }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
   const duplicateProductIdentity = form.materialName.trim() !== "" && rows.some((row) => row.id !== form.id && productImportRowsConflict(row, form));
@@ -24,10 +26,11 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
     && Number.isFinite(tierCasePrice) && tierCasePrice > 0 && tierCasePrice < basePrice);
   const scopeValid = !form.dealerScopeEdited || (form.dealerScope ?? []).every(s => s.members.length > 0 && s.members.every(m => m.active && (!form.customerType || m.customerType === (form.customerType === "综合" ? "GENERAL" : "SPECIAL"))));
   const canSave = form.materialName.trim() !== "" && form.casePrice.trim() !== "" && (conversionValid || form.status === "待完善") && tierValid && !duplicateProductIdentity && scopeValid && (!activityStarted || editReason.trim() !== "");
+  const requestClose = useDrawerClose({ form: { ...form, dealerScopeEdited: undefined, dealerScope: form.dealerScope ?? [] }, tierEnabled, editReason }, onClose, saving);
   return (
-    <div className="order-drawer-backdrop" onClick={() => { if (!saving) onClose(); }}>
+    <div className="order-drawer-backdrop">
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
-        <header><div><span>活动商品</span><h2>{isEditing ? "编辑商品" : "手动添加商品"}</h2></div><button aria-label="关闭" onClick={onClose}>×</button></header>
+        <header><div><span>活动商品</span><h2>{isEditing ? "编辑商品" : "手动添加商品"}</h2></div><button aria-label="关闭" disabled={saving} onClick={requestClose}>×</button></header>
         <div className="auto-sequence-note"><span>{isEditing ? "当前商品" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>{form.customerType || "未指定客户类型"} · {form.rebate || "未指定返利"}</small></div>
         <div className="drawer-form-body"><div className="drawer-form-grid">
           <label><span>客户类型</span><select value={form.customerType} onChange={(e) => update("customerType", e.target.value)}><option value="">未指定</option><option>特渠</option><option>综合</option></select></label>
@@ -54,11 +57,13 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
         </div>
         {activityStarted && <label className="drawer-form-reason"><span>{isEditing ? "修改原因（必填）" : "新增商品原因"}</span><input maxLength={500} value={editReason} onChange={e => setEditReason(e.target.value)} placeholder="请填写本次商品或下单范围修改原因" /></label>}
         <p className="drawer-form-note">带 * 的字段为必填项；{activityStarted ? "价格修改保存后，相关有效订单自动更新。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
-        <footer><button disabled={saving} onClick={onClose}>取消</button><button className="admin-primary" disabled={!canSave || saving} onClick={async () => {
-          setSaving(true);
-          const saved = await onSave({ ...form, sequence: nextSequence, manuallyEdited: true }, editReason.trim());
-          setSaving(false);
-          if (saved) onClose();
+        <footer><div className="drawer-save-error">{saveError && <small className="field-error">{saveError}</small>}</div><button disabled={saving} onClick={requestClose}>取消</button><button className="admin-primary" disabled={!canSave || saving} onClick={async () => {
+          setSaving(true); setSaveError("");
+          try {
+            const saved = await onSave({ ...form, sequence: nextSequence, manuallyEdited: true }, editReason.trim());
+            if (saved) onClose(); else setSaveError("保存失败，请根据页面提示检查后重试。");
+          } catch { setSaveError("保存请求异常，请稍后重试。"); }
+          finally { setSaving(false); }
         }}>{saving ? "保存中…" : isEditing ? "保存修改" : "添加商品"}</button></footer>
       </aside>
     </div>

@@ -50,7 +50,8 @@ test("project group colors remain consistent across dashboard sections", () => {
   const model = domain.dashboardMetrics(data, activity);
   assert.equal(model.productLineRows[0].color, model.generalChannelProductRows[0].color);
   assert.equal(model.productLineRows[0].color, model.regionProductCards[0].rows[0].color);
-  assert.equal(model.cards[1].value, "待完善");
+  assert.equal(model.cards[1].value, "0");
+  assert.equal(model.cards[1].unit, "吨");
   assert.equal(model.regionProductMax, 120);
 });
 

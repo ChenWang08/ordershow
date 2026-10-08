@@ -73,7 +73,7 @@ const customer = { id: 12, customerType: "GENERAL", branchName: "测试分公司
 const product = { id: 21, materialName: "测试商品", casePrice: 100, customerType: "GENERAL", branchScope: [], orderable: true };
 const runtimeOrder = { id: 31, activityCustomerId: 12, orderNo: "TEST-ORDER", customerType: "GENERAL", dealerFullName: "测试客户", phone: "13800000000", currentVersion: 2, lockVersion: 3, totalQuantity: 2, totalAmount: 200, status: "SUBMITTED", versions: [], operations: [], items: [{ productId: 21, materialName: "测试商品", quantity: 2, casePrice: 100, lineAmount: 200 }] };
 
-function editorHarness(overrides = {}) {
+function editorHarness(overrides = {}, confirm = () => true) {
   const calls = [];
   const adapter = stateAdapter();
   const state = { orders: [], selectedNo: null, reload: 0, error: "" };
@@ -85,7 +85,7 @@ function editorHarness(overrides = {}) {
     adjustAdminOrder: async (...args) => { calls.push(["adjust", ...args]); return runtimeOrder; },
     ...overrides,
   };
-  const { useOrderEditor } = loadModule("app/components/orders/useOrderEditor.ts", { react: adapter.react, "../../api": api });
+  const { useOrderEditor } = loadModule("app/components/orders/useOrderEditor.ts", { react: adapter.react, "../../api": api }, { window: { confirm } });
   const set = (key) => (value) => { state[key] = typeof value === "function" ? value(state[key]) : value; };
   const options = { activityId: 7, selected: null, setOrders: set("orders"), setSelectedNo: set("selectedNo"), setReloadKey: set("reload"), setLoadError: set("error") };
   return { calls, state, render: function useRenderEditor() { adapter.reset(); return useOrderEditor(options); } };
@@ -146,4 +146,50 @@ test("save failure retains the order editor for retry", async () => {
   assert.equal(harness.render().editorQuantities[21], 2);
   assert.equal(harness.state.orders.length, 0);
   assert.match(harness.render().editorError, /订单保存失败/);
+});
+
+
+test("order close ignores search, protects changes and allows restored values without a prompt", async () => {
+  let confirmed = false, prompts = 0;
+  const h = editorHarness({}, () => { prompts++; return confirmed; });
+  await h.render().openCreateEditor();
+  h.render().setEditorCustomerSearch("搜索文字"); h.render().closeEditor();
+  assert.equal(h.render().editorMode, null); assert.equal(prompts, 0);
+  await h.render().openAdjustEditor({ id: 31 });
+  h.render().setEditorQuantity(21, 3); h.render().closeEditor();
+  assert.equal(h.render().editorMode, "adjust"); assert.equal(prompts, 1);
+  h.render().setEditorQuantity(21, 2); h.render().closeEditor();
+  assert.equal(h.render().editorMode, null); assert.equal(prompts, 1);
+  await h.render().openCreateEditor(); await h.render().selectEditorCustomer(customer);
+  h.render().closeEditor(); assert.equal(h.render().editorMode, "create");
+  confirmed = true; h.render().closeEditor(); assert.equal(h.render().editorMode, null);
+});
+
+test("selected products survive search and empty quantity editing, then disappear on blur", async () => {
+  const h = editorHarness();
+  await h.render().openCreateEditor(); await h.render().selectEditorCustomer(customer);
+  h.render().setEditorQuantity(21, 12);
+  assert.equal(h.render().editorAddedProducts.length, 1);
+  h.render().setEditorProductSearch("不存在");
+  assert.equal(h.render().editorProducts.length, 0);
+  assert.equal(h.render().editorAddedProducts.length, 1);
+  h.render().setEditingQuantityId(21); h.render().setEditorQuantity(21, 0);
+  assert.equal(h.render().editorAddedProducts.length, 1);
+  assert.equal(h.render().editorTotalQuantity, 0);
+  h.render().setEditorQuantity(21, 120);
+  assert.equal(h.render().editorTotalQuantity, 120);
+  h.render().setEditorQuantity(21, 0); h.render().setEditingQuantityId(null);
+  assert.equal(h.render().editorAddedProducts.length, 0);
+});
+
+test("switching customer protects selected items and clears catalog, quantities and preview only on confirmation", async () => {
+  let confirmed = false;
+  const h = editorHarness({}, () => confirmed);
+  await h.render().openCreateEditor(); await h.render().selectEditorCustomer(customer);
+  h.render().setEditorQuantity(21, 12); h.render().setEditorPreview({totalAmount:1200});
+  h.render().changeEditorCustomer();
+  assert.equal(h.render().editorCustomer.id, 12); assert.equal(h.render().editorTotalQuantity, 12);
+  confirmed = true; h.render().changeEditorCustomer();
+  assert.equal(h.render().editorCustomer, null); assert.equal(h.render().editorTotalQuantity, 0);
+  assert.equal(h.render().editorPreview, null); assert.equal(h.render().editorAddedProducts.length, 0);
 });

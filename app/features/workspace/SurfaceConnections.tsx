@@ -19,7 +19,7 @@ export function H5Surface() {
 export function LotterySurface() {
   const { lotteryRounds, setLotteryRounds, activityId, activityStatus } = useActivityWorkspace();
   const { attendance } = useImportWorkspace();
-  return <LotteryBoard rounds={lotteryRounds} attendanceRows={attendance.rows} activityId={Number(activityId)}
+  return <LotteryBoard key={activityId} rounds={lotteryRounds} attendanceRows={attendance.rows} activityId={Number(activityId)}
     activityFinished={activityStatus === "finished"}
     onComplete={(id) => setLotteryRounds((items) => items.map((item) => item.id === id ? { ...item, status: "completed", serverStatus: "COMPLETED" } : item))} />;
 }
