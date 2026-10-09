@@ -54,6 +54,7 @@ public class AuthService {
         LEFT JOIN department d ON d.id = u.department_id
         WHERE u.username = ? AND u.status = 'ACTIVE'
           AND (u.role_code = 'SUPER_ADMIN' OR d.status = 'ACTIVE')
+        FOR UPDATE
         """, username.trim());
     if (users.size() != 1 || !passwordEncoder.matches(password, users.getFirst().get("password_hash").toString())) {
       throw DomainException.unauthorized("用户名或密码不正确");

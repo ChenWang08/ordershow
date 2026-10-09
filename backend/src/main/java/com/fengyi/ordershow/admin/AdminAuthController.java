@@ -12,6 +12,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -51,12 +52,16 @@ public class AdminAuthController {
   }
 
   @PostMapping("/auth/change-password")
+  @Transactional
   ApiResponse<Boolean> changePassword(@Valid @RequestBody ChangePasswordRequest body, HttpServletRequest request) {
     AdminPrincipal principal = auth.requireAdmin(request);
     if (!principal.isSuperAdmin()) {
       throw DomainException.forbidden("DEPARTMENT_PASSWORD_MANAGED", "账号密码由管理员统一管理");
     }
-    String currentHash = jdbc.queryForObject("SELECT password_hash FROM admin_user WHERE id = ?", String.class, principal.id());
+    String currentHash = jdbc.queryForObject("SELECT password_hash FROM admin_user WHERE id = ? FOR UPDATE", String.class, principal.id());
+    // A server reset may have committed while this request waited for the account lock.
+    request.removeAttribute(AuthService.ADMIN_REQUEST_ATTRIBUTE);
+    auth.requireAdmin(request);
     if (currentHash == null || !passwordEncoder.matches(body.currentPassword(), currentHash)) {
       throw DomainException.badRequest("CURRENT_PASSWORD_INCORRECT", "当前密码不正确");
     }
