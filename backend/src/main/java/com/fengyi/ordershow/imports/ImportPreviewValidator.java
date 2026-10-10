@@ -99,7 +99,7 @@ final class ImportPreviewValidator {
           } else if (optionalProductMissing(row.data())) {
             validation = "WARNING"; warnings++;
             staging.issue(taskId, "WARNING", "PRODUCT_INCOMPLETE", row.sheet(), row.rowNo(), null, null,
-                "商品信息不完整；仍会进入 H5，价格缺失时不可下单，其他缺失字段不展示");
+                "元/箱或吨箱转换系数缺失或无效；无有效箱价不可下单，缺系数按 0 吨计入");
           }
         } else if ("WHITELIST".equals(importType)) {
           String phone = text(row.sensitive().get("dealerPhone"));

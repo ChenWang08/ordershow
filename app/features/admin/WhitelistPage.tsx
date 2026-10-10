@@ -35,7 +35,7 @@ export function WhitelistPage({
             {!whitelistImportCompleted && <div className="single-upload-grid">
               <article className={"file-upload-card " + (whitelistFileName && !whitelistImportError ? "ready" : "")}>
                 <div className="file-card-heading"><span>XL</span><div><b>客户白名单 Excel</b><small>统一文件 · 读取 1 个非空 Sheet，名称不限</small></div><em>{whitelistFileName ? (whitelistImportError ? "解析失败" : "解析完成") : "待上传"}</em></div>
-                {whitelistFileName ? <p title={whitelistFileName}>{whitelistFileName}</p> : <p>请选择：【白名单】26年中秋订货会经销商白名单7.2.xlsx</p>}
+                {whitelistFileName ? <p title={whitelistFileName}>{whitelistFileName}</p> : <p>尚未选择白名单 Excel 文件</p>}
                 <div className="sheet-tags"><span>任意 Sheet（仅允许 1 个非空）</span><span>客户类型列可全部填写或全部留空</span><span>不再要求经销商类型列</span></div>
                 <footer><small>{activityPublished ? "活动已发布，Excel 导入已锁定" : whitelistFileName && !whitelistImportError ? `识别 ${parsedWhitelistCount} 名客户 · ${whitelistMode === "UNSPECIFIED" ? "不区分客户类型" : "按客户类型"}` : "必须包含客户类型、分公司、经销商全称和经销商电话等字段"}</small><div>{whitelistFileName && <button type="button" disabled={activityPublished} onClick={cancelWhitelistImport}>移除</button>}<label className={activityPublished ? "disabled" : ""}><input type="file" accept=".xlsx" disabled={activityPublished} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleWhitelistFile(file); event.currentTarget.value = ""; }} />{whitelistFileName ? "替换文件" : "选择文件"}</label></div></footer>
               </article>

@@ -1,4 +1,5 @@
 "use client";
+import { positiveProductNumber, productCompletenessStatus } from "../../domain/product-completeness";
 
 import { useState } from "react";
 import {
@@ -45,7 +46,7 @@ export function useProductEditor({
       setActionNotice("活动已截止，商品数据只读。" );
       return false;
     }
-    const nextRow = { ...row, imageStatus: productImageStatusForAssets(row.images) };
+    const nextRow = { ...row, status: productCompletenessStatus(row.casePrice, row.conversion), imageStatus: productImageStatusForAssets(row.images) };
     const numeric = (value: string) => value.trim() === "" ? null : Number(value);
     const productBody = {
       customerType: nextRow.customerType === "综合" ? "GENERAL" : nextRow.customerType === "特渠" ? "SPECIAL" : "ALL",
@@ -53,10 +54,10 @@ export function useProductEditor({
       categoryName: nextRow.category, productLine: nextRow.line, materialCode: nextRow.materialCode,
       materialName: nextRow.materialName, description: nextRow.description ?? "", brandName: nextRow.brand, varietyName: nextRow.variety,
       specification: nextRow.spec, casePack: nextRow.casePack, bottlePrice: numeric(nextRow.unitPrice),
-      casePrice: numeric(nextRow.casePrice), tonCaseFactor: numeric(nextRow.conversion), giftBox: nextRow.gift === "是",
+      casePrice: positiveProductNumber(nextRow.casePrice), tonCaseFactor: positiveProductNumber(nextRow.conversion), giftBox: nextRow.gift === "是",
       priceTierMinQuantity: numeric(nextRow.priceTierMinQuantity), priceTierCasePrice: numeric(nextRow.priceTierCasePrice),
       priceTierPricingMode: nextRow.priceTierPricingMode,
-      visible: true, orderable: Number(nextRow.casePrice) > 0, branchScope: nextRow.branchScope, reason,
+      visible: true, orderable: positiveProductNumber(nextRow.casePrice) !== null, branchScope: nextRow.branchScope, reason,
       ...(nextRow.dealerScopeEdited ? { dealerScope: (nextRow.dealerScope ?? []).map(s => ({ branchName: s.branchName, customerIds: s.members.map(m => m.customerId) })) } : {}),
     };
     if (editingProductRow) {

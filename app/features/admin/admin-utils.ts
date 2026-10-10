@@ -1,3 +1,4 @@
+import { productCompletenessStatus } from "../../domain/product-completeness";
 import readXlsxFile, { readSheetNames } from "read-excel-file";
 import { apiAssetUrl, type ImportStagingRow, type ProductImageReview, type RuntimeProduct } from "../../api";
 import { attendanceCustomerType, createImportRowId, productImportDuplicateRowIds, productMaterialCodeKey, productMaterialNameKey, whitelistCustomerTypeLabel, type AttendanceRow, type ProductImageAsset, type ProductImportRow, type WhitelistRow } from "../../domain/import-domain";
@@ -175,9 +176,8 @@ export async function parseProductWorkbook(file: File): Promise<ProductImportPar
   const duplicateRowIds = productImportDuplicateRowIds(parsed.filter((row) => !invalidRowIds.has(row.id)));
   const duplicateRows = parsed.filter((row) => duplicateRowIds.has(row.id));
   parsed.forEach((row) => {
-    const conversion = Number(row.conversion);
     row.status = invalidRowIds.has(row.id) || duplicateRowIds.has(row.id) ? "待核对"
-      : !row.casePrice || !row.conversion || !Number.isFinite(conversion) || conversion <= 0 ? "待完善" : "有效";
+      : productCompletenessStatus(row.casePrice, row.conversion);
   });
   if (duplicateRows.length > 0) warnings.push(`${sheetName} 有 ${duplicateRows.length} 条商品在同一客户类型、同一返利类型下名称与物料代码冲突，已标记为待核对；任一物料代码为空时按名称判重。`);
   const missingNames = parsed.filter((row) => !row.materialName.trim()).length;

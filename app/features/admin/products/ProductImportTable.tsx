@@ -1,4 +1,5 @@
 "use client";
+import { positiveProductNumber } from "../../../domain/product-completeness";
 /* eslint-disable @next/next/no-img-element -- runtime product images and local previews. */
 
 import { useMemo, useState } from "react";
@@ -29,8 +30,7 @@ export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false
         || (imageFilter === "已匹配" && row.imageStatus === "已匹配")
         || (imageFilter === "未匹配" && row.imageStatus === "未匹配")
         || (imageFilter === "待确认" && row.imageStatus === "待确认");
-      const casePrice = Number(String(row.casePrice ?? "").replace(/[,，￥¥\s]/g, ""));
-      const hasValidPrice = Number.isFinite(casePrice) && casePrice > 0;
+      const hasValidPrice = positiveProductNumber(row.casePrice) !== null;
       const matchesPrice = priceFilter === "全部"
         || (priceFilter === "价格有效" && hasValidPrice)
         || (priceFilter === "价格待完善" && !hasValidPrice);

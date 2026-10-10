@@ -156,6 +156,28 @@ class IsolatedApiE2ETest {
     HttpResponse<String> products = send(admin, "GET", "/admin/activities/" + activityId + "/products", null, null, null);
     assertEquals(200, products.statusCode(), products.body());
     assertEquals(5, data(products).size());
+    JsonNode originalProduct = findProduct(data(products), "P001");
+    long statusProductId = originalProduct.path("id").asLong();
+    String productPath = "/admin/activities/" + activityId + "/products/" + statusProductId;
+    ObjectNode optionalBlank = JSON.createObjectNode().put("productLine", "").put("specification", "").put("casePack", "");
+    var optionalSaved = send(admin,"PATCH",productPath,optionalBlank,adminCsrf,originalProduct.path("version").asText());
+    assertEquals(200,optionalSaved.statusCode(),optionalSaved.body());
+    assertEquals("ACTIVE",data(optionalSaved).path("dataStatus").asText());
+    ObjectNode incomplete = JSON.createObjectNode().put("casePriceSet",true).put("tonCaseFactorSet",true).put("casePrice",0).put("tonCaseFactor",-1).put("orderable",false).put("priceTierSet",true);
+    var incompleteSaved = send(admin,"PATCH",productPath,incomplete,adminCsrf,data(optionalSaved).path("version").asText());
+    assertEquals(200,incompleteSaved.statusCode(),incompleteSaved.body());
+    assertEquals("INCOMPLETE",data(incompleteSaved).path("dataStatus").asText());
+    assertFalse(data(incompleteSaved).path("orderable").asBoolean());
+    ObjectNode restored = JSON.createObjectNode().put("casePriceSet",true).put("tonCaseFactorSet",true).put("orderable",true)
+        .put("productLine",originalProduct.path("productLine").asText()).put("specification",originalProduct.path("specification").asText()).put("casePack",originalProduct.path("casePack").asText());
+    restored.set("casePrice",originalProduct.path("casePrice")); restored.set("tonCaseFactor",originalProduct.path("tonCaseFactor"));
+    restored.put("priceTierSet",true); restored.set("priceTierMinQuantity",originalProduct.path("priceTier").path("minQuantity"));
+    restored.set("priceTierCasePrice",originalProduct.path("priceTier").path("casePrice"));
+    restored.set("priceTierPricingMode",originalProduct.path("priceTier").path("pricingMode"));
+    var completeSaved = send(admin,"PATCH",productPath,restored,adminCsrf,data(incompleteSaved).path("version").asText());
+    assertEquals(200,completeSaved.statusCode(),completeSaved.body());
+    assertEquals("ACTIVE",data(completeSaved).path("dataStatus").asText());
+
   }
 
   @Test

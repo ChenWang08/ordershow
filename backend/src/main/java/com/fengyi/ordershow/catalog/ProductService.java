@@ -55,13 +55,13 @@ public class ProductService {
     if (patch.dealerScope() != null || patch.branchScope() != null || patch.customerType() != null) requireEditReason(activity.status(), patch.reason());
     List<String> branchScopes = patch.branchScope() == null ? current.branchScope() : splitBranchScope(patch.branchScope());
     String name = value(patch.materialName(), current.materialName());
-    BigDecimal casePrice = patch.casePriceSet() ? patch.casePrice() : current.casePrice();
+    BigDecimal casePrice = patch.casePriceSet() ? com.fengyi.ordershow.common.ProductCompleteness.positive(patch.casePrice()) : current.casePrice();
     PriceTierView priceTier = patch.priceTierSet()
         ? validatePriceTier(casePrice, patch.priceTierMinQuantity(), patch.priceTierCasePrice(), patch.priceTierPricingMode())
         : validatePriceTier(casePrice, current.priceTier() == null ? null : current.priceTier().minQuantity(),
             current.priceTier() == null ? null : current.priceTier().casePrice(),
             current.priceTier() == null ? null : current.priceTier().pricingMode());
-    BigDecimal factor = patch.tonCaseFactorSet() ? patch.tonCaseFactor() : current.tonCaseFactor();
+    BigDecimal factor = patch.tonCaseFactorSet() ? com.fengyi.ordershow.common.ProductCompleteness.positive(patch.tonCaseFactor()) : current.tonCaseFactor();
     String customerType = normalizeCustomerType(patch.customerType(), current.customerType());
     String rebateStatus = normalizeRebateStatus(patch.rebateStatus(), current.rebateStatus());
     String materialCode = choose(patch.materialCode(), current.materialCode());
@@ -85,9 +85,7 @@ public class ProductService {
         choose(patch.varietyName(), current.varietyName()), choose(patch.specification(), current.specification()),
         choose(patch.casePack(), current.casePack()), patch.bottlePriceSet() ? patch.bottlePrice() : current.bottlePrice(),
         casePrice, factor, patch.giftBox() == null ? current.giftBox() : patch.giftBox(), !branchScopes.isEmpty(), visible, orderable,
-        incomplete(name, casePrice, factor,
-            patch.specification() == null ? current.specification() : patch.specification(),
-            patch.casePack() == null ? current.casePack() : patch.casePack()) ? "INCOMPLETE" : "ACTIVE",
+        com.fengyi.ordershow.common.ProductCompleteness.incomplete(casePrice, factor) ? "INCOMPLETE" : "ACTIVE",
         productId, activityId, expectedVersion);
       if (changed != 1) throw DomainException.conflict("PRODUCT_VERSION_CONFLICT", "商品已被其他页面修改，请刷新后重试");
       replaceBranchScopes(productId, branchScopes);
@@ -115,14 +113,16 @@ public class ProductService {
     validateTypes(customerType, rebateStatus);
     String name = value(request.materialName(), "");
     if (name.isBlank()) throw DomainException.badRequest("PRODUCT_NAME_REQUIRED", "物料名称不能为空");
+    BigDecimal casePrice = com.fengyi.ordershow.common.ProductCompleteness.positive(request.casePrice());
+    BigDecimal factor = com.fengyi.ordershow.common.ProductCompleteness.positive(request.tonCaseFactor());
     boolean visible = request.visible() == null || request.visible();
-    boolean orderable = request.orderable() == null ? visible && request.casePrice() != null && request.casePrice().signum() > 0 : request.orderable();
+    boolean orderable = request.orderable() == null ? visible && casePrice != null && casePrice.signum() > 0 : request.orderable();
     requireEditReason(activity.status(), request.reason());
     List<String> branchScopes = splitBranchScope(request.branchScope());
-    if (orderable && (!visible || request.casePrice() == null || request.casePrice().signum() <= 0)) {
+    if (orderable && (!visible || casePrice == null || casePrice.signum() <= 0)) {
       throw DomainException.unprocessable("PRODUCT_NOT_ORDERABLE", "可订商品必须可见且元/箱大于 0");
     }
-    PriceTierView priceTier = validatePriceTier(request.casePrice(), request.priceTierMinQuantity(), request.priceTierCasePrice(), request.priceTierPricingMode());
+    PriceTierView priceTier = validatePriceTier(casePrice, request.priceTierMinQuantity(), request.priceTierCasePrice(), request.priceTierPricingMode());
     VersionSource source = catalog.currentSource(activityId);
     String code = choose(request.materialCode(), null);
     ensureNoProductIdentityConflict(activityId, source.versionId(), null, customerType, rebateStatus, name, code);
@@ -138,9 +138,8 @@ public class ProductService {
           """, activityId, customerType, rebateStatus, businessKey(customerType, rebateStatus, name, code), code, name, choose(request.description(), null),
           choose(request.categoryName(), null), choose(request.productLine(), null), choose(request.brandName(), null),
           choose(request.varietyName(), null), choose(request.specification(), null), choose(request.casePack(), null),
-          request.bottlePrice(), request.casePrice(), request.tonCaseFactor(), Boolean.TRUE.equals(request.giftBox()), !branchScopes.isEmpty(), visible, orderable,
-          activityId, source.versionId(), incomplete(name, request.casePrice(), request.tonCaseFactor(),
-          request.specification(), request.casePack()) ? "INCOMPLETE" : "ACTIVE", source.taskId(), source.versionId());
+          request.bottlePrice(), casePrice, factor, Boolean.TRUE.equals(request.giftBox()), !branchScopes.isEmpty(), visible, orderable,
+          activityId, source.versionId(), com.fengyi.ordershow.common.ProductCompleteness.incomplete(casePrice, factor) ? "INCOMPLETE" : "ACTIVE", source.taskId(), source.versionId());
       Long id = jdbc.queryForObject("SELECT id FROM activity_product WHERE activity_id = ? AND data_version_id = ? AND business_key = ?",
           Long.class, activityId, source.versionId(), businessKey(customerType, rebateStatus, name, code));
       if (id != null) replaceBranchScopes(id, branchScopes);
@@ -301,7 +300,6 @@ public class ProductService {
   private static String normalizeRebateStatus(String requested, String current) {
     return requested == null || requested.isBlank() ? current : requested.trim();
   }
-  private static boolean incomplete(String name, BigDecimal price, BigDecimal factor, String spec, String pack) { return name == null || name.isBlank() || price == null || factor == null || spec == null || spec.isBlank() || pack == null || pack.isBlank(); }
 
   public record ProductView(long id, String materialCode, String materialName, String description, String categoryName, String productLine,
       String brandName, String varietyName, String specification, String casePack, BigDecimal bottlePrice, BigDecimal casePrice,

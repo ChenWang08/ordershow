@@ -35,7 +35,7 @@ export function ProductImportPage({
             {!productImportCompleted && <div className="dual-upload-grid product-import-upload-grid">
               <article className={`file-upload-card ${productFileName && !productImportError ? "ready" : ""}`}>
                 <div className="file-card-heading"><span>XL</span><div><b>商品信息 Excel</b><small>统一文件 · 读取 1 个商品 Sheet</small></div><em>{productFileName ? (productImportError ? "解析失败" : "解析完成") : "待上传"}</em></div>
-                {productFileName ? <p title={productFileName}>{productFileName}</p> : <p>请选择：调味产品信息表.xlsx</p>}
+                {productFileName ? <p title={productFileName}>{productFileName}</p> : <p>尚未选择商品 Excel 文件</p>}
                 <div className="sheet-tags"><span>Sheet 名称不限</span><span>客户类型：综合 / 特渠 / 空</span><span>是否返利：是 / 否 / 空</span><span>产品说明：可为空</span></div>
                 <footer><small>{activityPublished ? "活动已发布，Excel 导入已锁定" : productFileName && !productImportError ? `识别 ${parsedProductCount} 条商品` : "必须包含 1 个非空商品 Sheet"}</small><div>{productFileName && <button type="button" disabled={activityPublished} onClick={cancelProductImport}>移除</button>}<label className={activityPublished ? "disabled" : ""}><input type="file" accept=".xlsx" disabled={activityPublished} onChange={(event) => { const file = event.target.files?.[0]; if (file) void handleProductFile(file); event.currentTarget.value = ""; }} />{productFileName ? "替换文件" : "选择文件"}</label></div></footer>
               </article>

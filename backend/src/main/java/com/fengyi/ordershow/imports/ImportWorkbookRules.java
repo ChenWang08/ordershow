@@ -23,8 +23,7 @@ final class ImportWorkbookRules {
   }
 
   static boolean optionalProductMissing(Map<String, Object> data) {
-    return List.of("productLine", "specification", "casePack", "casePrice", "tonCaseFactor")
-        .stream().anyMatch(key -> text(data.get(key)).isBlank());
+    return com.fengyi.ordershow.common.ProductCompleteness.incomplete(data.get("casePrice"), data.get("tonCaseFactor"));
   }
 
   static String priceTierError(Map<String, Object> data) {

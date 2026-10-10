@@ -41,6 +41,7 @@ export function useProductImport({
   const [pendingProductRollbackRows, setPendingProductRollbackRows] = useState<ProductImportRow[] | null>(null);
   const [productImageAssets, setProductImageAssets] = useState<ProductImageAsset[]>([]);
   const [productImageFileName, setProductImageFileName] = useState("");
+  const [productImageAttemptName, setProductImageAttemptName] = useState("");
   const [productImageUploadFile, setProductImageUploadFile] = useState<File | null>(null);
   const productImageStats = useMemo<ProductImageStats>(() => ({
     totalProducts: productRows.length,
@@ -68,6 +69,7 @@ export function useProductImport({
     revokeProductImageAssets(productImageAssets);
     setProductImageAssets([]);
     setProductImageFileName("");
+    setProductImageAttemptName("");
     setProductImageUploadFile(null);
   };
   const cancelProductImport = async () => {
@@ -88,6 +90,7 @@ export function useProductImport({
     revokeProductImageAssets(productImageAssets);
     setProductImageAssets([]);
     setProductImageFileName("");
+    setProductImageAttemptName("");
     setProductImageUploadFile(null);
     setProductFileName("");
     setProductSheetCounts([]);
@@ -158,6 +161,7 @@ export function useProductImport({
       const nextRows = bindProductStaging(imageResult.rows, serverRows);
       setProductImageAssets([]);
       setProductImageFileName("");
+      setProductImageAttemptName("");
       setProductImageUploadFile(null);
       setPendingProductRollbackRows(pendingProductRollbackRows ? pendingProductRollbackRows : cloneProductRows(productRows));
       setProductRows(nextRows);
@@ -184,6 +188,7 @@ export function useProductImport({
       return;
     }
     setProductImageError("");
+    setProductImageAttemptName(file.name);
     try {
       const assets = await parseProductImageZip(file);
       const imageResult = matchProductImages(productRows, assets);
@@ -205,6 +210,7 @@ export function useProductImport({
     revokeProductImageAssets(productImageAssets);
     setProductImageAssets([]);
     setProductImageFileName("");
+    setProductImageAttemptName("");
     setProductImageUploadFile(null);
     setProductImageError("");
     setProductRows((current) => current.map((row) => ({ ...row, images: undefined, imageStatus: "未匹配" })));
@@ -223,7 +229,7 @@ export function useProductImport({
     setPendingProductRollbackRows,
     productImageStats,
     resolvedProductImageAssets,
-    productImageFileName,
+    productImageFileName: productImageError ? productImageAttemptName || productImageFileName : productImageFileName,
     productImageError,
     setProductImageAssets,
     beginProductImport,

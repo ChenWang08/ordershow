@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { positiveProductNumber, productCompletenessStatus } from "../../../domain/product-completeness";
 import { useDrawerClose } from "../../../components/useDrawerClose";
 import { createImportRowId, productImportRowsConflict, type ProductImportRow } from "../../../domain/import-domain";
 import { ProductImageEditor } from "../products/ProductImageEditor";
@@ -17,15 +18,15 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
   const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value, ...(field === "customerType" && scopeEnabled ? { dealerScopeEdited: true } : {}) }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
   const duplicateProductIdentity = form.materialName.trim() !== "" && rows.some((row) => row.id !== form.id && productImportRowsConflict(row, form));
-  const conversionValue = Number(form.conversion);
-  const conversionValid = form.conversion.trim() !== "" && Number.isFinite(conversionValue) && conversionValue > 0;
-  const basePrice = Number(form.casePrice);
+  const conversionValid = positiveProductNumber(form.conversion) !== null;
+  const automaticStatus = !form.materialName.trim() || duplicateProductIdentity ? "待核对" : productCompletenessStatus(form.casePrice, form.conversion);
+  const basePrice = positiveProductNumber(form.casePrice) ?? 0;
   const tierMinQuantity = Number(form.priceTierMinQuantity);
   const tierCasePrice = Number(form.priceTierCasePrice);
   const tierValid = !tierEnabled || (Number.isInteger(tierMinQuantity) && tierMinQuantity >= 2 && tierMinQuantity <= 999999
     && Number.isFinite(tierCasePrice) && tierCasePrice > 0 && tierCasePrice < basePrice);
   const scopeValid = !form.dealerScopeEdited || (form.dealerScope ?? []).every(s => s.members.length > 0 && s.members.every(m => m.active && (!form.customerType || m.customerType === (form.customerType === "综合" ? "GENERAL" : "SPECIAL"))));
-  const canSave = form.materialName.trim() !== "" && form.casePrice.trim() !== "" && (conversionValid || form.status === "待完善") && tierValid && !duplicateProductIdentity && scopeValid && (!activityStarted || editReason.trim() !== "");
+  const canSave = form.materialName.trim() !== "" && tierValid && !duplicateProductIdentity && scopeValid && (!activityStarted || editReason.trim() !== "");
   const requestClose = useDrawerClose({ form: { ...form, dealerScopeEdited: undefined, dealerScope: form.dealerScope ?? [] }, tierEnabled, editReason }, onClose, saving);
   return (
     <div className="order-drawer-backdrop">
@@ -47,20 +48,20 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
           <label><span>规格</span><input value={form.spec} onChange={(e) => update("spec", e.target.value)} /></label>
           <label><span>箱规</span><input value={form.casePack} onChange={(e) => update("casePack", e.target.value)} /></label>
           <label><span>元/瓶</span><input inputMode="decimal" value={form.unitPrice} onChange={(e) => update("unitPrice", e.target.value)} /></label>
-          <label><span>元/箱 *</span><input inputMode="decimal" value={form.casePrice} onChange={(e) => update("casePrice", e.target.value)} /></label>
+          <label><span>元/箱</span><input inputMode="decimal" value={form.casePrice} onChange={(e) => update("casePrice", e.target.value)} /></label>
           <label className="wide-field price-tier-toggle"><span>阶梯价格（选填）</span><span><input type="checkbox" checked={tierEnabled} onChange={(e) => { setTierEnabled(e.target.checked); if (!e.target.checked) setForm((current) => ({ ...current, priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER" })); }} /> 设置阶梯优惠</span><small>可选择达到门槛后整批降价，或仅从门槛箱开始对超出部分降价</small></label>
           {tierEnabled && <><label><span>优惠起订箱数 *</span><input inputMode="numeric" type="number" min="2" max="999999" value={form.priceTierMinQuantity} onChange={(e) => update("priceTierMinQuantity", e.target.value)} placeholder="例如：1500" /><small className={!Number.isInteger(tierMinQuantity) || tierMinQuantity < 2 || tierMinQuantity > 999999 ? "field-error" : ""}>请输入 2～999999 的整数箱数</small></label><label><span>阶梯优惠箱价 *</span><input inputMode="decimal" value={form.priceTierCasePrice} onChange={(e) => update("priceTierCasePrice", e.target.value)} placeholder="例如：134" /><small className={!Number.isFinite(tierCasePrice) || tierCasePrice <= 0 || tierCasePrice >= basePrice ? "field-error" : ""}>必须大于 0 且低于基础箱价 {Number.isFinite(basePrice) ? basePrice : "—"} 元</small></label><label className="wide-field"><span>计价模式 *</span><select value={form.priceTierPricingMode} onChange={(e) => update("priceTierPricingMode", e.target.value)}><option value="WHOLE_ORDER">达量整批优惠（达到门槛后全部箱数按优惠价）</option><option value="INCREMENTAL">超出部分优惠（从门槛箱开始按优惠价）</option></select><small>{form.priceTierPricingMode === "INCREMENTAL" ? `例如满 ${form.priceTierMinQuantity || "1500"} 箱：前 ${Math.max(1, (tierMinQuantity || 1500) - 1)} 箱按基础价，第 ${form.priceTierMinQuantity || "1500"} 箱起按优惠价` : "达到门槛后，本商品本次订购的全部箱数按优惠价"}</small></label></>}
-          <label><span>每吨箱数（箱/吨） *</span><input inputMode="decimal" value={form.conversion} onChange={(e) => update("conversion", e.target.value)} /><small className={!conversionValid && form.status !== "待完善" ? "field-error" : ""}>Excel 原列名：吨箱转换系数；统计时按订货箱数 ÷ 每吨箱数计算吨数</small></label>
+          <label><span>每吨箱数（箱/吨）</span><input inputMode="decimal" value={form.conversion} onChange={(e) => update("conversion", e.target.value)} /><small className={!conversionValid ? "field-error" : ""}>Excel 原列名：吨箱转换系数；统计时按订货箱数 ÷ 每吨箱数计算吨数</small></label>
           <label><span>是否礼盒</span><select value={form.gift} onChange={(e) => update("gift", e.target.value)}><option>否</option><option>是</option></select></label>
           <ProductScopeEditor activityId={activityId} form={form} enabled={scopeEnabled} onChange={(branchScope, dealerScope) => setForm(current => ({ ...current, branchScope, dealerScope, dealerScopeEdited: scopeEnabled }))} />
-          <label><span>数据状态</span><select value={form.status} onChange={(e) => update("status", e.target.value)}><option>有效</option><option>待完善</option></select></label>
+          <label><span>数据状态（自动判定）</span><output>{automaticStatus}</output><small>仅元/箱或吨箱转换系数缺失、无效时为待完善；项目组、规格、箱规为选填。</small></label>
         </div>
         {activityStarted && <label className="drawer-form-reason"><span>{isEditing ? "修改原因（必填）" : "新增商品原因"}</span><input maxLength={500} value={editReason} onChange={e => setEditReason(e.target.value)} placeholder="请填写本次商品或下单范围修改原因" /></label>}
         <p className="drawer-form-note">带 * 的字段为必填项；{activityStarted ? "价格修改保存后，相关有效订单自动更新。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
         <footer><div className="drawer-save-error">{saveError && <small className="field-error">{saveError}</small>}</div><button disabled={saving} onClick={requestClose}>取消</button><button className="admin-primary" disabled={!canSave || saving} onClick={async () => {
           setSaving(true); setSaveError("");
           try {
-            const saved = await onSave({ ...form, sequence: nextSequence, manuallyEdited: true }, editReason.trim());
+            const saved = await onSave({ ...form, status: automaticStatus, sequence: nextSequence, manuallyEdited: true }, editReason.trim());
             if (saved) onClose(); else setSaveError("保存失败，请根据页面提示检查后重试。");
           } catch { setSaveError("保存请求异常，请稍后重试。"); }
           finally { setSaving(false); }

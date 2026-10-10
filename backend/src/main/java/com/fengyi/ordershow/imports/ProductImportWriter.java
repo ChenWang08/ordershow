@@ -18,8 +18,8 @@ public class ProductImportWriter {
     for (MaterializeRow row : rows) {
       Map<String, Object> data = row.effective();
       String name = text(data.get("materialName"));
-      BigDecimal casePrice = decimal(data.get("casePrice"));
-      BigDecimal factor = decimal(data.get("tonCaseFactor"));
+      BigDecimal casePrice = com.fengyi.ordershow.common.ProductCompleteness.positive(data.get("casePrice"));
+      BigDecimal factor = com.fengyi.ordershow.common.ProductCompleteness.positive(data.get("tonCaseFactor"));
       boolean visible = !name.isBlank();
       boolean orderable = visible && casePrice != null && casePrice.signum() > 0;
       String status = optionalProductMissing(data) ? "INCOMPLETE" : "ACTIVE";

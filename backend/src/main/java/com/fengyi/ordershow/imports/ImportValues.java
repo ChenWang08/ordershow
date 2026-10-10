@@ -1,7 +1,6 @@
 package com.fengyi.ordershow.imports;
 
 import java.math.BigDecimal;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import com.fengyi.ordershow.common.ProductBusinessKey;
@@ -11,8 +10,7 @@ import com.fengyi.ordershow.common.TextNormalizer;
 final class ImportValues {
   private ImportValues() {}
   static boolean optionalProductMissing(Map<String, Object> data) {
-    return List.of("productLine", "specification", "casePack", "casePrice", "tonCaseFactor")
-        .stream().anyMatch(key -> text(data.get(key)).isBlank());
+    return com.fengyi.ordershow.common.ProductCompleteness.incomplete(data.get("casePrice"), data.get("tonCaseFactor"));
   }
 
   static String productKey(Map<String, Object> data) {

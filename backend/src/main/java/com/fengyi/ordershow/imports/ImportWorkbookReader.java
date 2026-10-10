@@ -88,7 +88,7 @@ final class ImportWorkbookReader {
       data.put("specification", cell(row, indexes.get("规格")));
       data.put("casePack", cell(row, indexes.get("箱规")));
       data.put("bottlePrice", decimalText(cell(row, indexes.get("元/瓶"))));
-      data.put("casePrice", decimalText(cell(row, indexes.get("元/箱"))));
+      data.put("casePrice", positiveDecimalText(cell(row, indexes.get("元/箱"))));
       data.put("tonCaseFactor", positiveDecimalText(cell(row, indexes.get("吨箱转换系数"))));
       data.put("giftBox", "是".equals(cell(row, indexes.get("是否为标品礼盒"))));
       data.put("branchScope", cell(row, indexes.get("分公司定制品")));
@@ -123,7 +123,7 @@ final class ImportWorkbookReader {
       } else if (optionalProductMissing(data)) {
         validation = "WARNING"; diffType = "ADDED"; warnings++; added++;
         issue(taskId, "WARNING", "PRODUCT_INCOMPLETE", row.sheet(), row.rowNo(), null, null,
-            "商品信息不完整；仍会进入 H5，价格缺失时不可下单，其他缺失字段不展示");
+            "元/箱或吨箱转换系数缺失或无效；无有效箱价不可下单，缺系数按 0 吨计入");
       } else {
         validation = "VALID"; diffType = "ADDED"; added++;
       }
