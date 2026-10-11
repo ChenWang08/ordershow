@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FestivalDecor } from "../shared/components/FestivalDecor";
 import { ProductImageViewer } from "../shared/components/ProductImageViewer";
 import type { H5Props } from "./h5-domain";
@@ -13,18 +13,33 @@ import { H5SubmittedPage } from "./H5SubmittedPage";
 import { H5ResultPages } from "./H5ResultPages";
 import { H5ProductDetailSheet } from "./H5ProductDetailSheet";
 import { H5LiveRoomExit } from "./H5LiveRoomExit";
+import { trackH5Viewport } from "./h5-viewport";
 
 export function H5Ordering(props: H5Props) {
   const model = useH5OrderFlow(props);
   const { previewProduct, setPreviewProduct } = model;
   const [imagePreviewProduct, setImagePreviewProduct] = useState<Product | null>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const stop = trackH5Viewport(shell);
+    // The current renderer omits viewportFit/interactiveWidget metadata fields.
+    const meta = shell.closest(".standalone-h5") ? document.querySelector<HTMLMetaElement>('meta[name="viewport"]') : null;
+    const original = meta?.content;
+    if (meta) meta.content = `${original || "width=device-width, initial-scale=1"}, viewport-fit=cover, interactive-widget=resizes-content`;
+    return () => {
+      stop();
+      if (meta && original != null) meta.content = original;
+    };
+  }, []);
   return (
     <div className="h5-stage">
       <div className="device-caption">
         <span>客户订货 H5</span>
         <small>手机端 · 实时业务数据</small>
       </div>
-      <div className="phone-shell">
+      <div className="phone-shell" ref={shellRef}>
         <div className="phone-screen">
           <FestivalDecor />
           <H5LiveRoomExit url={props.runtimeActivity?.liveRoomUrl} disabled={model.runtimeBusy}

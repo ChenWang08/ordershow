@@ -15,6 +15,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                 <div><b>订货会</b><span>{identityLabel}</span></div>
                 <span aria-hidden="true" />
               </header>
+              <div className="order-scroll-area" role="region" aria-label="商品选择" tabIndex={0}>
               <div className="dealer-card">
                 <span>已识别经销商</span>
                 <b>{dealerName}</b>
@@ -61,11 +62,12 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                 ))}
                 {visibleProducts.length === 0 && <div className="empty-state">没有符合条件的商品</div>}
               </div>
+              </div>
               <div className="order-bar">
-                <button className="cart-summary" disabled={activityClosed || !totalBoxes} onClick={() => setCartOpen(true)}>
+                <button className="cart-summary" aria-label="查看已选商品明细" disabled={activityClosed || !totalBoxes} onClick={() => setCartOpen(true)}>
                   <span>已选 {selected.length} 种 · {totalBoxes} 箱 <em>查看明细⌃</em></span><b>¥{money(totalAmount)}</b>
                 </button>
-                <button className="confirm-cart-btn" disabled={customerOrderReadOnly || (!totalBoxes && orderStatus === "none")} onClick={() => totalBoxes ? setStep("confirm") : setCancelConfirmOpen(true)}>{totalBoxes ? "确认订单" : "取消本次订货"}</button>
+                <button className="confirm-cart-btn" disabled={customerOrderReadOnly || (!totalBoxes && orderStatus === "none")} onClick={() => totalBoxes ? setStep("confirm") : setCancelConfirmOpen(true)}>{totalBoxes || orderStatus === "none" ? "确认订单" : "取消本次订货"}</button>
               </div>
             </section>
           )}
@@ -102,7 +104,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                   ))}
                   {!selected.length && <div className="cart-empty">还没有选择商品</div>}
                 </div>
-                <footer><div><span>合计</span><b>¥{money(totalAmount)}</b><small>共 {totalBoxes} 箱</small></div><button disabled={customerOrderReadOnly || (!totalBoxes && orderStatus === "none")} onClick={() => { setCartOpen(false); if (totalBoxes) setStep("confirm"); else setCancelConfirmOpen(true); }}>{totalBoxes ? "去确认订单" : "取消本次订货"}</button></footer>
+                <footer><div><span>合计</span><b>¥{money(totalAmount)}</b><small>共 {totalBoxes} 箱</small></div><button disabled={customerOrderReadOnly || (!totalBoxes && orderStatus === "none")} onClick={() => { setCartOpen(false); if (totalBoxes) setStep("confirm"); else setCancelConfirmOpen(true); }}>{totalBoxes || orderStatus === "none" ? "去确认订单" : "取消本次订货"}</button></footer>
               </section>
             </div>
           )}

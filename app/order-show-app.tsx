@@ -19,6 +19,7 @@ export function OrderShowApp(props: OrderShowAppProps = {}) {
 
 function OrderShowContent({ initialSurface = "h5", showSurfaceTabs = true }: OrderShowAppProps) {
   const [surface, setSurface] = useState<Surface>(initialSurface);
+  const standaloneH5 = surface === "h5" && !showSurfaceTabs;
   const { activityName, runtimeConnected, runtimeActivity } = useActivityWorkspace();
   const surfaces: { key: Surface; label: string; sub: string }[] = [
     { key: "h5", label: "订货 H5", sub: "手机端" },
@@ -29,12 +30,12 @@ function OrderShowContent({ initialSurface = "h5", showSurfaceTabs = true }: Ord
     { key: "admin", label: "管理后台", sub: "运营端" },
   ];
   return (
-    <main className={`prototype-root surface-${surface}`}>
-      <nav className="prototype-nav">
+    <main className={`prototype-root surface-${surface}${standaloneH5 ? " standalone-h5" : ""}`}>
+      {!standaloneH5 && <nav className="prototype-nav">
         <div className="prototype-title"><span>金</span><p><b>{surface === "admin" ? "订购会管理平台" : activityName}</b><small>{surface === "admin" ? (runtimeConnected ? "多活动运营 · 实时数据" : "多活动运营 · 服务连接中") : runtimeConnected ? "业务系统 · 实时数据" : "业务服务连接中"}</small></p></div>
         {showSurfaceTabs && <div className="surface-tabs">{surfaces.map((item) => <button key={item.key} className={surface === item.key ? "active" : ""} onClick={() => setSurface(item.key)}><b>{item.label}</b><small>{item.sub}</small></button>)}</div>}
         <div className="prototype-status"><i /> {runtimeConnected ? "服务已连接" : "服务未连接"}</div>
-      </nav>
+      </nav>}
       <div className="prototype-canvas">
         {showSurfaceTabs
           ? <div className={surface === "h5" ? "surface-slot" : "surface-slot surface-hidden"}><H5Surface /></div>
