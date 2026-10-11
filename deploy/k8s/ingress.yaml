@@ -1,0 +1,26 @@
+# Standard Ingress. Operations adds controller-specific upload/SSE timeout settings.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: order-show
+spec:
+  ingressClassName: REPLACE_ME
+  tls:
+    - hosts: [orders.example.com]
+      secretName: order-show-tls
+  rules:
+    - host: orders.example.com
+      http:
+        paths:
+          - path: /api/v1
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port: {number: 8080}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port: {number: 3000}

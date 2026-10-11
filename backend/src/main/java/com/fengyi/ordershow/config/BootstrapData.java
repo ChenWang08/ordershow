@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "order-show.bootstrap-enabled", havingValue = "true", matchIfMissing = true)
 @org.springframework.core.annotation.Order(100)
 public class BootstrapData implements ApplicationRunner {
   private static final Logger log = LoggerFactory.getLogger(BootstrapData.class);

@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-show-config
+data:
+  SPRING_PROFILES_ACTIVE: test
+  DB_MIGRATION_ENABLED: "false"
+  DB_URL: "jdbc:mysql://REPLACE_ME:3306/order_show?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&sslMode=VERIFY_IDENTITY"
+  DB_USERNAME: "REPLACE_ME"
+  DB_POOL_SIZE: "10"
+  REDIS_HOST: "REPLACE_ME"
+  REDIS_PORT: "6379"
+  REDIS_USERNAME: ""
+  REDIS_SSL_ENABLED: "true"
+  STORAGE_PROVIDER: oss
+  STORAGE_ENDPOINT: "https://REPLACE_ME"
+  STORAGE_BUCKET: "REPLACE_ME"
+  OSS_REGION: "REPLACE_ME"
+  PUBLIC_ORIGIN: "https://REPLACE_ME"
+  REALTIME_CHANNEL: "order-show:test:events"
+  H5_WARMUP_ENABLED: "true"
+  H5_WRITE_CONCURRENCY: "12"
+  HTTP_MAX_THREADS: "40"
+  JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70"

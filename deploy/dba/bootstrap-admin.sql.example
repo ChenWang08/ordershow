@@ -1,0 +1,5 @@
+-- DBA: replace the BCrypt hash (cost 12), then execute ONCE in the new database.
+-- Never use a plaintext password in password_hash. No demo activity/data is created.
+INSERT INTO admin_user(username, display_name, password_hash, role_code, department_id, status, must_change_password)
+SELECT 'admin', '系统管理员', 'REPLACE_ME_BCRYPT_HASH', 'SUPER_ADMIN', NULL, 'ACTIVE', TRUE
+WHERE NOT EXISTS (SELECT 1 FROM admin_user WHERE role_code='SUPER_ADMIN');

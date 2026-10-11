@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
  * The business tables use normalized plaintext phone values after V023.
  */
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "order-show.legacy-migration-enabled", havingValue = "true", matchIfMissing = true)
 @Order(0)
 public class PhonePlaintextMigration implements ApplicationRunner {
   private final JdbcTemplate jdbc;

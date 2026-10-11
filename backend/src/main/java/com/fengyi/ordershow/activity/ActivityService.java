@@ -282,7 +282,8 @@ public class ActivityService {
   }
 
   @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 30_000)
-  void synchronizeTimedActivities() {
+  @org.springframework.transaction.annotation.Transactional
+  public void synchronizeTimedActivities() {
     List<Long> starting = jdbc.queryForList("""
         SELECT id FROM activity WHERE status = 'SCHEDULED'
           AND starts_at <= UTC_TIMESTAMP(3) AND ends_at > UTC_TIMESTAMP(3)

@@ -17,6 +17,31 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 class RealtimeEventServiceTest {
+  @Test void fansOutToTwoReplicasAndRetriesWhenRedisFails() throws Exception {
+    var redis = mock(org.springframework.data.redis.core.StringRedisTemplate.class);
+    var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+    var first = spy(new RealtimeEventService(mock(JdbcTemplate.class)));
+    var second = spy(new RealtimeEventService(mock(JdbcTemplate.class)));
+    first.configureFanout(redis, mapper, "test:events");
+    second.configureFanout(redis, mapper, "test:events");
+    when(redis.convertAndSend(eq("test:events"), anyString())).thenAnswer(call -> {
+      byte[] payload = call.getArgument(1, String.class).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+      first.receive(payload); second.receive(payload); return 2L;
+    });
+    first.publish(11, "invalidate", Map.of("version", 7));
+    verify(first).deliver(eq(11L), eq("invalidate"), any());
+    verify(second).deliver(eq(11L), eq("invalidate"), any());
+    when(redis.convertAndSend(eq("test:events"), anyString())).thenThrow(new IllegalStateException("offline"));
+    assertThatThrownBy(() -> first.publish(11, "invalidate", Map.of())).hasMessage("offline");
+  }
+
+  @Test void periodicInvalidationRecoversMissedPubSubMessages() throws Exception {
+    var emitter = mock(SseEmitter.class);
+    var service = new RealtimeEventService(mock(JdbcTemplate.class), () -> emitter);
+    service.subscribe(11);
+    service.refreshSubscribers();
+    verify(emitter, times(2)).send(any(SseEmitter.SseEventBuilder.class));
+  }
   private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
   private final RealtimeEventService service = spy(new RealtimeEventService(jdbc));
 

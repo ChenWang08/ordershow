@@ -329,20 +329,25 @@ public class ImportService {
 
   @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 1_000)
   public void processConfirmed() {
-    List<Long> ids = jdbc.queryForList("""
-        SELECT id FROM import_task WHERE status = 'CONFIRMING' AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP(3))
-        ORDER BY confirmed_at LIMIT 1
-        """, Long.class);
-    if (ids.isEmpty()) return;
-    long taskId = ids.getFirst();
-    int claimed = jdbc.update("UPDATE import_task SET status = 'MATERIALIZING', attempt_count = attempt_count + 1, lease_owner = ?, lease_expires_at = DATE_ADD(UTC_TIMESTAMP(3), INTERVAL 5 MINUTE) WHERE id = ? AND status = 'CONFIRMING'",
-        "worker-" + ProcessHandle.current().pid(), taskId);
-    if (claimed != 1) return;
+    // Claim and publication share one transaction: a crashed pod releases the claim by rollback.
+    // Other replicas skip the locked task instead of duplicating publication.
+    long[] selected = {0};
     try {
-      transactions.executeWithoutResult(status -> publisher.publish(taskId));
+      transactions.executeWithoutResult(status -> {
+        List<Long> ids = jdbc.queryForList("""
+            SELECT id FROM import_task WHERE status = 'CONFIRMING'
+              AND (next_attempt_at IS NULL OR next_attempt_at <= UTC_TIMESTAMP(3))
+            ORDER BY confirmed_at LIMIT 1 FOR UPDATE SKIP LOCKED
+            """, Long.class);
+        if (ids.isEmpty()) return;
+        selected[0] = ids.getFirst();
+        jdbc.update("UPDATE import_task SET status = 'MATERIALIZING', attempt_count = attempt_count + 1 WHERE id = ?", selected[0]);
+        publisher.publish(selected[0]);
+      });
     } catch (Exception exception) {
-      jdbc.update("UPDATE import_task SET status = 'FAILED', failed_at = UTC_TIMESTAMP(3), failure_code = 'PUBLISH_FAILED', failure_message = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ?",
-          truncate(exception.getMessage(), 900), taskId);
+      if (selected[0] == 0) throw exception;
+      jdbc.update("UPDATE import_task SET status = 'FAILED', failed_at = UTC_TIMESTAMP(3), failure_code = 'PUBLISH_FAILED', failure_message = ?, lease_owner = NULL, lease_expires_at = NULL WHERE id = ? AND status = 'CONFIRMING'",
+          truncate(exception.getMessage(), 900), selected[0]);
     }
   }
 

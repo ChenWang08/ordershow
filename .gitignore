@@ -44,6 +44,7 @@ next-env.d.ts
 /work/
 /backend/target/
 /backups/
+/deploy/private/
 
 # Local business source files and sensitive data
 /*.xlsx

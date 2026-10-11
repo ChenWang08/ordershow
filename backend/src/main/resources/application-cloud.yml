@@ -1,0 +1,36 @@
+# Activated by test/prod profile groups. No local credentials or schema mutation.
+spring:
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  flyway:
+    enabled: false
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      password: ${REDIS_PASSWORD}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: never
+      group:
+        readiness:
+          include: readinessState,db,redis
+order-show:
+  bootstrap-enabled: false
+  legacy-migration-enabled: false
+  price-backfill-enabled: false
+  cookie-secure: true
+  public-origin: ${PUBLIC_ORIGIN}
+  phone-hmac-key: ${PHONE_HMAC_KEY}
+  phone-encryption-key: ${PHONE_ENCRYPTION_KEY}
+  storage:
+    endpoint: ${STORAGE_ENDPOINT}
+    access-key: ${STORAGE_ACCESS_KEY}
+    secret-key: ${STORAGE_SECRET_KEY}
+    bucket: ${STORAGE_BUCKET}

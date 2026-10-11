@@ -4,6 +4,7 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.stereotype.Component;
 @Component
+@org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(name = "order-show.price-backfill-enabled", havingValue = "true", matchIfMissing = true)
 @org.springframework.core.annotation.Order(200)
 public class PriceBackfillRunner implements ApplicationRunner {
   private final PriceSyncService service;

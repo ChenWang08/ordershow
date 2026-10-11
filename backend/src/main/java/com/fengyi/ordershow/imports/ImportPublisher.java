@@ -37,8 +37,11 @@ public class ImportPublisher {
     this.attendanceMatching = attendanceMatching; this.products = products;
   }
   void publish(long taskId) {
+    // Locking reads before the activity lock avoid creating an old REPEATABLE_READ snapshot
+    // while another publication is committing a new catalog version for this activity.
+    long activityId = jdbc.queryForObject("SELECT activity_id FROM import_task WHERE id = ? FOR UPDATE", Long.class, taskId);
+    jdbc.queryForList("SELECT id FROM activity WHERE id = ? FOR UPDATE", activityId);
     ImportTask task = tasks.task(taskId);
-    long activityId = task.activityId();
     long adminId = task.confirmedBy();
     jdbc.update("UPDATE import_task SET status = 'MATERIALIZING' WHERE id = ?", taskId);
     Long previous = jdbc.query("SELECT current_version_id FROM activity_data_binding WHERE activity_id = ? AND data_type = ? FOR UPDATE",

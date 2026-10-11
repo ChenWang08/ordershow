@@ -1,4 +1,10 @@
 .git
+.env
+.env.*
+deploy/private
+backups
+outputs
+work
 .vinext
 .wrangler
 dist

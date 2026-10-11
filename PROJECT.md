@@ -22,6 +22,8 @@
 
 ## 3. 当前项目状态
 
+ACK 适配工作树新增本地/测试/生产配置、MinIO/OSS 双实现、Redis 跨副本实时通知和通用 K8s 模板。详见 [部署说明](deploy/README.md) 与 [验证记录](deploy/verification.md)。本地 Compose 长期保留；测试/生产使用 PolarDB、托管 Redis、OSS AK/SK，DBA 执行数据库脚本，关闭应用自动迁移和演示初始化。正式数据重新导入，副本数量手工调整，无 HPA。此说明不代表已合并到主分支或已部署到生产。
+
 2026-10-12 文档核对范围：代码提交截至 `99e7af6`，已补齐 2026-10-11 晚间的活动直播间配置、H5 退出返回、手机布局与数量编辑、Excel 模板下载、多来源 CORS 和 HTTP IP 提交兼容。此处描述代码实现，部署状态仍以部署记录为准。
 
 2026-10-12 已核验本机当前部署：前端资源包含直播间返回、模板下载、手机适配、数量编辑和 HTTP 提交兼容代码；数据库 V038 已成功执行，多来源 CORS 预检通过，后端健康 UP，后台、H5 和模板地址可访问。运行镜像、容器时间与证据见 [本机部署核验记录](docs/deployment/2026-10-12-runtime-verification.md)。本次为只读核验，未重新部署；真实手机交互、实际下单及完整业务流程不在本次验证范围内。
@@ -635,11 +637,11 @@ Excel：Apache POI
 实时更新：SSE（后台活动概览同时保留 10 秒轮询兜底）
 生产入口目标：托管 LB/WAF/CDN + HTTPS（Nginx 仅用于本地或实例内反向代理）
 本地任务：Spring Boot 进程处理导入任务，MySQL 保存任务状态
-生产任务目标：独立 Background Worker + MySQL DB Task Queue
+ACK 当前任务：应用内执行器共享数据库队列，事务领取任务，支持多副本
 本地数据库迁移：Spring Boot 启动时执行 Flyway
-生产迁移目标：独立 Migration Job 执行 Flyway
+ACK 数据库变更：DBA 审核执行 SQL，应用关闭 Flyway 与历史数据启动迁移
 本地部署：Docker Compose
-生产部署目标：容器化多实例部署
+测试/生产部署：ACK 多副本，手工调整副本数；环境变量由运维注入
 ```
 
 前端接口统一收口在 `app/api.ts`，后端采用模块化单体结构；本地由 Docker Compose 统一编排。
@@ -655,7 +657,7 @@ Excel：Apache POI
 - 统计与看板服务。
 - 抽奖服务。
 - 文件服务。
-- 当前由 Spring Boot 应用内任务执行器处理导入任务；生产部署再拆分 Background Worker / DB Task Queue 运行角色。
+- 当前由 Spring Boot 应用内执行器处理导入任务，使用数据库事务锁支持多副本领取；独立 Background Worker 属于后续可选演进，不是本次 ACK 部署前提。
 - 用户与权限服务。
 - 审计日志服务。
 

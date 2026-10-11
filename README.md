@@ -1,5 +1,7 @@
 # 订购会业务系统
 
+ACK 云端部署适配见 [部署交付说明](deploy/README.md) 和 [验证记录](deploy/verification.md)。本地 Compose 长期保留；测试、生产使用 ACK + PolarDB + 云 Redis + OSS，实际连接参数由运维注入。数据库变更由 DBA 执行，云端关闭自动 Flyway 和演示数据初始化。正式业务数据重新导入，多副本数量人工调整。
+
 面向调味品事业部订购会的完整本地业务系统。项目保留已确认的 React UI，并已接入 Spring Boot、MySQL、Redis、MinIO、Excel/ZIP 导入、H5 订单、后台订单管理、实时排行、专题战报、抽奖和审计日志。
 
 ## 当前部署核验
@@ -196,9 +198,9 @@ H5 增量直提、减量审核及撤回/作废后直接恢复的规则与验证�
 
 ## 当前实现与生产规划边界
 
-当前仓库已经实现可完整本地运行的单体版本：统一 React 前端、一个 Spring Boot 后端进程，以及由 Docker Compose 管理的 MySQL、Redis 和 MinIO。导入任务和 Flyway 迁移当前随本地后端运行方式执行。
+本地默认由 Docker Compose 管理 React 前端、Spring Boot 后端、MySQL、Redis 和 MinIO；保留本地 Flyway 自动迁移。ACK 使用同一业务代码和独立环境配置，连接托管服务；支持多个应用副本、Redis 实时事件广播和数据库事务领取导入任务。云端数据库脚本由 DBA 执行。
 
-独立 Background Worker、独立 Migration Job、多 API 实例、托管 LB/WAF/CDN、正式监控告警和云端高可用属于生产部署目标，尚不能视为当前本地环境已经完成。
+本仓库提供通用 K8s 模板，不创建云资源，不自动扩容。独立 Background Worker、托管 LB/WAF/CDN、正式监控告警、灾备及云端高可用验收由部署团队另行实施。真实 ACK、PolarDB、托管 Redis TLS 和 OSS 联调结果以部署验证记录为准，不能将本地通过等同于云端验收通过。
 
 ## 历史部署记录
 

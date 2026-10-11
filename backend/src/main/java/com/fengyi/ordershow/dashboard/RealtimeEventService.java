@@ -21,6 +21,16 @@ public class RealtimeEventService {
   private final Map<Long, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
   private final JdbcTemplate jdbc;
   private final Supplier<SseEmitter> emitterFactory;
+  private org.springframework.data.redis.core.StringRedisTemplate redis;
+  private com.fasterxml.jackson.databind.ObjectMapper json;
+  private String channel;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  void configureFanout(org.springframework.data.redis.core.StringRedisTemplate redis,
+      com.fasterxml.jackson.databind.ObjectMapper json,
+      @org.springframework.beans.factory.annotation.Value("${REALTIME_CHANNEL:order-show:local:events}") String channel) {
+    this.redis = redis; this.json = json; this.channel = channel;
+  }
 
   @org.springframework.beans.factory.annotation.Autowired
   public RealtimeEventService(JdbcTemplate jdbc) { this(jdbc, () -> new SseEmitter(30L * 60 * 1000)); }
@@ -45,6 +55,37 @@ public class RealtimeEventService {
   }
 
   public void publish(long activityId, String event, Object data) {
+    if (redis == null) { deliver(activityId, event, data); return; }
+    try {
+      Long receivers = redis.convertAndSend(channel, json.writeValueAsString(new Notification(activityId, event, data)));
+      if (receivers == null || receivers == 0) throw new IllegalStateException("No realtime subscribers; outbox will retry");
+    } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
+      throw new IllegalStateException("Cannot serialize realtime event", exception);
+    }
+  }
+
+  public void receive(byte[] payload) {
+    try {
+      Notification notification = json.readValue(payload, Notification.class);
+      deliver(notification.activityId(), notification.event(), notification.data());
+    } catch (IOException exception) {
+      org.slf4j.LoggerFactory.getLogger(getClass()).warn("Invalid realtime message ignored");
+    }
+  }
+
+  // Pub/sub is transient. Also refresh active connections periodically to recover missed messages.
+  @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 15000)
+  void refreshSubscribers() {
+    for (long id : emitters.keySet()) deliver(id, "invalidate", Map.of("activityId", id, "scope", "ACTIVITY"));
+  }
+
+  @jakarta.annotation.PreDestroy
+  void disconnect() {
+    emitters.values().forEach(list -> list.forEach(SseEmitter::complete));
+    emitters.clear();
+  }
+
+  void deliver(long activityId, String event, Object data) {
     var listeners = emitters.get(activityId);
     if (listeners == null) return;
     for (SseEmitter emitter : listeners) {
@@ -102,4 +143,5 @@ public class RealtimeEventService {
   }
 
   record OutboxRow(long id, long activityId, String eventType, String aggregateType, String aggregateId, Instant createdAt) {}
+  record Notification(long activityId, String event, Object data) {}
 }

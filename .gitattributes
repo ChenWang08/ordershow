@@ -1,0 +1,2 @@
+# DBA package checksums must remain reproducible across Windows/Linux checkouts.
+deploy/dba/generated/* text eol=lf
