@@ -5,6 +5,9 @@ dist
 node_modules
 backend/target
 *.xlsx
+!public/import-template-products.xlsx
+!public/import-template-whitelist.xlsx
+!public/import-template-attendance.xlsx
 *.xls
 *.zip
 *.docx

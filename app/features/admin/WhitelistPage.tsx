@@ -1,5 +1,7 @@
 "use client";
 
+import { ImportTemplateDownload, ImportTemplateHint } from "./ImportTemplateDownload";
+
 import { whitelistCustomerTypeMode, type WhitelistRow } from "../../domain/import-domain";
 import type { ActivityStatus } from "../shared/types";
 import { CustomerWhitelistTable } from "./whitelist/CustomerWhitelistTable";
@@ -30,8 +32,9 @@ export function WhitelistPage({
   const removedWhitelistCount = Math.max(0, parsedWhitelistCount - whitelistImportStats.total);
   return (
           <div className="admin-panel">
-            <div className="panel-title"><div><h2>{whitelistImportCompleted ? "当前客户白名单" : "客户白名单导入"}</h2><p>{whitelistImportCompleted ? "当前数据来自最近一次确认的完整 Excel；发布活动后锁定" : "上传完整白名单 Excel，浏览器解析后替换当前白名单"}</p></div><div className="panel-actions"><button className="secondary-button" disabled={baseDataReadOnly || (!whitelistImportCompleted && (!whitelistFileName || Boolean(whitelistImportError)))} onClick={openWhitelistForm}>＋ 手动添加客户</button>{whitelistImportCompleted && <button className="admin-primary" disabled={activityPublished} onClick={beginWhitelistImport}>重新导入 Excel</button>}</div></div>
+            <div className="panel-title"><div><h2>{whitelistImportCompleted ? "当前客户白名单" : "客户白名单导入"}</h2><p>{whitelistImportCompleted ? "当前数据来自最近一次确认的完整 Excel；发布活动后锁定" : "上传完整白名单 Excel，浏览器解析后替换当前白名单"}</p></div><div className="panel-actions"><ImportTemplateDownload kind="whitelist" /><button className="secondary-button" disabled={baseDataReadOnly || (!whitelistImportCompleted && (!whitelistFileName || Boolean(whitelistImportError)))} onClick={openWhitelistForm}>＋ 手动添加客户</button>{whitelistImportCompleted && <button className="admin-primary" disabled={activityPublished} onClick={beginWhitelistImport}>重新导入 Excel</button>}</div></div>
             {!whitelistImportCompleted && <div className="import-rule-hint"><b>全量替换规则</b><span>{activityPublished ? "活动已发布，白名单 Excel 已锁定；待开始状态可先撤回发布再修改。" : "每次白名单 Excel 都是一套独立完整名单，不展示新增、更新或移除差异。上传只生成预览，点击确认且保存成功后才整体替换当前白名单；只读取一个非空 Sheet，客户类型列可全部填写或全部留空；同一客户类型下手机号必须唯一，不同客户类型可以使用相同手机号。"}</span></div>}
+            {!whitelistImportCompleted && <ImportTemplateHint />}
             {!whitelistImportCompleted && <div className="single-upload-grid">
               <article className={"file-upload-card " + (whitelistFileName && !whitelistImportError ? "ready" : "")}>
                 <div className="file-card-heading"><span>XL</span><div><b>客户白名单 Excel</b><small>统一文件 · 读取 1 个非空 Sheet，名称不限</small></div><em>{whitelistFileName ? (whitelistImportError ? "解析失败" : "解析完成") : "待上传"}</em></div>

@@ -138,6 +138,10 @@
 .department-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .department-form-actions .admin-primary,
 .department-form-actions .secondary-button { width: auto; margin: 0; }
+.import-template-download { display: inline-flex; align-items: center; justify-content: center; text-decoration: none; white-space: nowrap; }
+.import-template-download:hover { background: #fff5f2; }
+.import-template-download:focus-visible { outline: 2px solid #8e2523; outline-offset: 3px; }
+.import-template-hint { margin: 12px 0 0; color: #695950; font-size: 12px; line-height: 1.6; }
 .department-form-actions .inline-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .department-empty-note { display: block; margin-top: 9px; color: #a06b2a; font-size: 8px; }
 .department-table { margin-top: 8px; overflow: hidden; border: 1px solid #e5ddd7; border-radius: 9px; }

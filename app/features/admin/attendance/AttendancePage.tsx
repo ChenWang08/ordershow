@@ -1,5 +1,7 @@
 "use client";
 
+import { ImportTemplateDownload, ImportTemplateHint } from "../ImportTemplateDownload";
+
 import { type AttendanceImportDraft, type AttendanceRow, type WhitelistCustomerTypeMode } from "../../../domain/import-domain";
 import { AttendanceTable } from "../attendance/AttendanceTable";
 
@@ -23,8 +25,9 @@ export function AttendancePage({ rows, fileName, warnings, sheetCounts, error, a
   const unspecifiedCustomerType = customerTypeMode === "UNSPECIFIED";
   return (
     <div className="admin-panel attendance-panel">
-      <div className="panel-title"><div><h2>现场到场客户</h2><p>按现场参会名单模板导入；抽奖选择现场到场客户时，现场大屏显示经销商名称。</p></div><div className="panel-actions"><button className="secondary-button" disabled={activityClosed} onClick={onAdd}>＋ 手动添加到场客户</button></div></div>
+      <div className="panel-title"><div><h2>现场到场客户</h2><p>按现场参会名单模板导入；抽奖选择现场到场客户时，现场大屏显示经销商名称。</p></div><div className="panel-actions"><ImportTemplateDownload kind="attendance" /><button className="secondary-button" disabled={activityClosed} onClick={onAdd}>＋ 手动添加到场客户</button></div></div>
       <div className="import-rule-hint"><b>{isPending ? "待确认导入" : activityClosed ? "活动已截止" : activityStarted ? "现场名单维护中" : "导入规则"}</b><span>{isPending ? "Excel 已解析，下面显示的是待导入预览；确认后才会替换当前名单并更新抽奖候选池，可先编辑或删除异常记录。" : activityClosed ? "活动已截止，现场到场名单只读。" : activityStarted ? "订货进行中仍可维护现场到场名单，确认替换后会更新抽奖候选池。" : "现场到场名单独立于订货基础数据，可在活动开始前或进行中导入；确认后更新抽奖候选池。"}</span></div>
+      <ImportTemplateHint />
       <div className="attendance-upload-grid">
         <article className={`file-upload-card attendance-upload-card ${isPending ? "pending" : displayFileName && !error ? "ready" : ""}`}>
           <div className="file-card-heading"><span>XL</span><div><b>现场到场客户 Excel</b><small>选择文件后先预览，确认后替换当前名单</small></div><em>{isPending ? "待确认" : error ? "解析失败" : displayFileName ? "解析完成" : "待上传"}</em></div>
