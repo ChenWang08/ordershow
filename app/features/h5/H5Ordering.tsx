@@ -27,10 +27,14 @@ export function H5Ordering(props: H5Props) {
     // The current renderer omits viewportFit/interactiveWidget metadata fields.
     const meta = shell.closest(".standalone-h5") ? document.querySelector<HTMLMetaElement>('meta[name="viewport"]') : null;
     const original = meta?.content;
+    const scrollRoots = shell.closest(".standalone-h5") ? [document.documentElement, document.body] : [];
+    const scrollStyles = scrollRoots.map(root => ({ root, overflow: root.style.overflow, overscroll: root.style.overscrollBehavior }));
+    scrollRoots.forEach(root => { root.style.overflow = "hidden"; root.style.overscrollBehavior = "none"; });
     if (meta) meta.content = `${original || "width=device-width, initial-scale=1"}, viewport-fit=cover, interactive-widget=resizes-content`;
     return () => {
       stop();
       if (meta && original != null) meta.content = original;
+      scrollStyles.forEach(({ root, overflow, overscroll }) => { root.style.overflow = overflow; root.style.overscrollBehavior = overscroll; });
     };
   }, []);
   return (

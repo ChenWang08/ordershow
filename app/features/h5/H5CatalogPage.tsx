@@ -2,6 +2,7 @@
 
 import type { H5OrderModel } from "./useH5OrderFlow";
 import { ProductArt } from "./ProductArt";
+import { QuantityInput } from "./QuantityInput";
 import { money } from "../shared/utils";
 import { priceBreakdown, tierPriceLabel } from "./h5-domain";
 
@@ -51,7 +52,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                         <div className="product-price-block"><strong>{product.isOrderable ? <>¥{money(priceBreakdown(product, quantities[product.id] || 0).displayPrice)}<small>/箱</small></> : "价格待完善"}</strong>{product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small>{tierPriceLabel(product, quantities[product.id] || 0)}</small>}</div>
                         <div className="stepper">
                           <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={activityClosed || !product.isOrderable || !quantities[product.id]}>−</button>
-                          <input aria-label={`${product.name}订货箱数`} disabled={activityClosed} inputMode="numeric" type="number" min="0" max="999999" value={quantities[product.id] || 0} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setQuantities({ ...quantities, [product.id]: Math.min(999999, Math.max(0, Math.floor(Number(e.target.value) || 0))) })} />
+                          <QuantityInput label={`${product.name}订货箱数`} disabled={activityClosed} value={quantities[product.id] || 0} onChange={(value) => setQuantities((old) => ({ ...old, [product.id]: value }))} />
                           <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)} disabled={activityClosed || !product.isOrderable}>＋</button>
                         </div>
                       </div>
@@ -94,7 +95,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                         <button className="remove-item" disabled={activityClosed} onClick={() => setQuantities((old) => ({ ...old, [product.id]: 0 }))}>删除</button>
                         <div className="stepper">
                           <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={activityClosed}>−</button>
-                          <input aria-label={`${product.name}订货箱数`} disabled={activityClosed} inputMode="numeric" type="number" min="0" max="999999" value={quantities[product.id]} onFocus={(e) => e.currentTarget.select()} onChange={(e) => setQuantities({ ...quantities, [product.id]: Math.min(999999, Math.max(0, Math.floor(Number(e.target.value) || 0))) })} />
+                          <QuantityInput label={`${product.name}订货箱数`} disabled={activityClosed} value={quantities[product.id] || 0} onChange={(value) => setQuantities((old) => ({ ...old, [product.id]: value }))} />
                           <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)} disabled={activityClosed}>＋</button>
                         </div>
                       </div>
