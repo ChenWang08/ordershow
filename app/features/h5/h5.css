@@ -257,3 +257,15 @@
 .h5-submit-recovery { position: sticky; top: 0; z-index: 30; padding: 12px 16px; background: #fff2d9; color: #714323; font-size: 12px; }
 .h5-submit-recovery p { margin: 0 0 8px; }
 .h5-submit-recovery button { border: 1px solid #b82121; border-radius: 6px; background: white; color: #b82121; padding: 7px 12px; }
+
+/* Activity-configured live room exit, shared by all H5 steps. */
+.h5-live-room-exit { position: absolute; z-index: 180; top: 7px; right: 9px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px; padding: 0 12px; border: 1px solid currentColor; border-radius: 22px; color: #a82323; background: transparent; font: inherit; font-size: 13px; line-height: 1; white-space: nowrap; cursor: pointer; }
+.phone-screen:has(.verify-page, .order-page, .confirm-page, .submitted-page) > .h5-live-room-exit { color: #fff5e7; border-color: rgba(255,245,231,.6); }
+.phone-screen:has(.h5-live-room-exit) .order-header,
+.phone-screen:has(.h5-live-room-exit) .simple-header { grid-template-columns: 76px minmax(0, 1fr) 76px; }
+.phone-screen:has(.h5-live-room-exit) .order-header > button,
+.phone-screen:has(.h5-live-room-exit) .simple-header > button { justify-self: start; }
+.phone-screen:has(.h5-live-room-exit) .simple-header { position: sticky; top: 0; z-index: 10; min-height: 54px; background: linear-gradient(135deg, #9e1819, #c1322a); }
+.h5-live-room-exit:disabled { opacity: .55; cursor: wait; }
+.h5-live-room-exit:focus-visible { outline: 3px solid #ffd779; outline-offset: 2px; }
+.h5-exit-saving { position: absolute; inset: 0; z-index: 175; display: grid; place-items: center; background: rgba(255,248,236,.85); color: #821b1b; }

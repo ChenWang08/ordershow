@@ -365,7 +365,24 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
                 } catch { setRuntimeMessage("最新订单加载失败，请重试。"); }
                 finally { setRuntimeBusy(false); }
                 };
-  return { catalog, requiresReview, pendingSubmission, pendingChangeRequest, recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
+  const prepareLiveRoomExit = async () => {
+    if (runtimeBusy || submissionBusy.current) return false;
+    if (pendingSubmission || orderNeedsRefresh) {
+      return window.confirm("订单提交结果尚待确认，返回直播间不会取消提交。确定离开吗？");
+    }
+    if (!customerOrderReadOnly && pendingChangeRequest?.status !== "PENDING") {
+      if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
+      const snapshot = latestDraftSnapshotRef.current;
+      if (snapshot && snapshot.signature !== lastSavedDraftSignatureRef.current) {
+        await queueDraftSync(snapshot);
+        if (snapshot.signature !== lastSavedDraftSignatureRef.current) {
+          return window.confirm("草稿尚未保存，退出后未保存的修改可能丢失。是否继续返回直播间？");
+        }
+      }
+    }
+    return true;
+  };
+  return { prepareLiveRoomExit, catalog, requiresReview, pendingSubmission, pendingChangeRequest, recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
 }
 
 export type H5OrderModel = ReturnType<typeof useH5OrderFlow>;

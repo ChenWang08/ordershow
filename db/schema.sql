@@ -79,6 +79,7 @@ CREATE TABLE activity (
   activity_code VARCHAR(64) NOT NULL,
   name VARCHAR(200) NOT NULL,
   description TEXT NULL,
+  live_room_url VARCHAR(2048) NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
   timezone VARCHAR(64) NOT NULL DEFAULT 'Asia/Shanghai',
   starts_at DATETIME(3) NOT NULL,

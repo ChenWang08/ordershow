@@ -12,6 +12,7 @@ import { H5ConfirmPage } from "./H5ConfirmPage";
 import { H5SubmittedPage } from "./H5SubmittedPage";
 import { H5ResultPages } from "./H5ResultPages";
 import { H5ProductDetailSheet } from "./H5ProductDetailSheet";
+import { H5LiveRoomExit } from "./H5LiveRoomExit";
 
 export function H5Ordering(props: H5Props) {
   const model = useH5OrderFlow(props);
@@ -26,6 +27,8 @@ export function H5Ordering(props: H5Props) {
       <div className="phone-shell">
         <div className="phone-screen">
           <FestivalDecor />
+          <H5LiveRoomExit url={props.runtimeActivity?.liveRoomUrl} disabled={model.runtimeBusy}
+            prepare={model.prepareLiveRoomExit} />
           {(model.pendingSubmission || model.orderNeedsRefresh) && <div className="h5-submit-recovery" role="alert">
             <p>{model.runtimeMessage || "上次提交结果待确认，请先确认后再修改订单。"}</p>
             {model.pendingSubmission && !model.orderNeedsRefresh && <button disabled={model.runtimeBusy} onClick={() => void model.recoverSubmission()}>

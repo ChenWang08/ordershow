@@ -88,6 +88,15 @@ public class ActivityController {
     return ApiResponse.of(service.finishNow(activityId, parseVersion(ifMatch), auth.requireAdmin(request)), TraceFilter.id(request));
   }
 
+  @PatchMapping("/admin/activities/{activityId}/live-room")
+  ApiResponse<ActivityService.ActivityView> updateLiveRoom(@PathVariable long activityId,
+      @RequestHeader("If-Match") String ifMatch, @Valid @RequestBody LiveRoomRequest body, HttpServletRequest request) {
+    return ApiResponse.of(service.updateLiveRoom(activityId, parseVersion(ifMatch), body.liveRoomUrl(),
+        auth.requireAdmin(request)), TraceFilter.id(request));
+  }
+
+  public record LiveRoomRequest(@Size(max = 2048) String liveRoomUrl) {}
+
   private static int parseVersion(String value) {
     return Integer.parseInt(value.replace("W/", "").replace("\"", "").trim());
   }

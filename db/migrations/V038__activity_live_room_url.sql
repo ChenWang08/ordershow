@@ -1,0 +1,1 @@
+ALTER TABLE activity ADD COLUMN live_room_url VARCHAR(2048) NULL;

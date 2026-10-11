@@ -362,7 +362,7 @@ public class ActivityService {
         value.configuredStatus(), value.timezone(), value.startsAt(), value.endsAt(), value.eventEndsAt(), value.customerScope(),
         value.companyRankingTopN(), value.branchRankingTopN(), value.tonDisplayScale(), value.version(), regions,
         Boolean.TRUE.equals(hasUnassigned), whitelistCustomerTypeMode, availableCustomerTypes,
-        value.publishedAt(), value.actualStartedAt(), value.closedAt(), value.finishedAt());
+        value.publishedAt(), value.actualStartedAt(), value.closedAt(), value.finishedAt(), value.liveRoomUrl());
   }
 
   private String effectiveStatus(ActivityView value) {
@@ -396,7 +396,7 @@ public class ActivityService {
         rs.getString("customer_scope"), rs.getInt("company_ranking_top_n"),
         rs.getInt("branch_ranking_top_n"), rs.getInt("ton_display_scale"), rs.getInt("version"), List.of(), false, "TYPED", List.of(),
         instant(rs.getTimestamp("published_at")), instant(rs.getTimestamp("actual_started_at")), instant(rs.getTimestamp("closed_at")),
-        instant(rs.getTimestamp("finished_at")));
+        instant(rs.getTimestamp("finished_at")), rs.getString("live_room_url"));
   }
 
   private static void validateTime(Instant startsAt, Instant endsAt, Instant eventEndsAt) {
@@ -527,5 +527,32 @@ public class ActivityService {
                               int tonDisplayScale, int version, List<RegionView> regions, boolean hasUnassignedGeneralCustomers,
                               String whitelistCustomerTypeMode, List<String> availableCustomerTypes,
                              Instant publishedAt,
-                             Instant actualStartedAt, Instant closedAt, Instant finishedAt) {}
+                             Instant actualStartedAt, Instant closedAt, Instant finishedAt, String liveRoomUrl) {}
+
+  @Transactional
+  public ActivityView updateLiveRoom(long id, int expectedVersion, String url, AdminPrincipal admin) {
+    admin.requireManager();
+    departmentAccess.requireActivityAccess(admin, id);
+    String normalized = validateLiveRoomUrl(url);
+    int changed = jdbc.update("""
+        UPDATE activity SET live_room_url = ?, updated_by = ?, version = version + 1
+        WHERE id = ? AND version = ? AND archived_at IS NULL
+        """, normalized, admin.id(), id, expectedVersion);
+    requireChanged(changed);
+    return byId(id);
+  }
+
+  static String validateLiveRoomUrl(String value) {
+    if (value == null || value.isBlank()) return null;
+    String url = value.trim();
+    try {
+      java.net.URI uri = new java.net.URI(url);
+      if (url.length() > 2048 || !"https".equalsIgnoreCase(uri.getScheme())
+          || uri.getHost() == null || uri.getUserInfo() != null
+          || uri.getPort() > 65535 || url.contains("\\")) throw new IllegalArgumentException();
+      return url;
+    } catch (Exception error) {
+      throw DomainException.badRequest("LIVE_ROOM_URL_INVALID", "请填写有效的 HTTPS 直播间链接（最多 2048 字符）");
+    }
+  }
 }

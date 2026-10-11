@@ -166,6 +166,7 @@ export function AdminWorkspace() {
         {tab === "成员管理" && isManager(adminIdentity) && <MemberAdminPanel />}
         {tab === "部门与账号" && adminIdentity?.roleCode === "SUPER_ADMIN" && <DepartmentAdminPanel />}
         {tab === "活动概览" && <ActivityOverview
+          activityId={Number(activityId)}
           activityCode={activityCode} activityName={activityName} activityStatus={activityStatus}
           activityEndAt={activityEndAt} activityEventEndAt={activityEventEndAt}
           minimumFutureAt={minimumFutureAt}

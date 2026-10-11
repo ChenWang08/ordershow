@@ -13,7 +13,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
               <header className="order-header">
                 <button className="text-btn" onClick={() => setStep(orderStatus === "none" ? "verify" : "submitted")}>‹</button>
                 <div><b>订货会</b><span>{identityLabel}</span></div>
-                <button className="round-btn" aria-label="更多">•••</button>
+                <span aria-hidden="true" />
               </header>
               <div className="dealer-card">
                 <span>已识别经销商</span>
