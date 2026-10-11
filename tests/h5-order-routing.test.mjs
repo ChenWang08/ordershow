@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { randomUUID } from "node:crypto";
+import { randomUUID, webcrypto } from "node:crypto";
 import { loadModule } from "./helpers/load-ts-module.mjs";
 const { ApiError } = loadModule("app/services/api/client.ts");
 const { createH5SubmissionManager } = loadModule("app/features/h5/h5-submission.ts", {
@@ -39,7 +39,7 @@ async function harness(status = "SUBMITTED", pending = null) {
       useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
         return [slots[i], value => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; },
     },
-  }, { crypto: { randomUUID }, window: { clearTimeout, sessionStorage: {
+  }, { crypto: { getRandomValues: values => webcrypto.getRandomValues(values) }, window: { clearTimeout, sessionStorage: {
     getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k),
   } } });
   const render = function useTestRender() { cursor = 0; return useH5OrderFlow({ activityStatus: "running", runtimeActivity: { code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] } }); };

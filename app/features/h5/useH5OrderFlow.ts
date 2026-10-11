@@ -1,4 +1,6 @@
 "use client";
+import { createIdempotencyKey } from "../../services/api/idempotency-key";
+
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, createH5OrderChangeRequest, loadH5Order, loadH5OrderChangeRequest, loadH5OrderDraft, loadH5Products, saveH5Order, verifyPhone, type OrderChangeRequest, type RuntimeIdentity, type RuntimeOrder, type RuntimeProduct } from "../../api";
@@ -25,7 +27,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const changeAttempt = useRef({ signature: "", key: "" });
   const changeKey = (value: unknown) => {
     const signature = JSON.stringify(value);
-    if (signature !== changeAttempt.current.signature) changeAttempt.current = { signature, key: crypto.randomUUID() };
+    if (signature !== changeAttempt.current.signature) changeAttempt.current = { signature, key: createIdempotencyKey() };
     return changeAttempt.current.key;
   };
   const [submission] = useState(() => createH5SubmissionManager({

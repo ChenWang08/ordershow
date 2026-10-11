@@ -1,3 +1,4 @@
+import { createIdempotencyKey } from "./idempotency-key";
 import { api, apiBase, ApiError } from "./client";
 import type { AdminOrderPreview, AdminOrderSummary, Envelope, OrderChangeRequest, PageEnvelope, RuntimeOrder } from "./types";
 
@@ -21,7 +22,7 @@ export async function previewAdminOrder(activityId: number, activityCustomerId: 
 export async function createAdminOrder(activityId: number, activityCustomerId: number,
     items: Array<{ productId: number; quantity: number }>, reason: string) {
   return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders`, {
-    method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
+    method: "POST", headers: { "Idempotency-Key": createIdempotencyKey() },
     body: JSON.stringify({ activityCustomerId, items, reason }),
   }, "admin")).data;
 }
@@ -29,7 +30,7 @@ export async function createAdminOrder(activityId: number, activityCustomerId: n
 export async function adjustAdminOrder(activityId: number, orderId: number, expectedVersion: number,
     expectedLockVersion: number, items: Array<{ productId: number; quantity: number }>, reason: string) {
   return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders/${orderId}`, {
-    method: "PUT", headers: { "Idempotency-Key": crypto.randomUUID() },
+    method: "PUT", headers: { "Idempotency-Key": createIdempotencyKey() },
     body: JSON.stringify({ expectedVersion, expectedLockVersion, items, reason }),
   }, "admin")).data;
 }
@@ -37,7 +38,7 @@ export async function adjustAdminOrder(activityId: number, orderId: number, expe
 export async function voidAdminOrder(activityId: number, orderId: number, expectedVersion: number,
     expectedLockVersion: number, reason: string) {
   return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders/${orderId}/void`, {
-    method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() },
+    method: "POST", headers: { "Idempotency-Key": createIdempotencyKey() },
     body: JSON.stringify({ expectedVersion, expectedLockVersion, reason }),
   }, "admin")).data;
 }
@@ -59,13 +60,13 @@ export async function loadOrderChangeDetail(activityId: number, id: number) {
 
 export async function approveAdminOrderChangeRequest(activityId: number, requestId: number, reason = "") {
   return (await api<Envelope<OrderChangeRequest>>(`/admin/activities/${activityId}/order-change-requests/${requestId}/approve`, {
-    method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ reason }),
+    method: "POST", headers: { "Idempotency-Key": createIdempotencyKey() }, body: JSON.stringify({ reason }),
   }, "admin")).data;
 }
 
 export async function rejectAdminOrderChangeRequest(activityId: number, requestId: number, reason: string) {
   return (await api<Envelope<OrderChangeRequest>>(`/admin/activities/${activityId}/order-change-requests/${requestId}/reject`, {
-    method: "POST", headers: { "Idempotency-Key": crypto.randomUUID() }, body: JSON.stringify({ reason }),
+    method: "POST", headers: { "Idempotency-Key": createIdempotencyKey() }, body: JSON.stringify({ reason }),
   }, "admin")).data;
 }
 

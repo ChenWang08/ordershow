@@ -1,3 +1,4 @@
+import { createIdempotencyKey } from "../../services/api/idempotency-key";
 import { ApiError } from "../../services/api/client";
 import type { RuntimeOrder } from "../../services/api/types";
 
@@ -97,7 +98,7 @@ export function createH5SubmissionManager(options: Options) {
       if (pending && JSON.stringify(pending.body) !== JSON.stringify(body))
         throw new ApiError(409,"SUBMISSION_PENDING","请先确认上次提交结果，再修改订单");
       if (!pending) {
-        pending = { format: 1, key: (options.uuid ?? (() => crypto.randomUUID()))(), createdAt: now(), scope: { ...scope }, body };
+        pending = { format: 1, key: (options.uuid ?? createIdempotencyKey)(), createdAt: now(), scope: { ...scope }, body };
         save(pending);
       }
       return run(pending);
