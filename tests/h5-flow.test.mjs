@@ -86,3 +86,16 @@ test("failed draft writes do not block a later retry", async () => {
   assert.equal(attempts, 2);
   assert.equal(model.lastSavedDraftSignatureRef.current, "changed");
 });
+
+const oldOrder = { status: "SUBMITTED", items: [{ productId: 1, quantity: 10 }, { productId: 2, quantity: 5 }] };
+test("only per-product reductions require review, including mixed changes with higher totals", () => {
+  assert.equal(domain.h5RequiresReview(oldOrder, [{ productId: 1, quantity: 12 }, { productId: 2, quantity: 5 }, { productId: 3, quantity: 1 }]), false);
+  assert.equal(domain.h5RequiresReview(oldOrder, oldOrder.items), false);
+  assert.equal(domain.h5RequiresReview(oldOrder, [{ productId: 1, quantity: 9 }, { productId: 2, quantity: 100 }]), true);
+  assert.equal(domain.h5RequiresReview(oldOrder, [{ productId: 1, quantity: 100 }]), true);
+});
+test("first orders and both inactive statuses bypass the old quantities", () => {
+  const items = [{ productId: 1, quantity: 1 }];
+  assert.equal(domain.h5RequiresReview(null, items), false);
+  for (const status of ["WITHDRAWN", "VOIDED"]) assert.equal(domain.h5RequiresReview({ ...oldOrder, status }, items), false);
+});

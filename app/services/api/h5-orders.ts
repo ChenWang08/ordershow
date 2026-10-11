@@ -35,9 +35,9 @@ export async function deleteH5OrderDraft(customerId: number, keepalive = false) 
 }
 
 export async function saveH5Order(expectedVersion: number, items: Array<{ productId: number; quantity: number }>,
-    idempotencyKey: string, activityCode: string, customerId: number, signal?: AbortSignal) {
+    idempotencyKey: string, activityCode: string, customerId: number, signal?: AbortSignal, expectedLockVersion?: number) {
   return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${encodeURIComponent(activityCode)}/order?includeHistory=false`, {
-    method: "PUT", headers: { "Idempotency-Key": idempotencyKey, "X-H5-Customer-Id": String(customerId) }, body: JSON.stringify({ expectedVersion, items }), signal,
+    method: "PUT", headers: { "Idempotency-Key": idempotencyKey, "X-H5-Customer-Id": String(customerId) }, body: JSON.stringify({ expectedVersion, items, expectedLockVersion }), signal,
   }, "h5")).data;
 }
 
@@ -52,9 +52,9 @@ export async function loadH5OrderChangeRequest() {
 }
 
 export async function createH5OrderChangeRequest(activityCode: string, customerId: number, expectedVersion: number,
-    requestType: "MODIFY" | "WITHDRAW", items: Array<{ productId: number; quantity: number }>, customerNote = "", idempotencyKey = crypto.randomUUID()) {
+    requestType: "MODIFY" | "WITHDRAW", items: Array<{ productId: number; quantity: number }>, customerNote = "", idempotencyKey = crypto.randomUUID(), expectedLockVersion?: number) {
   return (await api<Envelope<OrderChangeRequest>>(`/h5/activities/${encodeURIComponent(activityCode)}/order-change-requests`, {
     method: "POST", headers: { "Idempotency-Key": idempotencyKey, "X-H5-Customer-Id": String(customerId) },
-    body: JSON.stringify({ expectedVersion, requestType, items, customerNote }),
+    body: JSON.stringify({ expectedVersion, requestType, items, customerNote, expectedLockVersion }),
   }, "h5")).data;
 }

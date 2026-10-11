@@ -147,7 +147,7 @@ assert.ok(order.operations.some(operation => operation.adminName === originalIde
 activity = (await request(actor, 'GET', path)).data;
 const verified = await request(null, 'POST', `/public/activities/${activity.code}/verify-phone`, { customerType: 'GENERAL', regionCode: activity.regions[0].code, phone: '13900000123' });
 const h5 = { cookie: verified.cookie, csrf: verified.data.csrfToken };
-const change = (await request(h5, 'POST', `/h5/activities/${activity.code}/order-change-requests`, { expectedVersion: order.currentVersion, requestType: 'MODIFY', items: [{ productId: products[0].id, quantity: 3 }], customerNote: '成员审核测试' }, 200, writeHeaders())).data;
+const change = (await request(h5, 'POST', `/h5/activities/${activity.code}/order-change-requests`, { expectedVersion: order.currentVersion, requestType: 'MODIFY', items: [{ productId: products[0].id, quantity: 1 }], customerNote: '成员审核测试' }, 200, writeHeaders())).data;
 const approved = (await request(actor, 'POST', `${path}/order-change-requests/${change.id}/approve`, { reason: '成员审核通过' }, 200, writeHeaders())).data;
 assert.equal(approved.reviewedByName, originalIdentity);
 await grant(['ORDER'], { displayName: '成员张三已改名' });

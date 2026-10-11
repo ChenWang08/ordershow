@@ -5,8 +5,8 @@ import { ApiError, createH5OrderChangeRequest, loadH5Order, loadH5OrderChangeReq
 import type { WhitelistRow } from "../../domain/import-domain";
 import { maskPhone, normalizePhone } from "../shared/utils";
 import { useH5Draft } from "./useH5Draft";
-import { createH5SubmissionManager, submissionNeedsRecovery } from "./h5-submission";
-import { productRowToProduct, runtimeProductToProduct, priceBreakdown, groupByProductLine, summarizeOrderLineAmounts, h5QuantitySignature, h5OrderItems, type H5Props, type H5Step, type H5Channel, type H5OrderStatus, type Product, type RebateFilter, type SubmittedOrderItem } from "./h5-domain";
+import { createH5SubmissionManager } from "./h5-submission";
+import { productRowToProduct, runtimeProductToProduct, priceBreakdown, groupByProductLine, summarizeOrderLineAmounts, h5QuantitySignature, h5OrderItems, h5RequiresReview, type H5Props, type H5Step, type H5Channel, type H5OrderStatus, type Product, type RebateFilter, type SubmittedOrderItem } from "./h5-domain";
 
 export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelistRows, runtimeActivity }: H5Props) {
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
@@ -30,7 +30,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   };
   const [submission] = useState(() => createH5SubmissionManager({
     storage: () => typeof window === "undefined" ? undefined : window.sessionStorage,
-    send: (pending, signal) => saveH5Order(pending.body.expectedVersion, pending.body.items, pending.key, pending.scope.activityCode, pending.scope.customerId, signal),
+    send: (pending, signal) => saveH5Order(pending.body.expectedVersion, pending.body.items, pending.key, pending.scope.activityCode, pending.scope.customerId, signal, pending.body.expectedLockVersion),
   }));
   const catalog = useMemo(() => runtimeProducts ? runtimeProducts.map(runtimeProductToProduct) : importedRows ? importedRows.map(productRowToProduct) : [], [runtimeProducts, importedRows]);
   const [step, setStep] = useState<H5Step>(() => unspecifiedWhitelist ? "verify" : "channel");
@@ -47,8 +47,8 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [orderStatus, setOrderStatus] = useState<H5OrderStatus>("none");
-  const customerOrderReadOnly = activityClosed || orderStatus === "voided";
-  const [submitMode, setSubmitMode] = useState<"first" | "update">("first");
+  const customerOrderReadOnly = activityClosed || activityNotStarted;
+  const [submitMode, setSubmitMode] = useState<"first" | "update" | "restore">("first");
   const [orderVersion, setOrderVersion] = useState(0);
   const [orderUpdatedAt, setOrderUpdatedAt] = useState("");
   const [orderWithdrawnAt, setOrderWithdrawnAt] = useState("");
@@ -95,6 +95,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const visibleProductGroups = groupByProductLine(visibleProducts, (product) => product.line);
   const selectedLineGroups = groupByProductLine(selectedOrderItems, (item) => item.product.line);
   const selectedLineSummaries = summarizeOrderLineAmounts(selectedOrderItems);
+  const requiresReview = h5RequiresReview(runtimeOrder, selected.map(product => ({ productId: Number(product.id), quantity: quantities[product.id] })));
   const totalBoxes = selected.reduce((sum, p) => sum + quantities[p.id], 0);
   const totalAmount = selected.reduce((sum, p) => sum + priceBreakdown(p, quantities[p.id]).amount, 0);
   const orderViewQuantities = submittedQuantities;
@@ -151,7 +152,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
         minute: "2-digit",
         second: "2-digit",
       }),
-      title: event.type === "WITHDRAW" ? "客户撤回订单" : event.type === "SUBMIT" ? "客户首次提交" : event.type === "H5_CHANGE_REQUESTED" ? "客户提交变更申请" : event.type === "H5_CHANGE_APPROVED" ? "管理员审核通过变更" : event.type === "H5_CHANGE_REJECTED" ? "管理员驳回变更" : event.type === "ADMIN_CREATE" ? "管理员创建订单" : event.type === "ADMIN_VOID" ? "管理员作废订单" : event.type === "ADMIN_RESTORE" ? "管理员调整并恢复订单" : event.type === "ADMIN_ADJUST" ? "管理员调整订单" : "客户修改并重新提交",
+      title: event.type === "RESUBMIT" ? "客户重新订货，恢复订单" : event.type === "MODIFY_SUBMIT" ? "客户增加订货" : event.type === "FIRST_SUBMIT" ? "客户首次提交" : event.type === "WITHDRAW" ? "客户撤回订单" : event.type === "SUBMIT" ? "客户首次提交" : event.type === "H5_CHANGE_REQUESTED" ? "客户提交变更申请" : event.type === "H5_CHANGE_APPROVED" ? "管理员审核通过变更" : event.type === "H5_CHANGE_REJECTED" ? "管理员驳回变更" : event.type === "ADMIN_CREATE" ? "管理员创建订单" : event.type === "ADMIN_VOID" ? "管理员作废订单" : event.type === "ADMIN_RESTORE" ? "管理员调整并恢复订单" : event.type === "ADMIN_ADJUST" ? "管理员调整订单" : "客户修改并重新提交",
       detail: `${event.source === "SYSTEM" ? "系统" : event.source === "ADMIN" ? event.adminName || "管理员" : "经销商手机端"} · ${event.orderVersion ? `版本 V${event.orderVersion}` : "订单状态变更"}${event.reason ? ` · ${event.reason}` : ""}`,
     })));
   };
@@ -187,12 +188,12 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   }, [runtimeIdentity, runtimeBusy, pendingSubmission, orderNeedsRefresh, step, runtimeOrder, catalog]);
 
   const startEditingOrder = () => {
-    if (activityClosed || orderStatus === "voided") return;
-    if (pendingChangeRequest?.status === "PENDING" || (pendingChangeRequest?.status === "REJECTED" && pendingChangeRequest.requestType === "MODIFY")) {
+    if (customerOrderReadOnly || pendingSubmission) return;
+    if (pendingChangeRequest?.requestType === "MODIFY" && ["PENDING", "REJECTED"].includes(pendingChangeRequest.status)) {
       setQuantities(Object.fromEntries(pendingChangeRequest.items.map(item=>[String(item.productId),item.quantity])));
       setRuntimeMessage(""); setStep("order"); return;
     }
-    if (orderStatus === "withdrawn" || pendingChangeRequest?.status === "REJECTED") setQuantities({ ...submittedQuantities });
+    if ((orderStatus === "withdrawn" || orderStatus === "voided") || pendingChangeRequest?.status === "REJECTED") setQuantities({ ...submittedQuantities });
     setStep("order");
   };
 
@@ -280,19 +281,19 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
       submissionBusy.current = true;
       setRuntimeBusy(true); setRuntimeMessage("");
       const scope = { activityCode: runtimeActivity.code, customerId: runtimeIdentity.customerId };
-      const body = { expectedVersion: runtimeOrder?.currentVersion || 0,
+      const body = { expectedVersion: runtimeOrder?.currentVersion || 0, expectedLockVersion: runtimeOrder?.lockVersion,
         items: selected.map((product) => ({ productId: Number(product.id), quantity: quantities[product.id] })) };
       try {
         if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
         await draftSaveChainRef.current.catch(() => undefined);
         const isFirstSubmit = !runtimeOrder;
-        if (!isFirstSubmit && runtimeOrder.status === "SUBMITTED" && !pendingChangeRequest && !recover && h5QuantitySignature(body.items) === h5QuantitySignature(h5OrderItems(runtimeOrder))) {
+        if (!isFirstSubmit && runtimeOrder.status === "SUBMITTED" && !pendingSubmission && !recover && h5QuantitySignature(body.items) === h5QuantitySignature(h5OrderItems(runtimeOrder))) {
           setPendingSubmission(false); setOrderNeedsRefresh(false); setStep("submitted");
           return;
         }
-        if (!isFirstSubmit && !recover) {
+        if (requiresReview && !recover && !pendingSubmission) {
           const request = await createH5OrderChangeRequest(runtimeActivity.code, runtimeIdentity.customerId, body.expectedVersion,
-            "MODIFY", body.items, "", changeKey([scope, "MODIFY", body]));
+            "MODIFY", body.items, "", changeKey([scope, "MODIFY", body]), body.expectedLockVersion);
           changeAttempt.current.signature = "";
           setPendingChangeRequest(request);
           setPendingSubmission(false); setOrderNeedsRefresh(false);
@@ -300,19 +301,23 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
           setDraftMessage(""); setStep("submitted");
           return;
         }
-        const order = recover ? await submission.recover(scope) : await submission.submit(scope,body);
+        const order = recover || pendingSubmission ? await submission.recover(scope) : await submission.submit(scope,body);
         if (!order) { setPendingSubmission(false); setOrderNeedsRefresh(true); return; }
         setPendingSubmission(false); setOrderNeedsRefresh(false);
-        setSubmitMode(isFirstSubmit ? "first" : "update");
+        setSubmitMode(isFirstSubmit ? "first" : runtimeOrder.status !== "SUBMITTED" ? "restore" : "update");
+        setPendingChangeRequest(null);
+        setDraftReady(!activityClosed);
+        latestDraftSnapshotRef.current = null;
         setSubmittedIdentity(verifiedIdentity ? { ...verifiedIdentity } : null);
         applyRuntimeOrder(order, catalog);
         lastSavedDraftSignatureRef.current = h5QuantitySignature(h5OrderItems(order));
         setDraftMessage("");
         setStep("success");
       } catch (error) {
-        setPendingSubmission(!runtimeOrder && (submissionNeedsRecovery(error) || (error instanceof ApiError && [401,403].includes(error.status))));
+        try { setPendingSubmission(Boolean(submission.read(scope))); }
+        catch { setPendingSubmission(true); }
         setRuntimeMessage(error instanceof ApiError ? error.message : "网络连接异常，提交结果待确认，请重试确认。");
-        if (error instanceof ApiError && ["ORDER_VERSION_CONFLICT", "SUBMISSION_RECOVERY_EXPIRED", "IDEMPOTENCY_RESULT_UNAVAILABLE"].includes(error.code)) setOrderNeedsRefresh(true);
+        if (error instanceof ApiError && ["ORDER_VERSION_CONFLICT", "SUBMISSION_RECOVERY_EXPIRED", "IDEMPOTENCY_RESULT_UNAVAILABLE", "ORDER_CHANGE_REVIEW_REQUIRED", "ORDER_CHANGE_REVIEW_NOT_REQUIRED"].includes(error.code)) setOrderNeedsRefresh(true);
       } finally { submissionBusy.current = false; setRuntimeBusy(false); }
       return;
     }
@@ -330,7 +335,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
         if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
         await draftSaveChainRef.current.catch(() => undefined);
         const request = await createH5OrderChangeRequest(runtimeActivity.code, runtimeIdentity.customerId, runtimeOrder.currentVersion,
-          "WITHDRAW", [], "", changeKey([runtimeActivity.code, runtimeIdentity.customerId, "WITHDRAW", runtimeOrder.currentVersion]));
+          "WITHDRAW", [], "", changeKey([runtimeActivity.code, runtimeIdentity.customerId, "WITHDRAW", runtimeOrder.currentVersion, runtimeOrder.lockVersion]), runtimeOrder.lockVersion);
         changeAttempt.current.signature = "";
         setPendingChangeRequest(request);
         setRuntimeMessage("");
@@ -360,7 +365,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
                 } catch { setRuntimeMessage("最新订单加载失败，请重试。"); }
                 finally { setRuntimeBusy(false); }
                 };
-  return { catalog, pendingSubmission, pendingChangeRequest, recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
+  return { catalog, requiresReview, pendingSubmission, pendingChangeRequest, recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
 }
 
 export type H5OrderModel = ReturnType<typeof useH5OrderFlow>;

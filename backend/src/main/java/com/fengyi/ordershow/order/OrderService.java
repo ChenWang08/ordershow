@@ -89,14 +89,13 @@ public class OrderService {
     }
     activities.requireWritable(activity.id());
     OrderRow current = repository.lockOrder(activity.id(), customer.customerId());
-    if (current != null) {
-      repository.cancelH5Submission(activity.id(), customer.customerId(), idempotencyKey);
-      throw DomainException.conflict("ORDER_CHANGE_REVIEW_REQUIRED", "已有订单的修改需要提交后台审核");
-    }
     int currentVersion = current == null ? 0 : current.version();
     if (request.expectedVersion() != currentVersion) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单已在其他页面更新，请刷新后重试");
-    if (current != null && "VOIDED".equals(current.status())) {
-      throw DomainException.conflict("ORDER_VOIDED", "订单已由管理员作废，请联系管理员处理");
+    if (current != null && request.expectedLockVersion() != null && request.expectedLockVersion() != current.lockVersion()) {
+      throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单状态已变化，请刷新后重新确认");
+    }
+    if (current != null && "SUBMITTED".equals(current.status()) && repository.hasReducedItems(current.id(), quantities)) {
+      throw DomainException.conflict("ORDER_CHANGE_REVIEW_REQUIRED", "减少或删除商品需要提交后台审核");
     }
     List<ProductSnapshot> products = repository.loadProducts(activity.id(), customer.customerId(), customer.customerType(), customer.branchName(), quantities.keySet());
     if (products.size() != quantities.size()) throw DomainException.unprocessable("PRODUCT_NOT_ORDERABLE", "订单中包含不可订、已删除或不属于当前客户的商品");
@@ -123,7 +122,7 @@ public class OrderService {
     }
     int nextVersion = currentVersion + 1;
     boolean first = current == null;
-    boolean resubmit = current != null && "WITHDRAWN".equals(current.status());
+    boolean resubmit = current != null && !"SUBMITTED".equals(current.status());
     long orderId;
     if (first) {
       orderId = repository.insertH5Order(activity.id(), customer, totalQuantity, totalTons, totalAmount);
@@ -136,7 +135,13 @@ public class OrderService {
     repository.insertCurrentItems(orderId, items);
     long versionId = repository.insertVersion(activity.id(), orderId, nextVersion, customer, totalQuantity, totalTons, totalAmount, idempotencyKey);
     repository.insertVersionItems(versionId, items);
-    repository.insertH5Submission(activity.id(), orderId, first ? "FIRST_SUBMIT" : resubmit ? "RESUBMIT" : "MODIFY_SUBMIT", nextVersion, traceId);
+    if (resubmit) {
+      repository.insertOperation(activity.id(), orderId, "RESUBMIT", "H5", null, nextVersion,
+          "VOIDED".equals(current.status()) ? "客户重新订货，恢复已作废订单" : "客户重新订货，恢复已撤回订单", traceId);
+    } else {
+      repository.insertH5Submission(activity.id(), orderId, first ? "FIRST_SUBMIT" : "MODIFY_SUBMIT", nextVersion, traceId);
+    }
+    if (!first) changeRequests.rejectPending(orderId, "订单已由客户重新提交生效，本次申请失效");
     repository.writeOutbox(activity.id(), orderId, "ORDER_SUBMITTED", Map.of("orderId", orderId, "version", nextVersion));
     repository.deleteDraft(activity.id(), customer.customerId());
     OrderView result = repository.order(orderId, includeHistory);
@@ -180,9 +185,14 @@ public class OrderService {
     OrderRow current = repository.lockOrder(activity.id(), customer.customerId());
     if (current == null) throw DomainException.notFound("ORDER_NOT_FOUND", "尚未提交订单");
     if (current.version() != request.expectedVersion()) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单版本已变化，请刷新后重试");
-    if ("VOIDED".equals(current.status())) throw DomainException.conflict("ORDER_VOIDED", "订单已由管理员作废，请联系管理员处理");
-    if ("WITHDRAW".equals(requestType) && "WITHDRAWN".equals(current.status())) {
-      throw DomainException.conflict("ORDER_ALREADY_WITHDRAWN", "订单已经撤回");
+    if (request.expectedLockVersion() != null && request.expectedLockVersion() != current.lockVersion()) {
+      throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单状态已变化，请刷新后重新确认");
+    }
+    if (!"SUBMITTED".equals(current.status())) {
+      throw DomainException.conflict("ORDER_CHANGE_REVIEW_NOT_REQUIRED", "当前订单已失效，请重新提交订单直接恢复");
+    }
+    if ("MODIFY".equals(requestType) && !repository.hasReducedItems(current.id(), quantities(request.items()))) {
+      throw DomainException.conflict("ORDER_CHANGE_REVIEW_NOT_REQUIRED", "未减少商品，无需审核，请直接提交订单");
     }
     CustomerSnapshot customerSnapshot = repository.orderCustomer(activity.id(), customer.customerId());
     CalculatedOrder calculated;
@@ -211,7 +221,11 @@ public class OrderService {
   public ChangeRequestView currentH5ChangeRequest(String activityCode, H5Principal customer) {
     var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
-    return changeRequestView(changeRequests.pendingForCustomer(activity.id(), customer.customerId()));
+    var latest = changeRequests.pendingForCustomer(activity.id(), customer.customerId());
+    // A subsequent effective order must not be presented as a rejected application on H5.
+    if (latest != null && "REJECTED".equals(latest.status())
+        && (latest.baseVersion() != latest.currentVersion() || latest.baseLockVersion() != latest.currentLockVersion())) return null;
+    return changeRequestView(latest);
   }
 
   @Transactional(readOnly = true)
@@ -557,9 +571,15 @@ public class OrderService {
 
 
   public record SubmitItem(long productId, long quantity) {}
-  public record SubmitRequest(int expectedVersion, List<SubmitItem> items) {}
+  public record SubmitRequest(int expectedVersion, List<SubmitItem> items, Integer expectedLockVersion) {
+    public SubmitRequest(int expectedVersion, List<SubmitItem> items) { this(expectedVersion, items, null); }
+  }
   public record WithdrawRequest(int expectedVersion) {}
-  public record ChangeRequestRequest(int expectedVersion, String requestType, List<SubmitItem> items, String customerNote) {}
+  public record ChangeRequestRequest(int expectedVersion, String requestType, List<SubmitItem> items, String customerNote, Integer expectedLockVersion) {
+    public ChangeRequestRequest(int expectedVersion, String requestType, List<SubmitItem> items, String customerNote) {
+      this(expectedVersion, requestType, items, customerNote, null);
+    }
+  }
   public record ChangeRequestReviewRequest(String reason) {}
   public record AdminPreviewRequest(long activityCustomerId, List<SubmitItem> items) {}
   public record AdminCreateRequest(long activityCustomerId, List<SubmitItem> items, String reason) {}

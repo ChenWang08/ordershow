@@ -1,7 +1,7 @@
 import { ApiError } from "../../services/api/client";
 import type { RuntimeOrder } from "../../services/api/types";
 
-export type SubmissionBody = { expectedVersion: number; items: Array<{ productId: number; quantity: number }> };
+export type SubmissionBody = { expectedVersion: number; expectedLockVersion?: number; items: Array<{ productId: number; quantity: number }> };
 export type SubmissionScope = { activityCode: string; customerId: number };
 export type PendingSubmission = { format: 1; key: string; createdAt: number; scope: SubmissionScope; body: SubmissionBody };
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
@@ -14,7 +14,7 @@ type Options = {
 };
 const RECOVERY_MS = 24 * 60 * 60 * 1000; // Deliberately shorter than the server's 30-day minimum.
 function normalized(body: SubmissionBody): SubmissionBody {
-  return { expectedVersion: body.expectedVersion, items: body.items.map(item => ({ ...item })).sort((a,b) => a.productId-b.productId) };
+  return { expectedVersion: body.expectedVersion, ...(body.expectedLockVersion == null ? {} : { expectedLockVersion: body.expectedLockVersion }), items: body.items.map(item => ({ ...item })).sort((a,b) => a.productId-b.productId) };
 }
 export function submissionNeedsRecovery(error: unknown) {
   return !(error instanceof ApiError) || error.status >= 500 || error.status === 408 || error.status === 429
@@ -39,6 +39,7 @@ export function createH5SubmissionManager(options: Options) {
       if (pending.format !== 1 || typeof pending.key !== "string" || !pending.key || !Number.isFinite(pending.createdAt)
           || pending.scope.activityCode !== scope.activityCode || pending.scope.customerId !== scope.customerId
           || !Number.isSafeInteger(pending.body.expectedVersion) || pending.body.expectedVersion < 0
+          || (pending.body.expectedLockVersion != null && (!Number.isSafeInteger(pending.body.expectedLockVersion) || pending.body.expectedLockVersion < 0))
           || !Array.isArray(pending.body.items) || !pending.body.items.length || pending.body.items.length > 1000
           || !pending.body.items.every(item => Number.isSafeInteger(item.productId) && item.productId > 0
             && Number.isSafeInteger(item.quantity) && item.quantity > 0 && item.quantity <= 999999)) throw new Error();

@@ -318,8 +318,8 @@ paths:
     put:
       operationId: submitH5Order
       tags: [H5]
-      summary: 首次提交、修改或撤回后重新提交订单
-      description: 同次网络异常、超时或503重试必须复用原Idempotency-Key、expectedVersion、items及includeHistory。指纹忽略JSON属性及商品列表顺序。成功重放返回首次订单版本响应快照且无写副作用；同键异载荷返回IDEMPOTENCY_KEY_REUSED。历史记录缺失快照返回IDEMPOTENCY_RESULT_UNAVAILABLE，应查询订单。
+      summary: 首次提交、纯增量更新或失效订单恢复
+      description: 有效订单减少或删除任一商品返回 ORDER_CHANGE_REVIEW_REQUIRED，须改用审核申请接口；纯增量直接生效，已撤回或已作废订单直接恢复，无变化不新增版本。同次网络异常、超时或503重试必须复用原Idempotency-Key、expectedVersion、expectedLockVersion（如有）、items及includeHistory。指纹忽略JSON属性及商品列表顺序。成功重放返回首次订单版本响应快照且无写副作用；同键异载荷返回IDEMPOTENCY_KEY_REUSED。历史记录缺失快照返回IDEMPOTENCY_RESULT_UNAVAILABLE，应查询订单。
       security:
         - h5Cookie: []
       parameters:
@@ -470,7 +470,7 @@ paths:
       operationId: createH5OrderChangeRequest
       tags: [H5]
       summary: 提交已有订单的修改或撤回申请
-      description: 首次下单仍使用订单 PUT 接口；已有订单修改商品、数量或取消本次订货均创建待审核申请，当前订单在审核前保持不变。
+      description: 首次下单、纯增量和撤回/作废后恢复使用订单 PUT 接口；有效订单减少任一商品、删除商品或整单撤回才创建待审核申请，审核前原订单不变。无减量的修改申请返回 ORDER_CHANGE_REVIEW_NOT_REQUIRED。
       security:
         - h5Cookie: []
       parameters:
@@ -488,6 +488,10 @@ paths:
                 expectedVersion:
                   type: integer
                   minimum: 1
+                expectedLockVersion:
+                  type: integer
+                  minimum: 0
+                  description: 当前订单锁版本；新客户端提交以防状态变化后误覆盖
                 requestType:
                   type: string
                   enum: [MODIFY, WITHDRAW]
@@ -3066,7 +3070,11 @@ components:
       required: [expectedVersion, items]
       properties:
         expectedVersion:
-          description: 未创建订单时传 0
+          description: 未创建订单时传 0；有效订单纯增量及失效订单恢复沿用原订单版本
+          type: integer
+          minimum: 0
+        expectedLockVersion:
+          description: 当前订单锁版本；新客户端传入，兼容旧客户端省略
           type: integer
           minimum: 0
         items:

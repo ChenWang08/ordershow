@@ -166,3 +166,10 @@ export function h5OrderItems(order: RuntimeOrder | null) {
 }
 
 export type H5Props = { activityStatus: ActivityStatus; importedRows: ProductImportRow[] | null; importedWhitelistRows: WhitelistRow[] | null; runtimeActivity: RuntimeActivity | null };
+
+/** Compare each original product; totals and pending applications are not the baseline. */
+export function h5RequiresReview(order: Pick<RuntimeOrder, "status" | "items"> | null, items: Array<{ productId: number; quantity: number }>): boolean {
+  if (order?.status !== "SUBMITTED") return false;
+  const next = new Map(items.map(item => [item.productId, item.quantity]));
+  return order.items.some(item => (next.get(item.productId ?? 0) ?? 0) < item.quantity);
+}

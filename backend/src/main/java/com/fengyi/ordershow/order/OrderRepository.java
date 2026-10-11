@@ -143,6 +143,16 @@ public class OrderRepository {
     return current.equals(expected);
   }
 
+  boolean hasReducedItems(long orderId, Map<Long, Long> requested) {
+    return jdbc.query("SELECT activity_product_id, quantity FROM order_item WHERE order_id = ?",
+        rs -> {
+          while (rs.next()) {
+            if (requested.getOrDefault(rs.getLong(1), 0L) < rs.getLong(2)) return true;
+          }
+          return false;
+        }, orderId);
+  }
+
   void lockPricing(long activityId) {
     jdbc.queryForList("SELECT id FROM activity WHERE id = ? FOR UPDATE", activityId);
   }
@@ -525,7 +535,8 @@ public class OrderRepository {
     return jdbc.update("""
           UPDATE customer_order SET status = 'SUBMITTED', current_version_no = ?, total_quantity = ?, total_tons = ?,
             total_amount = ?, last_submitted_at = UTC_TIMESTAMP(3), last_modified_at = UTC_TIMESTAMP(3), withdrawn_at = NULL,
-            withdrawn_reason = NULL, last_modified_source = 'H5', lock_version = lock_version + 1
+            withdrawn_reason = NULL, voided_at = NULL, voided_reason = NULL, voided_by_admin_id = NULL,
+            last_modified_source = 'H5', last_modified_admin_id = NULL, lock_version = lock_version + 1
           WHERE id = ? AND current_version_no = ? AND lock_version = ?
           """, nextVersion, totalQuantity, totalTons, totalAmount, current.id(), currentVersion, current.lockVersion());
   }

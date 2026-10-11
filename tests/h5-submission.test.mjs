@@ -127,3 +127,14 @@ test("HTTP retry pins activity and expected customer even if the global activity
   assert.equal(call[1].headers["X-H5-Customer-Id"],"7");
   assert.deepEqual(JSON.parse(call[1].body),body);
 });
+
+test("increment and restoration retries retain the expected order lock version", async () => {
+  let offline = true;
+  const h = harness(async () => { if (offline) throw new TypeError("lost response"); return result; });
+  const command = { ...body, expectedVersion: 3, expectedLockVersion: 8 };
+  await assert.rejects(h.create().submit(scope, command));
+  offline = false;
+  await h.create().recover(scope);
+  assert.equal(h.calls[0].body.expectedLockVersion, 8);
+  assert.deepEqual(h.calls[0], h.calls.at(-1));
+});

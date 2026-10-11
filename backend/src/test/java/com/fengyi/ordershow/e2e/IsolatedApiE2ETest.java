@@ -330,13 +330,13 @@ class IsolatedApiE2ETest {
     assertEquals(200, modificationDraft.statusCode(), modificationDraft.body());
 
     ObjectNode modificationRequestBody = JSON.createObjectNode().put("expectedVersion", 1).put("requestType", "MODIFY");
-    modificationRequestBody.putArray("items").addObject().put("productId", productId).put("quantity", 3);
+    modificationRequestBody.putArray("items").addObject().put("productId", productId).put("quantity", 1);
     HttpResponse<String> modificationRequest = send(h5, "POST", "/h5/activities/" + activityCode + "/order-change-requests",
         modificationRequestBody, h5Csrf, null, UUID.randomUUID().toString());
     assertEquals(200, modificationRequest.statusCode(), modificationRequest.body());
     assertEquals("PENDING", data(modificationRequest).path("status").asText());
     assertEquals(1, data(modificationRequest).path("currentVersion").asInt());
-    assertEquals("300.00", data(modificationRequest).path("requestedTotalAmount").decimalValue().setScale(2).toPlainString());
+    assertEquals("100.00", data(modificationRequest).path("requestedTotalAmount").decimalValue().setScale(2).toPlainString());
     long replacedId=data(modificationRequest).path("id").asLong();
     String replacementKey=UUID.randomUUID().toString();
     var replacement=send(h5,"POST","/h5/activities/"+activityCode+"/order-change-requests",modificationRequestBody,h5Csrf,null,replacementKey);
@@ -363,7 +363,7 @@ class IsolatedApiE2ETest {
     assertEquals(orderNo, modified.path("orderNo").asText());
     assertEquals(2, modified.path("currentVersion").asInt());
     assertEquals(2, modified.path("versions").size());
-    assertEquals("300.00", modified.path("totalAmount").decimalValue().setScale(2).toPlainString());
+    assertEquals("100.00", modified.path("totalAmount").decimalValue().setScale(2).toPlainString());
     HttpResponse<String> clearedModificationDraft = send(h5, "GET",
         "/h5/activities/" + activityCode + "/order-draft", null, null, null);
     assertTrue(json(clearedModificationDraft).path("data").isMissingNode()
@@ -410,13 +410,9 @@ class IsolatedApiE2ETest {
     ObjectNode resubmitRequestBody = JSON.createObjectNode().put("expectedVersion", 2).put("requestType", "MODIFY");
     resubmitRequestBody.putArray("items").addObject().put("productId", productId).put("quantity", 1);
     resubmitRequestBody.withArray("items").addObject().put("productId", productWithoutTonsId).put("quantity", 1);
-    HttpResponse<String> resubmitRequest = send(h5, "POST", "/h5/activities/" + activityCode + "/order-change-requests",
+    HttpResponse<String> resubmitRequest = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
         resubmitRequestBody, h5Csrf, null, UUID.randomUUID().toString());
     assertEquals(200, resubmitRequest.statusCode(), resubmitRequest.body());
-    long resubmitRequestId = data(resubmitRequest).path("id").asLong();
-    HttpResponse<String> approvedResubmit = send(admin, "POST", "/admin/activities/" + activityId + "/order-change-requests/" + resubmitRequestId + "/approve",
-        JSON.createObjectNode().put("reason", "AUTOTEST 审核通过重新提交申请"), adminCsrf, null, UUID.randomUUID().toString());
-    assertEquals(200, approvedResubmit.statusCode(), approvedResubmit.body());
     JsonNode resubmitted = data(send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null));
     assertEquals("SUBMITTED", resubmitted.path("status").asText());
     assertEquals(3, resubmitted.path("currentVersion").asInt());
@@ -559,7 +555,7 @@ class IsolatedApiE2ETest {
 
     HttpResponse<String> detail = send(admin, "GET", "/admin/activities/" + activityId + "/orders/" + orderId, null, null, null);
     assertEquals(3, data(detail).path("versions").size());
-    assertEquals(9, data(detail).path("operations").size());
+    assertEquals(8, data(detail).path("operations").size());
     assertTrue(detail.body().contains(GENERAL_PHONE));
 
     HttpResponse<String> dashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null);
@@ -972,17 +968,122 @@ class IsolatedApiE2ETest {
     patch.put("casePrice",120).put("orderable",true);
     assertEquals(200,send(admin,"PATCH",base+"/products/"+productId,patch,adminCsrf,product.path("version").asText()).statusCode());
     assertEquals(withdrawn,data(send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null)));
+    var directRestore = send(h5,"PUT","/h5/activities/"+activityCode+"/order",
+        orderBody(withdrawn.path("currentVersion").asInt(), productId, 3),h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,directRestore.statusCode(),directRestore.body());
+    assertEquals(withdrawn.path("orderNo"),data(directRestore).path("orderNo"));
+    withdrawn=data(directRestore);
     var restoreRequestBody=JSON.createObjectNode().put("expectedVersion",withdrawn.path("currentVersion").asInt()).put("requestType","MODIFY");
     restoreRequestBody.putArray("items").addObject().put("productId",productId).put("quantity",2);
     var restoreRequest=send(h5,"POST","/h5/activities/"+activityCode+"/order-change-requests",restoreRequestBody,h5Csrf,null,UUID.randomUUID().toString());
     assertEquals(200,restoreRequest.statusCode(),restoreRequest.body());
     var adminRestore=JSON.createObjectNode().put("expectedVersion",withdrawn.path("currentVersion").asInt()).put("expectedLockVersion",withdrawn.path("lockVersion").asInt()).put("reason","验证管理员调整自动驳回");
-    adminRestore.putArray("items").addObject().put("productId",productId).put("quantity",3);
+    adminRestore.putArray("items").addObject().put("productId",productId).put("quantity",4);
     var restoredByAdmin=send(admin,"PUT",base+"/orders/"+withdrawn.path("id").asLong(),adminRestore,adminCsrf,null,UUID.randomUUID().toString());
     assertEquals(200,restoredByAdmin.statusCode(),restoredByAdmin.body());
     var invalidated=send(admin,"GET",base+"/order-change-requests/"+data(restoreRequest).path("id").asLong(),null,null,null);
     assertEquals("REJECTED",data(invalidated).path("status").asText());
     assertTrue(data(invalidated).path("reviewReason").asText().contains("订单已发生变化"));
+    verifyIncrementRecoveryRules();
+  }
+
+
+  private void verifyIncrementRecoveryRules() throws Exception {
+    String h5Path = "/h5/activities/" + activityCode + "/order";
+    String requestsPath = "/h5/activities/" + activityCode + "/order-change-requests";
+    String adminPath = "/admin/activities/" + activityId;
+    JsonNode current = data(send(h5,"GET",h5Path,null,null,null));
+    String originalNumber = current.path("orderNo").asText();
+    long originalId = current.path("id").asLong();
+    ObjectNode ten = orderBody(current.path("currentVersion").asInt(),productId,10)
+        .put("expectedLockVersion",current.path("lockVersion").asInt());
+    String increaseKey = UUID.randomUUID().toString();
+    var increased = send(h5,"PUT",h5Path,ten,h5Csrf,null,increaseKey);
+    assertEquals(200,increased.statusCode(),increased.body());
+    assertEquals(10,data(increased).path("totalQuantity").asInt());
+    assertEquals(data(increased),data(send(h5,"PUT",h5Path,ten,h5Csrf,null,increaseKey)));
+    current=data(increased);
+    int version=current.path("currentVersion").asInt();
+    var same=send(h5,"PUT",h5Path,orderBody(version,productId,10),h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,same.statusCode(),same.body());
+    assertEquals(current,data(same));
+
+    // One reduced product requires approval even when other products increase the total.
+    ObjectNode mixed=orderBody(version,productId,9);
+    mixed.withArray("items").addObject().put("productId",productWithoutTonsId).put("quantity",100);
+    var denied=send(h5,"PUT",h5Path,mixed,h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(409,denied.statusCode(),denied.body());
+    assertEquals("ORDER_CHANGE_REVIEW_REQUIRED",json(denied).path("code").asText());
+    mixed.put("requestType","MODIFY");
+    var pending=send(h5,"POST",requestsPath,mixed,h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,pending.statusCode(),pending.body());
+    long pendingId=data(pending).path("id").asLong();
+    assertEquals(10,data(send(h5,"GET",h5Path,null,null,null)).path("totalQuantity").asInt());
+    var invalid=orderBody(version,productId,12);
+    invalid.withArray("items").addObject().put("productId",Long.MAX_VALUE).put("quantity",1);
+    assertEquals(422,send(h5,"PUT",h5Path,invalid,h5Csrf,null,UUID.randomUUID().toString()).statusCode());
+    assertEquals("PENDING",data(send(h5,"GET",requestsPath+"/current",null,null,null)).path("status").asText());
+    var unchanged=send(h5,"PUT",h5Path,orderBody(version,productId,10),h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(version,data(unchanged).path("currentVersion").asInt());
+    assertEquals(pendingId,data(send(h5,"GET",requestsPath+"/current",null,null,null)).path("id").asLong());
+
+    ObjectNode twelve=orderBody(version,productId,12);
+    twelve.withArray("items").addObject().put("productId",productWithoutTonsId).put("quantity",1);
+    var pureIncrease=send(h5,"PUT",h5Path,twelve,h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,pureIncrease.statusCode(),pureIncrease.body());
+    current=data(pureIncrease);
+    var superseded=send(admin,"GET",adminPath+"/order-change-requests/"+pendingId,null,null,null);
+    assertEquals("REJECTED",data(superseded).path("status").asText());
+    assertTrue(data(superseded).path("reviewReason").asText().contains("失效"));
+    var latestRequest=json(send(h5,"GET",requestsPath+"/current",null,null,null)).path("data");
+    assertTrue(latestRequest.isNull() || latestRequest.isMissingNode());
+    assertEquals(409,send(admin,"POST",adminPath+"/order-change-requests/"+pendingId+"/approve",JSON.createObjectNode(),adminCsrf,null,UUID.randomUUID().toString()).statusCode());
+
+    // Deleting a product needs review; a rejected application leaves the effective order intact.
+    ObjectNode deletion=orderBody(current.path("currentVersion").asInt(),productId,20).put("requestType","MODIFY");
+    var deleteRequest=send(h5,"POST",requestsPath,deletion,h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,deleteRequest.statusCode(),deleteRequest.body());
+    var rejected=send(admin,"POST",adminPath+"/order-change-requests/"+data(deleteRequest).path("id").asLong()+"/reject",
+        JSON.createObjectNode().put("reason","测试保留原订单"),adminCsrf,null,UUID.randomUUID().toString());
+    assertEquals(200,rejected.statusCode(),rejected.body());
+    assertEquals(current.path("items"),data(send(h5,"GET",h5Path,null,null,null)).path("items"));
+
+    ObjectNode withdrawal=JSON.createObjectNode().put("expectedVersion",current.path("currentVersion").asInt()).put("requestType","WITHDRAW");
+    withdrawal.putArray("items");
+    var withdraw=send(h5,"POST",requestsPath,withdrawal,h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,withdraw.statusCode(),withdraw.body());
+    var approved=send(admin,"POST",adminPath+"/order-change-requests/"+data(withdraw).path("id").asLong()+"/approve",JSON.createObjectNode(),adminCsrf,null,UUID.randomUUID().toString());
+    assertEquals(200,approved.statusCode(),approved.body());
+    current=data(send(h5,"GET",h5Path,null,null,null));
+    assertEquals("WITHDRAWN",current.path("status").asText());
+    var five=orderBody(current.path("currentVersion").asInt(),productId,5).put("expectedLockVersion",current.path("lockVersion").asInt());
+    var restored=send(h5,"PUT",h5Path,five,h5Csrf,null,UUID.randomUUID().toString());
+    assertEquals(200,restored.statusCode(),restored.body());
+    assertEquals("SUBMITTED",data(restored).path("status").asText());
+    current=data(restored);
+    ObjectNode stalePage=orderBody(current.path("currentVersion").asInt(),productId,6).put("expectedLockVersion",current.path("lockVersion").asInt());
+    ObjectNode voidBody=JSON.createObjectNode().put("expectedVersion",current.path("currentVersion").asInt())
+        .put("expectedLockVersion",current.path("lockVersion").asInt()).put("reason","测试 H5 恢复作废订单");
+    var voided=send(admin,"POST",adminPath+"/orders/"+originalId+"/void",voidBody,adminCsrf,null,UUID.randomUUID().toString());
+    assertEquals(200,voided.statusCode(),voided.body());
+    assertEquals(409,send(h5,"PUT",h5Path,stalePage,h5Csrf,null,UUID.randomUUID().toString()).statusCode());
+    current=data(voided);
+    var two=orderBody(current.path("currentVersion").asInt(),productId,2).put("expectedLockVersion",current.path("lockVersion").asInt());
+    String restoreKey=UUID.randomUUID().toString();
+    var restoredVoid=send(h5,"PUT",h5Path,two,h5Csrf,null,restoreKey);
+    assertEquals(200,restoredVoid.statusCode(),restoredVoid.body());
+    current=data(restoredVoid);
+    assertEquals(current,data(send(h5,"PUT",h5Path,two,h5Csrf,null,restoreKey)));
+    assertEquals(originalId,current.path("id").asLong());
+    assertEquals(originalNumber,current.path("orderNo").asText());
+    assertEquals("SUBMITTED",current.path("status").asText());
+    assertEquals(2,current.path("totalQuantity").asInt());
+    assertTrue(current.path("voidedAt").isNull() || current.path("voidedAt").isMissingNode());
+    assertTrue(current.path("withdrawnAt").isNull() || current.path("withdrawnAt").isMissingNode());
+    assertTrue(current.path("operations").toString().contains("恢复已作废订单"));
+    var ranking=data(send(client(),"GET","/screen/activities/"+activityCode+"/ranking",null,null,null));
+    assertEquals(1,ranking.path("totals").path("order_count").asInt());
+    assertEquals(0,current.path("totalAmount").decimalValue().compareTo(ranking.path("totals").path("total_amount").decimalValue()));
   }
 
   @Test

@@ -9,11 +9,11 @@ export function H5ResultPages({ model }: { model: H5OrderModel }) {
           {visibleStep === "success" && (
             <section className="h5-page success-page">
               <div className="success-mark">✓</div>
-              <span>{submitMode === "first" ? "提交成功" : "修改成功"}</span>
-              <h2>{submitMode === "first" ? "您的订货已成功提交" : "订单修改已重新提交"}</h2>
+              <span>{submitMode === "first" ? "提交成功" : submitMode === "restore" ? "恢复成功" : "修改成功"}</span>
+              <h2>{submitMode === "first" ? "您的订货已成功提交" : submitMode === "restore" ? "订单已恢复，订单号不变" : "订单已更新并生效"}</h2>
               <p>订单编号：{runtimeOrder?.orderNo || "ZYORDER280018"}</p>
               <div className="success-amount"><span>订单总金额</span><b>¥{money(runtimeOrder?.totalAmount ?? totalAmount)}</b><small>{totalBoxes} 箱 · {selected.length} 种商品</small></div>
-              <div className="success-note">订单号保持不变，截止前如需修改或取消本次订货，请提交后台审核。当前订单会在审核通过后更新。</div>
+              <div className="success-note">订单已生效。截止前增加数量或新增商品直接生效；减少、删除商品或取消订货需后台审核。</div>
               <button className="primary-btn" onClick={() => setStep("submitted")}>查看订单</button>
               <button className="ghost-btn" onClick={() => { setChannel(""); setRegion(""); setVerifiedBranch(""); setVerifiedIdentity(null); setStep("channel"); }}>返回活动首页</button>
             </section>

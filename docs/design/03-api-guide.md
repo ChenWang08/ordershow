@@ -171,7 +171,7 @@ H5 商品展示按当前可见商品目录动态处理返利页签：只有同�
 
 关键幂等记录、请求指纹、任务 ID 和可重放响应摘要最终保存于 MySQL 的 `api_idempotency`。Redis 可以在命中时加速重复请求和互斥，但缓存丢失、过期或重启后必须回到 MySQL，不得因此重新执行订单版本、导入发布或抽奖结果。
 
-H5 首次提交已实现同次请求复用幂等键及首次成功响应快照。指纹固定包含 expectedVersion、includeHistory 和按 productId 排序的商品/数量；同键异载荷返回 IDEMPOTENCY_KEY_REUSED。已有订单的修改/撤回使用 `ORDER_CHANGE_REQUEST` 幂等记录，同一申请重复提交返回原申请，不重复创建待审核记录。旧记录缺失快照时返回 IDEMPOTENCY_RESULT_UNAVAILABLE，客户端须查询订单。
+H5 首次提交、纯增量更新及撤回/作废后恢复已实现同次请求复用幂等键及首次成功响应快照。指纹包含 expectedVersion、客户端传入时的 expectedLockVersion、includeHistory 和按 productId 排序的商品/数量；同键异载荷返回 IDEMPOTENCY_KEY_REUSED。已有有效订单的减量、删除商品或撤回使用 `ORDER_CHANGE_REQUEST` 幂等记录，同一申请重复提交返回原申请，不重复创建待审核记录。旧记录缺失快照时返回 IDEMPOTENCY_RESULT_UNAVAILABLE，客户端须查询订单。
 
 前端待确认请求按活动/客户保存在 sessionStorage，恢复窗口 24 小时；每次最多自动重试一次并遵守 Retry-After。服务端只对新 H5 提交快照启用有界清理，至少保留至活动结束和成功提交各满 30 天；PROCESSING、旧格式和其他接口不在此次清理范围。鉴权失败仍拒绝访问。实现与验收见 [H5 幂等重试说明](../testing/h5-idempotency-retry.md)。
 

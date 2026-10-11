@@ -6,7 +6,7 @@ import { money } from "../shared/utils";
 import { priceBreakdown, tierPriceLabel } from "./h5-domain";
 
 export function H5ConfirmPage({ model }: { model: H5OrderModel }) {
-  const { runtimeBusy, runtimeMessage, orderNeedsRefresh, setStep, setPreviewProduct, orderStatus, customerOrderReadOnly, quantities, visibleStep, selectedLineGroups, selectedLineSummaries, totalAmount, identityBranch, identityLabel, dealerName, submitOrder, reloadLatestOrder } = model;
+  const { requiresReview, pendingSubmission, runtimeBusy, runtimeMessage, orderNeedsRefresh, setStep, setPreviewProduct, orderStatus, customerOrderReadOnly, quantities, visibleStep, selectedLineGroups, selectedLineSummaries, totalAmount, identityBranch, identityLabel, dealerName, submitOrder, reloadLatestOrder } = model;
   return <>
           {visibleStep === "confirm" && (
             <section className="h5-page confirm-page">
@@ -30,10 +30,11 @@ export function H5ConfirmPage({ model }: { model: H5OrderModel }) {
                 <p className="grand-total"><span>订单总金额</span><b>¥{money(totalAmount)}</b></p>
                 {selectedLineSummaries.map((summary) => <p className="line-amount-row" key={summary.line}><span>项目组：{summary.line}</span><b>¥{money(summary.amount)}</b></p>)}
               </div>
+              {requiresReview && <div className="submitted-note">本次包含商品减量或删除，整次变更需后台审核；审核通过前原订单仍有效。</div>}
               <label className="agreement"><input type="checkbox" defaultChecked /> 我已核对商品与订货数量</label>
               {orderNeedsRefresh && <button disabled={runtimeBusy} onClick={reloadLatestOrder}>加载最新订单并重新核对（放弃本次未提交修改）</button>}
               {runtimeMessage && <div className="verify-error" role="alert">{runtimeMessage}</div>}
-              <button className="submit-order" disabled={customerOrderReadOnly || runtimeBusy} onClick={() => void submitOrder()}>{runtimeBusy ? "正在提交…" : orderStatus === "none" ? "确认提交订单" : orderStatus === "withdrawn" ? "重新提交订单" : "确认修改并提交"}</button>
+              <button className="submit-order" disabled={customerOrderReadOnly || runtimeBusy} onClick={() => void submitOrder()}>{runtimeBusy ? "正在提交…" : pendingSubmission ? "确认上次提交结果" : requiresReview ? "提交变更审核" : orderStatus === "none" ? "确认提交订单" : orderStatus === "withdrawn" || orderStatus === "voided" ? "重新提交并恢复订单" : "确认提交"}</button>
             </section>
           )}
 

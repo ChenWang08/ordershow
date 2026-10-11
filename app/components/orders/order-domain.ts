@@ -153,7 +153,7 @@ export function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRec
     FIRST_SUBMIT: "客户首次提交",
     MODIFY_SUBMIT: "客户修改后提交",
     WITHDRAW: "客户撤回",
-    RESUBMIT: "客户重新提交",
+    RESUBMIT: "客户重新订货，恢复订单",
     ADMIN_CREATE: "管理员创建订单",
     ADMIN_ADJUST: "管理员调整订单",
     ADMIN_VOID: "管理员作废订单",
@@ -203,7 +203,7 @@ export function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRec
         quantity: Number(item.quantity),
         subtotal: Number(item.lineAmount).toFixed(2),
       })),
-    permission: order.status === "WITHDRAWN" ? "可重新提交" : order.status === "VOIDED" ? "已作废" : "可修改",
+    permission: order.status === "SUBMITTED" ? "可修改" : "可重新提交",
     status,
     operationRecords: (detail.operations ?? []).map((operation) => ({
       time: formatDate(operation.occurredAt),

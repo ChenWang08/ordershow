@@ -21,7 +21,7 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
   const note = pending ? (showingRequest ? "以下为最新申请内容，审核通过后生效。" : request.requestType === "WITHDRAW" ? "撤回申请正在审核，以下保留原订单明细，审核通过后才撤回。" : "以下为当前生效订单，待审核申请尚未生效。")
     : rejected ? `驳回原因：${request.reviewReason || "请联系管理员确认"}。以下为当前正式订单。`
     : orderStatus === "withdrawn" ? "商品明细和订单号已保留，当前订单不计入有效订货。"
-    : orderStatus === "voided" ? "订单已由管理员作废，如需恢复请联系管理员。" : "以下为当前生效订单。";
+    : orderStatus === "voided" ? "订单已由管理员作废，当前不计入有效订货；订货截止前可重新提交，直接恢复并沿用原订单号。" : "以下为当前生效订单。";
   if (model.visibleStep !== "submitted") return null;
   return <section className="h5-page submitted-page">
     <header className="simple-header"><button onClick={() => model.setStep("verify")}>‹</button><b>我的订单</b><span /></header>
@@ -61,7 +61,7 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
     {activityClosed && <div className="submitted-note">订货已截止，不能新增或修改申请；截止前已提交的申请仍可由后台审核。</div>}
     {model.orderEvents.length > 0 && <section className="submitted-events"><h3>操作记录</h3>{model.orderEvents.map((event,index)=><p key={index}><b>{event.time} {event.title}</b><span>{event.detail}</span></p>)}</section>}
     <div className="submitted-actions">
-      {!customerOrderReadOnly && <button className="primary-btn" onClick={model.startEditingOrder}>{pending ? "继续修改申请" : rejected ? "修改并重新申请" : orderStatus === "withdrawn" ? "继续订货" : "修改订单"}</button>}
+      {!customerOrderReadOnly && <button className="primary-btn" onClick={model.startEditingOrder}>{orderStatus === "withdrawn" || orderStatus === "voided" ? "重新订货" : pending ? "继续修改订单" : "修改订单"}</button>}
       <button className="ghost-btn" onClick={()=>model.setStep("channel")}>返回活动首页</button>
     </div>
   </section>;

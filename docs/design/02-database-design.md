@@ -117,7 +117,7 @@ V035 新增身份快照：`order_operation.actor_identity_snapshot` 和 `actor_r
 | `order_version` | 每次成功非空提交的不可变版本 | 订单 + 版本号唯一 |
 | `order_version_item` | 提交版本的商品和客户/商品价格快照 | 版本 + 行号唯一；商品自动调价不回写 |
 | `order_operation` | 客户提交、变更申请、审核及后台新增、调整、恢复、作废等操作记录 | 只追加；商品自动调价不新增 |
-| `order_change_request` | 已有订单的修改/撤回申请及审核结果 | 订单同一时间最多一条 `PENDING`；申请快照不直接计入业务统计 |
+| `order_change_request` | 有效订单的减量/删除商品/撤回申请及审核结果 | 订单同一时间最多一条 `PENDING`；申请快照不直接计入业务统计 |
 | `api_idempotency` | 命令请求的持久幂等记录 | 活动 + 调用者 + 接口 + 幂等键唯一 |
 | `price_sync_batch` | 历史价格补处理兼容表 | 当前自动计价不写入；保留已执行批次结构 |
 | `h5_order_draft` | H5 未提交购物车草稿 | 活动 + 活动客户唯一；外键同时约束活动和活动客户 |
@@ -126,7 +126,7 @@ V035 新增身份快照：`order_operation.actor_identity_snapshot` 和 `actor_r
 
 `h5_order_draft` 只保存商品 ID 与数量 JSON、草稿所基于的 `base_order_version`、草稿锁版本、更新时间和过期时间，不保存手机号、客户名称、价格或订单金额。保存、读取和删除必须同时满足 H5 会话中的 `activityId` 与 `activityCustomerId`；请求体中的客户 ID 仅作一致性校验，不能改变会话身份。草稿商品每次保存都重新校验当前商品版本、客户类型、分公司范围、可见和可订状态。
 
-草稿不属于正式订单事实：首次提交前可以存在 `h5_order_draft`，但不存在 `customer_order`、订单号和订单版本。草稿 `base_order_version` 必须等于客户当前订单版本，防止旧页面覆盖已经提交或修改的订单；首次提交或已有订单创建变更申请时删除草稿，审核申请不会再从草稿恢复。H5 首次提交或变更申请的成功幂等重放只返回原响应，不删除后来保存的新草稿。`expires_at` 不晚于活动截止时间，过期草稿不再恢复。
+草稿不属于正式订单事实：首次提交前可以存在 `h5_order_draft`，但不存在 `customer_order`、订单号和订单版本。草稿 `base_order_version` 必须等于客户当前订单版本，防止旧页面覆盖已经提交或修改的订单；首次提交、纯增量更新、失效订单恢复或创建变更申请成功时删除草稿，审核申请不会再从草稿恢复。H5 直接提交或变更申请的成功幂等重放只返回原响应，不删除后来保存的新草稿。`expires_at` 不晚于活动截止时间，过期草稿不再恢复。
 
 H5 ORDER_SUBMIT 的 response_json 使用 format=2，保存 orderId、orderVersion、resultJson（订单响应 JSON 字符串，保留十进制精度）；沿用现有唯一约束，无结构迁移。expires_at 至少覆盖活动结束后 30 天，清理还检查 completed_at 及当前活动结束时间，每小时最多 500 条，仅处理新格式已完成的 H5 提交。详见 [幂等重试与清理](../testing/h5-idempotency-retry.md)。
 
