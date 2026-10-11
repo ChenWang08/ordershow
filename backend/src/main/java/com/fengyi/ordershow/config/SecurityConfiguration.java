@@ -5,6 +5,7 @@ import com.fengyi.ordershow.security.AuthService;
 import com.fengyi.ordershow.security.DepartmentAccessService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -59,7 +60,10 @@ public class SecurityConfiguration implements WebMvcConfigurer {
   @Bean
   CorsConfigurationSource corsConfigurationSource() {
     CorsConfiguration config = new CorsConfiguration();
-    config.setAllowedOrigins(List.of(properties.publicOrigin()));
+    config.setAllowedOrigins(Arrays.stream(properties.publicOrigin().split(","))
+        .map(String::trim)
+        .filter(origin -> !origin.isEmpty())
+        .toList());
     config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
     config.setAllowedHeaders(List.of("Content-Type", "X-CSRF-Token", "Idempotency-Key", "If-Match", "X-Request-Id", "X-H5-Customer-Id"));
     config.setExposedHeaders(List.of("X-Request-Id", "ETag", "Content-Disposition", "Retry-After"));
