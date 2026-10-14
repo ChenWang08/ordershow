@@ -30,7 +30,7 @@ public class FileController {
     var file = files.getFirst();
     String purpose = file.get("file_purpose").toString();
     // Product/prize images remain public assets used by H5 and screens. Source sheets are private.
-    if (!java.util.List.of("PRODUCT_IMAGE", "LOTTERY_PRIZE_IMAGE").contains(purpose)) {
+    if (!java.util.List.of("PRODUCT_IMAGE", "LOTTERY_PRIZE_IMAGE", "ACTIVITY_BACKGROUND").contains(purpose)) {
       var admin = auth.requireAdmin(request);
       long activityId = ((Number)file.get("activity_id")).longValue();
       access.requireActivityAccess(admin, activityId);

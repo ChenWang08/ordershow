@@ -1,0 +1,39 @@
+.screen-board {
+  background-image: var(--activity-desktop-background, radial-gradient(circle at 50% -15%, #7c1919 0, #4b0d0f 52%, #300707 100%));
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+.screen-board.lottery-board {
+  background-image: var(--activity-desktop-background, radial-gradient(circle at 50% 20%, #b62323 0, #821518 35%, #520b0e 75%));
+}
+.screen-board.report-board {
+  background-image: var(--activity-desktop-background, radial-gradient(ellipse at 50% -18%, rgba(190,56,27,.72), transparent 48%), radial-gradient(ellipse at 50% 110%, rgba(73,5,9,.9), transparent 58%), linear-gradient(135deg, #260307 0%, #64100f 46%, #350508 100%));
+}
+.has-desktop-background .screen-board .festival-moon,
+.has-desktop-background .screen-board .festival-cloud,
+.has-desktop-background .screen-board .festival-mountains,
+.has-desktop-background .report-board::before,
+.has-desktop-background .report-board::after { display: none; }
+@media (min-width: 641px) and (max-width: 1100px) {
+  .screen-title { grid-template-columns: minmax(150px, 1fr) minmax(0, 2fr) minmax(150px, 1fr); gap: 12px; padding-inline: 20px; }
+  .screen-title .screen-metric { width: 100%; min-width: 0; overflow-wrap: anywhere; }
+  .screen-title h1 { font-size: clamp(22px, 3vw, 33px); }
+  .screen-title strong { font-size: clamp(22px, 3vw, 31px); }
+}
+.activity-background-card { margin-top: 20px; padding: 20px; background: #fff; border: 1px solid #eee6df; border-radius: 13px; }
+.activity-background-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.activity-background-grid > section { min-width: 0; padding: 16px; border: 1px solid #e4d7ce; border-radius: 10px; }
+.activity-background-grid h3 { margin: 0 0 8px; }
+.activity-background-card .activity-background-grid p { display: block; line-height: 1.7; }
+.activity-background-preview { display: flex; align-items: end; justify-content: center; width: 100%; background-position: center; background-size: cover; background-repeat: no-repeat; border-radius: 8px; overflow: hidden; }
+.activity-background-preview.h5 { max-width: 180px; aspect-ratio: 1 / 2; margin-inline: auto; background-image: url('/order-entry-backdrop.svg'); background-color: #811520; }
+.activity-background-preview.desktop { aspect-ratio: 16 / 9; background-image: radial-gradient(circle at 50% -15%, #7c1919, #300707); }
+.activity-background-preview span { width: 100%; padding: 8px; color: #fff; background: #0009; text-align: center; font-size: 12px; }
+.activity-background-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.activity-background-actions label, .activity-background-actions button { position: relative; padding: 8px 12px; color: #8d2623; border: 1px solid #d8b7ad; border-radius: 6px; background: #fff; font-size: 12px; cursor: pointer; }
+.activity-background-actions button { width: auto; }
+.activity-background-actions label:has(input:disabled), .activity-background-actions button:disabled { opacity: .5; cursor: not-allowed; }
+.activity-background-actions label:focus-within { outline: 2px solid #a92321; outline-offset: 2px; }
+.activity-background-actions input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: inherit; }
+@media (max-width: 700px) { .activity-background-grid { grid-template-columns: minmax(0, 1fr); } }

@@ -4,7 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { loadModule } from "./helpers/load-ts-module.mjs";
 
-const { ActivityOverview } = loadModule("app/features/admin/ActivityOverview.tsx", { "./ActivityLiveRoomCard": { ActivityLiveRoomCard: () => null }, "../../admin-context": { useAdminIdentity: () => ({ roleCode: "DEPARTMENT_ADMIN" }) } });
+const { ActivityOverview } = loadModule("app/features/admin/ActivityOverview.tsx", { "./ActivityBackgroundCard": { ActivityBackgroundCard: () => null }, "./ActivityLiveRoomCard": { ActivityLiveRoomCard: () => null }, "../../admin-context": { useAdminIdentity: () => ({ roleCode: "DEPARTMENT_ADMIN" }) } });
 const noop = () => {};
 const viewProps = {
   activityCode: "HD-TEST", activityName: "测试活动", departmentName: "测试部门",
@@ -118,6 +118,7 @@ test("failed settings save does not proceed to publication", async () => {
 
 test('member overview never exposes activity lifecycle controls even with all permissions', () => {
   const { ActivityOverview: MemberOverview } = loadModule('app/features/admin/ActivityOverview.tsx', {
+    './ActivityBackgroundCard': { ActivityBackgroundCard: () => null },
     './ActivityLiveRoomCard': { ActivityLiveRoomCard: () => null },
     '../../admin-context': { useAdminIdentity: () => ({ roleCode: 'DEPARTMENT_MEMBER', permissions: ['OVERVIEW','PRODUCT','WHITELIST','ATTENDANCE','ORDER','LOTTERY'] }) },
   });

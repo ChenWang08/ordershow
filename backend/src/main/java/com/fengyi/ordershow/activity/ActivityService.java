@@ -362,7 +362,8 @@ public class ActivityService {
         value.configuredStatus(), value.timezone(), value.startsAt(), value.endsAt(), value.eventEndsAt(), value.customerScope(),
         value.companyRankingTopN(), value.branchRankingTopN(), value.tonDisplayScale(), value.version(), regions,
         Boolean.TRUE.equals(hasUnassigned), whitelistCustomerTypeMode, availableCustomerTypes,
-        value.publishedAt(), value.actualStartedAt(), value.closedAt(), value.finishedAt(), value.liveRoomUrl());
+        value.publishedAt(), value.actualStartedAt(), value.closedAt(), value.finishedAt(), value.liveRoomUrl(),
+        value.h5BackgroundUrl(), value.desktopBackgroundUrl());
   }
 
   private String effectiveStatus(ActivityView value) {
@@ -396,7 +397,13 @@ public class ActivityService {
         rs.getString("customer_scope"), rs.getInt("company_ranking_top_n"),
         rs.getInt("branch_ranking_top_n"), rs.getInt("ton_display_scale"), rs.getInt("version"), List.of(), false, "TYPED", List.of(),
         instant(rs.getTimestamp("published_at")), instant(rs.getTimestamp("actual_started_at")), instant(rs.getTimestamp("closed_at")),
-        instant(rs.getTimestamp("finished_at")), rs.getString("live_room_url"));
+        instant(rs.getTimestamp("finished_at")), rs.getString("live_room_url"),
+        backgroundUrl(rs, "h5_background_file_id"), backgroundUrl(rs, "desktop_background_file_id"));
+  }
+
+  private static String backgroundUrl(ResultSet rs, String column) throws SQLException {
+    long id = rs.getLong(column);
+    return rs.wasNull() ? null : "/api/v1/public/files/" + id;
   }
 
   private static void validateTime(Instant startsAt, Instant endsAt, Instant eventEndsAt) {
@@ -527,7 +534,8 @@ public class ActivityService {
                               int tonDisplayScale, int version, List<RegionView> regions, boolean hasUnassignedGeneralCustomers,
                               String whitelistCustomerTypeMode, List<String> availableCustomerTypes,
                              Instant publishedAt,
-                             Instant actualStartedAt, Instant closedAt, Instant finishedAt, String liveRoomUrl) {}
+                             Instant actualStartedAt, Instant closedAt, Instant finishedAt, String liveRoomUrl,
+                             String h5BackgroundUrl, String desktopBackgroundUrl) {}
 
   @Transactional
   public ActivityView updateLiveRoom(long id, int expectedVersion, String url, AdminPrincipal admin) {

@@ -49,6 +49,7 @@ test("import workspaces retain separate data and stable setters across renders",
 
 const marker = (name) => function SurfaceMarker() { return React.createElement("span", { "data-surface": name }); };
 const { OrderShowApp } = loadModule("app/order-show-app.tsx", {
+  "./features/shared/activity-background": { useBackgroundImage: () => undefined },
   "./features/admin/AdminEntry": { AdminEntry: marker("admin") },
   "./useActivityRuntime": { useActivityRuntime: () => ({ activityName: "测试活动", runtimeConnected: true, runtimeActivity: null }) },
   "./features/workspace/SurfaceConnections": { H5Surface: marker("h5"), AdminSurface: marker("admin"), LotterySurface: marker("lottery") },

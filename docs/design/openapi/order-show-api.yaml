@@ -22,6 +22,64 @@ tags:
   - name: Exports
   - name: Audit
 paths:
+  /admin/activities/{activityId}/backgrounds/{kind}:
+    parameters:
+      - $ref: '#/components/parameters/ActivityId'
+      - name: kind
+        in: path
+        required: true
+        schema: { type: string, enum: [h5, desktop] }
+    post:
+      operationId: uploadActivityBackground
+      tags: [Activities]
+      summary: 管理员上传并立即保存活动背景
+      description: JPG/JPEG、PNG、WebP；h5 上限 5 MiB，desktop 上限 10 MiB。电脑端订单排行、专题战报、幸运抽奖共用。校验管理员及活动所属部门；仅更新所选背景，不修改活动基础配置版本。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: 背景已保存，返回更新后的活动
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Activity' }
+                  traceId: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: resetActivityBackground
+      tags: [Activities]
+      summary: 清除当前活动所选背景，恢复各页面默认背景
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已恢复默认
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Activity' }
+                  traceId: { type: string }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /admin/members:
     get:
       operationId: listDepartmentMembers
@@ -2820,6 +2878,12 @@ components:
       type: object
       required: [code, name, status, startsAt, endsAt, eventEndsAt, timezone, customerScope]
       properties:
+        h5BackgroundUrl:
+          type: [string, 'null']
+          description: 手机入口背景的公开资源路径；未配置时省略，前端使用默认背景。
+        desktopBackgroundUrl:
+          type: [string, 'null']
+          description: 三个电脑端展示页面共用的公开背景资源路径；未配置时省略。
         code:
           type: string
           description: 面向运营人员展示的活动编号，用于数据识别、报表和兼容旧链接。

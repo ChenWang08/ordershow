@@ -16,6 +16,14 @@ export async function loadAdminActivity(id: number) {
   return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${id}`)).data;
 }
 
+export async function saveActivityBackground(activityId: number, kind: "h5" | "desktop", file: File | null) {
+  const body = new FormData();
+  if (file) body.append("file", file);
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activityId}/backgrounds/${kind}`, {
+    method: file ? "POST" : "DELETE", ...(file ? { body } : {}),
+  }, "admin")).data;
+}
+
 export async function updateActivityLiveRoom(activity: RuntimeActivity, liveRoomUrl: string) {
   return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/live-room`, {
     method: "PATCH", headers: { "If-Match": String(activity.version) },

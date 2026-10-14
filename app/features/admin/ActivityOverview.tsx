@@ -5,6 +5,7 @@ import { canUse, isManager } from "./permissions";
 import type { ActivityStatus } from "../shared/types";
 import { ActivityEntryLinksCard } from "./ActivityEntryLinksCard";
 import { ActivityLiveRoomCard } from "./ActivityLiveRoomCard";
+import { ActivityBackgroundCard } from "./ActivityBackgroundCard";
 import type { useActivitySettings } from "./useActivitySettings";
 import type { useActivityOverview } from "./useActivityOverview";
 
@@ -47,6 +48,7 @@ export function ActivityOverview({
                 <p><span>当前状态</span><b className={activityClosed ? "closed-text" : activityStarted ? "green" : "pending-text"}>{activityStatus === "draft" ? "草稿 · H5 未发布" : activityStatus === "scheduled" ? `待开始 · ${activityStartDraft.replace("T", " ")} 自动开放` : activityStatus === "running" ? "订货中 · H5 可下单" : activityStatus === "closed" ? "订货已截止 · 抽奖和实时看板可继续" : "活动已结束 · 历史看板和战报只读"}</b></p><p><span>基础数据</span><b className={activityPublished ? "closed-text" : "green"}>{activityPublished ? "商品和白名单已锁定" : "可导入和替换"}</b></p><p><span>运行规则</span><small>{activityFinished ? "抽奖和实时推送已关闭；最终看板与战报可回看" : activityStatus === "closed" ? "订单只读；可继续抽奖，也可延长或立即结束整场活动" : activityStatus === "running" ? "开始时间不可修改；两个结束时间只能延长" : activityStatus === "scheduled" ? "可调整未来时间；修改基础数据请先撤回发布" : "保存设置不会发布活动"}</small></p><div className="activity-card-actions">{manager && <>{!activityFinished && <button className="admin-primary" onClick={() => void saveActivityConfig()}>{activityStatus === "closed" ? "保存延长活动时间" : activityStatus === "running" ? "保存延长时间" : activityStatus === "scheduled" ? "保存时间调整" : "保存活动设置"}</button>}{activityStatus === "draft" && <button onClick={() => void publishCurrentActivity()}>发布活动</button>}{activityStatus === "scheduled" && <button onClick={() => void withdrawCurrentActivity()}>撤回发布</button>}{activityStatus === "running" && <button className="danger-action" onClick={() => void closeCurrentActivity()}>立即截止订货</button>}{activityStatus === "closed" && <button className="danger-action" onClick={() => void finishCurrentActivity()}>结束整场活动</button>}</>}{activityFinished && canUse(identity, "ORDER") && <button type="button" onClick={() => onViewOrders()}>查看最终数据</button>}</div>
               </article>
              </div>
+             {activityId && <ActivityBackgroundCard key={`background-${activityId}`} activityId={activityId} editable={manager} />}
              {activityId && <ActivityLiveRoomCard key={activityId} activityId={activityId} editable={manager} />}
              <ActivityEntryLinksCard
                key={activityCode}

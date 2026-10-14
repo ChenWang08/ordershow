@@ -20,7 +20,7 @@
   padding: 25px 23px 118px;
   color: #fff8e5;
   background-color: #811520;
-  background-image: url("/order-entry-backdrop.svg");
+  background-image: var(--activity-h5-background, url("/order-entry-backdrop.svg"));
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
