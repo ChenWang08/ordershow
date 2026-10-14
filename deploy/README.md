@@ -9,6 +9,7 @@
 ## 环境配置
 
 - 本地：继续使用根目录 `.env.example` / `docker-compose.yml`。不配置 profile 时保留原本地行为，也可设置 `SPRING_PROFILES_ACTIVE=local`。
+- 切换本地开发目录但复用原数据卷时，必须在新目录的 `.env` 中保留原 `PHONE_HMAC_KEY` 和 `PHONE_ENCRYPTION_KEY`，不能改用默认值；否则已有手机号校验或解密会失败。`.env` 不提交 Git。仅变更后端环境变量时，使用 `docker compose up -d --no-deps --no-build --force-recreate backend` 加载配置；普通 restart 不会加载新的环境变量。此操作会更新原本地后端，须在明确要更新该环境时执行；隔离测试仍使用 ACK smoke 配置。
 - ACK 测试：`SPRING_PROFILES_ACTIVE=test`；生产：`prod`。这两个 profile 都包含 `cloud` 配置，关闭 Flyway、历史数据启动迁移、本地演示活动和管理员初始化。
 - `config/` 中的示例是变量说明，不是自动加载的配置。ACK 使用 `k8s/configmap.yaml` 和 Secret 注入环境变量；环境间必须分别配置资源和凭证。
 - 各副本使用同一组业务密钥。不要在扩容或重启时重新生成密钥；已有加密数据需要原密钥读取。

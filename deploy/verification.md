@@ -37,6 +37,8 @@
 
 ## 镜像
 
+更新：2026-10-12 再次按 `linux/amd64` 构建，完成隔离验证。用户换网后，前后端 `20261012.1` 均已推送到指定 CODING 仓库，并核验远端摘要与平台。完整地址、摘要和历史网络故障记录见 [20261012.1 交付记录](publish-20261012.1.md)。尚未部署真实 ACK。以下为初次构建时的历史记录。
+
 本机 Docker 已构建独立标签，不覆盖原业务 latest 标签，未推送任何仓库：
 
 - `order-show-ack-backend:20261012`，ID `sha256:278666805d4529317c1232e052250c08f87e4e1855f3f365d99472bd13fb8b22`。
@@ -65,6 +67,15 @@ docker compose -p order-show-ack-smoke -f deploy/verify/compose.yaml --profile c
 ```sh
 docker compose -p order-show-ack-smoke -f deploy/verify/compose.yaml --profile cloud-check down
 ```
+
+## 2026-10-12 本地密钥恢复验证
+
+用户明确授权沿用原本地数据并重新启动后端。将原目录的 PHONE_HMAC_KEY、PHONE_ENCRYPTION_KEY 保存至当前根目录 Git 忽略的 `.env`，未记录密钥值或修改云端配置。
+
+- 仅执行 `docker compose up -d --no-deps --no-build --force-recreate backend`；后端 readiness 返回 UP。
+- 原受影响手机号的 SPECIAL 身份验证成功；登录后商品接口 HTTP 200（43 条），订单、草稿、变更申请查询和 H5 页面均 HTTP 200。仅创建验证会话，未下单或修改白名单。
+- 对比操作前后容器 ID、启动时间、挂载卷：MySQL、Redis、MinIO、前端均未改变；未删除或替换数据卷。
+- 本次是本地接口验证，不替代浏览器完整交互验收；真实云资源验证仍待完成。
 
 ## 必须在真实测试环境完成的项目
 
