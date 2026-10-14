@@ -31,6 +31,7 @@ export function useAttendanceManagement({
   const [attendancePublishing, setAttendancePublishing] = useState(false);
   const [attendanceImportAttemptName, setAttendanceImportAttemptName] = useState("");
   const handleAttendanceFile = async (file: File) => {
+    if (attendancePreviewLoading || attendancePublishing) return;
     if (activityClosed) {
       onAttendanceImportErrorChange("活动已截止，现场到场名单只读。" );
       setActionNotice("活动已截止，现场到场名单只读。" );
@@ -38,15 +39,25 @@ export function useAttendanceManagement({
     }
     setAttendanceImportAttemptName(file.name);
     onAttendanceImportErrorChange("");
+    setPendingAttendanceImport(null);
+    setAttendanceMatchPreview(null);
+    setAttendancePreviewLoading(true);
+    let stage = "文件解析";
     try {
       const result = await parseAttendanceWorkbook(file);
       let serverRows: ImportStagingRow[] = [];
       let matchPreview: AttendanceMatchPreview | null = null;
       if (Number.isFinite(Number(activityId))) {
+        stage = "文件上传或服务端校验";
         const task = await uploadImport(Number(activityId), "ATTENDANCE", file);
         setServerImportTasks((current) => ({ ...current, ATTENDANCE: Number(task.id) }));
         setServerImportBlocking((current) => ({ ...current, ATTENDANCE: Number(task.errorCount || 0) }));
+        setPendingAttendanceImport({ ...result, fileName: file.name, inputCount: result.rows.length });
+        stage = "导入预览读取";
         serverRows = await loadImportRows(Number(activityId), Number(task.id));
+        setPendingAttendanceImport({ ...result, rows: bindAttendanceStaging(result.rows, serverRows),
+          fileName: file.name, inputCount: result.rows.length });
+        stage = "白名单关联试算";
         matchPreview = await loadAttendanceMatchPreview(Number(activityId), Number(task.id));
       }
       const boundRows = bindAttendanceStaging(result.rows, serverRows);
@@ -57,12 +68,23 @@ export function useAttendanceManagement({
         ? `已解析 ${result.rows.length} 名现场到场客户：预计关联 ${matchPreview.matchedCount} 名、待确认 ${matchPreview.pendingCount} 名、未关联 ${matchPreview.unmatchedCount} 名。`
         : `已解析 ${result.rows.length} 名现场到场客户，请检查预览后确认导入。`);
     } catch (error) {
-      onAttendanceImportErrorChange(error instanceof Error ? error.message : "文件解析失败，请检查 Excel 内容。" );
-      setPendingAttendanceImport(null);
+      onAttendanceImportErrorChange(`${stage}失败：${error instanceof Error ? error.message : "请稍后重试。"}`);
       setAttendanceMatchPreview(null);
+    } finally {
+      setAttendancePreviewLoading(false);
+    }
+  };
+  const retryAttendancePreview = async () => {
+    if (activityClosed || attendancePreviewLoading || attendancePublishing || !pendingAttendanceImport || !serverImportTasks.ATTENDANCE) return;
+    try {
+      await refreshServerImportPreview("ATTENDANCE");
+      setActionNotice("现场到场名单预览及白名单关联试算已更新，请检查后确认导入。");
+    } catch (error) {
+      onAttendanceImportErrorChange(`导入预览或白名单关联试算失败：${error instanceof Error ? error.message : "请稍后重试。"}`);
     }
   };
   const cancelAttendanceImport = async () => {
+    if (attendancePreviewLoading || attendancePublishing) return;
     if (!pendingAttendanceImport && !attendanceImportError) return;
     const taskId = serverImportTasks.ATTENDANCE;
     if (taskId && Number.isFinite(Number(activityId))) {
@@ -84,7 +106,7 @@ export function useAttendanceManagement({
     setActionNotice("已取消本次现场到场名单导入，当前名单保持不变。" );
   };
   const confirmAttendanceImport = async () => {
-    if (attendancePublishing) return;
+    if (attendancePublishing || attendancePreviewLoading || attendanceImportError) return;
     if (activityClosed) {
       setActionNotice("活动已截止，现场到场名单只读。" );
       return;
@@ -198,7 +220,8 @@ export function useAttendanceManagement({
         } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "到场名单预览删除失败"); return; }
       }
       setPendingAttendanceImport((current) => current ? { ...current, rows: current.rows.filter((row) => !ids.includes(row.id)) } : current);
-      await refreshServerImportPreview("ATTENDANCE");
+      try { await refreshServerImportPreview("ATTENDANCE"); }
+      catch (error) { setActionNotice(error instanceof ApiError ? `删除已保存，但关联试算刷新失败：${error.message}` : "删除已保存，但关联试算刷新失败，请重试。"); return; }
       setActionNotice(`已从待导入结果移除 ${ids.length} 名到场客户，确认导入后生效。`);
       return;
     }
@@ -217,12 +240,14 @@ export function useAttendanceManagement({
     pendingAttendanceImport,
     setPendingAttendanceImport,
     setAttendanceMatchPreview,
+    attendancePreviewReady: attendanceMatchPreview !== null && !attendanceImportError,
     attendancePreviewLoading,
     setAttendancePreviewLoading,
     attendancePublishing,
     attendanceImportAttemptName,
     setAttendanceImportAttemptName,
     handleAttendanceFile,
+    retryAttendancePreview,
     cancelAttendanceImport,
     confirmAttendanceImport,
     saveAttendanceRow,

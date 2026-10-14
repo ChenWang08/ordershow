@@ -42,6 +42,8 @@
 .report-header { position: relative; z-index: 2; padding: 22px 40px 12px; text-align: center; }
 .report-header > span { color: #e7b85c; font-size: 12px; letter-spacing: .12em; }
 .report-header h1 { margin: 7px 0 14px; font-family: "STKaiti", serif; font-size: 35px; letter-spacing: .08em; }
+/* Keep the original heading space so the report selector and data do not move. */
+.report-header .report-heading-placeholder { visibility: hidden; }
 .report-header label { display: inline-flex; align-items: center; gap: 8px; color: #e7c899; font-size: 11px; }
 .report-header select { min-width: 350px; padding: 7px 11px; color: #fff5dc; border: 1px solid rgba(230,188,106,.5); border-radius: 7px; outline: 0; background: #6d1718; font-size: 11px; }
 .report-content { position: relative; z-index: 2; display: grid; place-items: center; flex: 1; padding: 15px 7vw 95px; }

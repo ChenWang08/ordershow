@@ -126,7 +126,8 @@ public class ImportService {
     Map<Long, String> dealerNames = customerNames(matchedCustomerIds);
     List<AttendanceMatchPreviewRow> previewRows = drafts.stream().map(draft -> new AttendanceMatchPreviewRow(
         draft.stagingRowId(), draft.match().customerId(), draft.match().status(), draft.match().method(),
-        draft.match().reasonCode(), dealerNames.get(draft.match().customerId()), "MATCHED".equals(draft.match().status()))).toList();
+        draft.match().reasonCode(), draft.match().customerId() == null ? null : dealerNames.get(draft.match().customerId()),
+        "MATCHED".equals(draft.match().status()))).toList();
     int matched = (int) previewRows.stream().filter(row -> "MATCHED".equals(row.matchStatus())).count();
     int pending = (int) previewRows.stream().filter(row -> "PENDING_CONFIRMATION".equals(row.matchStatus())).count();
     int unmatched = previewRows.size() - matched - pending;

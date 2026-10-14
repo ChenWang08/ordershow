@@ -6,9 +6,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, createH5OrderChangeRequest, loadH5Order, loadH5OrderChangeRequest, loadH5OrderDraft, loadH5Products, saveH5Order, verifyPhone, type OrderChangeRequest, type RuntimeIdentity, type RuntimeOrder, type RuntimeProduct } from "../../api";
 import type { WhitelistRow } from "../../domain/import-domain";
 import { maskPhone, normalizePhone } from "../shared/utils";
+import { useH5CatalogSearch } from "./useH5CatalogSearch";
 import { useH5Draft } from "./useH5Draft";
 import { createH5SubmissionManager } from "./h5-submission";
-import { productRowToProduct, runtimeProductToProduct, priceBreakdown, groupByProductLine, summarizeOrderLineAmounts, h5QuantitySignature, h5OrderItems, h5RequiresReview, type H5Props, type H5Step, type H5Channel, type H5OrderStatus, type Product, type RebateFilter, type SubmittedOrderItem } from "./h5-domain";
+import { productRowToProduct, runtimeProductToProduct, priceBreakdown, groupByProductLine, summarizeOrderLineAmounts, h5QuantitySignature, h5OrderItems, h5RequiresReview, type H5Props, type H5Step, type H5Channel, type H5OrderStatus, type Product, type SubmittedOrderItem } from "./h5-domain";
 
 export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelistRows, runtimeActivity }: H5Props) {
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
@@ -43,9 +44,6 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const [submittedIdentity, setSubmittedIdentity] = useState<WhitelistRow | null>(null);
   const [phone, setPhone] = useState("");
   const [verifyError, setVerifyError] = useState("");
-  const [rebateFilter, setRebateFilter] = useState<RebateFilter>("PARTICIPATING");
-  const [line, setLine] = useState("全部");
-  const [search, setSearch] = useState("");
   const [previewProduct, setPreviewProduct] = useState<Product | null>(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [orderStatus, setOrderStatus] = useState<H5OrderStatus>("none");
@@ -69,29 +67,11 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   ];
   const regionalized = whitelistRegions.length > 0;
   const selectedRegionName = regionOptions.find((item) => item.value === region)?.name || region;
-  const lineOptions = useMemo(() => ["全部", ...Array.from(new Set(catalog.map((product) => product.line).filter(Boolean)))], [catalog]);
-  const effectiveLine = lineOptions.includes(line) ? line : "全部";
   const h5CustomerType = channel === "综合客户" ? "综合" : "特渠";
-  const normalizedProductSearch = search.trim().toLocaleLowerCase("zh-CN");
-  const hasRebateSplit = useMemo(() => {
-    const hasParticipating = catalog.some((product) => product.rebate === true);
-    const hasNotParticipating = catalog.some((product) => product.rebate === false);
-    return hasParticipating && hasNotParticipating;
-  }, [catalog]);
-  let effectiveRebateFilter: RebateFilter = "ALL";
-  if (hasRebateSplit) effectiveRebateFilter = rebateFilter === "NOT_PARTICIPATING" ? "NOT_PARTICIPATING" : "PARTICIPATING";
-  const visibleProducts = catalog.filter(
-    (p) => (p.status === "有效" || p.status === "待完善")
-      && (unspecifiedWhitelist || p.customerType === "全部" || p.customerType === h5CustomerType)
-      && (effectiveRebateFilter === "ALL"
-        || p.rebate === "全部"
-        || (effectiveRebateFilter === "PARTICIPATING" ? p.rebate === true : p.rebate === false))
-      && (p.branchScope.length === 0 || p.branchScope.includes(verifiedBranch))
-      && (effectiveLine === "全部" || p.line === effectiveLine)
-      && (!normalizedProductSearch
-        || p.name.toLocaleLowerCase("zh-CN").includes(normalizedProductSearch)
-        || (p.materialCode ?? "").toLocaleLowerCase("zh-CN").includes(normalizedProductSearch)),
-  );
+  const catalogSearch = useH5CatalogSearch(catalog, h5CustomerType, unspecifiedWhitelist, verifiedBranch,
+    JSON.stringify([runtimeActivity?.code, runtimeIdentity?.customerId ?? verifiedIdentity?.id, channel, verifiedBranch]), visibleStep === "order");
+  const { lineOptions, hasRebateSplit, visibleProducts, search, setSearch, setLine, setRebateFilter } = catalogSearch;
+  const { line, rebate: effectiveRebateFilter } = catalogSearch.selection;
   const selected = catalog.filter((p) => (quantities[p.id] || 0) > 0);
   const selectedOrderItems = selected.map((product) => ({ product, quantity: quantities[product.id] }));
   const visibleProductGroups = groupByProductLine(visibleProducts, (product) => product.line);
@@ -384,7 +364,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
     }
     return true;
   };
-  return { prepareLiveRoomExit, catalog, requiresReview, pendingSubmission, pendingChangeRequest, recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
+  return { catalogSearch, prepareLiveRoomExit, catalog, requiresReview, pendingSubmission, pendingChangeRequest, recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
 }
 
 export type H5OrderModel = ReturnType<typeof useH5OrderFlow>;

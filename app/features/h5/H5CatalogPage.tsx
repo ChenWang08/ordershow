@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import type { H5OrderModel } from "./useH5OrderFlow";
 import { ProductArt } from "./ProductArt";
 import { QuantityInput } from "./QuantityInput";
@@ -8,6 +9,38 @@ import { priceBreakdown, tierPriceLabel } from "./h5-domain";
 
 export function H5CatalogPage({ model }: { model: H5OrderModel }) {
   const { activityClosed, setStep, setRebateFilter, line, setLine, search, setSearch, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, setCancelConfirmOpen, quantities, setQuantities, visibleStep, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selectedLineGroups, selected, totalBoxes, totalAmount, importedIdentity, identityLabel, dealerName, displayBranch, displayPhone, changeQty, draftMessage } = model;
+  const { catalogSearch } = model;
+  const scrollArea = useRef<HTMLDivElement>(null);
+  const toolbar = useRef<HTMLDivElement>(null);
+  const savedScroll = useRef<number | null>(null);
+  const previousScope = useRef(catalogSearch.scope);
+  const activeLine = useRef<HTMLButtonElement>(null);
+  const previousResult = useRef(catalogSearch.searchResultKey);
+  const changeSearch = (value: string) => {
+    if (!search.trim() && value.trim()) savedScroll.current = scrollArea.current?.scrollTop ?? 0;
+    setSearch(value);
+  };
+  useEffect(() => {
+    if (previousScope.current !== catalogSearch.scope) {
+      savedScroll.current = null;
+      previousScope.current = catalogSearch.scope;
+    }
+    if (visibleStep !== "order" || previousResult.current === catalogSearch.searchResultKey) return;
+    previousResult.current = catalogSearch.searchResultKey;
+    const container = scrollArea.current;
+    if (!container) return;
+    if (!catalogSearch.searching) {
+      if (savedScroll.current !== null) container.scrollTop = savedScroll.current;
+      savedScroll.current = null;
+    } else if (toolbar.current) {
+      container.scrollTop = Math.max(0, container.scrollTop + toolbar.current.getBoundingClientRect().top - container.getBoundingClientRect().top - 8);
+    }
+  }, [catalogSearch.scope, catalogSearch.searchResultKey, catalogSearch.searching, visibleStep]);
+  useEffect(() => {
+    const button = activeLine.current;
+    const parent = button?.parentElement;
+    if (button && parent) parent.scrollLeft = Math.max(0, button.offsetLeft - parent.offsetLeft - 16);
+  }, [line, visibleStep]);
   return <>
           {visibleStep === "order" && (
             <section className="h5-page order-page">
@@ -16,7 +49,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                 <div><b>订货会</b><span>{identityLabel}</span></div>
                 <span aria-hidden="true" />
               </header>
-              <div className="order-scroll-area" role="region" aria-label="商品选择" tabIndex={0}>
+              <div ref={scrollArea} className="order-scroll-area" role="region" aria-label="商品选择" tabIndex={0}>
               <div className="dealer-card">
                 <span>已识别经销商</span>
                 <b>{dealerName}</b>
@@ -24,21 +57,30 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
               </div>
               <div className="policy-note"><b>订货提示</b><span>{activityClosed ? "活动已截止，当前订单仅可查看。" : orderStatus === "none" ? "所有商品按箱订购。增加数量或新增商品直接生效，减少、删除商品或取消订货需要审核。" : "增加数量或新增商品直接生效；减少、删除商品或取消订货需审核。已撤回或已作废订单可重新提交恢复。"}</span></div>
               {draftMessage && <div className="h5-draft-status" role="status">{draftMessage}</div>}
-              <div className="product-toolbar">
-                <div className={`segment${hasRebateSplit ? "" : " single"}`} role="tablist" aria-label="商品返利类型">
+              <div ref={toolbar} className="product-toolbar">
+                <div className={`segment${hasRebateSplit ? catalogSearch.searching ? " search-segment" : "" : " single"}`} role="tablist" aria-label="商品返利类型">
                   {hasRebateSplit ? <>
+                    {catalogSearch.searching && <button role="tab" aria-selected={effectiveRebateFilter === "ALL"} className={effectiveRebateFilter === "ALL" ? "active" : ""} onClick={catalogSearch.showAllSearchResults}>全部结果</button>}
                     <button role="tab" aria-selected={effectiveRebateFilter === "PARTICIPATING"} className={effectiveRebateFilter === "PARTICIPATING" ? "active" : ""} onClick={() => setRebateFilter("PARTICIPATING")}>返利产品</button>
                     <button role="tab" aria-selected={effectiveRebateFilter === "NOT_PARTICIPATING"} className={effectiveRebateFilter === "NOT_PARTICIPATING" ? "active" : ""} onClick={() => setRebateFilter("NOT_PARTICIPATING")}>非返利产品</button>
                   </> : <button role="tab" aria-selected="true" className="active" onClick={() => setRebateFilter("ALL")}>全部商品</button>}
                 </div>
-                <label className="search-box">⌕<input placeholder="搜索商品" value={search} onChange={(e) => setSearch(e.target.value)} /></label>
+                <div className="search-box">⌕<input aria-label="搜索全部商品名称、编码或项目组" placeholder="搜索全部商品名称／编码／项目组" value={search} enterKeyHint="search"
+                  onChange={(e) => changeSearch(e.target.value)} onCompositionStart={catalogSearch.startSearchComposition}
+                  onCompositionEnd={(e) => catalogSearch.endSearchComposition(e.currentTarget.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && !e.nativeEvent.isComposing) { e.preventDefault(); catalogSearch.submitSearch(); } }} />
+                  {search && <button type="button" className="clear-product-search" aria-label="清空商品搜索" onClick={() => changeSearch("")}>×</button>}</div>
               </div>
               <div className="line-tabs">
                 {lineOptions.map((item) => (
-                  <button key={item} className={line === item ? "active" : ""} onClick={() => setLine(item)}>{item}</button>
+                  <button key={item} ref={line === item ? activeLine : undefined} aria-pressed={line === item} className={line === item ? "active" : ""} onClick={() => setLine(item)}>{item}</button>
                 ))}
               </div>
-              <div className="product-list">
+              {(catalogSearch.searching || catalogSearch.searchPending) && <div className="catalog-search-status" role="status">
+                {catalogSearch.searchPending ? "正在搜索…" : `当前：${effectiveRebateFilter === "ALL" ? "全部结果" : effectiveRebateFilter === "PARTICIPATING" ? "返利产品" : "非返利产品"} · ${line}，显示 ${visibleProducts.length} / ${catalogSearch.totalMatches} 件`}
+                {!catalogSearch.searchPending && visibleProducts.length < catalogSearch.totalMatches && <button type="button" onClick={catalogSearch.showAllSearchResults}>查看全部结果</button>}
+              </div>}
+              <div className="product-list" aria-busy={catalogSearch.searchPending}>
                 {visibleProductGroups.map((group) => (
                   <section className="product-line-group" key={group.line}>
                   <header className="product-line-heading"><b>{group.line}</b><span>{group.items.length} 种商品</span></header>
@@ -47,6 +89,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                   <button type="button" className="product-image product-image-button" aria-label={`查看${product.name}商品详情`} onClick={() => setPreviewProduct(product)}><ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} /></button>
                   <div className="product-info">
                       <h3><button type="button" className="product-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button></h3>
+                      {catalogSearch.searching && <small className="catalog-product-location">{product.rebate === true ? "返利产品" : product.rebate === false ? "非返利产品" : "不区分返利"} · {product.line || "未分类"}</small>}
                       {product.description && <p className="product-description" title={product.description}>{product.description}</p>}
                       <div className="product-action">
                         <div className="product-price-block"><strong>{product.isOrderable ? <>¥{money(priceBreakdown(product, quantities[product.id] || 0).displayPrice)}<small>/箱</small></> : "价格待完善"}</strong>{product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small>{tierPriceLabel(product, quantities[product.id] || 0)}</small>}</div>
@@ -61,7 +104,9 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                   ))}
                   </section>
                 ))}
-                {visibleProducts.length === 0 && <div className="empty-state">没有符合条件的商品</div>}
+                {visibleProducts.length === 0 && !catalogSearch.searchPending && <div className="empty-state">
+                  {catalogSearch.searching ? catalogSearch.totalMatches > 0 ? <>当前分类无匹配商品，其他分类有 {catalogSearch.totalMatches} 件<button type="button" onClick={catalogSearch.showAllSearchResults}>查看全部结果</button></> : <>未找到相关商品<button type="button" onClick={() => changeSearch("")}>清空搜索</button></> : "没有符合条件的商品"}
+                </div>}
               </div>
               </div>
               <div className="order-bar">

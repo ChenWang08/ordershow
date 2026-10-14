@@ -80,7 +80,10 @@ export function AdminWorkspace() {
   const refreshServerImportPreview = async (type: "PRODUCT" | "WHITELIST" | "ATTENDANCE") => {
     const taskId = serverImportTasks[type];
     if (!taskId || !Number.isFinite(Number(activityId))) return;
-    if (type === "ATTENDANCE") setAttendancePreviewLoading(true);
+    if (type === "ATTENDANCE") {
+      setAttendancePreviewLoading(true);
+      setAttendanceMatchPreview(null);
+    }
     try {
       const [task, staging, attendancePreview] = await Promise.all([
         loadImportTask(Number(activityId), taskId), loadImportRows(Number(activityId), taskId),
@@ -93,11 +96,15 @@ export function AdminWorkspace() {
         setWhitelistRows((current) => bindWhitelistStaging(current, staging));
       } else {
         if (attendancePreview) setAttendanceMatchPreview(attendancePreview);
+        onAttendanceImportErrorChange("");
         setPendingAttendanceImport((current) => current ? { ...current,
           rows: attendancePreview
             ? mergeAttendanceMatchPreview(bindAttendanceStaging(current.rows, staging), attendancePreview)
             : bindAttendanceStaging(current.rows, staging) } : current);
       }
+    } catch (error) {
+      if (type === "ATTENDANCE") onAttendanceImportErrorChange(`导入预览或白名单关联试算失败：${error instanceof Error ? error.message : "请稍后重试。"}`);
+      throw error;
     } finally {
       if (type === "ATTENDANCE") setAttendancePreviewLoading(false);
     }
@@ -109,7 +116,7 @@ export function AdminWorkspace() {
     setActionNotice, recordOperation, refreshServerImportPreview,
   });
   const {
-    attendanceFormOpen, setAttendanceFormOpen, editingAttendanceRow, setEditingAttendanceRow, pendingAttendanceImport, setPendingAttendanceImport, setAttendanceMatchPreview, attendancePreviewLoading, setAttendancePreviewLoading, attendancePublishing, attendanceImportAttemptName, setAttendanceImportAttemptName, handleAttendanceFile, cancelAttendanceImport, confirmAttendanceImport, saveAttendanceRow, deleteAttendanceRows,
+    attendanceFormOpen, setAttendanceFormOpen, editingAttendanceRow, setEditingAttendanceRow, pendingAttendanceImport, setPendingAttendanceImport, setAttendanceMatchPreview, attendancePreviewReady, attendancePreviewLoading, setAttendancePreviewLoading, attendancePublishing, attendanceImportAttemptName, setAttendanceImportAttemptName, handleAttendanceFile, retryAttendancePreview, cancelAttendanceImport, confirmAttendanceImport, saveAttendanceRow, deleteAttendanceRows,
   } = attendanceManagement;
   const whitelistImport = useWhitelistImport({
     refreshProductScopes: async () => {
@@ -181,7 +188,7 @@ export function AdminWorkspace() {
           activityStatus={activityStatus} whitelistRows={whitelistRows} whitelistImportCompleted={whitelistImportCompleted}
           serverImportBlocking={serverImportBlocking} whitelistImport={whitelistImport} whitelistEditor={whitelistEditor}
         />}
-        {tab === "现场到场" && <AttendancePage rows={pendingAttendanceImport?.rows ?? attendanceRows} fileName={attendanceFileName} warnings={attendanceWarnings} sheetCounts={attendanceSheetCounts} error={attendanceImportError} activityStarted={activityStarted} activityClosed={activityClosed} pendingImport={pendingAttendanceImport} importAttemptName={attendanceImportAttemptName} blockingCount={serverImportBlocking.ATTENDANCE ?? 0} previewLoading={attendancePreviewLoading} publishing={attendancePublishing} onFile={handleAttendanceFile} onAdd={() => { setEditingAttendanceRow(null); setAttendanceFormOpen(true); }} onEdit={setEditingAttendanceRow} onDelete={deleteAttendanceRows} onConfirmImport={confirmAttendanceImport} onCancelImport={cancelAttendanceImport} customerTypeMode={whitelistMode} />}
+        {tab === "现场到场" && <AttendancePage rows={pendingAttendanceImport?.rows ?? attendanceRows} fileName={attendanceFileName} warnings={attendanceWarnings} sheetCounts={attendanceSheetCounts} error={attendanceImportError} activityStarted={activityStarted} activityClosed={activityClosed} pendingImport={pendingAttendanceImport} importAttemptName={attendanceImportAttemptName} blockingCount={serverImportBlocking.ATTENDANCE ?? 0} previewLoading={attendancePreviewLoading} previewReady={attendancePreviewReady} onRetryPreview={retryAttendancePreview} publishing={attendancePublishing} onFile={handleAttendanceFile} onAdd={() => { setEditingAttendanceRow(null); setAttendanceFormOpen(true); }} onEdit={setEditingAttendanceRow} onDelete={deleteAttendanceRows} onConfirmImport={confirmAttendanceImport} onCancelImport={cancelAttendanceImport} customerTypeMode={whitelistMode} />}
         {tab === "订单管理" && <OrderManagement activityClosed={activityClosed} activityStarted={activityStarted} activityId={Number(activityId)} activityName={activityName} />}
         {tab === "抽奖规则" && <LotterySettings rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} attendeeCount={canUse(adminIdentity, "ATTENDANCE") ? attendanceRows.length : moduleContext?.attendeeCount || 0} customerCount={canUse(adminIdentity, "WHITELIST") ? whitelistRows.filter((row) => row.status === "有效").length : moduleContext?.customerCount || 0} customerTypeMode={whitelistMode} readOnly={activityFinished} onChange={onLotteryChange} />}
       </AdminLayout>

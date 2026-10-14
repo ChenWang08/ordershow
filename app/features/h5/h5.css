@@ -308,3 +308,12 @@
 .standalone-h5 .h5-live-room-exit { top: calc(7px + env(safe-area-inset-top)); right: calc(9px + env(safe-area-inset-right)); }
 .h5-live-room-exit:focus-visible { outline: 3px solid #ffd779; outline-offset: 2px; }
 .h5-exit-saving { position: absolute; inset: 0; z-index: 175; display: grid; place-items: center; background: rgba(255,248,236,.85); color: #821b1b; }
+
+/* Search spans the customer's visible catalog while retaining category navigation. */
+.segment.search-segment { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.search-box input { min-width: 0; }
+.clear-product-search { flex: 0 0 auto; border: 0; background: transparent; color: #8b776c; padding: 4px 8px; font-size: 20px; }
+.catalog-search-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 14px 10px; color: #8b776c; font-size: 11px; }
+.catalog-search-status button, .product-list .empty-state button { border: 0; background: transparent; color: #a4201e; padding: 6px; text-decoration: underline; }
+.product-list .empty-state button { display: block; margin: 8px auto; }
+.catalog-product-location { display: block; color: #8b776c; font-size: 10px; margin: 4px 0; }
