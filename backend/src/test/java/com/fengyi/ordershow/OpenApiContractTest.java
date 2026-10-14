@@ -36,6 +36,7 @@ class OpenApiContractTest {
         "/admin/activities/{activityId}/publish",
         "/admin/activities/{activityId}/withdraw-publication",
         "/admin/activities/{activityId}/close",
+        "/admin/activities/{activityId}/reopen",
         "/admin/activities/{activityId}/orders/{orderId}",
         "/admin/activities/{activityId}/orders/{orderId}/void",
         "/admin/activities/{activityId}/orders/export",

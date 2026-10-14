@@ -422,7 +422,7 @@ test("uses published, time-driven activity lifecycle controls", async () => {
   assert.match(prototype, /历史回看/);
   assert.doesNotMatch(prototype, /立即开始并锁定导入|恢复为待开始|changeActivityStatus/);
   assert.match(prototype, /订货开始时间必须晚于当前时间/);
-  assert.match(prototype, /活动进行中只能延长截止时间/);
+  assert.match(prototype, /订货截止时间必须晚于当前时间/);
   assert.match(api, /publishActivity/);
   assert.match(api, /withdrawActivityPublication/);
   assert.match(api, /closeActivityNow/);
@@ -433,7 +433,7 @@ test("uses published, time-driven activity lifecycle controls", async () => {
   assert.match(activityController, /\/finish/);
   assert.doesNotMatch(activityController, /\/transition/);
   assert.match(activityService, /status = 'ACTIVE'.*actual_started_at/s);
-  assert.match(activityService, /ACTIVITY_END_CAN_ONLY_EXTEND/);
+  assert.match(activityService, /ACTIVITY_END_NOT_FUTURE/);
   assert.match(activityService, /ACTIVITY_EVENT_END_CAN_ONLY_EXTEND/);
   assert.match(activityService, /status = 'FINISHED'.*finished_at/s);
 });

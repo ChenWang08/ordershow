@@ -87,7 +87,7 @@ test("invalid activity end times do not reach the API", async () => {
   harness.render().setNewActivity({ ...validDraft, eventEndsAt: "2099-01-01T11:00" });
   await harness.render().submitNewActivity();
   assert.deepEqual(harness.calls, []);
-  assert.match(harness.notices.at(-1), /不能早于订货截止时间/);
+  assert.match(harness.notices.at(-1), /必须晚于订货截止时间/);
 });
 
 test("creation failure leaves the drawer open and allows retry", async () => {

@@ -1007,6 +1007,49 @@ paths:
                 $ref: '#/components/schemas/ActivityResponse'
         '409':
           $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/reopen:
+    post:
+      operationId: reopenActivity
+      tags: [Activities]
+      summary: 重新开放已截止或已结束活动的订货
+      description: 仅超级管理员或本部门管理员可操作。服务器当前时间必须早于订货截止时间，整场结束时间必须严格晚于订货截止时间。保留订单和中奖记录，不恢复失效登录；校验部门活动时间冲突，记录原因及变更前后状态和时间。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endsAt, eventEndsAt, reason]
+              properties:
+                endsAt:
+                  type: string
+                  format: date-time
+                eventEndsAt:
+                  type: string
+                  format: date-time
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '200':
+          description: 恢复订货成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
   /admin/activities/{activityId}/imports:
     get:
       operationId: listImportTasks

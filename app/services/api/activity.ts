@@ -95,3 +95,10 @@ export async function finishActivityNow(activity: RuntimeActivity, reason: strin
     method: "POST", headers: { "If-Match": String(activity.version) }, body: JSON.stringify({ reason }),
   }, "admin")).data;
 }
+
+export async function reopenActivity(activity: RuntimeActivity, input: { endsAt: string; eventEndsAt: string; reason: string }) {
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/reopen`, {
+    method: "POST", headers: { "If-Match": String(activity.version) },
+    body: JSON.stringify({ endsAt: new Date(input.endsAt).toISOString(), eventEndsAt: new Date(input.eventEndsAt).toISOString(), reason: input.reason.trim() }),
+  }, "admin")).data;
+}

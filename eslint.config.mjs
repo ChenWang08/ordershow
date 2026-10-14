@@ -5,14 +5,24 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
-  // Override default ignores of eslint-config-next.
   globalIgnores([
-    // Default ignores of eslint-config-next:
+    // Generated application bundles, tool caches, and test reports.
     ".next/**",
+    ".vinext/**",
+    ".wrangler/**",
+    "dist/**",
     "out/**",
-    "build/**",
+    "coverage/**",
+    "backend/target/**",
+    // Local scratch work, exported evidence, and deployment backups (also Git-ignored).
+    "work/**",
+    "outputs/**",
+    "backups/**",
+    // Generated type declarations.
     "next-env.d.ts",
     "types/worker-runtime.d.ts",
+    // Next ignores build/ by default, but this project keeps maintained Vite plugin source there.
+    "!build/**",
   ]),
 ]);
 

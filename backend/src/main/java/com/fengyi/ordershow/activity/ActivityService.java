@@ -157,12 +157,7 @@ public class ActivityService {
       if (!current.startsAt().truncatedTo(ChronoUnit.MINUTES).equals(request.startsAt().truncatedTo(ChronoUnit.MINUTES))) {
         throw DomainException.conflict("ACTIVITY_START_READ_ONLY", "活动开始后不能修改订货开始时间");
       }
-      if (request.endsAt().truncatedTo(ChronoUnit.MINUTES).isBefore(current.endsAt().truncatedTo(ChronoUnit.MINUTES))) {
-        throw DomainException.conflict("ACTIVITY_END_CAN_ONLY_EXTEND", "活动进行中只能延长订货截止时间；如需停止请使用立即截止订货");
-      }
-      if (current.eventEndsAt() != null && request.eventEndsAt().truncatedTo(ChronoUnit.MINUTES).isBefore(current.eventEndsAt().truncatedTo(ChronoUnit.MINUTES))) {
-        throw DomainException.conflict("ACTIVITY_EVENT_END_CAN_ONLY_EXTEND", "活动开始后只能延长整场活动结束时间");
-      }
+      requireFutureEnd(request.endsAt());
       requirePublishedDataUnchanged(current, request);
     }
     if ("CLOSED".equals(effective)) {
@@ -179,6 +174,7 @@ public class ActivityService {
         && request.endsAt().truncatedTo(ChronoUnit.MINUTES).equals(current.endsAt().truncatedTo(ChronoUnit.MINUTES))
         ? current.endsAt() : request.endsAt();
     Instant eventEndsAtToSave = request.eventEndsAt();
+    validateTime(startsAtToSave, endsAtToSave, eventEndsAtToSave);
     if ("SCHEDULED".equals(effective) || "ACTIVE".equals(effective) || "CLOSED".equals(effective)) {
       lockDepartmentForScheduleCheck(current.departmentId());
       requireNoPublishedOverlap(id, current.departmentId(), startsAtToSave, eventEndsAtToSave == null ? endsAtToSave : eventEndsAtToSave);
@@ -281,8 +277,8 @@ public class ActivityService {
     }
   }
 
-  @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 30_000)
-  void synchronizeTimedActivities() {
+  @Transactional
+  public void synchronizeTimedActivities() {
     List<Long> starting = jdbc.queryForList("""
         SELECT id FROM activity WHERE status = 'SCHEDULED'
           AND starts_at <= UTC_TIMESTAMP(3) AND ends_at > UTC_TIMESTAMP(3)
@@ -377,7 +373,7 @@ public class ActivityService {
   static String effectiveStatus(String configuredStatus, Instant startsAt, Instant endsAt, Instant eventEndsAt, Instant now) {
     if ("ARCHIVED".equals(configuredStatus) || "FINISHED".equals(configuredStatus)) return configuredStatus;
     if ("DRAFT".equals(configuredStatus)) return "DRAFT";
-    if ("CLOSED".equals(configuredStatus) && eventEndsAt != null && !now.isBefore(eventEndsAt)) return "FINISHED";
+    if (eventEndsAt != null && !now.isBefore(eventEndsAt)) return "FINISHED";
     if ("CLOSED".equals(configuredStatus)) return "CLOSED";
     if (!now.isBefore(endsAt)) return "CLOSED";
     if (("SCHEDULED".equals(configuredStatus) || "ACTIVE".equals(configuredStatus)) && !now.isBefore(startsAt)) return "ACTIVE";
@@ -410,8 +406,8 @@ public class ActivityService {
     if (startsAt == null || endsAt == null || !startsAt.isBefore(endsAt)) {
       throw DomainException.badRequest("ACTIVITY_TIME_INVALID", "活动开始时间必须早于截止时间");
     }
-    if (eventEndsAt == null || eventEndsAt.isBefore(endsAt)) {
-      throw DomainException.badRequest("ACTIVITY_EVENT_TIME_INVALID", "整场活动结束时间不能早于订货截止时间");
+    if (eventEndsAt == null || !eventEndsAt.isAfter(endsAt)) {
+      throw DomainException.badRequest("ACTIVITY_EVENT_TIME_INVALID", "整场活动结束时间必须晚于订货截止时间");
     }
   }
 
@@ -419,6 +415,53 @@ public class ActivityService {
     if (!startsAt.isAfter(now())) {
       throw DomainException.badRequest("ACTIVITY_START_NOT_FUTURE", "订货开始时间必须晚于当前时间");
     }
+  }
+
+  private void requireFutureEnd(Instant endsAt) {
+    if (endsAt == null || !endsAt.isAfter(now())) {
+      throw DomainException.badRequest("ACTIVITY_END_NOT_FUTURE", "订货截止时间必须晚于当前时间");
+    }
+  }
+
+  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
+  public ActivityView reopen(long id, int expectedVersion, Instant endsAt, Instant eventEndsAt,
+      String reason, String traceId, AdminPrincipal admin) {
+    admin.requireManager();
+    departmentAccess.requireActivityAccess(admin, id);
+    if (reason == null || reason.isBlank() || reason.trim().length() > 500) {
+      throw DomainException.badRequest("ACTIVITY_REOPEN_REASON_INVALID", "请填写重新开放原因（最多 500 字）");
+    }
+    lockDepartmentForScheduleCheck(byId(id).departmentId());
+    jdbc.queryForList("SELECT id FROM activity WHERE id = ? FOR UPDATE", Long.class, id);
+    ActivityView current = byId(id);
+    if (!List.of("CLOSED", "FINISHED").contains(current.status())) {
+      throw DomainException.conflict("ACTIVITY_REOPEN_INVALID", "只有订货已截止或整场活动已结束时可以重新开放订货");
+    }
+    if (current.version() != expectedVersion) requireChanged(0);
+    requireFutureEnd(endsAt);
+    validateTime(current.startsAt(), endsAt, eventEndsAt);
+    requireNoPublishedOverlap(id, current.departmentId(), current.startsAt(), eventEndsAt);
+    int changed = jdbc.update("""
+        UPDATE activity SET status = 'ACTIVE', ends_at = ?, event_ends_at = ?,
+          closed_at = NULL, finished_at = NULL, version = version + 1, updated_by = ?
+        WHERE id = ? AND version = ? AND archived_at IS NULL
+        """, Timestamp.from(endsAt), Timestamp.from(eventEndsAt), admin.id(), id, expectedVersion);
+    requireChanged(changed);
+    jdbc.update("DELETE FROM activity_dashboard_snapshot WHERE activity_id = ?", id);
+    jdbc.update("""
+        INSERT INTO audit_log(activity_id, actor_type, admin_user_id, action_code, object_type, object_id,
+          reason, before_json, after_json, result, trace_id, occurred_at, actor_identity_snapshot, actor_role_snapshot)
+        VALUES (?, 'ADMIN', ?, 'ACTIVITY_REOPEN', 'ACTIVITY', ?, ?,
+          JSON_OBJECT('status', ?, 'endsAt', ?, 'eventEndsAt', ?, 'closedAt', ?, 'finishedAt', ?),
+          JSON_OBJECT('status', 'ACTIVE', 'endsAt', ?, 'eventEndsAt', ?),
+          'SUCCESS', ?, UTC_TIMESTAMP(3), ?, ?)
+        """, id, admin.id(), String.valueOf(id), reason.trim(), current.status(), current.endsAt().toString(),
+        current.eventEndsAt() == null ? null : current.eventEndsAt().toString(),
+        current.closedAt() == null ? null : current.closedAt().toString(),
+        current.finishedAt() == null ? null : current.finishedAt().toString(), endsAt.toString(), eventEndsAt.toString(),
+        traceId, admin.displayName() + "（" + admin.username() + "）", admin.roleCode());
+    outbox(id, "ACTIVITY_REOPENED");
+    return byId(id);
   }
 
   private void requirePublishReady(long activityId) {

@@ -57,7 +57,11 @@ function settingsHarness(overrides = {}, apiOverrides = {}, confirm = true) {
   let cursor = 0;
   const { useActivitySettings } = loadModule("app/features/admin/useActivitySettings.ts", {
     "../../api": api,
-    react: { useState(initial) {
+    react: { useRef(initial) {
+      const index = cursor++;
+      if (!(index in slots)) slots[index] = { current: initial };
+      return slots[index];
+    }, useState(initial) {
       const index = cursor++;
       if (!(index in slots)) slots[index] = initial;
       return [slots[index], (value) => { slots[index] = value; }];
@@ -96,10 +100,9 @@ test("cancelled publication performs no API writes", async () => {
   assert.deepEqual(harness.calls, []);
 });
 
-test("invalid times and shortened running orders are rejected before saving", async () => {
+test("invalid start times are rejected before saving", async () => {
   for (const [status, end, message] of [
     ["draft", "2099-01-02T09:00", /开始时间必须早于截止时间/],
-    ["running", "2099-01-02T11:00", /只能延长截止时间/],
   ]) {
     const harness = settingsHarness({ activityStatus: status });
     harness.render().setActivityEndDraft(end);
@@ -124,7 +127,85 @@ test('member overview never exposes activity lifecycle controls even with all pe
   });
   for (const activityStatus of ['draft','scheduled','running','closed','finished']) {
     const html = renderToStaticMarkup(React.createElement(MemberOverview, { ...viewProps, activityStatus }));
-    for (const action of ['发布活动','撤回发布','立即截止订货','结束整场活动','保存活动设置','保存延长时间']) assert.equal(html.includes('>' + action + '</button>'), false);
+    for (const action of ['发布活动','撤回发布','立即截止订货','结束整场活动','保存活动设置','保存时间调整','重新开放订货']) assert.equal(html.includes('>' + action + '</button>'), false);
     assert.equal((html.match(/<input\b[^>]*type="datetime-local"[^>]*disabled=""[^>]*>/g) || []).length, 3);
   }
+});
+
+test('running activity can shorten future deadlines but event end must be strictly later', async () => {
+  const harness = settingsHarness({ activityStatus: 'running' });
+  harness.render().setActivityEndDraft('2099-01-02T11:00');
+  harness.render().setActivityEventEndDraft('2099-01-02T11:30');
+  assert.equal(await harness.render().saveActivityConfig(), true);
+  harness.render().setActivityEventEndDraft('2099-01-02T11:00');
+  assert.equal(await harness.render().saveActivityConfig(), false);
+  assert.match(harness.notices.at(-1), /必须晚于订货截止/);
+});
+
+test('only closed and finished activities show reopening', () => {
+  for (const activityStatus of ['draft', 'scheduled', 'running', 'closed', 'finished']) {
+    const html = renderToStaticMarkup(React.createElement(ActivityOverview, { ...viewProps, activityStatus }));
+    assert.equal(html.includes('>重新开放订货</button>'), ['closed', 'finished'].includes(activityStatus));
+  }
+});
+
+function reopenHarness(apiOverrides = {}, confirm = true) {
+  const activity = { id: 1, version: 7, name: '测试活动', status: 'FINISHED', startsAt: '2020-01-01T10:00', endsAt: '2020-01-01T12:00', eventEndsAt: '2020-01-01T16:00' };
+  const submitted = [];
+  const harness = settingsHarness({ activityStatus: 'finished' }, {
+    loadAdminActivity: async () => activity,
+    reopenActivity: async (snapshot, input) => { submitted.push({ snapshot, input }); return { ...activity, ...input, status: 'ACTIVE' }; },
+    ...apiOverrides,
+  }, confirm);
+  return { ...harness, submitted };
+}
+
+async function fillReopen(harness, changes = {}) {
+  await harness.render().openReopenDialog();
+  const draft = harness.render().reopenDraft;
+  assert.equal(draft.endsAt, '');
+  assert.equal(draft.eventEndsAt, '');
+  harness.render().setReopenDraft({ ...draft, endsAt: '2099-01-02T11:00', eventEndsAt: '2099-01-02T12:00', reason: '误结束', ...changes });
+}
+
+test('reopening retains loaded version and restores running status', async () => {
+  const harness = reopenHarness();
+  await fillReopen(harness);
+  await harness.render().submitReopen();
+  assert.equal(harness.submitted[0].snapshot.version, 7);
+  assert.equal(harness.render().reopenDraft, null);
+  assert.ok(harness.calls.includes('status:running'));
+});
+
+test('reopening rejects expired, equal deadlines and blank reasons without writes', async () => {
+  for (const changes of [{ endsAt: '2020-01-01T12:00' }, { eventEndsAt: '2099-01-02T11:00' }, { reason: ' ' }]) {
+    const harness = reopenHarness();
+    await fillReopen(harness, changes);
+    await harness.render().submitReopen();
+    assert.equal(harness.submitted.length, 0);
+    assert.ok(harness.render().reopenDraft.error);
+  }
+});
+
+test('cancelled confirmation keeps the form and performs no writes', async () => {
+  const harness = reopenHarness({}, false);
+  await fillReopen(harness);
+  await harness.render().submitReopen();
+  assert.equal(harness.submitted.length, 0);
+  assert.equal(harness.render().reopenDraft.reason, '误结束');
+});
+
+test('pending reopening blocks duplicate submissions and failures preserve entered values', async () => {
+  let reject;
+  let writes = 0;
+  const harness = reopenHarness({ reopenActivity: () => { writes++; return new Promise((_, fail) => { reject = fail; }); } });
+  await fillReopen(harness);
+  const pending = harness.render().submitReopen();
+  await harness.render().submitReopen();
+  assert.equal(writes, 1);
+  reject(new Error('offline'));
+  await pending;
+  assert.equal(harness.render().reopenDraft.reason, '误结束');
+  assert.ok(harness.render().reopenDraft.error);
+  assert.equal(harness.render().reopenBusy, false);
 });

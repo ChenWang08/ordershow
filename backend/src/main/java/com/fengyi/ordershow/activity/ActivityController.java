@@ -97,6 +97,19 @@ public class ActivityController {
 
   public record LiveRoomRequest(@Size(max = 2048) String liveRoomUrl) {}
 
+  @PostMapping("/admin/activities/{activityId}/reopen")
+  ApiResponse<ActivityService.ActivityView> reopen(@PathVariable long activityId,
+      @RequestHeader("If-Match") String ifMatch, @Valid @RequestBody ReopenRequest body, HttpServletRequest request) {
+    request.setAttribute(AuditService.REASON_REQUEST_ATTRIBUTE, body.reason().trim());
+    var result = service.reopen(activityId, parseVersion(ifMatch), body.endsAt(), body.eventEndsAt(),
+        body.reason(), TraceFilter.id(request), auth.requireAdmin(request));
+    request.setAttribute(AuditService.RECORDED_REQUEST_ATTRIBUTE, true);
+    return ApiResponse.of(result, TraceFilter.id(request));
+  }
+
+  public record ReopenRequest(@NotNull Instant endsAt, @NotNull Instant eventEndsAt,
+                             @NotBlank @Size(max = 500) String reason) {}
+
   private static int parseVersion(String value) {
     return Integer.parseInt(value.replace("W/", "").replace("\"", "").trim());
   }
