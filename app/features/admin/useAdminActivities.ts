@@ -88,8 +88,8 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice }
       setActionNotice("订货截止时间必须晚于开始时间。");
       return;
     }
-    if (new Date(newActivity.eventEndsAt) < new Date(newActivity.endsAt)) {
-      setActionNotice("整场活动结束时间不能早于订货截止时间。");
+    if (new Date(newActivity.eventEndsAt) <= new Date(newActivity.endsAt)) {
+      setActionNotice("整场活动结束时间必须晚于订货截止时间。");
       return;
     }
     setCreatingActivity(true);

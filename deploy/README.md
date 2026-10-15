@@ -46,6 +46,8 @@ PolarDB 需要支持项目 SQL 使用的 MySQL 8 能力，具体版本须测试�
 
 ## 镜像构建与推送
 
+最新本地验证版本为 `20261015.1`，见 [本地镜像与验证记录](local-images-20261015.1.md)。构建本地 ACK 镜像、推送 CODING、更新 ACK 部署是三个独立步骤；此次仅完成本地构建和验证。隔离配置默认使用该版本，可通过 `ACK_IMAGE_TAG` 选择版本。
+
 下面是 shell 示例，将仓库和版本改为实际值，构建与 ACK 节点一致的架构。使用明确版本标签，测试验收后将同一镜像摘要用于生产。
 
 ```sh
@@ -58,6 +60,8 @@ docker push REGISTRY/order-show/frontend:VERSION
 **前端的 NEXT_PUBLIC_API_BASE 是构建参数，不是运行时配置。** ACK 镜像固定使用相对路径 `/api/v1`，由 Ingress 同域分流，测试和生产不需要把域名编进镜像。不要把本地默认指向 8080 的前端镜像直接交给 ACK。后端云资源信息均由运行时环境变量注入。
 
 ## 数据库准备
+
+当前结构版本为 V039；已有 V038 云库须由 DBA 先执行 `db/migrations/V039__activity_backgrounds.sql` 并记录版本，再更新应用。不得对已有库重跑空库包。
 
 先阅读 [DBA 执行说明](dba/README.md)。运行 `node scripts/package-dba.mjs` 生成空库初始化包，DBA 建库并执行，再创建初始管理员。V037 是 Java 数据清理迁移，此次全新空库明确不适用，已在 manifest 中标记。应用不会自动改表，也不会在云端创建本地演示活动。
 

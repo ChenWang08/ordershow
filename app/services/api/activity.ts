@@ -16,6 +16,14 @@ export async function loadAdminActivity(id: number) {
   return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${id}`)).data;
 }
 
+export async function saveActivityBackground(activityId: number, kind: "h5" | "desktop", file: File | null) {
+  const body = new FormData();
+  if (file) body.append("file", file);
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activityId}/backgrounds/${kind}`, {
+    method: file ? "POST" : "DELETE", ...(file ? { body } : {}),
+  }, "admin")).data;
+}
+
 export async function updateActivityLiveRoom(activity: RuntimeActivity, liveRoomUrl: string) {
   return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/live-room`, {
     method: "PATCH", headers: { "If-Match": String(activity.version) },
@@ -85,5 +93,12 @@ export async function closeActivityNow(activity: RuntimeActivity, reason: string
 export async function finishActivityNow(activity: RuntimeActivity, reason: string) {
   return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/finish`, {
     method: "POST", headers: { "If-Match": String(activity.version) }, body: JSON.stringify({ reason }),
+  }, "admin")).data;
+}
+
+export async function reopenActivity(activity: RuntimeActivity, input: { endsAt: string; eventEndsAt: string; reason: string }) {
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/reopen`, {
+    method: "POST", headers: { "If-Match": String(activity.version) },
+    body: JSON.stringify({ endsAt: new Date(input.endsAt).toISOString(), eventEndsAt: new Date(input.eventEndsAt).toISOString(), reason: input.reason.trim() }),
   }, "admin")).data;
 }

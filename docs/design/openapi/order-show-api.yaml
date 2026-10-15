@@ -22,6 +22,64 @@ tags:
   - name: Exports
   - name: Audit
 paths:
+  /admin/activities/{activityId}/backgrounds/{kind}:
+    parameters:
+      - $ref: '#/components/parameters/ActivityId'
+      - name: kind
+        in: path
+        required: true
+        schema: { type: string, enum: [h5, desktop] }
+    post:
+      operationId: uploadActivityBackground
+      tags: [Activities]
+      summary: 管理员上传并立即保存活动背景
+      description: JPG/JPEG、PNG、WebP；h5 上限 5 MiB，desktop 上限 10 MiB。电脑端订单排行、专题战报、幸运抽奖共用。校验管理员及活动所属部门；仅更新所选背景，不修改活动基础配置版本。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: 背景已保存，返回更新后的活动
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Activity' }
+                  traceId: { type: string }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: resetActivityBackground
+      tags: [Activities]
+      summary: 清除当前活动所选背景，恢复各页面默认背景
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已恢复默认
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Activity' }
+                  traceId: { type: string }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /admin/members:
     get:
       operationId: listDepartmentMembers
@@ -947,6 +1005,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ActivityResponse'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/reopen:
+    post:
+      operationId: reopenActivity
+      tags: [Activities]
+      summary: 重新开放已截止或已结束活动的订货
+      description: 仅超级管理员或本部门管理员可操作。服务器当前时间必须早于订货截止时间，整场结束时间必须严格晚于订货截止时间。保留订单和中奖记录，不恢复失效登录；校验部门活动时间冲突，记录原因及变更前后状态和时间。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endsAt, eventEndsAt, reason]
+              properties:
+                endsAt:
+                  type: string
+                  format: date-time
+                eventEndsAt:
+                  type: string
+                  format: date-time
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        '200':
+          description: 恢复订货成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
         '409':
           $ref: '#/components/responses/Problem'
   /admin/activities/{activityId}/imports:
@@ -2820,6 +2921,12 @@ components:
       type: object
       required: [code, name, status, startsAt, endsAt, eventEndsAt, timezone, customerScope]
       properties:
+        h5BackgroundUrl:
+          type: [string, 'null']
+          description: 手机入口背景的公开资源路径；未配置时省略，前端使用默认背景。
+        desktopBackgroundUrl:
+          type: [string, 'null']
+          description: 三个电脑端展示页面共用的公开背景资源路径；未配置时省略。
         code:
           type: string
           description: 面向运营人员展示的活动编号，用于数据识别、报表和兼容旧链接。
@@ -2892,6 +2999,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/RegionCode'
             - type: 'null'
+          description: 仅有综合客户的已发布有效白名单允许省略或传 null，服务端按手机号读取真实大区；显式提交大区仍须匹配。双类型白名单中综合客户继续按现有规则选择大区，有大区配置时不可省略，未分配客户传 UNASSIGNED。特渠及 ALL 不要求大区。
         phone:
           type: string
           minLength: 1

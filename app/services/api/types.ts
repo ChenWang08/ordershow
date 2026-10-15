@@ -3,6 +3,8 @@ export type PageEnvelope<T> = { data: T[]; page: { number: number; size: number;
 export type RankingMetric = "AMOUNT" | "TONS";
 
 export type RuntimeActivity = {
+  h5BackgroundUrl?: string | null;
+  desktopBackgroundUrl?: string | null;
   liveRoomUrl?: string | null;
   id: number; departmentId: number; departmentName?: string; code: string; name: string; description?: string; status: string; configuredStatus: string;
   timezone: string; startsAt: string; endsAt: string; customerScope: string; companyRankingTopN: number;

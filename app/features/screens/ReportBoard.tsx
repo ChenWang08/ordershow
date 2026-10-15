@@ -69,8 +69,8 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
     <section className="screen-board report-board">
       <FestivalDecor />
       <header className="report-header">
-        <span>调味品事业部新品发布及旺季动员会</span>
-        <h1>月满家圆 · 味启新程{historical && <small> · 历史回看</small>}</h1>
+        <span className="report-heading-placeholder" aria-hidden="true">调味品事业部新品发布及旺季动员会</span>
+        <h1><span className="report-heading-placeholder" aria-hidden="true">月满家圆 · 味启新程</span>{historical && <small> · 历史回看</small>}</h1>
         <label>当前看板：
           <select value={report} disabled={unspecifiedCustomerType} onChange={(e) => setReport(e.target.value)}>
             {reports.map((item) => <option key={item}>{item}</option>)}

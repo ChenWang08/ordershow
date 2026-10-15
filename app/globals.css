@@ -9,3 +9,5 @@
 @import "./styles/shared-details.css";
 @import "./features/screens/styles/dashboard.css";
 @import "./styles/responsive.css";
+@import "./styles/activity-backgrounds.css";
+@import "./styles/screen-header.css";

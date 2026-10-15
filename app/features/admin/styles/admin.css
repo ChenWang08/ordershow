@@ -345,3 +345,9 @@
 .member-modal fieldset { border: 1px solid #dfd4cd; border-radius: 6px; padding: 14px; }
 .member-permissions { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .member-permissions label { display: flex; align-items: center; gap: 8px; }
+
+.reopen-drawer.form-drawer { width: min(470px, 94vw); }
+.reopen-drawer .drawer-body { min-height: 0; }
+.reopen-drawer .drawer-body textarea { min-height: 96px; resize: vertical; padding: 10px; border: 1px solid #dcd0c8; border-radius: 7px; background: #fff; font: inherit; }
+.reopen-drawer .drawer-body > p { color: #80695c; font-size: 12px; line-height: 1.6; }
+.reopen-drawer .drawer-body > p[role="alert"] { color: #a92321; padding: 10px; background: #fff0ed; border-radius: 7px; }

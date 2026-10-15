@@ -671,6 +671,86 @@ class IsolatedApiE2ETest {
 
     HttpResponse<String> afterFinish = send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null);
     assertEquals(401, afterFinish.statusCode());
+    verifyReopeningRecovery();
+  }
+
+  private void verifyReopeningRecovery() throws Exception {
+    String path = "/admin/activities/" + activityId;
+    String screen = "/screen/activities/" + activityCode;
+    JsonNode before = data(send(admin, "GET", path, null, null, null));
+    JsonNode originalOrder = data(send(admin, "GET", path + "/orders/" + orderId, null, null, null));
+    JsonNode originalLottery = data(send(client(), "GET", "/public/activities/" + activityCode + "/lottery", null, null, null));
+    String version = before.path("version").asText();
+    ObjectNode body = JSON.createObjectNode().put("endsAt", Instant.now().plusSeconds(3600).toString())
+        .put("eventEndsAt", Instant.now().plusSeconds(7200).toString()).put("reason", "AUTOTEST 误结束恢复");
+    for (ObjectNode invalid : List.of(body.deepCopy().put("reason", " "),
+        body.deepCopy().put("endsAt", Instant.now().minusSeconds(1).toString()),
+        body.deepCopy().put("eventEndsAt", body.path("endsAt").asText()))) {
+      var rejected = send(admin, "POST", path + "/reopen", invalid, adminCsrf, version);
+      assertEquals(400, rejected.statusCode(), rejected.body());
+    }
+    assertEquals(409, send(admin, "POST", path + "/reopen", body, adminCsrf, "-1").statusCode());
+    var attempts = new ArrayList<CompletableFuture<HttpResponse<String>>>();
+    for (int i = 0; i < 2; i++) attempts.add(CompletableFuture.supplyAsync(() -> {
+      try { return send(admin, "POST", path + "/reopen", body, adminCsrf, version); }
+      catch (Exception error) { throw new RuntimeException(error); }
+    }));
+    var results = attempts.stream().map(CompletableFuture::join).toList();
+    assertEquals(List.of(200, 409), results.stream().map(HttpResponse::statusCode).sorted().toList(), results.toString());
+    JsonNode reopened = data(results.stream().filter(r -> r.statusCode() == 200).findFirst().orElseThrow());
+    assertEquals("ACTIVE", reopened.path("status").asText());
+    assertEquals(before.path("startsAt"), reopened.path("startsAt"));
+    assertTrue(reopened.path("closedAt").isNull() || reopened.path("closedAt").isMissingNode());
+    assertTrue(reopened.path("finishedAt").isNull() || reopened.path("finishedAt").isMissingNode());
+    assertEquals(originalOrder, data(send(admin, "GET", path + "/orders/" + orderId, null, null, null)));
+    assertEquals(originalLottery, data(send(client(), "GET", "/public/activities/" + activityCode + "/lottery", null, null, null)));
+    assertEquals("ACTIVE", data(send(client(), "GET", screen + "/ranking", null, null, null)).path("status").asText());
+    assertEquals(401, send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null).statusCode());
+
+    ObjectNode verify = JSON.createObjectNode().put("customerType", "GENERAL").put("regionCode", generalRegionCode).put("phone", GENERAL_PHONE);
+    var login = send(h5, "POST", "/public/activities/" + activityCode + "/verify-phone", verify, null, null);
+    assertEquals(200, login.statusCode(), login.body());
+    h5Csrf = data(login).path("csrfToken").asText();
+    var addition = orderBody(originalOrder.path("currentVersion").asInt(), productId, 3);
+    var submitted = send(h5, "PUT", "/h5/activities/" + activityCode + "/order", addition, h5Csrf, null, UUID.randomUUID().toString());
+    assertEquals(200, submitted.statusCode(), submitted.body());
+    JsonNode liveTotals = data(send(client(), "GET", screen + "/ranking", null, null, null)).path("totals");
+
+    ObjectNode shortened = ((ObjectNode) reopened).deepCopy();
+    shortened.put("endsAt", Instant.now().plusSeconds(600).toString());
+    shortened.put("eventEndsAt", Instant.now().plusSeconds(1200).toString());
+    var updated = send(admin, "PUT", path, shortened, adminCsrf, reopened.path("version").asText());
+    assertEquals(200, updated.statusCode(), updated.body());
+    var reason = JSON.createObjectNode().put("reason", "AUTOTEST 多次恢复");
+    var closed = send(admin, "POST", path + "/close", reason, adminCsrf, data(updated).path("version").asText());
+    assertEquals(200, closed.statusCode(), closed.body());
+    var again = send(admin, "POST", path + "/reopen", body, adminCsrf, data(closed).path("version").asText());
+    assertEquals(200, again.statusCode(), again.body());
+    assertEquals(200, send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null).statusCode());
+    closed = send(admin, "POST", path + "/close", reason, adminCsrf, data(again).path("version").asText());
+    var finished = send(admin, "POST", path + "/finish", reason, adminCsrf, data(closed).path("version").asText());
+    assertEquals(200, finished.statusCode(), finished.body());
+    assertEquals(liveTotals, data(send(client(), "GET", screen + "/ranking", null, null, null)).path("totals"));
+
+    // Exercise automatic cutoffs as well as explicit buttons, including the scheduler's catch-up window.
+    body.put("endsAt", Instant.now().plusSeconds(2).toString()).put("eventEndsAt", Instant.now().plusSeconds(4).toString());
+    var timed = send(admin, "POST", path + "/reopen", body, adminCsrf, data(finished).path("version").asText());
+    assertEquals(200, timed.statusCode(), timed.body());
+    Thread.sleep(2500);
+    assertEquals("CLOSED", data(send(admin, "GET", path, null, null, null)).path("status").asText());
+    Thread.sleep(2000);
+    JsonNode automaticEnd = data(send(admin, "GET", path, null, null, null));
+    assertEquals("FINISHED", automaticEnd.path("status").asText());
+    body.put("endsAt", Instant.now().plusSeconds(600).toString()).put("eventEndsAt", Instant.now().plusSeconds(1200).toString());
+    var finalReopen = send(admin, "POST", path + "/reopen", body, adminCsrf, automaticEnd.path("version").asText());
+    assertEquals(200, finalReopen.statusCode(), finalReopen.body());
+    closed = send(admin, "POST", path + "/close", reason, adminCsrf, data(finalReopen).path("version").asText());
+    finished = send(admin, "POST", path + "/finish", reason, adminCsrf, data(closed).path("version").asText());
+    assertEquals(200, finished.statusCode(), finished.body());
+    assertEquals(liveTotals, data(send(client(), "GET", screen + "/ranking", null, null, null)).path("totals"));
+    var logs = send(admin, "GET", path + "/audit-logs?actionCode=ACTIVITY_REOPEN", null, null, null);
+    assertEquals(200, logs.statusCode(), logs.body());
+    assertTrue(logs.body().contains("AUTOTEST 误结束恢复"));
   }
 
   @Test

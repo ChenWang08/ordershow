@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   ApiError, loadAdminActivity, updateActivity, publishActivity, withdrawActivityPublication,
-  closeActivityNow, finishActivityNow, type RuntimeActivity,
+  closeActivityNow, finishActivityNow, reopenActivity, type RuntimeActivity,
 } from "../../api";
 import type { ActivityStatus } from "../shared/types";
 import { runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
@@ -34,6 +34,9 @@ export function useActivitySettings({
   const [activityEndDraft, setActivityEndDraft] = useState(activityEndAt);
   const [activityEventEndDraft, setActivityEventEndDraft] = useState(activityEventEndAt);
   const [activityNameDraft, setActivityNameDraft] = useState(activityName);
+  const [reopenDraft, setReopenDraft] = useState<{ activity: RuntimeActivity; endsAt: string; eventEndsAt: string; reason: string; error: string } | null>(null);
+  const [reopenBusy, setReopenBusy] = useState(false);
+  const reopenPending = useRef(false);
   const applyActivity = (activity: RuntimeActivity) => {
     const nextStatus = runtimeActivityStatus(activity.status);
     onActivityStatusChange(nextStatus);
@@ -62,8 +65,12 @@ export function useActivitySettings({
       setActionNotice("活动开始时间必须早于截止时间。" );
       return false;
     }
-    if (eventEndTime < endTime) {
-      setActionNotice("整场活动结束时间不能早于订货截止时间。" );
+    if (!Number.isFinite(startTime) || !Number.isFinite(endTime) || !Number.isFinite(eventEndTime)) {
+      setActionNotice("请填写有效的活动时间。");
+      return false;
+    }
+    if (eventEndTime <= endTime) {
+      setActionNotice("整场活动结束时间必须晚于订货截止时间。" );
       return false;
     }
     if ((activityStatus === "draft" || activityStatus === "scheduled") && startTime <= Date.now()) {
@@ -74,8 +81,8 @@ export function useActivitySettings({
       setActionNotice("活动进行中，订货开始时间不能修改。" );
       return false;
     }
-    if (activityStatus === "running" && endTime < new Date(activityEndAt).getTime()) {
-      setActionNotice("活动进行中只能延长截止时间；如需停止，请使用“立即截止订货”。" );
+    if (activityStatus === "running" && endTime <= Date.now()) {
+      setActionNotice("订货截止时间必须晚于当前时间。" );
       return false;
     }
     if (Number.isFinite(Number(activityId))) {
@@ -149,5 +156,47 @@ export function useActivitySettings({
       setActionNotice(error instanceof ApiError ? error.message : "结束整场活动失败，请稍后重试。" );
     }
   };
-  return { activityNameDraft, setActivityNameDraft, activityStartDraft, setActivityStartDraft, activityEndDraft, setActivityEndDraft, activityEventEndDraft, setActivityEventEndDraft, saveActivityConfig, publishCurrentActivity, withdrawCurrentActivity, closeCurrentActivity, finishCurrentActivity };
+  const openReopenDialog = async () => {
+    if (reopenPending.current) return;
+    reopenPending.current = true;
+    setReopenBusy(true);
+    try {
+      const activity = await loadAdminActivity(Number(activityId));
+      if (activity.status !== "CLOSED" && activity.status !== "FINISHED") {
+        setActionNotice("活动状态已变化，请刷新后重试。");
+        return;
+      }
+      const now = Date.now();
+      setReopenDraft({ activity,
+        endsAt: new Date(activity.endsAt).getTime() > now ? toDateTimeLocal(activity.endsAt) : "",
+        eventEndsAt: activity.eventEndsAt && new Date(activity.eventEndsAt).getTime() > now ? toDateTimeLocal(activity.eventEndsAt) : "",
+        reason: "", error: "" });
+    } catch (error) {
+      setActionNotice(error instanceof ApiError ? error.message : "活动信息加载失败，请稍后重试。");
+    } finally { reopenPending.current = false; setReopenBusy(false); }
+  };
+  const closeReopenDialog = () => { if (!reopenPending.current) setReopenDraft(null); };
+  const submitReopen = async () => {
+    if (!reopenDraft || reopenPending.current) return;
+    const { activity, endsAt, eventEndsAt, reason } = reopenDraft;
+    const end = new Date(endsAt).getTime();
+    const eventEnd = new Date(eventEndsAt).getTime();
+    const error = !Number.isFinite(end) || end <= Date.now() ? "订货截止时间必须晚于当前时间。"
+      : !Number.isFinite(eventEnd) || eventEnd <= end ? "整场活动结束时间必须晚于订货截止时间。"
+      : !reason.trim() || reason.trim().length > 500 ? "请填写重新开放原因（最多 500 字）。" : "";
+    if (error) { setReopenDraft({ ...reopenDraft, error }); return; }
+    if (!window.confirm(`确定重新开放“${activity.name}”的订货吗？\n订货截止：${endsAt.replace("T", " ")}\n整场结束：${eventEndsAt.replace("T", " ")}\n已有订单和中奖记录保留，订货、抽奖和实时看板恢复；已失效的客户登录需重新验证。`)) return;
+    reopenPending.current = true;
+    setReopenBusy(true);
+    try {
+      applyActivity(await reopenActivity(activity, { endsAt, eventEndsAt, reason }));
+      recordOperation("重新开放订货", activityId, `原因：${reason.trim()}；订货截止：${endsAt}；整场结束：${eventEndsAt}`);
+      setReopenDraft(null);
+      setActionNotice("已重新开放订货，已有订单和中奖记录保留；已失效的客户登录需重新验证。");
+    } catch (error) {
+      setReopenDraft({ ...reopenDraft, error: error instanceof ApiError ? error.message : "重新开放失败，请稍后重试。" });
+    } finally { reopenPending.current = false; setReopenBusy(false); }
+  };
+  return { activityNameDraft, setActivityNameDraft, activityStartDraft, setActivityStartDraft, activityEndDraft, setActivityEndDraft, activityEventEndDraft, setActivityEventEndDraft, saveActivityConfig, publishCurrentActivity, withdrawCurrentActivity, closeCurrentActivity, finishCurrentActivity,
+    reopenDraft, setReopenDraft, reopenBusy, openReopenDialog, closeReopenDialog, submitReopen };
 }

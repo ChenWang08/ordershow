@@ -37,7 +37,7 @@ class MemberPermissionServiceTest {
   @Test void fullPermissionsNeverGrantActivityOrAccountAdministration() {
     var actor = member(AdminPermission.values());
     for (String path : List.of("/admin/activities", "/admin/activities/1", "/admin/activities/1/publish",
-        "/admin/activities/1/withdraw-publication", "/admin/activities/1/close", "/admin/activities/1/finish",
+        "/admin/activities/1/withdraw-publication", "/admin/activities/1/close", "/admin/activities/1/finish", "/admin/activities/1/reopen",
         "/admin/members", "/admin/users/1", "/admin/departments", "/admin/auth/change-password")) {
       assertThatThrownBy(() -> check(actor, "POST", path)).isInstanceOf(DomainException.class);
     }

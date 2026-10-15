@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 public class AuditService {
   public static final String IDEMPOTENT_REPLAY_ATTRIBUTE = "orderShowIdempotentReplay";
   public static final String REASON_REQUEST_ATTRIBUTE = "orderShowAuditReason";
+  public static final String RECORDED_REQUEST_ATTRIBUTE = "orderShowAuditRecorded";
   private static final Logger log = LoggerFactory.getLogger(AuditService.class);
   private static final Pattern ACTIVITY_ID = Pattern.compile("/activities/(\\d+)");
   private static final Pattern LAST_ID = Pattern.compile("/(\\d+)(?:/[^/]*)?$");
@@ -39,6 +40,7 @@ public class AuditService {
   }
 
   public void record(HttpServletRequest request, HttpServletResponse response, Exception exception) {
+    if (Boolean.TRUE.equals(request.getAttribute(RECORDED_REQUEST_ATTRIBUTE)) && exception == null && response.getStatus() < 400) return;
     if (Boolean.TRUE.equals(request.getAttribute(IDEMPOTENT_REPLAY_ATTRIBUTE)) && exception == null && response.getStatus() < 400) return;
     if (isRead(request.getMethod())) return;
     try {
@@ -113,6 +115,8 @@ public class AuditService {
     if (uri.contains("/activities")) return "ACTIVITY"; return "SESSION";
   }
   private static String action(String method, String uri) {
+    if (uri.endsWith("/reopen")) return "ACTIVITY_REOPEN";
+    if (uri.endsWith("/finish")) return "ACTIVITY_FINISH";
     if (uri.endsWith("/admin/members")) return "MEMBER_CREATED";
     if (uri.contains("/admin/members/")) return "MEMBER_UPDATED";
     if (uri.contains("/order-change-requests/") && uri.endsWith("/approve")) return "ORDER_CHANGE_APPROVED";

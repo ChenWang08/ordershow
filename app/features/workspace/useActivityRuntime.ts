@@ -36,6 +36,10 @@ export function useActivityRuntime(adminActivity?: RuntimeActivity) {
       void (adminActivityId != null ? loadAdminActivity(adminActivityId) : loadActivity()).then((activity) => {
         if (!active) return;
         setRuntimeActivity(activity);
+        setActivityName(activity.name);
+        setActivityStartAt(toDateTimeLocal(activity.startsAt));
+        setActivityEndAt(toDateTimeLocal(activity.endsAt));
+        setActivityEventEndAt(toDateTimeLocal(activity.eventEndsAt || activity.endsAt));
         setActivityStatus(runtimeActivityStatus(activity.status));
       }).catch(() => undefined);
     }, 15_000);

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { loadModule } from "./helpers/load-ts-module.mjs";
 
 const customer = (id = "preview") => ({
@@ -14,7 +16,7 @@ const attendee = (id = "preview") => ({
 });
 const draft = () => ({ rows: [attendee()], fileName: "attendance.xlsx", warnings: [], sheetCounts: [], inputCount: 1 });
 
-function customerHarness(overrides = {}, apiOverrides = {}) {
+function customerHarness(overrides = {}, apiOverrides = {}, domainOverrides = {}) {
   const calls = [];
   const notices = [];
   const confirmations = [];
@@ -53,6 +55,11 @@ function customerHarness(overrides = {}, apiOverrides = {}) {
   let cursor = 0;
   const mocks = {
     "../../api": api,
+    "../../domain/import-domain": {
+      ...loadModule("app/domain/import-domain.ts"),
+      parseAttendanceWorkbook: async () => draft(),
+      ...domainOverrides,
+    },
     react: {
       useMemo: (calculate) => calculate(),
       useState(initial) {
@@ -62,7 +69,7 @@ function customerHarness(overrides = {}, apiOverrides = {}) {
       },
     },
   };
-  const globals = { window: { confirm: (message) => { confirmations.push(message); return true; } } };
+  const globals = { Error, window: { confirm: (message) => { confirmations.push(message); return true; } } };
   const { useAttendanceManagement } = loadModule("app/features/admin/useAttendanceManagement.ts", mocks, globals);
   const { useWhitelistImport } = loadModule("app/features/admin/useWhitelistImport.ts", mocks, globals);
   const { useWhitelistEditor } = loadModule("app/features/admin/useWhitelistEditor.ts", mocks, globals);
@@ -217,4 +224,108 @@ test("closed activities reject customer and attendance writes", async () => {
   await attendance.deleteAttendanceRows(["published"]);
   await attendance.handleAttendanceFile({ name: "attendance.xlsx" });
   assert.deepEqual(harness.calls, []);
+});
+
+test("attendance matching failure retains uploaded rows and task for retry", async () => {
+  const harness = customerHarness({}, {
+    uploadImport: async () => ({ id: 91, errorCount: 0 }),
+    loadImportRows: async () => [],
+    loadAttendanceMatchPreview: async () => { throw new Error("server failure"); },
+  });
+  await harness.render().attendance.handleAttendanceFile({ name: "attendance.xlsx" });
+  const model = harness.render().attendance;
+  assert.equal(model.pendingAttendanceImport.rows.length, 1);
+  assert.equal(harness.options.serverImportTasks.ATTENDANCE, 91);
+  assert.equal(model.attendancePreviewReady, false);
+  assert.equal(model.attendancePreviewLoading, false);
+  assert.match(harness.options.attendanceImportError, /^白名单关联试算失败/);
+  await model.confirmAttendanceImport();
+  assert.equal(harness.confirmations.length, 0);
+  await model.retryAttendancePreview();
+  assert.deepEqual(harness.calls, [["refresh", "ATTENDANCE"]]);
+  assert.equal(harness.options.attendanceRows[0].id, "published");
+});
+
+test("attendance staging read failure retains the draft for retry", async () => {
+  const harness = customerHarness({}, {
+    uploadImport: async () => ({ id: 91, errorCount: 0 }),
+    loadImportRows: async () => { throw new Error("offline"); },
+  });
+  await harness.render().attendance.handleAttendanceFile({ name: "attendance.xlsx" });
+  assert.equal(harness.render().attendance.pendingAttendanceImport.rows.length, 1);
+  assert.equal(harness.options.serverImportTasks.ATTENDANCE, 91);
+  assert.match(harness.options.attendanceImportError, /^导入预览读取失败/);
+});
+
+test("attendance parse and upload errors are distinguished and clear stale matching", async () => {
+  for (const parsing of [true, false]) {
+    const harness = customerHarness({}, {
+      uploadImport: async () => { throw new Error("offline"); },
+    }, parsing ? { parseAttendanceWorkbook: async () => { throw new Error("bad headers"); } } : {});
+    harness.render().attendance.setPendingAttendanceImport(draft());
+    harness.render().attendance.setAttendanceMatchPreview({ whitelistVersionId: 17 });
+    await harness.render().attendance.handleAttendanceFile({ name: "new.xlsx" });
+    const model = harness.render().attendance;
+    assert.equal(model.pendingAttendanceImport, null);
+    assert.equal(model.attendancePreviewReady, false);
+    assert.equal(model.attendancePreviewLoading, false);
+    assert.equal(harness.options.serverImportTasks.ATTENDANCE, 8);
+    assert.match(harness.options.attendanceImportError, parsing ? /^文件解析失败/ : /^文件上传或服务端校验失败/);
+  }
+});
+
+test("attendance retry failure is handled and preserves the uploaded draft", async () => {
+  const harness = customerHarness({ refreshServerImportPreview: async () => { throw new Error("offline"); } });
+  harness.render().attendance.setPendingAttendanceImport(draft());
+  await harness.render().attendance.retryAttendancePreview();
+  assert.equal(harness.render().attendance.pendingAttendanceImport.rows.length, 1);
+  assert.match(harness.options.attendanceImportError, /^导入预览或白名单关联试算失败/);
+  assert.equal(harness.render().attendance.attendancePreviewReady, false);
+});
+
+test("zero-match attendance can publish with no whitelist version", async () => {
+  const harness = customerHarness({}, {
+    uploadImport: async () => ({ id: 91, errorCount: 0 }),
+    loadImportRows: async () => [],
+    loadAttendanceMatchPreview: async () => ({ whitelistVersionId: null, rows: [], matchedCount: 0, pendingCount: 0, unmatchedCount: 1 }),
+  }, { parseAttendanceWorkbook: async () => ({ ...draft(), rows: [{ ...attendee(), matchStatus: "UNMATCHED", activityCustomerId: null, lotteryEligible: false }] }) });
+  await harness.render().attendance.handleAttendanceFile({ name: "attendance.xlsx" });
+  assert.equal(harness.render().attendance.attendancePreviewReady, true);
+  assert.equal(harness.options.attendanceImportError, "");
+  await harness.render().attendance.confirmAttendanceImport();
+  assert.deepEqual(harness.calls[0], ["confirm", 1, 91, undefined, undefined, null]);
+  assert.match(harness.confirmations[0], /资格客户 0 名/);
+  assert.match(harness.confirmations[0], /未关联 1 条/);
+});
+
+test("attendance matching errors offer retry and disable publication in the rendered page", () => {
+  const { AttendancePage } = loadModule("app/features/admin/attendance/AttendancePage.tsx", {
+    "../ImportTemplateDownload": { ImportTemplateDownload: () => null, ImportTemplateHint: () => null },
+    "../attendance/AttendanceTable": { AttendanceTable: () => null },
+  });
+  const props = {
+    rows: [], fileName: "", warnings: [], sheetCounts: [],
+    error: "白名单关联试算失败：服务暂不可用", activityStarted: false, activityClosed: false,
+    pendingImport: { ...draft(), rows: [{ ...attendee(), customerType: "综合客户" }] },
+    importAttemptName: "attendance.xlsx", blockingCount: 0, previewLoading: false,
+    previewReady: false, publishing: false,
+  };
+  const failed = renderToStaticMarkup(createElement(AttendancePage, props));
+  assert.match(failed, /重试关联预览/);
+  assert.match(failed, /白名单关联试算失败/);
+  assert.doesNotMatch(failed, /解析失败/);
+  assert.match(failed, /<button[^>]*disabled=""[^>]*>请先完成关联试算<\/button>/);
+  const ready = renderToStaticMarkup(createElement(AttendancePage, { ...props, error: "", previewReady: true }));
+  assert.doesNotMatch(ready, /重试关联预览/);
+  const publish = ready.match(/<button[^>]*>确认替换当前到场名单 1 名<\/button>/)?.[0];
+  assert.ok(publish);
+  assert.doesNotMatch(publish, /disabled/);
+});
+
+test("attendance preview refresh failure after deletion stays recoverable", async () => {
+  const harness = customerHarness({ refreshServerImportPreview: async () => { throw new Error("offline"); } });
+  harness.render().attendance.setPendingAttendanceImport({ ...draft(), rows: [{ ...attendee(), serverRowId: 31 }] });
+  await harness.render().attendance.deleteAttendanceRows(["preview"]);
+  assert.equal(harness.render().attendance.pendingAttendanceImport.rows.length, 0);
+  assert.match(harness.notices.at(-1), /删除已保存，但关联试算刷新失败/);
 });

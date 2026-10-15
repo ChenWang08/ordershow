@@ -29,6 +29,11 @@ class PrivateFilePermissionTest {
     assertThat(controller.get(3, request).getStatusCode().value()).isEqualTo(200);
     verifyNoInteractions(auth, departments);
   }
+  @Test void activityBackgroundsArePublicWithoutAnAdminSession() {
+    file("ACTIVITY_BACKGROUND");
+    assertThat(controller.get(3, request).getStatusCode().value()).isEqualTo(200);
+    verifyNoInteractions(auth, departments);
+  }
   @Test void sourceSheetsRequireTheirActualModulePermissionBeforeReadingBytes() {
     file("IMPORT_SOURCE");
     var actor = new AdminPrincipal(2,"member","成员","DEPARTMENT_MEMBER",1L,"部门",false,Set.of(AdminPermission.ORDER));

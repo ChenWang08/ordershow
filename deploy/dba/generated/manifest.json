@@ -151,10 +151,14 @@
       "sha256": "ac3bd07e3f616d8231ec084177a23946380405dc5af0abc4b0440e3abb21daa4"
     },
     {
+      "file": "V039__activity_backgrounds.sql",
+      "sha256": "34e898edc743807d838ff6bf8804c1b266d0b10255b914d05182ac981d418227"
+    },
+    {
       "file": "V037__unify_product_completeness.java",
       "action": "EMPTY_DATABASE_NO_OP",
       "sha256": "059c82a580cf0f64e6603360b3f68340f19dc5a1552bedef3e9f0b42922906c1"
     }
   ],
-  "bundleSha256": "b81020dbb8c035100fd9809c460d73746bfc2f311484e9f36a73ad7a974f2e14"
+  "bundleSha256": "102a13376064a9ac311f3aee5e7e37ed75d62b7490790baf998a726bc0628961"
 }

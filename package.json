@@ -12,7 +12,7 @@
     "test": "npm run build && node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit --incremental false",
     "types:generate": "wrangler types types/worker-runtime.d.ts --config scripts/worker-types.jsonc --include-env false",
-    "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
+    "lint": "eslint .",
     "db:generate": "drizzle-kit generate"
   },
   "dependencies": {

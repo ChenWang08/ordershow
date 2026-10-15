@@ -1,0 +1,50 @@
+/* Only presentation surfaces use a viewport shell. The header occupies a real
+   grid row, so opening it cannot cover even an already-scrolled dashboard. */
+.prototype-root.collapsible-screen {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  --screen-header-height: 74px;
+}
+.collapsible-screen > .prototype-canvas {
+  min-height: 0;
+  overflow: auto;
+  container-type: size;
+  overscroll-behavior: contain;
+}
+.collapsible-screen .screen-board,
+.collapsible-screen .order-dashboard { min-height: 100cqh; }
+.collapsible-screen .rank-row,
+.collapsible-screen .branch-rank > div { min-height: clamp(22px, calc((100cqh - 151px) / 30), 29px); }
+.collapsible-screen .branch-rank.branch-rank-scrollable { max-height: calc(100cqh - 115px); }
+.screen-header { height: 0; min-width: 0; transition: height 180ms ease; }
+.screen-header[data-open="true"] { height: var(--screen-header-height); }
+.screen-header-panel { height: 100%; overflow: hidden; visibility: hidden; }
+.screen-header[data-open="true"] .screen-header-panel { visibility: visible; }
+.screen-header .prototype-nav { position: relative; height: var(--screen-header-height); padding-right: 58px; }
+.screen-header-hover-zone {
+  position: fixed; z-index: 101; top: 0; left: 0; width: 100%; height: 6px;
+  background: transparent;
+}
+.screen-header-trigger {
+  position: fixed; z-index: 102; top: 0; right: 12px;
+  width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+  padding: 0; border: 0; background: transparent; color: #f0c76c;
+}
+.screen-header-trigger:focus-visible {
+  width: 36px; height: 26px; clip-path: none;
+  border: 1px solid #a88249; border-radius: 0 0 7px 7px; background: #351211;
+}
+.screen-header-trigger:focus-visible { outline: 2px solid #f0c76c; outline-offset: 2px; }
+@media (any-hover: none) {
+  .screen-header:not([data-mouse="true"]) .screen-header-trigger { width: 44px; height: 32px; clip-path: none; border: 1px solid #a88249; border-radius: 0 0 7px 7px; background: #351211; }
+}
+@media (max-width: 640px) {
+  .prototype-root.collapsible-screen { --screen-header-height: 58px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen-header { transition: none; }
+}

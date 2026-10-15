@@ -12,13 +12,13 @@ function sql(statement) {
     'mysql','-uack_smoke','-N','ack_smoke','-e',statement], {encoding:'utf8'}).trim();
 }
 assert.equal(sql('SELECT DATABASE()'), 'ack_smoke');
-assert.equal(sql('SELECT version FROM deployment_schema_history'), 'V038');
+assert.equal(sql('SELECT version FROM deployment_schema_history'), 'V039');
 assert.equal(sql("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='flyway_schema_history'"), '0');
 const bases=['http://127.0.0.1:18081/api/v1','http://127.0.0.1:18082/api/v1'];
 let cookie='',csrf='';
-async function call(replica, method, path, body, expected=200) {
+async function call(replica, method, path, body, expected=200, extraHeaders={}) {
   const multipart = body instanceof FormData;
-  const response=await fetch(bases[replica]+path,{method,headers:{Cookie:cookie,'X-CSRF-Token':csrf,...(multipart?{}:{'Content-Type':'application/json'})},body:body==null?undefined:multipart?body:JSON.stringify(body)});
+  const response=await fetch(bases[replica]+path,{method,headers:{Cookie:cookie,'X-CSRF-Token':csrf,...extraHeaders,...(multipart?{}:{'Content-Type':'application/json'})},body:body==null?undefined:multipart?body:JSON.stringify(body)});
   const result=await response.json();
   assert.equal(response.status,expected,JSON.stringify(result));
   if(response.headers.getSetCookie().length) cookie=response.headers.getSetCookie().map(v=>v.split(';')[0]).join('; ');
@@ -36,6 +36,17 @@ const activity=await call(0,'POST','/admin/activities',{
   startsAt:new Date(Date.now()+3600000).toISOString(),endsAt:new Date(Date.now()+86400000).toISOString(),
   eventEndsAt:new Date(Date.now()+172800000).toISOString(),companyRankingTopN:20,branchRankingTopN:20,tonDisplayScale:3,
 });
+// New merged features must work through either replica and shared object storage.
+const backgroundBytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=','base64');
+const backgroundForm=new FormData();
+backgroundForm.set('file',new Blob([backgroundBytes],{type:'image/png'}),'smoke.png');
+await call(0,'POST',`/admin/activities/${activity.id}/backgrounds/h5`,backgroundForm);
+const backgroundId=sql(`SELECT h5_background_file_id FROM activity WHERE id=${Number(activity.id)}`);
+const backgroundRead=await fetch(bases[1]+`/public/files/${backgroundId}`);
+assert.equal(backgroundRead.status,200);
+assert.deepEqual(Buffer.from(await backgroundRead.arrayBuffer()),backgroundBytes);
+await call(1,'DELETE',`/admin/activities/${activity.id}/backgrounds/h5`);
+assert.equal(sql(`SELECT COUNT(*) FROM activity WHERE id=${Number(activity.id)} AND h5_background_file_id IS NULL`),'1');
 const form=new FormData();
 form.set('importType','PRODUCT');
 const bytes=await fs.readFile('public/import-template-products.xlsx');
@@ -60,6 +71,14 @@ for(let i=0;i<30;i++) {
 assert.ok(completed,'import published by one of the two workers');
 assert.equal(sql(`SELECT COUNT(*) FROM import_publish_version WHERE source_import_task_id=${Number(task.id)}`),'1');
 
+sql(`UPDATE activity SET status='CLOSED',starts_at=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 2 HOUR),ends_at=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 HOUR) WHERE id=${Number(activity.id)}`);
+const beforeReopen=await call(0,'GET',`/admin/activities/${activity.id}`);
+const reopenBody={endsAt:new Date(Date.now()+86400000).toISOString(),eventEndsAt:new Date(Date.now()+172800000).toISOString(),reason:'ACK isolated verification'};
+const reopened=await call(1,'POST',`/admin/activities/${activity.id}/reopen`,reopenBody,200,{'If-Match':String(beforeReopen.version)});
+assert.equal(reopened.status,'ACTIVE');
+await call(0,'POST',`/admin/activities/${activity.id}/reopen`,reopenBody,409,{'If-Match':String(beforeReopen.version)});
+assert.equal(sql(`SELECT COUNT(*) FROM domain_event_outbox WHERE activity_id=${Number(activity.id)} AND event_type='ACTIVITY_REOPENED'`),'1');
+console.log('PASS: cross-replica activity background upload/read/reset and reopen/stale request protection.');
 sql(`UPDATE activity SET status='ACTIVE',starts_at=DATE_SUB(UTC_TIMESTAMP(3),INTERVAL 1 HOUR),ends_at=DATE_ADD(UTC_TIMESTAMP(3),INTERVAL 1 DAY) WHERE id=${Number(activity.id)}`);
 const aborts=bases.map(()=>new AbortController());
 try {
