@@ -8,14 +8,16 @@ import type { WhitelistRow } from "../../domain/import-domain";
 import { maskPhone, normalizePhone } from "../shared/utils";
 import { useH5CatalogSearch } from "./useH5CatalogSearch";
 import { useH5Draft } from "./useH5Draft";
+import { h5EntryPolicy } from "./h5-entry-policy";
 import { createH5SubmissionManager } from "./h5-submission";
 import { productRowToProduct, runtimeProductToProduct, priceBreakdown, groupByProductLine, summarizeOrderLineAmounts, h5QuantitySignature, h5OrderItems, h5RequiresReview, type H5Props, type H5Step, type H5Channel, type H5OrderStatus, type Product, type SubmittedOrderItem } from "./h5-domain";
 
 export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelistRows, runtimeActivity }: H5Props) {
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
   const activityNotStarted = activityStatus === "draft" || activityStatus === "scheduled";
-  const importedWhitelistIsUnspecified = Boolean(importedWhitelistRows?.length && importedWhitelistRows.every((row) => row.customerType === ""));
-  const unspecifiedWhitelist = runtimeActivity?.whitelistCustomerTypeMode === "UNSPECIFIED" || (!runtimeActivity && importedWhitelistIsUnspecified);
+  const entryPolicy = h5EntryPolicy(runtimeActivity);
+  const unspecifiedWhitelist = runtimeActivity?.whitelistCustomerTypeMode === "UNSPECIFIED";
+  const directEntry = entryPolicy.mode === "direct";
   const [runtimeProducts, setRuntimeProducts] = useState<RuntimeProduct[] | null>(null);
   const [runtimeIdentity, setRuntimeIdentity] = useState<RuntimeIdentity | null>(null);
   const [runtimeOrder, setRuntimeOrder] = useState<RuntimeOrder | null>(null);
@@ -37,7 +39,8 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   }));
   const catalog = useMemo(() => runtimeProducts ? runtimeProducts.map(runtimeProductToProduct) : importedRows ? importedRows.map(productRowToProduct) : [], [runtimeProducts, importedRows]);
   const [step, setStep] = useState<H5Step>(() => unspecifiedWhitelist ? "verify" : "channel");
-  const [channel, setChannel] = useState<H5Channel>("");
+  const [selectedChannel, setChannel] = useState<H5Channel>("");
+  const channel: H5Channel = runtimeIdentity ? (runtimeIdentity.customerType === "GENERAL" ? "综合客户" : runtimeIdentity.customerType === "SPECIAL" ? "特渠专业客户" : "") : entryPolicy.channel || selectedChannel;
   const [region, setRegion] = useState("");
   const [verifiedBranch, setVerifiedBranch] = useState("");
   const [verifiedIdentity, setVerifiedIdentity] = useState<WhitelistRow | null>(null);
@@ -57,7 +60,9 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const [submittedQuantities, setSubmittedQuantities] = useState<Record<string, number>>({});
   const [submittedItems, setSubmittedItems] = useState<SubmittedOrderItem[]>([]);
   const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const visibleStep = unspecifiedWhitelist && step === "channel" ? "verify" : step;
+  const entryStep = ["channel", "region", "verify"].includes(step);
+  const visibleStep = entryStep && (entryPolicy.mode === "loading" || entryPolicy.mode === "empty") ? entryPolicy.mode
+    : directEntry && entryStep ? "verify" : entryStep && entryPolicy.mode === "choose" && !selectedChannel ? "channel" : step;
   const whitelistRegions = runtimeActivity?.regions ?? [];
   const regionOptions = [
     ...whitelistRegions.map((item) => ({ value: item.code, name: item.name, detail: `${item.name}综合经销商` })),
@@ -66,7 +71,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
       : []),
   ];
   const regionalized = whitelistRegions.length > 0;
-  const selectedRegionName = regionOptions.find((item) => item.value === region)?.name || region;
+  const selectedRegionName = directEntry ? "" : regionOptions.find((item) => item.value === region)?.name || region;
   const h5CustomerType = channel === "综合客户" ? "综合" : "特渠";
   const catalogSearch = useH5CatalogSearch(catalog, h5CustomerType, unspecifiedWhitelist, verifiedBranch,
     JSON.stringify([runtimeActivity?.code, runtimeIdentity?.customerId ?? verifiedIdentity?.id, channel, verifiedBranch]), visibleStep === "order");
@@ -87,7 +92,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const orderViewBoxes = orderViewSelected.reduce((sum, p) => sum + orderViewQuantities[p.id], 0);
   const orderViewAmount = orderViewSelected.reduce((sum, p) => sum + priceBreakdown(p, orderViewQuantities[p.id]).amount, 0);
   const importedIdentity = verifiedIdentity ?? submittedIdentity;
-  const identityRegionCode = runtimeIdentity?.regionCode || importedIdentity?.region || region;
+  const identityRegionCode = runtimeIdentity ? runtimeIdentity.regionCode || "" : importedIdentity ? importedIdentity.region || "" : directEntry ? "" : region;
   const identityRegion = regionOptions.find((item) => item.value === identityRegionCode)?.name || identityRegionCode;
   const identityBranch = runtimeIdentity?.branchName || importedIdentity?.branch || verifiedBranch;
   const identityLabel = runtimeIdentity
@@ -180,7 +185,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   };
 
   const verifyIdentity = async () => {
-    if (activityNotStarted) return;
+    if (activityNotStarted || entryPolicy.mode === "loading" || entryPolicy.mode === "empty") return;
     const normalizedPhone = normalizePhone(phone);
     if (runtimeActivity) {
       setRuntimeBusy(true); setVerifyError(""); setRuntimeMessage("");
@@ -188,7 +193,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
         if (draftSaveTimerRef.current != null) window.clearTimeout(draftSaveTimerRef.current);
         if (latestDraftSnapshotRef.current) await queueDraftSync(latestDraftSnapshotRef.current, false);
         setDraftReady(false);
-        const identity = await verifyPhone(unspecifiedWhitelist ? "ALL" : channel === "综合客户" ? "GENERAL" : "SPECIAL", unspecifiedWhitelist ? "" : region, normalizedPhone);
+        const identity = await verifyPhone(unspecifiedWhitelist ? "ALL" : channel === "综合客户" ? "GENERAL" : "SPECIAL", directEntry ? "" : region, normalizedPhone);
         let recoveryNeedsRefresh = false;
         setPendingSubmission(false); setOrderNeedsRefresh(false);
         try {
@@ -364,7 +369,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
     }
     return true;
   };
-  return { catalogSearch, prepareLiveRoomExit, catalog, requiresReview, pendingSubmission, pendingChangeRequest, recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
+  return { directEntry, catalogSearch, prepareLiveRoomExit, catalog, requiresReview, pendingSubmission, pendingChangeRequest, recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel, region, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, setRebateFilter, line, setLine, search, setSearch, previewProduct, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, submitMode, orderVersion, orderUpdatedAt, orderWithdrawnAt, orderEvents, cancelConfirmOpen, setCancelConfirmOpen, quantities, setQuantities, visibleStep, regionOptions, regionalized, selectedRegionName, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selected, selectedLineGroups, selectedLineSummaries, totalBoxes, totalAmount, orderViewQuantities, orderViewSelected, orderViewLineGroups, orderViewLineSummaries, orderViewBoxes, orderViewAmount, importedIdentity, identityBranch, identityLabel, dealerName, displayBranch, displayPhone, changeQty, startEditingOrder, verifyIdentity, submitOrder, withdrawOrder, reloadLatestOrder, draftMessage };
 }
 
 export type H5OrderModel = ReturnType<typeof useH5OrderFlow>;

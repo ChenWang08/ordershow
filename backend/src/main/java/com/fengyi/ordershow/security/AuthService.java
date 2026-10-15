@@ -182,6 +182,13 @@ public class AuthService {
           AND c.customer_type = ? AND c.phone_lookup_hash = ? AND c.is_active = TRUE
           AND (b.current_version_id IS NULL OR c.data_version_id = b.current_version_id)
           AND (c.customer_type <> 'GENERAL' OR (
+            (? IS NULL AND b.current_version_id = c.data_version_id AND NOT EXISTS (
+              SELECT 1 FROM activity_customer other_type
+              WHERE other_type.activity_id = c.activity_id
+                AND other_type.data_version_id = b.current_version_id
+                AND other_type.is_active = TRUE AND other_type.customer_type <> 'GENERAL'
+            ))
+            OR
             NOT EXISTS (
               SELECT 1 FROM activity_customer regionalized
               JOIN activity_data_binding regional_binding
@@ -199,7 +206,7 @@ public class AuthService {
         rs.getString("activity_code"), rs.getString("customer_type"), rs.getString("region_code"),
         rs.getString("branch_name"), rs.getString("dealer_short_name"), rs.getString("dealer_full_name"),
         rs.getString("phone_masked")), activityCode, requestedType, crypto.lookupHash(normalized),
-        requestedRegion, requestedRegion, requestedRegion, requestedRegion, requestedRegion);
+        requestedRegion, requestedRegion, requestedRegion, requestedRegion, requestedRegion, requestedRegion);
     if (customers.size() != 1) throw DomainException.notFound("WHITELIST_IDENTITY_NOT_FOUND", "该手机号不在所选通道或大区的有效白名单中");
     H5Principal customer = customers.getFirst();
     String token = randomToken();

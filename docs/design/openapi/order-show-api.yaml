@@ -2999,6 +2999,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/RegionCode'
             - type: 'null'
+          description: 仅有综合客户的已发布有效白名单允许省略或传 null，服务端按手机号读取真实大区；显式提交大区仍须匹配。双类型白名单中综合客户继续按现有规则选择大区，有大区配置时不可省略，未分配客户传 UNASSIGNED。特渠及 ALL 不要求大区。
         phone:
           type: string
           minLength: 1

@@ -3,8 +3,13 @@
 import type { H5OrderModel } from "./useH5OrderFlow";
 
 export function H5EntryPages({ model }: { model: H5OrderModel }) {
-  const { activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeBusy, runtimeMessage, setStep, channel, setChannel, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, orderStatus, visibleStep, regionOptions, regionalized, selectedRegionName, identityLabel, verifyIdentity } = model;
+  const { directEntry, activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeBusy, runtimeMessage, setStep, channel, setChannel, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, orderStatus, visibleStep, regionOptions, regionalized, selectedRegionName, identityLabel, verifyIdentity } = model;
   return <>
+          {(visibleStep === "loading" || visibleStep === "empty") && <section className="h5-page verify-page entry-page">
+            <div className="mini-brand"><b>金龙鱼</b></div>
+            <div className="h5-hero-copy entry-hero"><span className="eyebrow">订货会</span></div>
+            <div className="verify-card entry-card" role="status"><h2>{visibleStep === "loading" ? "正在加载活动入口…" : "暂无可验证客户"}</h2><p>{visibleStep === "loading" ? "请稍候；若长时间未显示，请检查网络后刷新页面。" : "当前活动暂无已发布的有效白名单，请联系活动工作人员。"}</p></div>
+          </section>}
           {visibleStep === "channel" && !unspecifiedWhitelist && (
             <section className="h5-page verify-page entry-page">
               <div className="mini-brand"><b>金龙鱼</b></div>
@@ -58,13 +63,13 @@ export function H5EntryPages({ model }: { model: H5OrderModel }) {
 
           {visibleStep === "verify" && (
             <section className="h5-page verify-page">
-              <div className="entry-nav">{!unspecifiedWhitelist && <button onClick={() => setStep(channel === "综合客户" && regionalized ? "region" : "channel")}>‹</button>}<span>{identityLabel}</span></div>
+              <div className="entry-nav">{!directEntry && <button onClick={() => setStep(channel === "综合客户" && regionalized ? "region" : "channel")}>‹</button>}<span>{identityLabel}</span></div>
               <div className="mini-brand"><b>金龙鱼</b></div>
               <div className="h5-hero-copy">
                 <span className="eyebrow">订货会</span>
               </div>
               <div className="verify-card">
-                <div className="verify-context"><span className="step-tag">{identityLabel}</span>{!unspecifiedWhitelist && <button onClick={() => setStep("channel")}>重新选择</button>}</div>
+                <div className="verify-context"><span className="step-tag">{identityLabel}</span>{!directEntry && <button onClick={() => setStep("channel")}>重新选择</button>}</div>
                 <h2>输入白名单手机号</h2>
                 <p>验证通过后，将为您展示{unspecifiedWhitelist ? "本次白名单客户" : channel === "综合客户" ? `${selectedRegionName ? `${selectedRegionName}综合客户` : "综合客户"}` : "特渠专业客户"}的订货商品。</p>
                 <label>
