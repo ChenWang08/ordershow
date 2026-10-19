@@ -5,6 +5,7 @@ import {
   ApiError, loadAdminActivity, updateActivity, publishActivity, withdrawActivityPublication,
   closeActivityNow, finishActivityNow, reopenActivity, type RuntimeActivity,
 } from "../../api";
+import { beijingDateTimeMillis } from "../shared/time";
 import type { ActivityStatus } from "../shared/types";
 import { runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
 
@@ -58,9 +59,9 @@ export function useActivitySettings({
       setActionNotice("请填写订货开始、订货截止和整场活动结束时间。" );
       return false;
     }
-    const startTime = new Date(activityStartDraft).getTime();
-    const endTime = new Date(activityEndDraft).getTime();
-    const eventEndTime = new Date(activityEventEndDraft).getTime();
+    const startTime = beijingDateTimeMillis(activityStartDraft);
+    const endTime = beijingDateTimeMillis(activityEndDraft);
+    const eventEndTime = beijingDateTimeMillis(activityEventEndDraft);
     if (startTime >= endTime) {
       setActionNotice("活动开始时间必须早于截止时间。" );
       return false;
@@ -77,7 +78,7 @@ export function useActivitySettings({
       setActionNotice("订货开始时间必须晚于当前时间，请重新选择。" );
       return false;
     }
-    if (activityStatus === "running" && startTime !== new Date(activityStartAt).getTime()) {
+    if (activityStatus === "running" && startTime !== beijingDateTimeMillis(activityStartAt)) {
       setActionNotice("活动进行中，订货开始时间不能修改。" );
       return false;
     }
@@ -179,8 +180,8 @@ export function useActivitySettings({
   const submitReopen = async () => {
     if (!reopenDraft || reopenPending.current) return;
     const { activity, endsAt, eventEndsAt, reason } = reopenDraft;
-    const end = new Date(endsAt).getTime();
-    const eventEnd = new Date(eventEndsAt).getTime();
+    const end = beijingDateTimeMillis(endsAt);
+    const eventEnd = beijingDateTimeMillis(eventEndsAt);
     const error = !Number.isFinite(end) || end <= Date.now() ? "订货截止时间必须晚于当前时间。"
       : !Number.isFinite(eventEnd) || eventEnd <= end ? "整场活动结束时间必须晚于订货截止时间。"
       : !reason.trim() || reason.trim().length > 500 ? "请填写重新开放原因（最多 500 字）。" : "";

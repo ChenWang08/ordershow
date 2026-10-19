@@ -1,10 +1,13 @@
 "use client";
+
+import { formatBeijingTime } from "../../features/shared/time";
+
 import { confirmDrawerClose } from "../useDrawerClose";
 import type { OrderManagementModel } from "./OrderManagement";
 
 const money=(v?:number)=>v==null?"—":`¥${Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const tons=(v?:number)=>`${Number(v ?? 0).toFixed(3)} 吨`;
-const date=(v:string)=>new Date(v).toLocaleString("zh-CN",{hour12:false,timeZone:"Asia/Shanghai"});
+const date=(v:string)=>formatBeijingTime(v);
 const labels={PENDING:"待审核",APPROVED:"已通过",REJECTED:"已驳回"};
 export function OrderChangeRequestPanel({model,detailOnly=false}:{model:OrderManagementModel;detailOnly?:boolean}) {
   const r=model.changeRequests;

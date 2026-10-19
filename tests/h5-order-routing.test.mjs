@@ -7,14 +7,14 @@ const { createH5SubmissionManager } = loadModule("app/features/h5/h5-submission.
   "../../services/api/client": { ApiError },
 }, { setTimeout, clearTimeout, AbortController });
 const item = (productId, quantity) => ({ productId, quantity, materialName: "商品" + productId, casePrice: 10, lineAmount: quantity * 10 });
-async function harness(status = "SUBMITTED", pending = null) {
+async function harness(status = "SUBMITTED", pending = null, activity = { code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] }) {
   let cursor = 0, fail = false;
   const slots = [], calls = [], storage = new Map();
   const order = { id: 1, orderNo: "ORDER1", status, currentVersion: 2, lockVersion: 4,
     items: [item(1, 10)], operations: [], lastModifiedAt: "2026-10-10T01:00:00Z" };
   const api = {
     ApiError, apiAssetUrl: url => url,
-    verifyPhone: async () => ({ activityId: 1, customerId: 2, customerType: "ALL", dealerFullName: "测试客户" }),
+    verifyPhone: async (type, region, phone) => { calls.push(["verify", type, region, phone]); return { activityId: 1, customerId: type === "SPECIAL" ? 3 : 2, customerType: type, regionCode: region, dealerFullName: "测试客户" }; },
     loadH5Products: async () => [1, 2].map(id => ({ id, materialName: "商品" + id, images: [], casePrice: 10, customerType: "ALL", rebateStatus: "ALL", orderable: true })),
     loadH5Order: async () => order,
     loadH5OrderChangeRequest: async () => pending,
@@ -42,9 +42,10 @@ async function harness(status = "SUBMITTED", pending = null) {
   }, { crypto: { getRandomValues: values => webcrypto.getRandomValues(values) }, window: { clearTimeout, sessionStorage: {
     getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k),
   } } });
-  const render = function useTestRender() { cursor = 0; return useH5OrderFlow({ activityStatus: "running", runtimeActivity: { code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] } }); };
+  const render = function useTestRender() { cursor = 0; return useH5OrderFlow({ activityStatus: "running", runtimeActivity: activity }); };
   await render().verifyIdentity();
-  return { render, calls, fail: value => { fail = value; } };
+  calls.length = 0;
+  return { render, calls, draft, api, fail: value => { fail = value; } };
 }
 test("H5 pure increases use direct submission and clear the old pending application", async () => {
   const h = await harness("SUBMITTED", { id: 7, status: "PENDING", requestType: "MODIFY", items: [item(1, 5)] });
@@ -87,4 +88,86 @@ test("editing during a pending withdrawal starts from the effective items", asyn
   assert.equal(h.render().quantities[1], 10);
   h.render().setQuantities({ 1: 12 }); await h.render().submitOrder();
   assert.equal(h.calls[0][0], "direct");
+});
+
+const mixedActivity = { code: "A", availableCustomerTypes: ["GENERAL", "SPECIAL"], regions: [{ code: "NORTH", name: "北区" }] };
+
+test("returning home clears the old identity and both channel switches verify the selected scope", async () => {
+  const h = await harness("SUBMITTED", null, mixedActivity);
+  for (const [channel, type, region] of [["综合客户", "GENERAL", "NORTH"], ["特渠专业客户", "SPECIAL", ""], ["综合客户", "GENERAL", "NORTH"]]) {
+    await h.render().resetEntry();
+    assert.equal(h.render().phone, "");
+    assert.equal(h.render().runtimeOrder, null);
+    assert.equal(h.render().orderStatus, "none");
+    assert.equal(Object.keys(h.render().quantities).length, 0);
+    await h.render().resetEntry(channel);
+    h.render().setRegion(region);
+    h.render().setStep("verify");
+    assert.equal(h.render().channel, channel);
+    assert.match(h.render().identityLabel, new RegExp(channel));
+    h.render().setPhone("13800000001");
+    await h.render().verifyIdentity();
+    assert.deepEqual(h.calls.at(-1), ["verify", type, region, "13800000001"]);
+    assert.equal(h.render().step, "submitted");
+  }
+});
+
+test("switching waits for draft completion and blocks overlapping verification", async () => {
+  const h = await harness("SUBMITTED", null, mixedActivity);
+  let release;
+  h.draft.draftSaveChainRef.current = new Promise(resolve => { release = resolve; });
+  const switching = h.render().resetEntry("特渠专业客户");
+  await h.render().verifyIdentity();
+  assert.equal(h.calls.length, 0);
+  assert.notEqual(h.render().runtimeOrder, null);
+  release(); await switching;
+  assert.equal(h.render().runtimeOrder, null);
+  assert.equal(h.render().channel, "特渠专业客户");
+  assert.equal(h.draft.latestDraftSnapshotRef.current, null);
+  assert.equal(h.draft.draftOwnerIdRef.current, null);
+});
+
+test("a failed draft flush keeps the original customer and order", async () => {
+  const h = await harness();
+  h.draft.latestDraftSnapshotRef.current = { customerId: 2, signature: "unsaved" };
+  await h.render().resetEntry("特渠专业客户");
+  assert.notEqual(h.render().runtimeOrder, null);
+  assert.match(h.render().runtimeMessage, /草稿尚未保存/);
+});
+
+test("single-type and unspecified activities retain their direct entry policy after reset", async () => {
+  for (const [activity, type] of [[{ code: "A", availableCustomerTypes: ["GENERAL"], regions: [] }, "GENERAL"], [{ code: "A", availableCustomerTypes: ["SPECIAL"], regions: [] }, "SPECIAL"], [{ code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] }, "ALL"]]) {
+    const h = await harness("SUBMITTED", null, activity);
+    await h.render().resetEntry();
+    assert.equal(h.render().visibleStep, "verify");
+    await h.render().verifyIdentity();
+    assert.equal(h.calls.at(-1)[1], type);
+  }
+});
+
+test("failed verification after a switch cannot expose the previous order", async () => {
+  const h = await harness("SUBMITTED", null, mixedActivity);
+  await h.render().resetEntry("综合客户");
+  h.render().setRegion("SOUTH"); h.render().setStep("verify");
+  h.api.verifyPhone = async () => { throw new Error("unavailable"); };
+  await h.render().verifyIdentity();
+  assert.equal(h.render().step, "verify");
+  assert.equal(h.render().runtimeOrder, null);
+  assert.equal(h.render().identityLabel, "综合客户 · SOUTH");
+  assert.notEqual(h.render().verifyError, "");
+});
+
+test("verification is serialized with channel switching even before rerender", async () => {
+  const h = await harness("SUBMITTED", null, mixedActivity);
+  await h.render().resetEntry("特渠专业客户");
+  let release;
+  let requests = 0;
+  h.api.verifyPhone = async () => { requests++; await new Promise(resolve => { release = resolve; }); return { activityId: 1, customerId: 3, customerType: "SPECIAL" }; };
+  const model = h.render();
+  const verifying = model.verifyIdentity();
+  await model.verifyIdentity();
+  await model.resetEntry("综合客户");
+  assert.equal(requests, 1);
+  release(); await verifying;
+  assert.equal(h.render().channel, "特渠专业客户");
 });

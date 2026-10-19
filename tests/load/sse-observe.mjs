@@ -1,6 +1,7 @@
 // Read-only SSE observer: safe to run alongside the existing write-load runner without changing its version delta.
 import assert from 'node:assert/strict';
 import {base,guard,save} from './lib.mjs';
+import {notificationAgeMs} from './time-metrics.mjs';
 guard();
 const seconds=Number(process.argv[2] || 330),count=Number(process.argv[3] || 100);
 assert(Number.isInteger(seconds) && seconds>=10 && seconds<=600);
@@ -29,7 +30,7 @@ try {
      const data=JSON.parse(event.split('\n').find(l=>l.startsWith('data:')).slice(5));
      assert.equal(data.scope,'ACTIVITY');assert.equal(data.activityId,101);
      const created=Date.parse(data.oldestEventAt);assert(Number.isFinite(created));
-     frames[index]++;delays.push(Math.max(0,Date.now()-created));if(index===0)coveredEvents+=data.eventCount;
+     frames[index]++;delays.push(notificationAgeMs(created));if(index===0)coveredEvents+=data.eventCount;
     }
    }
   }catch(error){if(!controller.signal.aborted)failures.push({index,message:error.message});}

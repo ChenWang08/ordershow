@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { useDrawerSave } from "../../../components/useDrawerSave";
+import type { DrawerSaveResult } from "../../../components/drawer-save-result";
 import { useDrawerClose } from "../../../components/useDrawerClose";
 import { attendanceCustomerType, createImportRowId, type AttendanceFieldKey, type AttendanceRow } from "../../../domain/import-domain";
 
-export function AttendanceFormDrawer({ rows, initialRow, onClose, onSave }: { rows: AttendanceRow[]; initialRow?: AttendanceRow; onClose: () => void; onSave: (row: AttendanceRow) => Promise<boolean> }) {
+export function AttendanceFormDrawer({ rows, initialRow, onClose, onSave }: { rows: AttendanceRow[]; initialRow?: AttendanceRow; onClose: () => void; onSave: (row: AttendanceRow) => Promise<DrawerSaveResult> }) {
   const isEditing = Boolean(initialRow);
   const [form, setForm] = useState<AttendanceRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("attendance-manual"), sequence: 0, dealerName: "", gender: "", contactPhone: "", branch: "", dealerCompany: "", participantType: "", customerType: "" });
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
+  const { saving, saveError, requiresReload, save } = useDrawerSave(onClose);
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.map((row) => row.sequence)) + 1;
   const update = (field: AttendanceFieldKey, value: string) => setForm((current) => ({ ...current, [field]: value, ...(field === "participantType" ? { customerType: attendanceCustomerType(value) } : {}) }));
   const requestClose = useDrawerClose(form, onClose, saving);
@@ -25,14 +26,7 @@ export function AttendanceFormDrawer({ rows, initialRow, onClose, onSave }: { ro
           <label className="wide-field"><span>经销商名称</span><input value={form.dealerCompany} onChange={(event) => update("dealerCompany", event.target.value)} placeholder="请输入经销商名称" /></label>
           <label className="wide-field"><span>参会人员类型</span><input value={form.participantType} onChange={(event) => update("participantType", event.target.value)} placeholder="例如：综合经销商 / 特渠专业经销商" /></label>
         </div><p className="drawer-form-note">抽奖大屏只显示经销商名称；客户类型由参会人员类型自动识别。</p></div>
-        <footer><div className="drawer-save-error">{saveError && <small className="field-error">{saveError}</small>}</div><button type="button" disabled={saving} onClick={requestClose}>取消</button><button type="button" className="admin-primary" disabled={saving} onClick={async () => {
-          setSaving(true); setSaveError("");
-          try {
-            const saved = await onSave({ ...form, sequence: nextSequence, manuallyEdited: true });
-            if (saved) onClose(); else setSaveError("保存失败，请根据页面提示检查后重试。");
-          } catch { setSaveError("保存请求异常，请稍后重试。"); }
-          finally { setSaving(false); }
-        }}>{saving ? "保存中…" : isEditing ? "保存修改" : "保存到场客户"}</button></footer>
+        <footer><div className="drawer-save-error">{saveError && <small className="field-error" role="alert">{saveError}</small>}{requiresReload && <button type="button" onClick={() => window.location.reload()}>刷新列表</button>}</div><button type="button" disabled={saving} onClick={requestClose}>取消</button><button type="button" className="admin-primary" disabled={saving || requiresReload} onClick={() => save(() => onSave({ ...form, sequence: nextSequence, manuallyEdited: true }))}>{saving ? "保存中…" : isEditing ? "保存修改" : "保存到场客户"}</button></footer>
       </aside>
     </div>
   );

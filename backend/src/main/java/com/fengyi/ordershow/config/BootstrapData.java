@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.config;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fengyi.ordershow.customer.AttendanceMatchingService;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -51,7 +53,7 @@ public class BootstrapData implements ApplicationRunner {
           INSERT INTO activity(department_id, activity_code, name, description, status, timezone, starts_at, ends_at,
                                customer_scope, created_by, updated_by)
           VALUES (?, '2026-mid-autumn', '2026 年中秋订货会', '订购会本地开发活动', 'DRAFT', 'Asia/Shanghai', ?, ?, 'ALL', ?, ?)
-          """, defaultDepartmentId(), java.sql.Timestamp.from(starts), java.sql.Timestamp.from(ends), adminId, adminId);
+          """, defaultDepartmentId(), UtcTime.database(starts), UtcTime.database(ends), adminId, adminId);
       Long activityId = jdbc.queryForObject("SELECT id FROM activity WHERE activity_code = '2026-mid-autumn'", Long.class);
       if (activityId != null) {
         jdbc.batchUpdate("INSERT INTO activity_region(activity_id, region_code, region_name, sort_no) VALUES (?, ?, ?, ?)",

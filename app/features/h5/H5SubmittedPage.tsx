@@ -1,5 +1,8 @@
 "use client";
 
+import { formatBeijingTime } from "../shared/time";
+
+
 import { useState } from "react";
 import type { H5OrderModel } from "./useH5OrderFlow";
 import { ProductArt } from "./ProductArt";
@@ -35,7 +38,7 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
     </button>}
     <div className="submitted-meta">
       <p><span>订单编号</span><b>{order?.orderNo || "—"}</b></p>
-      {pending && <p><span>申请时间</span><b>{new Date(request.requestedAt).toLocaleString("zh-CN",{hour12:false,timeZone:"Asia/Shanghai"})}</b></p>}
+      {pending && <p><span>申请时间</span><b>{formatBeijingTime(request.requestedAt)}</b></p>}
       {!pending && <p><span>最后修改时间</span><b>{model.orderUpdatedAt}</b></p>}
       <p><span>{orderStatus === "submitted" ? "当前生效版本" : "当前订单版本"}</span><b>V{order?.currentVersion ?? model.orderVersion}</b></p>
       {request && <p><span>申请状态</span><b>{pending ? "待审核" : "已驳回"}</b></p>}
@@ -62,7 +65,7 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
     {model.orderEvents.length > 0 && <section className="submitted-events"><h3>操作记录</h3>{model.orderEvents.map((event,index)=><p key={index}><b>{event.time} {event.title}</b><span>{event.detail}</span></p>)}</section>}
     <div className="submitted-actions">
       {!customerOrderReadOnly && <button className="primary-btn" onClick={model.startEditingOrder}>{orderStatus === "withdrawn" || orderStatus === "voided" ? "重新订货" : pending ? "继续修改订单" : "修改订单"}</button>}
-      <button className="ghost-btn" onClick={()=>model.setStep("channel")}>返回活动首页</button>
+      <button className="ghost-btn" disabled={model.runtimeBusy} onClick={()=>void model.resetEntry()}>返回活动首页</button>
     </div>
   </section>;
 }

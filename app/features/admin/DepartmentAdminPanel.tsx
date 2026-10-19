@@ -1,5 +1,8 @@
 "use client";
 
+import { formatBeijingTime } from "../shared/time";
+
+
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ApiError, createAdminDepartment, createDepartmentUser, loadAdminDepartments, loadAdminUsers,
@@ -231,7 +234,7 @@ export function DepartmentAdminPanel() {
           <span>{item.username}<small>{item.displayName}</small></span>
           <span>{item.departmentName || "总部"}</span>
           <span>{item.status === "ACTIVE" ? "启用" : "停用"}</span>
-          <span>{item.lastLoginAt ? new Date(item.lastLoginAt).toLocaleString("zh-CN", { hour12: false }) : "未登录"}</span>
+          <span>{item.lastLoginAt ? formatBeijingTime(item.lastLoginAt) : "未登录"}</span>
           <div className="department-table-actions">{item.roleCode === "DEPARTMENT_ADMIN" && <div className="inline-actions"><button type="button" onClick={() => resetUserPassword(item)} disabled={busy}>重置密码</button><button type="button" onClick={() => toggleUser(item)} disabled={busy}>{item.status === "ACTIVE" ? "停用" : "启用"}</button></div>}</div>
         </div>)}
       </div>

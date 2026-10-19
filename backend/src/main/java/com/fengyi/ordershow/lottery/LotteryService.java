@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.lottery;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fengyi.ordershow.activity.ActivityService;
@@ -16,7 +18,6 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -128,7 +129,7 @@ public class LotteryService {
   public List<RuleView> rules(long activityId) {
     return jdbc.query("SELECT id, activity_id, name, status, created_at, updated_at FROM lottery_rule WHERE activity_id = ? ORDER BY id DESC",
         (rs, rowNum) -> new RuleView(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4),
-            rs.getTimestamp(5).toInstant(), rs.getTimestamp(6).toInstant(), rounds(rs.getLong(1))), activityId);
+            UtcTime.read(rs, 5), UtcTime.read(rs, 6), rounds(rs.getLong(1))), activityId);
   }
 
   public RuleView rule(long activityId, long ruleId) {
@@ -383,9 +384,9 @@ public class LotteryService {
           Long imageFileId = rs.getObject(24) == null ? null : rs.getLong(24);
           return new RoundView(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getInt(4), rs.getString(5),
               rs.getString(6), rs.getInt(7), rs.getString(8), rs.getString(9), rs.getBigDecimal(10),
-              rs.getString(11), rs.getString(12), rs.getLong(13), instant(rs.getTimestamp(14)), rs.getBoolean(15), rs.getString(16),
+              rs.getString(11), rs.getString(12), rs.getLong(13), UtcTime.read(rs, 14), rs.getBoolean(15), rs.getString(16),
               rs.getString(17), rs.getInt(18), rs.getObject(19) == null ? null : rs.getInt(19), rs.getString(20),
-              instant(rs.getTimestamp(21)), instant(rs.getTimestamp(22)), rs.getInt(23), imageFileId, prizeImageUrl(imageFileId));
+              UtcTime.read(rs, 21), UtcTime.read(rs, 22), rs.getInt(23), imageFileId, prizeImageUrl(imageFileId));
         }, args);
   }
 
@@ -402,9 +403,9 @@ public class LotteryService {
           Long imageFileId = rs.getObject(24) == null ? null : rs.getLong(24);
           return new RoundView(rs.getLong(1), rs.getLong(2), rs.getLong(3), rs.getInt(4), rs.getString(5),
               rs.getString(6), rs.getInt(7), rs.getString(8), rs.getString(9), rs.getBigDecimal(10), rs.getString(11),
-              rs.getString(12), rs.getLong(13), instant(rs.getTimestamp(14)), rs.getBoolean(15), rs.getString(16), rs.getString(17),
+              rs.getString(12), rs.getLong(13), UtcTime.read(rs, 14), rs.getBoolean(15), rs.getString(16), rs.getString(17),
               rs.getInt(18), rs.getObject(19) == null ? null : rs.getInt(19), rs.getString(20),
-              instant(rs.getTimestamp(21)), instant(rs.getTimestamp(22)), rs.getInt(23), imageFileId, prizeImageUrl(imageFileId));
+              UtcTime.read(rs, 21), UtcTime.read(rs, 22), rs.getInt(23), imageFileId, prizeImageUrl(imageFileId));
         }, activityId, roundId);
     if (result.isEmpty()) throw DomainException.notFound("LOTTERY_ROUND_NOT_FOUND", "已发布抽奖轮次不存在");
     return result.getFirst();
@@ -685,7 +686,6 @@ public class LotteryService {
     return Integer.compare(left.length, right.length);
   }
   private String toJson(Object value) { try { return json.writeValueAsString(value); } catch (JsonProcessingException e) { throw new IllegalStateException(e); } }
-  private static Instant instant(Timestamp value) { return value == null ? null : value.toInstant(); }
 
   private record Candidate(long customerId, String shortName, String fullName, String customerType, String regionCode,
                            String branchName, String phoneMasked, Long orderId, BigDecimal orderAmount,

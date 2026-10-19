@@ -25,9 +25,13 @@ spring:
     username: ${DB_USERNAME:order_show}
     password: ${DB_PASSWORD:order_show_local}
     hikari:
+      connection-init-sql: SET time_zone = '+00:00'
       maximum-pool-size: ${DB_POOL_SIZE:20}
       connection-timeout: 5000
       data-source-properties:
+        connectionTimeZone: UTC
+        forceConnectionTimeZoneToSession: true
+        preserveInstants: true
         rewriteBatchedStatements: true
   flyway:
     enabled: ${DB_MIGRATION_ENABLED:true}

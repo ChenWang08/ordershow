@@ -171,7 +171,6 @@ test("keeps product imports as independent full-replacement batches", async () =
   assert.match(importService, /IMAGE_DECISION_MULTIPLE_IMAGES/);
   assert.match(productService, /sameMaterialNameProducts/);
   assert.match(prototype, /await deleteAdminProductImage/);
-  assert.match(prototype, /const saved = await onSave/);
   assert.match(importController, /MultipartFile imageZip/);
   assert.match(importService, /auxiliary_file_id/);
   assert.match(importService, /image_decisions_json/);
@@ -287,7 +286,7 @@ test("derives H5 and dashboard regions from the current whitelist", async () => 
   assert.match(prototype, /generalRegions/);
   assert.match(prototype, /regionProductCards\.length > 0/);
   assert.match(prototype, /maxAmount=\{regionProductMax\}/);
-  assert.match(prototype, /setStep\(regionalized \? "region" : "verify"\)/);
+  assert.match(prototype, /nextChannel === "综合客户" && regionalized \? "region"/);
   assert.match(prototype, /whitelistCustomerTypeMode === "UNSPECIFIED"/);
   assert.match(prototype, /value: "ALL", label: "全部客户"/);
   assert.match(prototype, /loadDashboard\(\{ customerType, regionCode, metric \}\)/);
@@ -523,10 +522,8 @@ test("uses live overview data, full admin phones, Chinese regions, and linked at
     assert.match(prototype, /待确认和未关联记录不会进入抽奖候选池/);
     assert.match(prototype, /现场手机号仅作联系信息/);
   assert.match(prototype, /mergeAttendanceMatchPreview/);
-  assert.match(prototype, /onSave: \(row: AttendanceRow\) => Promise<boolean>/);
   assert.match(prototype, /当前到场预览记录未绑定后端 staging/);
   assert.match(prototype, /当前白名单预览记录未绑定后端 staging/);
-  assert.match(prototype, /const saved = await onSave/);
   assert.match(importDomain, /edited\.participantName/);
   assert.match(importDomain, /edited\.dealerFullName/);
   assert.match(api, /loadAttendanceMatchPreview/);

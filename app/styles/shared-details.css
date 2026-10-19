@@ -51,7 +51,11 @@
 .order-timeline p { display: flex; flex-direction: column; margin: 0; padding: 8px 0 8px 16px; border-left: 2px solid #d8b372; font-size: 9px; }
 .order-timeline span { margin-top: 3px; color: #8c7c73; }
 .order-drawer > footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: auto; padding: 18px 20px; border-top: 1px solid #e5dbd4; background: #fff; }
-.drawer-save-error { display: flex; min-width: 0; flex: 1; align-items: center; color: #b72a26; font-size: 8px; }
+.drawer-save-error { display: flex; min-width: 0; flex: 1; flex-wrap: wrap; align-items: center; gap: 8px; color: #b72a26; font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.drawer-save-error .field-error { font-size: inherit; }
+.form-drawer > footer { flex-wrap: wrap; }
+.form-drawer > footer > button { flex-shrink: 0; }
+@media (max-width: 600px) { .form-drawer > footer .drawer-save-error:not(:empty) { flex-basis: 100%; max-height: 28vh; overflow-y: auto; } }
 .order-drawer > footer button { padding: 8px 13px; color: #7b6960; border: 1px solid #ddd1ca; border-radius: 7px; background: #fff; font-size: 9px; }.order-drawer > footer .admin-primary { color: #fff; border-color: #a92321; background: #a92321; }
 .order-drawer > footer .danger-action { color: #a92321; border-color: #d9b3ab; background: #fff8f6; }
 .order-editor-drawer { width: min(680px, 94vw); overflow: hidden; }

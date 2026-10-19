@@ -36,6 +36,12 @@ const activity=await call(0,'POST','/admin/activities',{
   startsAt:new Date(Date.now()+3600000).toISOString(),endsAt:new Date(Date.now()+86400000).toISOString(),
   eventEndsAt:new Date(Date.now()+172800000).toISOString(),companyRankingTopN:20,branchRankingTopN:20,tonDisplayScale:3,
 });
+// MySQL defaults to +08:00 and replica B uses an Asia/Shanghai JVM.
+// API instants and database default timestamps must still represent UTC.
+assert.equal((await call(1,'GET',`/admin/activities/${activity.id}`)).startsAt,activity.startsAt);
+assert.ok(activity.startsAt.endsWith('Z'));
+assert.ok(Math.abs(Number(sql(`SELECT TIMESTAMPDIFF(SECOND,created_at,UTC_TIMESTAMP(3)) FROM activity WHERE id=${Number(activity.id)}`))) < 60,'new default timestamp must use UTC');
+console.log('PASS: UTC API round trip across replicas and UTC database default under +08:00 server.');
 // New merged features must work through either replica and shared object storage.
 const backgroundBytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=','base64');
 const backgroundForm=new FormData();

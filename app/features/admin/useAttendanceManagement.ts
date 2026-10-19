@@ -1,5 +1,7 @@
 "use client";
 
+import { saveFailure, saveRequestFailure, type DrawerSaveResult } from "../../components/drawer-save-result";
+
 import { useState, type Dispatch, type SetStateAction } from "react";
 import { ApiError, uploadImport, cancelImport, confirmImport, waitForImport, loadImportRows, loadAttendanceMatchPreview, loadAdminAttendees, updateImportRow, deleteImportRows, createAdminAttendee, updateAdminAttendee, deleteAdminAttendee, type ImportStagingRow, type AttendanceMatchPreview } from "../../api";
 import { bindAttendanceStaging, parseAttendanceWorkbook, type AttendanceRow, type AttendanceImportDraft } from "../../domain/import-domain";
@@ -153,32 +155,29 @@ export function useAttendanceManagement({
       setAttendancePublishing(false);
     }
   };
-  const saveAttendanceRow = async (row: AttendanceRow) => {
+  const saveAttendanceRow = async (row: AttendanceRow): Promise<DrawerSaveResult> => {
     if (activityClosed) {
-      setActionNotice("活动已截止，现场到场名单只读。" );
-      return false;
+      return saveFailure("活动已截止，现场到场名单只读。" );
     }
     if (pendingAttendanceImport) {
       if (editingAttendanceRow) {
         const taskId = serverImportTasks.ATTENDANCE;
         if (!taskId || !editingAttendanceRow.serverRowId) {
-          setActionNotice("当前到场预览记录未绑定后端 staging，请重新选择 Excel 后再编辑。");
-          return false;
+          return saveFailure("当前到场预览记录未绑定后端 staging，请重新选择 Excel 后再编辑。");
         }
         try {
           await updateImportRow(Number(activityId), taskId, editingAttendanceRow.serverRowId, {
             participantName: row.dealerName, gender: row.gender, contactPhone: row.contactPhone,
             branchName: row.branch, dealerFullName: row.dealerCompany, participantType: row.participantType,
           });
-        } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "到场名单预览修改失败"); return false; }
+        } catch (error) { return saveFailure(error instanceof ApiError ? error.message : "到场名单预览修改失败"); }
         setPendingAttendanceImport((current) => current ? { ...current, rows: current.rows.map((item) => item.id === row.id ? row : item) } : current);
         try { await refreshServerImportPreview("ATTENDANCE"); }
-        catch (error) { setActionNotice(error instanceof ApiError ? `修改已写入 staging，但关联试算刷新失败：${error.message}` : "修改已写入 staging，但关联试算刷新失败，请重试。"); return false; }
+        catch (error) { return saveFailure(error instanceof ApiError ? `修改已保存，但关联试算刷新失败：${error.message}。请先刷新列表核对。` : "修改已保存，但关联试算刷新失败，请先刷新列表核对。", true); }
         setActionNotice(`已修改待导入到场客户：${row.dealerCompany || row.dealerName || "未命名客户"}，确认导入后生效。`);
-        return true;
+        return { ok: true };
       } else {
-        setActionNotice("导入预览阶段不能新增到场客户；请先发布本次 Excel，再使用单条新增。");
-        return false;
+        return saveFailure("导入预览阶段不能新增到场客户；请先发布本次 Excel，再使用单条新增。");
       }
     }
     const attendeeBody = { participantName: row.dealerName, gender: row.gender, participantType: row.participantType,
@@ -188,22 +187,22 @@ export function useAttendanceManagement({
       try {
         const saved = await updateAdminAttendee(Number(activityId), Number(editingAttendanceRow.id), attendeeBody);
         savedRow = { ...mapAdminAttendanceRows([saved])[0], sequence: row.sequence, manuallyEdited: true };
-      } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "到场客户保存失败"); return false; }
+      } catch (error) { return saveFailure(error instanceof ApiError ? error.message : "到场客户保存失败"); }
       setAttendanceRows((current) => current.map((item) => item.id === row.id ? savedRow : item));
       if (activityStarted) recordOperation("活动开始后改单条现场到场客户", row.dealerCompany || row.dealerName, `修改现场到场信息；原因由表单记录。`);
       else recordOperation("编辑现场到场客户", row.dealerCompany || row.dealerName, "修改当前现场到场名单信息。" );
       setActionNotice(`${activityStarted ? "已记录并保存" : "已保存"}到场客户修改：${row.dealerCompany || row.dealerName || "未命名客户"}`);
-      return true;
+      return { ok: true };
     } else {
       let savedRow = row;
       try {
         const saved = await createAdminAttendee(Number(activityId), attendeeBody);
         savedRow = { ...mapAdminAttendanceRows([saved])[0], sequence: row.sequence, manuallyEdited: true };
-      } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "到场客户新增失败"); return false; }
+      } catch (error) { return saveRequestFailure(error, "到场客户新增失败，请检查网络连接", true); }
       setAttendanceRows((current) => [...current, savedRow]);
       recordOperation(activityStarted ? "活动开始后手动新增现场到场客户" : "手动添加现场到场客户", row.dealerCompany || row.dealerName, activityStarted ? "活动开始后单条补录现场到场客户。" : "手动添加现场到场客户。" );
       setActionNotice(`已添加到场客户：${row.dealerCompany || row.dealerName || "未命名客户"}`);
-      return true;
+      return { ok: true };
     }
   };
   const deleteAttendanceRows = async (ids: string[]) => {

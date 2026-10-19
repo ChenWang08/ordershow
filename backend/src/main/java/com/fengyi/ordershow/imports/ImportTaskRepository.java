@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.imports;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fengyi.ordershow.imports.ImportData.MaterializeRow;
 import com.fengyi.ordershow.imports.ImportService.ImportTask;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -52,7 +54,7 @@ public class ImportTaskRepository {
         rs.getString("original_filename"), rs.getInt("input_count"), rs.getInt("added_count"), rs.getInt("updated_count"),
         rs.getInt("unchanged_count"), rs.getInt("deactivated_count"), rs.getInt("warning_count"), rs.getInt("error_count"),
         rs.getString("failure_code"), rs.getString("failure_message"), rs.getLong("created_by"),
-        rs.getObject("confirmed_by") == null ? 0 : rs.getLong("confirmed_by"), rs.getTimestamp("created_at").toInstant(),
-        rs.getTimestamp("completed_at") == null ? null : rs.getTimestamp("completed_at").toInstant());
+        rs.getObject("confirmed_by") == null ? 0 : rs.getLong("confirmed_by"), UtcTime.read(rs, "created_at"),
+        UtcTime.read(rs, "completed_at"));
   }
 }

@@ -1,4 +1,5 @@
 import type { ActivityStatus } from "./types";
+import { toBeijingDateTimeLocal } from "./time";
 
 export function normalizePhone(value: string) {
   return value.replace(/\D/g, "");
@@ -18,16 +19,12 @@ export function normalizeSearchText(value: string) {
 }
 
 
-export function toDateTimeLocal(value: string) {
-  const date = new Date(value);
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
+export const toDateTimeLocal = toBeijingDateTimeLocal;
 
 export function nextMinuteDateTimeLocal() {
   const next = new Date();
-  next.setSeconds(0, 0);
-  next.setMinutes(next.getMinutes() + 1);
+  next.setUTCSeconds(0, 0);
+  next.setUTCMinutes(next.getUTCMinutes() + 1);
   return toDateTimeLocal(next.toISOString());
 }
 

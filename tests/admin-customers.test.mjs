@@ -54,7 +54,7 @@ function customerHarness(overrides = {}, apiOverrides = {}, domainOverrides = {}
   const slots = [];
   let cursor = 0;
   const mocks = {
-    "../../api": api,
+    "../../api": api, "../api": api,
     "../../domain/import-domain": {
       ...loadModule("app/domain/import-domain.ts"),
       parseAttendanceWorkbook: async () => draft(),
@@ -74,7 +74,7 @@ function customerHarness(overrides = {}, apiOverrides = {}, domainOverrides = {}
   const { useWhitelistImport } = loadModule("app/features/admin/useWhitelistImport.ts", mocks, globals);
   const { useWhitelistEditor } = loadModule("app/features/admin/useWhitelistEditor.ts", mocks, globals);
   return {
-    calls, notices, confirmations, options,
+    calls, notices, confirmations, options, api,
     render: function useCustomerRender() {
       cursor = 0;
       const attendance = useAttendanceManagement(options);
@@ -123,7 +123,7 @@ test("editing a masked whitelist phone does not overwrite the stored phone", asy
   const harness = customerHarness();
   const row = { ...customer(), serverRowId: 31 };
   harness.render().editor.setEditingWhitelistRow(row);
-  assert.equal(await harness.render().editor.saveWhitelistRow(row), true);
+  assert.equal((await harness.render().editor.saveWhitelistRow(row)).ok, true);
   const [, activityId, taskId, stagingId, changes] = harness.calls[0];
   assert.equal(activityId, 1);
   assert.equal(taskId, 7);
@@ -136,9 +136,10 @@ test("editing a masked whitelist phone does not overwrite the stored phone", asy
 test("whitelist preview editing requires a staging ID", async () => {
   const harness = customerHarness();
   harness.render().editor.setEditingWhitelistRow(customer());
-  assert.equal(await harness.render().editor.saveWhitelistRow(customer()), false);
+  const result = await harness.render().editor.saveWhitelistRow(customer());
+  assert.equal(result.ok, false);
   assert.deepEqual(harness.calls, []);
-  assert.match(harness.notices.at(-1), /未绑定后端 staging/);
+  assert.match(result.message, /未绑定后端 staging/);
 });
 
 test("published whitelist deletion carries its version", async () => {
@@ -217,10 +218,10 @@ test("attendance preview deletion does not modify published attendees", async ()
 test("closed activities reject customer and attendance writes", async () => {
   const harness = customerHarness({ activityStatus: "closed" });
   const { editor, whitelist, attendance } = harness.render();
-  assert.equal(await editor.saveWhitelistRow(customer()), false);
+  assert.equal((await editor.saveWhitelistRow(customer())).ok, false);
   await editor.deleteWhitelistRows(["preview"]);
   await whitelist.confirmWhitelistImport();
-  assert.equal(await attendance.saveAttendanceRow(attendee()), false);
+  assert.equal((await attendance.saveAttendanceRow(attendee())).ok, false);
   await attendance.deleteAttendanceRows(["published"]);
   await attendance.handleAttendanceFile({ name: "attendance.xlsx" });
   assert.deepEqual(harness.calls, []);
@@ -328,4 +329,50 @@ test("attendance preview refresh failure after deletion stays recoverable", asyn
   await harness.render().attendance.deleteAttendanceRows(["preview"]);
   assert.equal(harness.render().attendance.pendingAttendanceImport.rows.length, 0);
   assert.match(harness.notices.at(-1), /删除已保存，但关联试算刷新失败/);
+});
+
+test("whitelist API rejections return their actual reason without changing rows", async () => {
+  const harness = customerHarness({ whitelistImportCompleted: true });
+  harness.api.createAdminCustomer = async () => { throw new harness.api.ApiError("该渠道下手机号已对应其他客户"); };
+  const before = harness.options.whitelistRows;
+  const result = await harness.render().editor.saveWhitelistRow(customer("new"));
+  assert.equal(result.ok, false); assert.match(result.message, /手机号已对应其他客户/);
+  assert.equal(result.requiresReload, false); assert.equal(harness.options.whitelistRows, before);
+});
+
+test("uncertain customer and attendee creates require a reload before another submission", async () => {
+  const harness = customerHarness({ whitelistImportCompleted: true }, {
+    createAdminCustomer: async () => { throw new Error("network lost"); },
+    createAdminAttendee: async () => { throw new Error("network lost"); },
+  });
+  for (const result of [await harness.render().editor.saveWhitelistRow(customer("new")), await harness.render().attendance.saveAttendanceRow(attendee("new"))]) {
+    assert.equal(result.ok, false); assert.equal(result.requiresReload, true);
+    assert.match(result.message, /新增结果尚未确认/);
+  }
+  assert.equal(harness.options.whitelistRows.length, 1); assert.equal(harness.options.attendanceRows.length, 1);
+});
+
+test("saved whitelist and attendance previews report refresh failure as already saved", async () => {
+  const harness = customerHarness({ refreshServerImportPreview: async () => { throw new Error("offline"); } });
+  const row = { ...customer(), serverRowId: 31 };
+  harness.render().editor.setEditingWhitelistRow(row);
+  let result = await harness.render().editor.saveWhitelistRow(row);
+  assert.equal(result.requiresReload, true); assert.match(result.message, /修改已保存/);
+  const attendanceRow = { ...attendee(), serverRowId: 32 };
+  harness.render().attendance.setPendingAttendanceImport({ ...draft(), rows: [attendanceRow] });
+  harness.render().attendance.setEditingAttendanceRow(attendanceRow);
+  result = await harness.render().attendance.saveAttendanceRow(attendanceRow);
+  assert.equal(result.requiresReload, true); assert.match(result.message, /修改已保存/);
+});
+
+test("successful customer and attendee creates use server identities and versions", async () => {
+  const harness = customerHarness({ whitelistImportCompleted: true }, {
+    createAdminCustomer: async () => ({ id: 81, lockVersion: 2, excelSequence: 99, phone: "13900000001", active: true }),
+    createAdminAttendee: async () => ({ id: 82, participantName: "新参会人", dealerName: "测试客户有限公司", matchStatus: "MATCHED", activityCustomerId: 81, lotteryEligible: true }),
+  });
+  assert.equal((await harness.render().editor.saveWhitelistRow(customer("new"))).ok, true);
+  const added = harness.options.whitelistRows.at(-1);
+  assert.equal(added.id, "81"); assert.equal(added.serverVersion, 2); assert.equal(added.sequence, 99);
+  assert.equal((await harness.render().attendance.saveAttendanceRow(attendee("new"))).ok, true);
+  assert.equal(harness.options.attendanceRows.at(-1).id, "82");
 });

@@ -4,7 +4,7 @@ import type { H5OrderModel } from "./useH5OrderFlow";
 import { money } from "../shared/utils";
 
 export function H5ResultPages({ model }: { model: H5OrderModel }) {
-  const { runtimeOrder, runtimeBusy, runtimeMessage, setStep, setChannel, setRegion, setVerifiedBranch, setVerifiedIdentity, submitMode, cancelConfirmOpen, setCancelConfirmOpen, visibleStep, selected, totalBoxes, totalAmount, withdrawOrder } = model;
+  const { runtimeOrder, runtimeBusy, runtimeMessage, setStep, resetEntry, submitMode, cancelConfirmOpen, setCancelConfirmOpen, visibleStep, selected, totalBoxes, totalAmount, withdrawOrder } = model;
   return <>
           {visibleStep === "success" && (
             <section className="h5-page success-page">
@@ -15,7 +15,7 @@ export function H5ResultPages({ model }: { model: H5OrderModel }) {
               <div className="success-amount"><span>订单总金额</span><b>¥{money(runtimeOrder?.totalAmount ?? totalAmount)}</b><small>{totalBoxes} 箱 · {selected.length} 种商品</small></div>
               <div className="success-note">订单已生效。截止前增加数量或新增商品直接生效；减少、删除商品或取消订货需后台审核。</div>
               <button className="primary-btn" onClick={() => setStep("submitted")}>查看订单</button>
-              <button className="ghost-btn" onClick={() => { setChannel(""); setRegion(""); setVerifiedBranch(""); setVerifiedIdentity(null); setStep("channel"); }}>返回活动首页</button>
+              <button className="ghost-btn" disabled={runtimeBusy} onClick={() => void resetEntry()}>返回活动首页</button>
             </section>
           )}
           {cancelConfirmOpen && (

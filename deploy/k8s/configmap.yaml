@@ -5,6 +5,7 @@ metadata:
 data:
   SPRING_PROFILES_ACTIVE: test
   DB_MIGRATION_ENABLED: "false"
+  # Preserve UTC connection settings; do not override Hikari UTC initialization.
   DB_URL: "jdbc:mysql://REPLACE_ME:3306/order_show?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&sslMode=VERIFY_IDENTITY"
   DB_USERNAME: "REPLACE_ME"
   DB_POOL_SIZE: "10"

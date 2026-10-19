@@ -1,12 +1,13 @@
 package com.fengyi.ordershow.dashboard;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fengyi.ordershow.activity.ActivityFinishedEvent;
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.DomainException;
 import java.math.BigDecimal;
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -183,7 +184,7 @@ public class DashboardService {
           AND last_submitted_at >= ? AND last_submitted_at <= ?
         GROUP BY bucket ORDER BY bucket
         """, (rs, rowNum) -> new TrendPoint(rs.getString(1), rs.getBigDecimal(2), rs.getLong(3)),
-        dashboard.activityId(), Timestamp.from(trendStart), Timestamp.from(trendEnd));
+        dashboard.activityId(), UtcTime.database(trendStart), UtcTime.database(trendEnd));
     List<RegionTotal> regions = jdbc.query("""
         SELECT COALESCE(region_code, 'UNASSIGNED'), SUM(total_amount), COUNT(*)
         FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED' AND customer_type = 'GENERAL'
@@ -347,7 +348,7 @@ public class DashboardService {
           AND (? IS NULL OR ? = '' OR customer_type = ?)
           AND (? IS NULL OR ? = '' OR region_code = ?)
         ORDER BY last_submitted_at DESC LIMIT 20
-        """, (rs, rowNum) -> new LatestOrder(rs.getString(1), rs.getString(2), rs.getString(3), rs.getBigDecimal(4), rs.getTimestamp(5).toInstant()),
+        """, (rs, rowNum) -> new LatestOrder(rs.getString(1), rs.getString(2), rs.getString(3), rs.getBigDecimal(4), UtcTime.read(rs, 5)),
         activityId, customerType, customerType, customerType, regionCode, regionCode, regionCode);
   }
 

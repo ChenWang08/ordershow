@@ -1,16 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import { useDrawerSave } from "../../../components/useDrawerSave";
+import type { DrawerSaveResult } from "../../../components/drawer-save-result";
 import { useDrawerClose } from "../../../components/useDrawerClose";
 import { createImportRowId, normalizeWhitelistName, whitelistIdentityKey, whitelistPhoneIsValid, type WhitelistCustomerTypeMode, type WhitelistRow } from "../../../domain/import-domain";
 import { normalizePhone } from "../../shared/utils";
 
-export function WhitelistFormDrawer({ rows, initialRow, customerTypeMode = "TYPED", activityStarted = false, onClose, onSave }: { rows: WhitelistRow[]; initialRow?: WhitelistRow; customerTypeMode?: WhitelistCustomerTypeMode; activityStarted?: boolean; onClose: () => void; onSave: (row: WhitelistRow, reason?: string) => Promise<boolean> }) {
+export function WhitelistFormDrawer({ rows, initialRow, customerTypeMode = "TYPED", activityStarted = false, onClose, onSave }: { rows: WhitelistRow[]; initialRow?: WhitelistRow; customerTypeMode?: WhitelistCustomerTypeMode; activityStarted?: boolean; onClose: () => void; onSave: (row: WhitelistRow, reason?: string) => Promise<DrawerSaveResult> }) {
   const isEditing = Boolean(initialRow);
   const [form, setForm] = useState<WhitelistRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("whitelist"), sequence: 0, customerType: customerTypeMode === "UNSPECIFIED" ? "" : "综合客户", region: "", branch: "", dealerShort: "", dealerFull: "", dealerType: "", dealerName: "", dealerPhone: "", confirmerName: "", confirmerPhone: "", status: "有效", source: "manual" });
   const [editReason, setEditReason] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState("");
+  const { saving, saveError, requiresReload, save } = useDrawerSave(onClose);
   const update = (field: keyof WhitelistRow, value: string | number) => setForm((current) => ({ ...current, [field]: value }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType).map((row) => row.sequence)) + 1;
   const phoneValid = (isEditing && form.dealerPhone.includes("*")) || whitelistPhoneIsValid(form.dealerPhone);
@@ -38,14 +39,7 @@ export function WhitelistFormDrawer({ rows, initialRow, customerTypeMode = "TYPE
           {activityStarted && <label className="wide-field"><span>紧急修改原因 *</span><input value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="请填写本次改单原因，保存后写入操作日志" /></label>}
         </div>
         <p className="drawer-form-note">{customerTypeMode === "UNSPECIFIED" ? "当前白名单不区分客户类型，H5 将直接验证手机号。" : "当前白名单按客户类型区分，综合客户进入 H5 后还需选择大区。"} {activityStarted ? "活动已开始，本次手动调整会记录操作日志。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
-        <footer><div className="drawer-save-error">{saveError && <small className="field-error">{saveError}</small>}</div><button disabled={saving} onClick={requestClose}>取消</button><button className="admin-primary" disabled={!canSave || saving} onClick={async () => {
-          setSaving(true); setSaveError("");
-          try {
-            const saved = await onSave({ ...form, sequence: nextSequence, status: "有效", source: isEditing ? form.source ?? "excel" : "manual", identityKey: whitelistIdentityKey(form), manuallyEdited: true }, editReason.trim());
-            if (saved) onClose(); else setSaveError("保存失败，请根据页面提示检查后重试。");
-          } catch { setSaveError("保存请求异常，请稍后重试。"); }
-          finally { setSaving(false); }
-        }}>{saving ? "保存中…" : isEditing ? "保存修改" : "添加客户"}</button></footer>
+        <footer><div className="drawer-save-error">{saveError && <small className="field-error" role="alert">{saveError}</small>}{requiresReload && <button type="button" onClick={() => window.location.reload()}>刷新列表</button>}</div><button disabled={saving} onClick={requestClose}>取消</button><button className="admin-primary" disabled={!canSave || saving || requiresReload} onClick={() => save(() => onSave({ ...form, sequence: nextSequence, status: "有效", source: isEditing ? form.source ?? "excel" : "manual", identityKey: whitelistIdentityKey(form), manuallyEdited: true }, editReason.trim()))}>{saving ? "保存中…" : isEditing ? "保存修改" : "添加客户"}</button></footer>
       </aside>
     </div>
   );
