@@ -60,6 +60,9 @@ try {
 
     & node scripts/test-department-members.mjs
     if ($LASTEXITCODE -ne 0) { throw "Department member permission tests failed." }
+
+    & node scripts/test-manual-additions.mjs
+    if ($LASTEXITCODE -ne 0) { throw "Manual customer/product/attendance creation tests failed." }
   } finally {
     Pop-Location
   }

@@ -1,4 +1,6 @@
 "use client";
+
+import { saveFailure, saveRequestFailure, type DrawerSaveResult } from "../../components/drawer-save-result";
 import { positiveProductNumber, productCompletenessStatus } from "../../domain/product-completeness";
 
 import { useState } from "react";
@@ -41,10 +43,9 @@ export function useProductEditor({
     setEditingProductRow(null);
     setProductFormOpen(true);
   };
-  const saveProductRow = async (row: ProductImportRow, reason = "") => {
+  const saveProductRow = async (row: ProductImportRow, reason = ""): Promise<DrawerSaveResult> => {
     if (activityClosed) {
-      setActionNotice("活动已截止，商品数据只读。" );
-      return false;
+      return saveFailure("活动已截止，商品数据只读。" );
     }
     const nextRow = { ...row, status: productCompletenessStatus(row.casePrice, row.conversion), imageStatus: productImageStatusForAssets(row.images) };
     const numeric = (value: string) => value.trim() === "" ? null : Number(value);
@@ -75,19 +76,24 @@ export function useProductEditor({
             priceTierPricingMode: nextRow.priceTierPricingMode,
             branchScope: nextRow.branchScope,
           });
-        } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "商品预览修改失败"); return false; }
+        } catch (error) { return saveFailure(error instanceof ApiError ? error.message : "商品预览修改失败"); }
       }
       let savedRow: ProductImportRow = { ...nextRow, manuallyEdited: true };
       let refreshedCatalogRows: ProductImportRow[] | null = null;
+      let detailsSaved = false;
+      if (productImportCompleted && editingProductRow.serverVersion === undefined) {
+        return saveFailure("当前商品缺少后端版本信息，请刷新列表后重试。", true);
+      }
       if (productImportCompleted && editingProductRow.serverVersion !== undefined) {
         try {
           const productId = Number(editingProductRow.id);
           const saved = await updateAdminProduct(Number(activityId), Number(editingProductRow.id), editingProductRow.serverVersion, {
             ...productBody, bottlePriceSet: true, casePriceSet: true, tonCaseFactorSet: true, priceTierSet: true,
           });
-          if (!saved) return false;
+          if (!saved) return saveFailure("商品保存结果异常，请刷新列表核对。", true);
           savedRow = { ...savedRow, id: String(saved.id), serverVersion: saved.version,
             status: saved.dataStatus === "INCOMPLETE" ? "待完善" : "有效" };
+          detailsSaved = true;
           const desiredImages = savedRow.images ?? [];
           const selectedReview = desiredImages.find((image) => image.reviewCandidateId
             && productImageRelationStatus(image) === "CONFIRMED");
@@ -122,7 +128,13 @@ export function useProductEditor({
           refreshedCatalogRows = mergeProductImageReviews(refreshedProducts.map(runtimeProductToImportRow), refreshedReviews);
           const refreshed = refreshedProducts.find((product) => product.id === productId);
           if (refreshed) savedRow = { ...runtimeProductToImportRow(refreshed), manuallyEdited: true };
-        } catch (error) { setActionNotice(error instanceof ApiError ? `商品或图片保存失败：${error.message}` : "商品或图片保存失败，请刷新后重试"); return false; }
+        } catch (error) {
+          if (detailsSaved) {
+            setProductRows((current) => current.map((item) => item.id === savedRow.id ? savedRow : item));
+            return saveFailure(`商品资料已保存，但图片处理或列表刷新未完成${error instanceof ApiError ? `：${error.message}` : ""}。请先刷新列表核对，再继续编辑。`, true);
+          }
+          return saveRequestFailure(error, "商品保存失败，请检查网络连接");
+        }
       }
       const sharedName = !productImportCompleted
         && productMaterialNameKey(editingProductRow.materialName) === productMaterialNameKey(savedRow.materialName)
@@ -145,22 +157,26 @@ export function useProductEditor({
         setProductRows((current) => current.map(applySavedPreviewImage));
         const previewRowsAfterSave = productRows.map(applySavedPreviewImage);
         setProductImageAssets((current) => synchronizeProductImageAssetStatuses(current, previewRowsAfterSave));
-        await refreshServerImportPreview("PRODUCT");
+        try { await refreshServerImportPreview("PRODUCT"); }
+        catch (error) {
+          return saveFailure(`修改已保存，但预览刷新失败${error instanceof ApiError ? `：${error.message}` : ""}。请先刷新列表核对。`, true);
+        }
       }
       if (activityStarted) recordOperation("活动开始后改单条商品", nextRow.materialName, `修改前：物料代码 ${editingProductRow.materialCode || "—"}、名称 ${editingProductRow.materialName || "—"}、元/箱 ${editingProductRow.casePrice || "—"}、分公司 ${editingProductRow.branchScope || "全部"}、状态 ${editingProductRow.status}；修改后：物料代码 ${nextRow.materialCode || "—"}、名称 ${nextRow.materialName || "—"}、元/箱 ${nextRow.casePrice || "—"}、分公司 ${nextRow.branchScope || "全部"}、状态 ${nextRow.status}；原因：${reason || "—"}。`);
       setActionNotice("保存成功");
-      return true;
+      return { ok: true };
     }
     if (!productImportCompleted && productFileName) {
-      setActionNotice("导入预览阶段不能新增商品；请先发布本次 Excel，再使用单条新增。");
-      return false;
+      return saveFailure("导入预览阶段不能新增商品；请先发布本次 Excel，再使用单条新增。");
     }
     let manualRow: ProductImportRow = { ...nextRow, source: "manual", manuallyEdited: true };
+    let productCreated = false;
     if (productImportCompleted) {
       try {
         const saved = await createAdminProduct(Number(activityId), productBody);
         manualRow = { ...manualRow, id: String(saved.id), serverVersion: saved.version, sequence: saved.sortNo,
           status: saved.dataStatus === "INCOMPLETE" ? "待完善" : "有效" };
+        productCreated = true;
         const desiredImages = nextRow.images ?? [];
         if (desiredImages.length > 0) {
           const uploadedIds = new Map<string, number>();
@@ -177,7 +193,13 @@ export function useProductEditor({
           const refreshed = refreshedProducts.find((product) => product.id === Number(saved.id));
           if (refreshed) manualRow = { ...runtimeProductToImportRow(refreshed), manuallyEdited: true };
         }
-      } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "商品新增失败"); return false; }
+      } catch (error) {
+        if (productCreated) {
+          setProductRows((current) => [...current.filter((item) => item.id !== manualRow.id), manualRow]);
+          return saveFailure(`商品已添加，但图片处理或列表刷新未完成${error instanceof ApiError ? `：${error.message}` : ""}。请先刷新列表，再编辑该商品，请勿重复添加。`, true);
+        }
+        return saveRequestFailure(error, "商品新增失败，请检查网络连接", true);
+      }
     }
     setProductRows((current) => [...current, manualRow]);
     if (!productImportCompleted && productFileName) {
@@ -185,7 +207,7 @@ export function useProductEditor({
     }
     recordOperation(activityStarted ? "活动开始后手动新增商品" : "手动添加商品", manualRow.materialName, `物料代码：${manualRow.materialCode || "—"}；客户类型：${manualRow.customerType}；返利：${manualRow.rebate}；${activityStarted ? `原因：${reason || "—"}。` : ""}`);
     setActionNotice(`${activityStarted ? "已记录并添加" : "已添加"}商品：${manualRow.materialName}`);
-    return true;
+    return { ok: true };
   };
   const deleteProductRows = async (ids: string[]) => {
     if (activityPublished) {

@@ -181,7 +181,7 @@ public class CustomerService {
           INSERT INTO activity_customer(activity_id, customer_id, customer_type, region_code, branch_name, normalized_branch_name,
             dealer_short_name, dealer_full_name, normalized_dealer_full_name, dealer_category, contact_name, phone, phone_lookup_hash, phone_masked,
             confirmer_name, confirmer_phone, confirmer_phone_masked, excel_sequence, is_active, source_import_task_id, data_version_id)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
             (SELECT COALESCE(MAX(c.excel_sequence), 0) + 1 FROM activity_customer c WHERE c.activity_id = ? AND c.data_version_id = ?),
             TRUE, ?, ?)
           """, activityId, customerId, customerType, regionCode, blankToNull(request.branchName()),

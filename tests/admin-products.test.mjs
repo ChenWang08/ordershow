@@ -78,7 +78,7 @@ function productHarness(overrides = {}, apiOverrides = {}) {
   const slots = [];
   let cursor = 0;
   const mocks = {
-    "../../api": api,
+    "../../api": api, "../api": api,
     react: {
       useMemo: (calculate) => calculate(),
       useState(initial) {
@@ -92,7 +92,7 @@ function productHarness(overrides = {}, apiOverrides = {}) {
   const { useProductImport } = loadModule("app/features/admin/useProductImport.ts", mocks, globals);
   const { useProductEditor } = loadModule("app/features/admin/useProductEditor.ts", mocks, globals);
   return {
-    calls, notices, options,
+    calls, notices, options, api,
     render: function useProductRender() {
       cursor = 0;
       const productImport = useProductImport(options);
@@ -197,7 +197,40 @@ test("adding products during an import preview is rejected", async () => {
   const harness = productHarness();
   harness.render().productImport.setProductFileName("products.xlsx");
   const result = await harness.render().productEditor.saveProductRow(productRow("new"));
-  assert.equal(result, false);
+  assert.equal(result.ok, false);
   assert.equal(harness.options.productRows.length, 1);
-  assert.match(harness.notices.at(-1), /导入预览阶段不能新增商品/);
+  assert.match(result.message, /导入预览阶段不能新增商品/);
+});
+
+test("a created product survives image failure and blocks repeating the create", async () => {
+  let creates = 0;
+  const harness = productHarness({ productImportCompleted: true }, {
+    createAdminProduct: async () => { creates++; return { id: 81, version: 2, sortNo: 99, dataStatus: "ACTIVE" }; },
+    addAdminProductImage: async () => { throw new Error("upload lost"); },
+  });
+  const row = { ...productRow("new"), images: [{ id: "local-image", file: {} }] };
+  const result = await harness.render().productEditor.saveProductRow(row);
+  assert.equal(result.ok, false); assert.equal(result.requiresReload, true);
+  assert.match(result.message, /商品已添加/); assert.equal(creates, 1);
+  const saved = harness.options.productRows.find(item => item.id === "81");
+  assert.equal(saved.serverVersion, 2); assert.equal(saved.sequence, 99);
+});
+
+test("saved product edits preserve the new version when catalog refresh fails", async () => {
+  const row = { ...productRow("42"), serverVersion: 1 };
+  const harness = productHarness({ productImportCompleted: true, productRows: [row] }, {
+    updateAdminProduct: async () => ({ id: 42, version: 2, dataStatus: "ACTIVE" }),
+    loadAdminProducts: async () => { throw new Error("refresh lost"); },
+  });
+  harness.render().productEditor.setEditingProductRow(row);
+  const result = await harness.render().productEditor.saveProductRow(row);
+  assert.equal(result.requiresReload, true); assert.match(result.message, /商品资料已保存/);
+  assert.equal(harness.options.productRows[0].serverVersion, 2);
+});
+
+test("uncertain product creates do not append a fake local row", async () => {
+  const harness = productHarness({ productImportCompleted: true }, { createAdminProduct: async () => { throw new Error("offline"); } });
+  const result = await harness.render().productEditor.saveProductRow(productRow("new"));
+  assert.equal(result.requiresReload, true); assert.match(result.message, /新增结果尚未确认/);
+  assert.equal(harness.options.productRows.length, 1);
 });

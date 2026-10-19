@@ -5,7 +5,11 @@ import { loadModule } from "./helpers/load-ts-module.mjs";
 function state() {
   let cursor = 0;
   const slots = [];
-  return { reset() { cursor = 0; }, react: { useState(initial) {
+  return { reset() { cursor = 0; }, react: { useRef(initial) {
+    const id = cursor++;
+    if (!(id in slots)) slots[id] = { current: initial };
+    return slots[id];
+  }, useState(initial) {
     const id = cursor++;
     if (!(id in slots)) slots[id] = typeof initial === "function" ? initial() : initial;
     return [slots[id], next => { slots[id] = typeof next === "function" ? next(slots[id]) : next; }];
@@ -45,7 +49,7 @@ for (const [folder, name, fieldLabel, newValue] of [
       "../products/ProductImageEditor": { ProductImageEditor: () => null },
       "./ProductScopeEditor": { ProductScopeEditor: () => null }, "./product-scope.css": {},
     }, { window: { confirm() { prompts++; return accepted; } }, crypto: { randomUUID: () => "test" } })[name];
-    const props = { rows: [], activityId: 1, scopeEnabled: false, onClose: () => closes++, onSave: async () => false };
+    const props = { rows: [], activityId: 1, scopeEnabled: false, onClose: () => closes++, onSave: async () => ({ ok: false, message: "手机号重复，请直接编辑原客户" }) };
     let tree;
     const render = () => { adapter.reset(); tree = component(props); };
     const find = predicate => nodes(tree).find(predicate);
@@ -71,10 +75,11 @@ for (const [folder, name, fieldLabel, newValue] of [
     assert.equal(find(node => node.type === "button" && text(node) === "×").props.disabled, true);
     find(node => node.type === "button" && text(node) === "×").props.onClick();
     assert.equal(closes, 2);
-    resolveSave(false); await save; render();
+    resolveSave({ ok: false, message: "手机号重复，请直接编辑原客户" }); await save; render();
     assert.equal(input().props.value, newValue);
+    assert.match(text(find(node => node.props?.role === "alert")), /手机号重复/);
     assert.equal(find(node => node.type === "button" && text(node) === "×").props.disabled, false);
-    props.onSave = async () => true; render();
+    props.onSave = async () => ({ ok: true }); render();
     const before = prompts;
     await find(node => node.type === "button" && node.props.className === "admin-primary").props.onClick();
     assert.equal(closes, 3); assert.equal(prompts, before);
@@ -135,4 +140,29 @@ test("quantity control supports six digits, temporary blanks, numeric limits and
   assert.equal(input().props.value, 35); assert.equal(editing, false);
   props.disabled = true; render();
   assert.equal(input().props.disabled, true);
+});
+
+test("save guard prevents same-tick double submission and blocks retry until reload when outcome is uncertain", async () => {
+  const adapter = state(); let submits = 0, closes = 0, finish;
+  const { useDrawerSave } = loadModule("app/components/useDrawerSave.ts", { react: adapter.react });
+  const render = function useRender() { adapter.reset(); return useDrawerSave(() => closes++); };
+  const submit = () => { submits++; return new Promise(resolve => { finish = resolve; }); };
+  const model = render();
+  const first = model.save(submit);
+  await model.save(submit);
+  assert.equal(submits, 1); assert.equal(render().saving, true);
+  finish({ ok: false, message: "商品已添加，图片上传失败，请刷新", requiresReload: true });
+  await first;
+  assert.equal(render().saving, false); assert.equal(render().requiresReload, true);
+  assert.match(render().saveError, /商品已添加/);
+  await model.save(submit); assert.equal(submits, 1); assert.equal(closes, 0);
+});
+
+test("unexpected save exceptions preserve the drawer and require checking the result", async () => {
+  const adapter = state(); let closes = 0;
+  const { useDrawerSave } = loadModule("app/components/useDrawerSave.ts", { react: adapter.react });
+  const render = function useRender() { adapter.reset(); return useDrawerSave(() => closes++); };
+  await render().save(async () => { throw new Error("private SQL details"); });
+  assert.equal(closes, 0); assert.equal(render().requiresReload, true);
+  assert.match(render().saveError, /保存结果尚未确认/); assert.doesNotMatch(render().saveError, /SQL/);
 });

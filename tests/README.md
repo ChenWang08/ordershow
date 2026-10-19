@@ -7,6 +7,7 @@
 - `source-contracts.test.mjs`：保留的源码、迁移和接口文档约束检查。它们不是运行时覆盖率；本轮移除了一批已有行为测试覆盖的函数名和实现细节断言。后续需求优先增加行为测试，再按覆盖情况逐项替换剩余源码约束。
 - `backend/src/test`：Java 单元、接口契约和隔离 API E2E。
 - `scripts/browser-regression.mjs`：真实浏览器关键流程，包括活动切换、H5、管理员订单编辑、大屏筛选、趋势交互和响应式布局。
+- `scripts/test-manual-additions.mjs`、`scripts/test-manual-additions-browser.mjs`：隔离环境实际新增白名单/商品/到场人员、错误提示和部分保存回归；后者使用前者生成的合成夹具。具体运行方式见 [2026-10-19 回归记录](../docs/testing/manual-additions-2026-10-19.md)。
 
 ## 运行
 
