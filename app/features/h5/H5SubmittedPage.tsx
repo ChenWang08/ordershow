@@ -62,7 +62,7 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
     {model.orderEvents.length > 0 && <section className="submitted-events"><h3>操作记录</h3>{model.orderEvents.map((event,index)=><p key={index}><b>{event.time} {event.title}</b><span>{event.detail}</span></p>)}</section>}
     <div className="submitted-actions">
       {!customerOrderReadOnly && <button className="primary-btn" onClick={model.startEditingOrder}>{orderStatus === "withdrawn" || orderStatus === "voided" ? "重新订货" : pending ? "继续修改订单" : "修改订单"}</button>}
-      <button className="ghost-btn" onClick={()=>model.setStep("channel")}>返回活动首页</button>
+      <button className="ghost-btn" disabled={model.runtimeBusy} onClick={()=>void model.resetEntry()}>返回活动首页</button>
     </div>
   </section>;
 }

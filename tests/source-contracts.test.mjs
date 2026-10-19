@@ -287,7 +287,7 @@ test("derives H5 and dashboard regions from the current whitelist", async () => 
   assert.match(prototype, /generalRegions/);
   assert.match(prototype, /regionProductCards\.length > 0/);
   assert.match(prototype, /maxAmount=\{regionProductMax\}/);
-  assert.match(prototype, /setStep\(regionalized \? "region" : "verify"\)/);
+  assert.match(prototype, /nextChannel === "综合客户" && regionalized \? "region"/);
   assert.match(prototype, /whitelistCustomerTypeMode === "UNSPECIFIED"/);
   assert.match(prototype, /value: "ALL", label: "全部客户"/);
   assert.match(prototype, /loadDashboard\(\{ customerType, regionCode, metric \}\)/);

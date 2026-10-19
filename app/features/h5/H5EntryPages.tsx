@@ -3,7 +3,7 @@
 import type { H5OrderModel } from "./useH5OrderFlow";
 
 export function H5EntryPages({ model }: { model: H5OrderModel }) {
-  const { directEntry, activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeBusy, runtimeMessage, setStep, channel, setChannel, setRegion, setVerifiedBranch, setVerifiedIdentity, phone, setPhone, verifyError, setVerifyError, orderStatus, visibleStep, regionOptions, regionalized, selectedRegionName, identityLabel, verifyIdentity } = model;
+  const { directEntry, activityStatus, runtimeActivity, activityClosed, activityNotStarted, unspecifiedWhitelist, runtimeBusy, runtimeMessage, setStep, channel, resetEntry, setRegion, phone, setPhone, verifyError, setVerifyError, orderStatus, visibleStep, regionOptions, regionalized, selectedRegionName, identityLabel, verifyIdentity } = model;
   return <>
           {(visibleStep === "loading" || visibleStep === "empty") && <section className="h5-page verify-page entry-page">
             <div className="mini-brand"><b>金龙鱼</b></div>
@@ -21,12 +21,12 @@ export function H5EntryPages({ model }: { model: H5OrderModel }) {
                 <h2>选择您的订货通道</h2>
                 <p>请选择白名单中登记的客户类型，进入对应订货专区。</p>
                 <div className="channel-options">
-                  <button onClick={() => { setChannel("综合客户"); setRegion(""); setVerifiedBranch(""); setVerifiedIdentity(null); setStep(regionalized ? "region" : "verify"); }}>
+                  <button disabled={runtimeBusy} onClick={() => void resetEntry("综合客户")}>
                     <i className="channel-icon">综</i>
                     <span><b>综合客户订货</b><small>{regionalized ? "综合经销商 · 进入后选择所属片区" : "综合经销商 · 手机号验证身份"}</small></span>
                     <em>›</em>
                   </button>
-                  <button onClick={() => { setChannel("特渠专业客户"); setRegion(""); setVerifiedBranch(""); setVerifiedIdentity(null); setStep("verify"); }}>
+                  <button disabled={runtimeBusy} onClick={() => void resetEntry("特渠专业客户")}>
                     <i className="channel-icon special">特</i>
                     <span><b>特渠专业客户订货</b><small>专业渠道经销商 · 手机号验证身份</small></span>
                     <em>›</em>
@@ -39,7 +39,7 @@ export function H5EntryPages({ model }: { model: H5OrderModel }) {
 
           {visibleStep === "region" && (
             <section className="h5-page verify-page entry-page">
-              <div className="entry-nav"><button onClick={() => setStep("channel")}>‹</button><span>综合客户订货</span></div>
+              <div className="entry-nav"><button disabled={runtimeBusy} onClick={() => void resetEntry()}>‹</button><span>综合客户订货</span></div>
               <div className="mini-brand"><b>金龙鱼</b></div>
               <div className="h5-hero-copy region-hero">
                 <span className="eyebrow">订货会</span>
@@ -63,13 +63,13 @@ export function H5EntryPages({ model }: { model: H5OrderModel }) {
 
           {visibleStep === "verify" && (
             <section className="h5-page verify-page">
-              <div className="entry-nav">{!directEntry && <button onClick={() => setStep(channel === "综合客户" && regionalized ? "region" : "channel")}>‹</button>}<span>{identityLabel}</span></div>
+              <div className="entry-nav">{!directEntry && <button disabled={runtimeBusy} onClick={() => setStep(channel === "综合客户" && regionalized ? "region" : "channel")}>‹</button>}<span>{identityLabel}</span></div>
               <div className="mini-brand"><b>金龙鱼</b></div>
               <div className="h5-hero-copy">
                 <span className="eyebrow">订货会</span>
               </div>
               <div className="verify-card">
-                <div className="verify-context"><span className="step-tag">{identityLabel}</span>{!directEntry && <button onClick={() => setStep("channel")}>重新选择</button>}</div>
+                <div className="verify-context"><span className="step-tag">{identityLabel}</span>{!directEntry && <button disabled={runtimeBusy} onClick={() => void resetEntry()}>重新选择</button>}</div>
                 <h2>输入白名单手机号</h2>
                 <p>验证通过后，将为您展示{unspecifiedWhitelist ? "本次白名单客户" : channel === "综合客户" ? `${selectedRegionName ? `${selectedRegionName}综合客户` : "综合客户"}` : "特渠专业客户"}的订货商品。</p>
                 <label>
