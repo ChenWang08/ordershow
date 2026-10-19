@@ -22,7 +22,7 @@ export function guard() {
 export function sql(query) {
   guard();
   return docker([...compose, 'exec', '-T', '-e', 'MYSQL_PWD=load_only_password', 'mysql',
-    'mysql', '-uorder_show_load', '--batch', '--skip-column-names', 'order_show_load'], { input: query });
+    'mysql', '-uorder_show_load', '--batch', '--skip-column-names', 'order_show_load'], { input: "SET time_zone = '+00:00';\n" + query });
 }
 export function save(name, data) {
   assert(/^[\w.-]+$/.test(name));

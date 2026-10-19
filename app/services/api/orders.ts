@@ -1,3 +1,4 @@
+import { beijingDateStamp } from "../../features/shared/time";
 import { createIdempotencyKey } from "./idempotency-key";
 import { api, apiBase, ApiError } from "./client";
 import type { AdminOrderPreview, AdminOrderSummary, Envelope, OrderChangeRequest, PageEnvelope, RuntimeOrder } from "./types";
@@ -78,5 +79,5 @@ export async function exportAdminOrders(activityId: number, filters: { status?: 
   const blob = await response.blob();
   const url = URL.createObjectURL(blob); const link = document.createElement("a");
   const safeName = activityName.replace(/[\\/:*?"<>|]/g, "-");
-  link.href = url; link.download = `${safeName}_订单数据_${new Date().toISOString().slice(0, 10)}.xlsx`; link.click(); URL.revokeObjectURL(url);
+  link.href = url; link.download = `${safeName}_订单数据_${beijingDateStamp()}.xlsx`; link.click(); URL.revokeObjectURL(url);
 }

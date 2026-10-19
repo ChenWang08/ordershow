@@ -352,6 +352,14 @@ class IsolatedApiE2ETest {
     assertEquals(200,reviewPage.statusCode(),reviewPage.body());
     assertEquals(1,json(reviewPage).path("page").path("totalElements").asInt());
     assertFalse(data(reviewPage).get(0).has("items"));
+    Instant requestInstant = Instant.parse(data(replacement).path("requestedAt").asText());
+    assertTrue(Math.abs(Duration.between(requestInstant, Instant.now()).toSeconds()) < 60,
+        "New request timestamps must represent UTC now, not Beijing wall time labeled as UTC");
+    assertEquals(requestInstant, Instant.parse(data(reviewPage).get(0).path("requestedAt").asText()));
+    var requestDetail = send(admin, "GET", "/admin/activities/" + activityId + "/order-change-requests/" + data(replacement).path("id").asLong(), null, null, null);
+    assertEquals(requestInstant, Instant.parse(data(requestDetail).path("requestedAt").asText()));
+    var h5Request = send(h5, "GET", "/h5/activities/" + activityCode + "/order-change-requests/current", null, null, null);
+    assertEquals(requestInstant, Instant.parse(data(h5Request).path("requestedAt").asText()));
     HttpResponse<String> pendingRequests = send(admin, "GET", "/admin/activities/" + activityId + "/order-change-requests?status=PENDING", null, null, null);
     assertEquals(200, pendingRequests.statusCode(), pendingRequests.body());
     long modificationRequestId = data(pendingRequests).get(0).path("id").asLong();
@@ -359,6 +367,8 @@ class IsolatedApiE2ETest {
         JSON.createObjectNode().put("reason", "AUTOTEST 审核通过修改申请"), adminCsrf, null, UUID.randomUUID().toString());
     assertEquals(200, approvedModification.statusCode(), approvedModification.body());
     assertEquals("APPROVED", data(approvedModification).path("status").asText());
+    assertEquals(requestInstant, Instant.parse(data(approvedModification).path("requestedAt").asText()));
+    assertFalse(Instant.parse(data(approvedModification).path("reviewedAt").asText()).isBefore(requestInstant));
     JsonNode modified = data(send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null));
     assertEquals(orderNo, modified.path("orderNo").asText());
     assertEquals(2, modified.path("currentVersion").asInt());
@@ -598,6 +608,8 @@ class IsolatedApiE2ETest {
     var cutoffReject=send(admin,"POST","/admin/activities/"+activityId+"/order-change-requests/"+cutoffRequestId+"/reject",JSON.createObjectNode().put("reason","截止后仍可审核"),adminCsrf,null,UUID.randomUUID().toString());
     assertEquals(200,cutoffReject.statusCode(),cutoffReject.body());
     assertEquals("REJECTED",data(cutoffReject).path("status").asText());
+    assertFalse(Instant.parse(data(cutoffReject).path("reviewedAt").asText())
+        .isBefore(Instant.parse(data(cutoffReject).path("requestedAt").asText())));
 
     var replayAfterClose = send(h5,"PUT","/h5/activities/"+activityCode+"/order",
         orderBody(0,productId,2),h5Csrf,null,firstSubmissionKey);

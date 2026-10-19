@@ -1,5 +1,8 @@
 "use client";
 
+import { formatBeijingTime } from "../shared/time";
+
+
 import { useAdminIdentity } from "../../admin-context";
 import { canUse, isManager } from "./permissions";
 import { useEffect, type Dispatch, type SetStateAction } from "react";
@@ -82,7 +85,7 @@ export function useAdminInitialization({
       setOperationLogs(auditLogs.map((entry) => ({ id: String(entry.id), action: entry.actionCode, target: `${entry.objectType}${entry.objectId ? ` #${entry.objectId}` : ""}`,
         detail: entry.result === "SUCCESS" ? `操作成功 · 追踪号 ${entry.traceId}` : `操作失败：${entry.errorCode || "未知错误"}`,
         operator: entry.actorName || (entry.actorType === "H5_CUSTOMER" ? "H5 客户" : "系统"),
-        time: new Date(entry.occurredAt).toLocaleString("zh-CN", { hour12: false }) })));
+        time: formatBeijingTime(entry.occurredAt) })));
       const pendingTasks = (["PRODUCT", "WHITELIST", "ATTENDANCE"] as const)
         .map((type) => importTasks.find((task) => task.importType === type && task.status === "PREVIEW_READY"))
         .filter((task): task is ImportTask => Boolean(task));

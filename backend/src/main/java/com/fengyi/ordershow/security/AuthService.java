@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.security;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.config.OrderShowProperties;
 import jakarta.servlet.http.Cookie;
@@ -7,7 +9,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -67,7 +68,7 @@ public class AuthService {
     jdbc.update("""
         INSERT INTO admin_session(admin_user_id, token_hash, csrf_token_hash, expires_at, last_seen_at, ip_address, user_agent)
         VALUES (?, ?, ?, ?, UTC_TIMESTAMP(3), INET6_ATON(?), ?)
-        """, id, crypto.sha256(token), crypto.sha256(csrf), Timestamp.from(expires), remoteIp(request), userAgent(request));
+        """, id, crypto.sha256(token), crypto.sha256(csrf), UtcTime.database(expires), remoteIp(request), userAgent(request));
     jdbc.update("UPDATE admin_user SET last_login_at = UTC_TIMESTAMP(3) WHERE id = ?", id);
     addCookie(response, ADMIN_COOKIE, token, true, Duration.ofHours(properties.adminSessionHours()));
     addCookie(response, ADMIN_CSRF_COOKIE, csrf, false, Duration.ofHours(properties.adminSessionHours()));
@@ -216,7 +217,7 @@ public class AuthService {
         INSERT INTO h5_session(activity_id, activity_customer_id, token_hash, csrf_token_hash, expires_at, last_seen_at, ip_address, user_agent)
         VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(3), INET6_ATON(?), ?)
         """, customer.activityId(), customer.customerId(), crypto.sha256(token), crypto.sha256(csrf),
-        Timestamp.from(expires), remoteIp(request), userAgent(request));
+        UtcTime.database(expires), remoteIp(request), userAgent(request));
     addCookie(response, H5_COOKIE, token, true, Duration.ofHours(properties.h5SessionHours()));
     addCookie(response, H5_CSRF_COOKIE, csrf, false, Duration.ofHours(properties.h5SessionHours()));
     return new H5LoginResult(customer, csrf);

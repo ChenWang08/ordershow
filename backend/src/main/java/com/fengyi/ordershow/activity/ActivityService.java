@@ -1,11 +1,12 @@
 package com.fengyi.ordershow.activity;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.security.AdminPrincipal;
 import com.fengyi.ordershow.security.DepartmentAccessService;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -69,7 +70,7 @@ public class ActivityService {
   /** Internal order/catalog lookup: no UI regions or whitelist summaries on the request hot path. */
   public OrderingActivity orderingActivity(String code) {
     var rows = jdbc.query("SELECT id,ends_at FROM activity WHERE activity_code=? AND archived_at IS NULL",
-        (rs, rowNum) -> new OrderingActivity(rs.getLong("id"),rs.getTimestamp("ends_at").toInstant()),code);
+        (rs, rowNum) -> new OrderingActivity(rs.getLong("id"),UtcTime.read(rs, "ends_at")),code);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
     return rows.getFirst();
   }
@@ -127,8 +128,8 @@ public class ActivityService {
                              customer_scope, company_ranking_top_n, branch_ranking_top_n, ton_display_scale,
                              created_by, updated_by)
         VALUES (?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, departmentId, temporaryCode, request.name(), request.description(), request.timezone(), Timestamp.from(request.startsAt()),
-        Timestamp.from(request.endsAt()), Timestamp.from(request.eventEndsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
+        """, departmentId, temporaryCode, request.name(), request.description(), request.timezone(), UtcTime.database(request.startsAt()),
+        UtcTime.database(request.endsAt()), UtcTime.database(request.eventEndsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
         request.tonDisplayScale(), admin.id(), admin.id());
     Long id = jdbc.queryForObject("SELECT id FROM activity WHERE activity_code = ?", Long.class, temporaryCode);
     String activityNo = generateActivityNo(id, now(), request.timezone());
@@ -183,8 +184,8 @@ public class ActivityService {
         UPDATE activity SET name = ?, description = ?, timezone = ?, starts_at = ?, ends_at = ?, event_ends_at = ?, customer_scope = ?,
           company_ranking_top_n = ?, branch_ranking_top_n = ?, ton_display_scale = ?, updated_by = ?, version = version + 1
         WHERE id = ? AND version = ?
-        """, request.name(), request.description(), request.timezone(), Timestamp.from(startsAtToSave),
-        Timestamp.from(endsAtToSave), Timestamp.from(request.eventEndsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
+        """, request.name(), request.description(), request.timezone(), UtcTime.database(startsAtToSave),
+        UtcTime.database(endsAtToSave), UtcTime.database(request.eventEndsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
         request.tonDisplayScale(), admin.id(), id, expectedVersion);
     if (changed != 1) throw DomainException.conflict("ACTIVITY_VERSION_CONFLICT", "活动配置已被其他页面修改，请刷新后重试");
     return byId(id);
@@ -267,8 +268,8 @@ public class ActivityService {
 
   public void requireWritable(long activityId) {
     var rows = jdbc.query("SELECT status,starts_at,ends_at,event_ends_at FROM activity WHERE id=? AND archived_at IS NULL",
-        (rs, rowNum) -> new OrderingWindow(rs.getString("status"),rs.getTimestamp("starts_at").toInstant(),
-            rs.getTimestamp("ends_at").toInstant(),instant(rs.getTimestamp("event_ends_at"))),activityId);
+        (rs, rowNum) -> new OrderingWindow(rs.getString("status"),UtcTime.read(rs, "starts_at"),
+            UtcTime.read(rs, "ends_at"),UtcTime.read(rs, "event_ends_at")),activityId);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
     OrderingWindow activity = rows.getFirst();
     Instant now = now();
@@ -389,11 +390,11 @@ public class ActivityService {
     return new ActivityView(rs.getLong("id"), rs.getLong("department_id"), rs.getString("department_name"),
         rs.getString("activity_code"), rs.getString("name"),
         rs.getString("description"), configured, configured, rs.getString("timezone"),
-        rs.getTimestamp("starts_at").toInstant(), rs.getTimestamp("ends_at").toInstant(), instant(rs.getTimestamp("event_ends_at")),
+        UtcTime.read(rs, "starts_at"), UtcTime.read(rs, "ends_at"), UtcTime.read(rs, "event_ends_at"),
         rs.getString("customer_scope"), rs.getInt("company_ranking_top_n"),
         rs.getInt("branch_ranking_top_n"), rs.getInt("ton_display_scale"), rs.getInt("version"), List.of(), false, "TYPED", List.of(),
-        instant(rs.getTimestamp("published_at")), instant(rs.getTimestamp("actual_started_at")), instant(rs.getTimestamp("closed_at")),
-        instant(rs.getTimestamp("finished_at")), rs.getString("live_room_url"),
+        UtcTime.read(rs, "published_at"), UtcTime.read(rs, "actual_started_at"), UtcTime.read(rs, "closed_at"),
+        UtcTime.read(rs, "finished_at"), rs.getString("live_room_url"),
         backgroundUrl(rs, "h5_background_file_id"), backgroundUrl(rs, "desktop_background_file_id"));
   }
 
@@ -445,7 +446,7 @@ public class ActivityService {
         UPDATE activity SET status = 'ACTIVE', ends_at = ?, event_ends_at = ?,
           closed_at = NULL, finished_at = NULL, version = version + 1, updated_by = ?
         WHERE id = ? AND version = ? AND archived_at IS NULL
-        """, Timestamp.from(endsAt), Timestamp.from(eventEndsAt), admin.id(), id, expectedVersion);
+        """, UtcTime.database(endsAt), UtcTime.database(eventEndsAt), admin.id(), id, expectedVersion);
     requireChanged(changed);
     jdbc.update("DELETE FROM activity_dashboard_snapshot WHERE activity_id = ?", id);
     jdbc.update("""
@@ -501,8 +502,8 @@ public class ActivityService {
           AND COALESCE(event_ends_at, ends_at) > UTC_TIMESTAMP(3)
         ORDER BY starts_at, id
         """, (rs, rowNum) -> new PublishedActivity(rs.getString("activity_code"), rs.getString("name"),
-            rs.getTimestamp(3).toInstant(), rs.getTimestamp(4).toInstant()),
-        activityId, departmentId, Timestamp.from(endsAt), Timestamp.from(startsAt));
+            UtcTime.read(rs, 3), UtcTime.read(rs, 4)),
+        activityId, departmentId, UtcTime.database(endsAt), UtcTime.database(startsAt));
     if (!conflicts.isEmpty()) {
       PublishedActivity conflict = conflicts.getFirst();
       throw DomainException.conflict("DEPARTMENT_ACTIVITY_TIME_CONFLICT",
@@ -564,7 +565,6 @@ public class ActivityService {
     String date = DateTimeFormatter.ofPattern("yyyyMMdd").withZone(zone).format(createdAt);
     return "HD" + date + String.format("%03d", id);
   }
-  private static Instant instant(Timestamp value) { return value == null ? null : value.toInstant(); }
 
   public record RegionView(String code, String name, int sortNo) {}
   public record RegionWrite(String code, String name, int sortNo) {}

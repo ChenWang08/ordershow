@@ -1,3 +1,4 @@
+import {notificationAgeMs} from './time-metrics.mjs';
 // Synthetic outbox events only. Domain orders and amounts must remain unchanged.
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
@@ -72,10 +73,11 @@ try {
  assert.equal(rows[0],'PUBLISHED');assert.equal(Number(rows[1]),count);
  assert.equal(sql(`SELECT status FROM domain_event_outbox WHERE id=${futureId};`).trim(),'PENDING','A lower-ID future event must not be acknowledged');
  assert.equal(sql('SELECT COUNT(*),SUM(total_amount),SUM(total_quantity) FROM customer_order; SELECT COUNT(*) FROM order_version;'),before);
- const latencies=observations.map(o=>o.receivedAt-origin).sort((a,b)=>a-b);
- const refresh=observations.filter(o=>o.refreshedAt).map(o=>o.refreshedAt-origin);
+ const latencies=observations.map(o=>notificationAgeMs(origin,o.receivedAt)).sort((a,b)=>a-b);
+ const refresh=observations.filter(o=>o.refreshedAt).map(o=>notificationAgeMs(origin,o.refreshedAt));
  const report={run,events:count,connections,perActivity:count/2,notificationP95Ms:latencies[Math.ceil(latencies.length*.95)-1],notificationMaxMs:latencies.at(-1),dashboardRefreshMaxMs:Math.max(...refresh),refreshedScreens:refresh.length,databasePublishMaxMs:Number(rows[2]),framesPerConnection:[...new Set(observations.map(o=>o.frames))],futureEventPreserved:true,domainDataUnchanged:true,elapsedMs:Date.now()-started,measurement:'server event creation to client receipt/API refresh, including fixture transaction time'};
  save(`${run}.json`,report);console.log(report);
+ assert(Number.isFinite(report.databasePublishMaxMs) && report.databasePublishMaxMs>=0,'Negative/invalid database notification delay');
  assert(report.notificationMaxMs<=3000,'Notification latency exceeds 3s');
  assert(report.dashboardRefreshMaxMs<=3000,'Ten-screen API refresh exceeds 3s');
 } finally {

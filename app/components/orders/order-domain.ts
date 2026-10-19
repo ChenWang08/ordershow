@@ -1,3 +1,4 @@
+import { formatBeijingTime } from "../../features/shared/time";
 import { ApiError, type AdminCustomer, type AdminOrderSummary, type RuntimeOrder, type RuntimeProduct } from "../../api";
 
 export type OrderStatus = "已提交" | "已撤回" | "已作废";
@@ -79,10 +80,7 @@ export type OrderRecord = {
 
 export function formatDate(value?: string) {
   if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? value
-    : date.toLocaleString("zh-CN", { hour12: false, month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return formatBeijingTime(value, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 export function formatMoney(value: number) {

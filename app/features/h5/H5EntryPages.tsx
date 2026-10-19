@@ -1,5 +1,8 @@
 "use client";
 
+import { formatBeijingTime } from "../shared/time";
+
+
 import type { H5OrderModel } from "./useH5OrderFlow";
 
 export function H5EntryPages({ model }: { model: H5OrderModel }) {
@@ -79,7 +82,7 @@ export function H5EntryPages({ model }: { model: H5OrderModel }) {
                 {verifyError && <div className="verify-error" role="alert">{verifyError}</div>}
                 <button className="primary-btn" disabled={runtimeBusy || !phone.trim() || activityNotStarted} onClick={() => void verifyIdentity()}>{runtimeBusy ? "正在验证…" : activityStatus === "draft" ? "活动尚未发布" : activityStatus === "scheduled" ? "订货尚未开始" : activityClosed ? "验证并查看订单" : orderStatus === "none" ? "验证并进入订货" : "验证并查看订单"}</button>
                 {runtimeMessage && <div className="verify-error" role="status">{runtimeMessage}</div>}
-                <small>{activityStatus === "draft" ? "当前活动仍在准备中" : activityStatus === "scheduled" ? `将于 ${runtimeActivity ? new Date(runtimeActivity.startsAt).toLocaleString("zh-CN", { hour12: false }) : "设定时间"} 开放订货` : activityClosed ? "订货已截止，验证后可查看历史订单" : "仅用于本次订货会身份识别"}</small>
+                <small>{activityStatus === "draft" ? "当前活动仍在准备中" : activityStatus === "scheduled" ? `将于 ${runtimeActivity ? formatBeijingTime(runtimeActivity.startsAt) : "设定时间"} 开放订货` : activityClosed ? "订货已截止，验证后可查看历史订单" : "仅用于本次订货会身份识别"}</small>
               </div>
             </section>
           )}

@@ -1,3 +1,4 @@
+import { BEIJING_TIME_ZONE, formatBeijingTime } from "../shared/time";
 import type { RuntimeActivity, DashboardReport } from "../../api";
 
 export function isUnspecifiedCustomerTypeActivity(activity: RuntimeActivity | null) {
@@ -125,8 +126,8 @@ export function dashboardMetrics(data: DashboardReport | null, activity: Runtime
   const regionProductMax = Math.max(1, ...regionProductCards.flatMap((region) => region.rows.map((row) => row.amount)));
   const branchRankingRows = (dashboard?.branches ?? []).slice(0, 15);
   const dealerRankingRows = (dashboard?.companies ?? []).slice(0, 15);
-  const generatedAt = dashboard?.generatedAt ? new Date(dashboard.generatedAt).toLocaleString("zh-CN", { hour12: false }) : "--";
-  const activityTimeZone = activity?.timezone || "Asia/Shanghai";
+  const generatedAt = dashboard?.generatedAt ? formatBeijingTime(dashboard.generatedAt) : "--";
+  const activityTimeZone = BEIJING_TIME_ZONE;
   const cards = [
     { icon: "¥", label: "订单总额", value: dashboardCompactAmount(amount), unit: "元", tone: "mint" },
     { icon: "△", label: "订单总吨数", value: Number(totals.total_tons ?? 0).toLocaleString("zh-CN", { maximumFractionDigits: 3 }), unit: "吨", tone: "blue" },

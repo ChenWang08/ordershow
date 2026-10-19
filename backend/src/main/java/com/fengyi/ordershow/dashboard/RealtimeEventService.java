@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.dashboard;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -74,7 +76,7 @@ public class RealtimeEventService {
       List<OutboxRow> page = jdbc.query("""
           SELECT id, activity_id, event_type, aggregate_type, aggregate_id, created_at FROM domain_event_outbox
           WHERE status = 'PENDING' AND available_at <= UTC_TIMESTAMP(3) AND id > ? ORDER BY id LIMIT 1000
-          """, (rs, rowNum) -> new OutboxRow(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getString(5), rs.getTimestamp(6).toInstant()), cursor);
+          """, (rs, rowNum) -> new OutboxRow(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getString(5), UtcTime.read(rs, 6)), cursor);
       rows.addAll(page);
       if (page.size() < BATCH_SIZE) break;
       cursor = page.getLast().id();

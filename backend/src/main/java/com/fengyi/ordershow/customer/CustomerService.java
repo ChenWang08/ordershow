@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.customer;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.activity.ActivityRegionService;
 import com.fengyi.ordershow.common.TextNormalizer;
@@ -350,12 +352,12 @@ public class CustomerService {
     return new CustomerView(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
         rs.getString(6), rs.getString(7), rs.getString(8), phone, rs.getString(11), rs.getString(12),
         confirmerPhone, rs.getString(15), rs.getObject(16) == null ? null : rs.getInt(16), rs.getBoolean(17),
-        rs.getInt(18), rs.getTimestamp(19).toInstant());
+        rs.getInt(18), UtcTime.read(rs, 19));
   }
   private AttendeeView mapAttendee(ResultSet rs, int rowNum) throws SQLException {
     return new AttendeeView(rs.getLong(1), rs.getObject(2) == null ? null : rs.getLong(2), rs.getString(3), rs.getString(4), rs.getString(5),
         rs.getString(6), rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12),
-        rs.getString(13), rs.getBoolean(14), rs.getTimestamp(15).toInstant(), rs.getTimestamp(16).toInstant());
+        rs.getString(13), rs.getBoolean(14), UtcTime.read(rs, 15), UtcTime.read(rs, 16));
   }
   private String decrypt(byte[] value) { return value == null ? null : crypto.decrypt(value); }
   private static String normalize(String value) { return value == null ? null : TextNormalizer.normalize(value); }

@@ -1,5 +1,7 @@
 "use client";
 
+
+import { beijingDateTimeMillis } from "../shared/time";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, createActivity, getPreferredAdminActivityCode, setPreferredAdminActivityCode, loadAdminActivities, loadAdminDepartments, type RuntimeActivity, type AdminDepartment } from "../../api";
 import { useAdminIdentity } from "../../admin-context";
@@ -84,11 +86,15 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice }
       setActionNotice("超级管理员创建活动时必须选择所属部门。");
       return;
     }
-    if (new Date(newActivity.startsAt) >= new Date(newActivity.endsAt)) {
+    if (![newActivity.startsAt, newActivity.endsAt, newActivity.eventEndsAt].every(value => Number.isFinite(beijingDateTimeMillis(value)))) {
+      setActionNotice("请填写有效的北京时间。");
+      return;
+    }
+    if (beijingDateTimeMillis(newActivity.startsAt) >= beijingDateTimeMillis(newActivity.endsAt)) {
       setActionNotice("订货截止时间必须晚于开始时间。");
       return;
     }
-    if (new Date(newActivity.eventEndsAt) <= new Date(newActivity.endsAt)) {
+    if (beijingDateTimeMillis(newActivity.eventEndsAt) <= beijingDateTimeMillis(newActivity.endsAt)) {
       setActionNotice("整场活动结束时间必须晚于订货截止时间。");
       return;
     }

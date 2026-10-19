@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.order;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -143,7 +145,7 @@ public class OrderChangeRequestRepository {
         nullableLong(rs, "requested_total_quantity"), rs.getBigDecimal("requested_total_tons"), rs.getBigDecimal("requested_total_amount"),
         rs.getString("requested_items_json"), rs.getString("customer_note"), rs.getString("review_reason"),
         nullableLong(rs, "reviewed_by_admin_id"), rs.getString("reviewed_by_name"),
-        rs.getTimestamp("requested_at").toInstant(), timestamp(rs, "reviewed_at"), rs.getString("original_order_json"));
+        UtcTime.read(rs, "requested_at"), timestamp(rs, "reviewed_at"), rs.getString("original_order_json"));
   }
 
   private static Long nullableLong(ResultSet rs, String column) throws SQLException {
@@ -152,8 +154,7 @@ public class OrderChangeRequestRepository {
   }
 
   private static Instant timestamp(ResultSet rs, String column) throws SQLException {
-    var value = rs.getTimestamp(column);
-    return value == null ? null : value.toInstant();
+    return UtcTime.read(rs, column);
   }
 }
 

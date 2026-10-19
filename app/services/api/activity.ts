@@ -1,3 +1,4 @@
+import { beijingDateTimeToUtc } from "../../features/shared/time";
 import { api } from "./client";
 import { activeActivityPath } from "./context";
 import type { Envelope, RuntimeActivity } from "./types";
@@ -46,9 +47,9 @@ export async function createActivity(input: CreateActivityInput) {
       name: input.name.trim(),
       description: "",
       timezone: "Asia/Shanghai",
-      startsAt: new Date(input.startsAt).toISOString(),
-      endsAt: new Date(input.endsAt).toISOString(),
-      eventEndsAt: new Date(input.eventEndsAt).toISOString(),
+      startsAt: beijingDateTimeToUtc(input.startsAt),
+      endsAt: beijingDateTimeToUtc(input.endsAt),
+      eventEndsAt: beijingDateTimeToUtc(input.eventEndsAt),
       customerScope: "ALL",
       companyRankingTopN: 20,
       branchRankingTopN: 20,
@@ -62,8 +63,8 @@ export async function createActivity(input: CreateActivityInput) {
 export async function updateActivity(activity: RuntimeActivity, changes: { name: string; startsAt: string; endsAt: string; eventEndsAt: string }) {
   const body = {
     code: activity.code, name: changes.name, description: activity.description || "", timezone: activity.timezone,
-    startsAt: new Date(changes.startsAt).toISOString(), endsAt: new Date(changes.endsAt).toISOString(),
-    eventEndsAt: new Date(changes.eventEndsAt).toISOString(),
+    startsAt: beijingDateTimeToUtc(changes.startsAt), endsAt: beijingDateTimeToUtc(changes.endsAt),
+    eventEndsAt: beijingDateTimeToUtc(changes.eventEndsAt),
     customerScope: activity.customerScope, companyRankingTopN: activity.companyRankingTopN,
     branchRankingTopN: activity.branchRankingTopN, tonDisplayScale: activity.tonDisplayScale,
   };
@@ -99,6 +100,6 @@ export async function finishActivityNow(activity: RuntimeActivity, reason: strin
 export async function reopenActivity(activity: RuntimeActivity, input: { endsAt: string; eventEndsAt: string; reason: string }) {
   return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/reopen`, {
     method: "POST", headers: { "If-Match": String(activity.version) },
-    body: JSON.stringify({ endsAt: new Date(input.endsAt).toISOString(), eventEndsAt: new Date(input.eventEndsAt).toISOString(), reason: input.reason.trim() }),
+    body: JSON.stringify({ endsAt: beijingDateTimeToUtc(input.endsAt), eventEndsAt: beijingDateTimeToUtc(input.eventEndsAt), reason: input.reason.trim() }),
   }, "admin")).data;
 }

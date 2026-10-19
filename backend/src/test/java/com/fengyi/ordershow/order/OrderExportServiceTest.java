@@ -7,6 +7,7 @@ import static org.mockito.Mockito.when;
 import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -24,7 +25,8 @@ class OrderExportServiceTest {
         new BigDecimal("203998.00"), time, time, time);
     Map<String, Object> detail = Map.of("order_no", "ZY-1", "phone", "13800000000", "created_source", "ADMIN",
         "pricing_mode", "INCREMENTAL", "base_price_quantity", 1499, "tier_price_quantity", 1,
-        "applied_tier_min_quantity", 1500, "line_amount", new BigDecimal("203998.00"));
+        "applied_tier_min_quantity", 1500, "line_amount", new BigDecimal("203998.00"),
+        "last_submitted_at", LocalDateTime.parse("2026-09-01T10:00:00"));
     when(queries.exportData(7, null, "GENERAL", "客户")).thenReturn(new OrderQueryService.ExportData(
         List.of(order), List.of(detail), List.of(Map.of("material_name", "测试商品")), List.of(Map.of("branch_name_snapshot", "测试分公司"))));
 
@@ -39,12 +41,16 @@ class OrderExportServiceTest {
       assertThat(summary.getCell(7).getStringCellValue()).isEqualTo("13800000000");
       assertThat(summary.getCell(10).getStringCellValue()).isEmpty();
       assertThat(summary.getCell(11).getStringCellValue()).isEqualTo("203998.00");
+      assertThat(summary.getCell(12).getStringCellValue()).isEqualTo("2026-09-01 18:00:00");
+      assertThat(summary.getCell(13).getStringCellValue()).isEqualTo("2026-09-01 18:00:00");
+      assertThat(summary.getCell(14).getStringCellValue()).isEqualTo("2026-09-01 18:00:00");
       var item = workbook.getSheetAt(1).getRow(1);
       assertThat(workbook.getSheetAt(1).getRow(0).getCell(12).getStringCellValue()).isEqualTo("项目组");
       assertThat(item.getCell(16).getStringCellValue()).isEqualTo("INCREMENTAL");
       assertThat(item.getCell(18).getStringCellValue()).isEqualTo("1499");
       assertThat(item.getCell(20).getStringCellValue()).isEqualTo("1");
       assertThat(item.getCell(22).getStringCellValue()).isEqualTo("是");
+      assertThat(item.getCell(25).getStringCellValue()).isEqualTo(summary.getCell(13).getStringCellValue());
       assertThat(workbook.getSheetAt(1).getPaneInformation().isFreezePane()).isTrue();
       assertThat(workbook.getSheetAt(2).getRow(0).getCell(2).getStringCellValue()).isEqualTo("项目组");
     }

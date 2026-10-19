@@ -6,6 +6,8 @@
 - `admin-*.test.mjs`、`workspace-orders.test.mjs`、`h5-flow.test.mjs`、`screens.test.mjs`：验证业务计算、操作结果、组件渲染及部分状态行为。其中 Hook 操作测试使用显式状态适配器，不能代替真实 React 浏览器生命周期测试。
 - `source-contracts.test.mjs`：保留的源码、迁移和接口文档约束检查。它们不是运行时覆盖率；本轮移除了一批已有行为测试覆盖的函数名和实现细节断言。后续需求优先增加行为测试，再按覆盖情况逐项替换剩余源码约束。
 - `backend/src/test`：Java 单元、接口契约和隔离 API E2E。
+- `time.test.mjs`、`time-monitoring.test.mjs`、Java `UtcTimeConfigurationTest` / `UtcDatabaseIntegrationTest` 及审核 API E2E：覆盖北京时间展示与表单转换、UTC 数据库默认值、跨 JVM/浏览器时区、审核时间一致性、Excel 导出及负通知延迟。真实浏览器运行 `scripts/test-time-browser.mjs`，见 [时间回归说明](../docs/testing/utc-time-2026-10-19.md)。
+- 本地历史校正工具及配套 3 项测试已按用户要求移出项目并归档，不再属于常规测试入口。已执行的真实历史副本校正/回退、实际 Excel、新申请审核和三个浏览器时区结果保留在 [历史时间回归](../docs/testing/time-history-2026-10-19.md)。
 - `scripts/browser-regression.mjs`：真实浏览器关键流程，包括活动切换、H5、管理员订单编辑、大屏筛选、趋势交互和响应式布局。
 - `scripts/test-manual-additions.mjs`、`scripts/test-manual-additions-browser.mjs`：隔离环境实际新增白名单/商品/到场人员、错误提示和部分保存回归；后者使用前者生成的合成夹具。具体运行方式见 [2026-10-19 回归记录](../docs/testing/manual-additions-2026-10-19.md)。
 

@@ -1,14 +1,13 @@
 package com.fengyi.ordershow.order;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.security.H5Principal;
-import java.sql.Timestamp;
 import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -66,7 +65,7 @@ public class OrderDraftService {
         VALUES (?, ?, ?, CAST(? AS JSON), ?, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
         ON DUPLICATE KEY UPDATE base_order_version = VALUES(base_order_version), items_json = VALUES(items_json),
           expires_at = VALUES(expires_at), lock_version = lock_version + 1, updated_at = UTC_TIMESTAMP(3)
-        """, activity.id(), customer.customerId(), request.baseOrderVersion(), serialized, Timestamp.from(activity.endsAt()));
+        """, activity.id(), customer.customerId(), request.baseOrderVersion(), serialized, UtcTime.database(activity.endsAt()));
     return current(activityCode, customer);
   }
 
@@ -145,12 +144,7 @@ public class OrderDraftService {
     return value == null ? "" : value.toLowerCase(Locale.CHINA).replaceAll("[\\s　_-]+", "");
   }
 
-  private static Instant toInstant(Object value) {
-    if (value instanceof Timestamp timestamp) return timestamp.toInstant();
-    if (value instanceof LocalDateTime dateTime) return dateTime.toInstant(ZoneOffset.UTC);
-    if (value instanceof Instant instant) return instant;
-    throw new IllegalArgumentException("Unsupported database timestamp: " + value);
-  }
+  private static Instant toInstant(Object value) { return UtcTime.instant(value); }
 
   public record DraftItem(long productId, long quantity) {}
   public record SaveDraftRequest(long customerId, int baseOrderVersion, List<DraftItem> items) {}

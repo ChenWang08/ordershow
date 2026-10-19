@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.admin;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.security.AdminPrincipal;
 import com.fengyi.ordershow.security.DepartmentAccessService;
@@ -205,7 +207,7 @@ public class DepartmentService {
     return new DepartmentView(rs.getLong("id"), rs.getString("department_code"), rs.getString("department_name"),
         rs.getString("status"), nullableLong(rs, "account_id"), rs.getString("account_username"),
         rs.getString("account_display_name"), rs.getString("account_status"),
-        rs.getTimestamp("last_login_at") == null ? null : rs.getTimestamp("last_login_at").toInstant(),
+        UtcTime.read(rs, "last_login_at"),
         rs.getLong("activity_count"));
   }
 
@@ -213,7 +215,7 @@ public class DepartmentService {
     return new AdminUserView(rs.getLong("id"), rs.getString("username"), rs.getString("display_name"),
         rs.getString("role_code"), nullableLong(rs, "department_id"), rs.getString("department_name"),
         rs.getString("status"), rs.getBoolean("must_change_password"),
-        rs.getTimestamp("last_login_at") == null ? null : rs.getTimestamp("last_login_at").toInstant(),
+        UtcTime.read(rs, "last_login_at"),
         rs.getInt("lock_version"));
   }
 

@@ -1,4 +1,7 @@
 "use client";
+
+import { formatBeijingTime } from "../shared/time";
+
 import { createIdempotencyKey } from "../../services/api/idempotency-key";
 
 
@@ -135,10 +138,10 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
     setQuantities(itemQuantities); setSubmittedQuantities(itemQuantities); setSubmittedItems(items);
     setOrderStatus(order.status === "WITHDRAWN" ? "withdrawn" : order.status === "VOIDED" ? "voided" : "submitted");
     setOrderVersion(order.currentVersion);
-    setOrderUpdatedAt(new Date(order.lastModifiedAt).toLocaleString("zh-CN", { hour12: false }));
-    setOrderWithdrawnAt(order.withdrawnAt ? new Date(order.withdrawnAt).toLocaleString("zh-CN", { hour12: false }) : "");
+    setOrderUpdatedAt(formatBeijingTime(order.lastModifiedAt));
+    setOrderWithdrawnAt(order.withdrawnAt ? formatBeijingTime(order.withdrawnAt) : "");
     setOrderEvents(order.operations.map((event) => ({
-      time: new Date(event.occurredAt).toLocaleTimeString("zh-CN", {
+      time: formatBeijingTime(event.occurredAt, {
         hour12: false,
         hour: "2-digit",
         minute: "2-digit",
@@ -268,10 +271,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
           validDraft.items.forEach((item) => { if (availableIds.has(String(item.productId))) restored[String(item.productId)] = item.quantity; });
           setQuantities(restored);
           lastSavedDraftSignatureRef.current = h5QuantitySignature(validDraft.items);
-          setDraftMessage(`已恢复 ${new Date(validDraft.updatedAt).toLocaleString("zh-CN", {
-            hour12: false,
-            timeZone: "Asia/Shanghai",
-          })} 保存的草稿`);
+          setDraftMessage(`已恢复 ${formatBeijingTime(validDraft.updatedAt)} 保存的草稿`);
           setStep("order");
         } else {
           const baseItems = h5OrderItems(order);

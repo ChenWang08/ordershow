@@ -5,7 +5,8 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 import com.fengyi.ordershow.common.DomainException;
 import java.sql.ResultSet;
-import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import com.fengyi.ordershow.common.UtcTime;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -22,9 +23,9 @@ class OrderingActivityTest {
     var now=Instant.parse("2026-09-08T00:00:00Z");
     JdbcTemplate jdbc=mock(JdbcTemplate.class);ResultSet row=mock(ResultSet.class);
     when(row.getString("status")).thenReturn(status);
-    when(row.getTimestamp("starts_at")).thenReturn(Timestamp.from(now.minusSeconds(60)));
-    when(row.getTimestamp("ends_at")).thenReturn(Timestamp.from(now.plusSeconds(remainingSeconds)));
-    when(row.getTimestamp("event_ends_at")).thenReturn(Timestamp.from(now.plusSeconds(3600)));
+    when(row.getObject("starts_at", LocalDateTime.class)).thenReturn(UtcTime.database(now.minusSeconds(60)));
+    when(row.getObject("ends_at", LocalDateTime.class)).thenReturn(UtcTime.database(now.plusSeconds(remainingSeconds)));
+    when(row.getObject("event_ends_at", LocalDateTime.class)).thenReturn(UtcTime.database(now.plusSeconds(3600)));
     doAnswer(call->List.of(((RowMapper<?>)call.getArgument(1)).mapRow(row,0)))
         .when(jdbc).query(anyString(),any(RowMapper.class),any(Object[].class));
     var service=new ActivityService(jdbc,Clock.fixed(now,ZoneOffset.UTC));

@@ -1,5 +1,8 @@
 "use client";
 
+import { formatBeijingTime } from "../shared/time";
+
+
 import { adminNavigation, canUse, isManager } from "./permissions";
 import { MemberAdminPanel } from "./MemberAdminPanel";
 import { useModuleContext } from "./useModuleContext";
@@ -75,7 +78,7 @@ export function AdminWorkspace() {
   const [serverImportBlocking, setServerImportBlocking] = useState<Partial<Record<"PRODUCT" | "WHITELIST" | "ATTENDANCE", number>>>({});
   const [regionCodesByName, setRegionCodesByName] = useState<Record<string, string>>({});
   const recordOperation = (action: string, target: string, detail: string) => {
-    setOperationLogs((current) => [{ id: createImportRowId("operation"), action, target, detail, operator: adminIdentity?.displayName || adminIdentity?.username || "运营管理员", time: new Date().toLocaleString("zh-CN", { hour12: false }) }, ...current]);
+    setOperationLogs((current) => [{ id: createImportRowId("operation"), action, target, detail, operator: adminIdentity?.displayName || adminIdentity?.username || "运营管理员", time: formatBeijingTime(new Date()) }, ...current]);
   };
   const refreshServerImportPreview = async (type: "PRODUCT" | "WHITELIST" | "ATTENDANCE") => {
     const taskId = serverImportTasks[type];

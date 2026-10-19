@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.admin;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.security.AdminPermission;
 import com.fengyi.ordershow.security.AdminPrincipal;
@@ -94,7 +96,7 @@ public class MemberService {
         : Set.copyOf(java.util.Arrays.stream(codes.split(",")).map(AdminPermission::valueOf).toList());
     return new MemberView(rs.getLong("id"), rs.getString("username"), rs.getString("display_name"),
         rs.getLong("department_id"), rs.getString("department_name"), rs.getString("status"), rs.getInt("lock_version"),
-        rs.getTimestamp("last_login_at") == null ? null : rs.getTimestamp("last_login_at").toInstant(), granted);
+        UtcTime.read(rs, "last_login_at"), granted);
   }
   private void savePermissions(long id, Set<AdminPermission> permissions) {
     jdbc.update("DELETE FROM admin_user_permission WHERE admin_user_id=?", id);

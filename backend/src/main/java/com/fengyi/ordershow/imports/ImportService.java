@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.imports;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import static com.fengyi.ordershow.imports.ImportValues.*;
 import com.fengyi.ordershow.imports.ImportData.MaterializeRow;
 
@@ -152,7 +154,7 @@ public class ImportService {
         FROM import_error WHERE import_task_id = ? AND resolved_at IS NULL ORDER BY severity, source_row_number, id
         """, (rs, rowNum) -> new ImportIssue(rs.getLong("id"), rs.getString("severity"), rs.getString("error_code"),
         rs.getString("sheet_name"), rs.getObject("source_row_number") == null ? null : rs.getInt("source_row_number"), rs.getString("field_name"),
-        rs.getString("raw_value_masked"), rs.getString("message"), rs.getTimestamp("resolved_at") == null ? null : rs.getTimestamp("resolved_at").toInstant()), taskId);
+        rs.getString("raw_value_masked"), rs.getString("message"), UtcTime.read(rs, "resolved_at")), taskId);
   }
 
   public void updateRow(long taskId, long rowId, Map<String, Object> changes, boolean deleted, long adminId) {

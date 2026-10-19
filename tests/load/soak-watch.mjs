@@ -21,6 +21,7 @@ try {
     const sample={elapsedSeconds:(Date.now()-started)/1000,pending,oldestMs,versions,screenMs};
     samples.push(sample);save(`${run}-progress.json`,report());
     console.log('WATCH',sample);
+    assert(oldestMs>=0,'Negative notification age: check database timezones');
     assert(oldestMs<=3000,'Pending notifications exceed 3 seconds');assert(screenMs<=3000,'Dashboard probe exceeds 3 seconds');
     const remaining=seconds*1000-(Date.now()-started);
     if(remaining>0)await new Promise(resolve=>setTimeout(resolve,Math.min(30000,remaining)));

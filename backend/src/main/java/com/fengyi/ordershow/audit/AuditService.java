@@ -1,5 +1,7 @@
 package com.fengyi.ordershow.audit;
 
+import com.fengyi.ordershow.common.UtcTime;
+
 import com.fengyi.ordershow.common.PageResponse;
 import com.fengyi.ordershow.common.TraceFilter;
 import com.fengyi.ordershow.security.AdminPrincipal;
@@ -58,7 +60,7 @@ public class AuditService {
       String ip = remoteIp(request);
       writer.write(new Object[]{activityId, actorType, admin == null ? null : admin.id(), action, objectType, objectId, truncate(reason, 500),
           success ? "SUCCESS" : "FAILURE", success ? null : "HTTP_" + response.getStatus(), TraceFilter.id(request), ip,
-          truncate(request.getHeader("User-Agent"), 500), java.sql.Timestamp.from(Instant.now()),
+          truncate(request.getHeader("User-Agent"), 500), UtcTime.database(Instant.now()),
           admin == null ? null : admin.displayName() + "（" + admin.username() + "）", admin == null ? null : admin.roleCode()});
     } catch (Exception auditFailure) {
       log.warn("Failed to persist audit event for {} {}", request.getMethod(), request.getRequestURI(), auditFailure);
@@ -98,7 +100,7 @@ public class AuditService {
 
   private AuditView map(ResultSet rs, int rowNum) throws SQLException {
     return new AuditView(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
-        rs.getString(6), rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10), rs.getTimestamp(11).toInstant());
+        rs.getString(6), rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10), UtcTime.read(rs, 11));
   }
   private static boolean isRead(String method) { return "GET".equals(method) || "HEAD".equals(method) || "OPTIONS".equals(method); }
   private static Long activityId(String uri) { Matcher matcher = ACTIVITY_ID.matcher(uri); return matcher.find() ? Long.valueOf(matcher.group(1)) : null; }

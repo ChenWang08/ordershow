@@ -1,5 +1,8 @@
 "use client";
 
+import { formatBeijingTime } from "../shared/time";
+
+
 import { useEffect, useState } from "react";
 import { ApiError, createMember, loadAdminDepartments, loadMembers, updateMember, type AdminDepartment, type DepartmentMember } from "../../api";
 import { useAdminIdentity } from "../../admin-context";
@@ -44,7 +47,7 @@ export function MemberAdminPanel() {
     {error && <p className="warning-box" role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {loading ? <p role="status">正在加载成员…</p> : <div className="member-table-scroll"><table className="member-table"><thead><tr><th>成员 / 账号</th><th>部门</th><th>功能权限</th><th>状态</th><th>最后登录</th><th>操作</th></tr></thead><tbody>
       {members.map(member => <tr key={member.id}><td><b>{member.displayName}</b><br />{member.username}</td><td>{member.departmentName}</td>
-        <td>{memberModules.filter(m => member.permissions.includes(m.code)).map(m => m.label).join("、") || "暂无权限"}</td><td>{member.status === "ACTIVE" ? "启用" : "停用"}</td><td>{member.lastLoginAt ? new Date(member.lastLoginAt).toLocaleString("zh-CN", { hour12: false }) : "未登录"}</td>
+        <td>{memberModules.filter(m => member.permissions.includes(m.code)).map(m => m.label).join("、") || "暂无权限"}</td><td>{member.status === "ACTIVE" ? "启用" : "停用"}</td><td>{member.lastLoginAt ? formatBeijingTime(member.lastLoginAt) : "未登录"}</td>
         <td><div className="member-row-actions"><button disabled={busy} onClick={() => { setError(""); setEditor({ member, username: member.username, displayName: member.displayName, departmentId: String(member.departmentId), password: "", permissions: [...member.permissions] }); }}>编辑权限</button>
           <button disabled={busy} onClick={() => { setError(""); setResetPassword(""); setResetTarget(member); }}>重置密码</button>
           <button disabled={busy} onClick={() => { const status = member.status === "ACTIVE" ? "DISABLED" : "ACTIVE"; if (window.confirm(`确认${status === "DISABLED" ? "停用" : "启用"}成员 ${member.displayName}（${member.username}）？${status === "DISABLED" ? "其已有登录会话将立即失效。" : ""}`)) void run(() => updateMember(member.id, { lockVersion: member.lockVersion, status }), "成员状态已更新"); }}>{member.status === "ACTIVE" ? "停用" : "启用"}</button></div></td></tr>)}
