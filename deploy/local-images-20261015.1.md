@@ -1,6 +1,6 @@
 # 本地 ACK 镜像验证记录：20261015.1
 
-日期：2026-10-15（Asia/Shanghai）。状态：已构建并完成本地隔离验证，未推送 CODING，未部署真实 ACK。
+日期：2026-10-15（Asia/Shanghai）。状态：已构建、完成本地隔离验证，并已推送 CODING；远端摘要及 linux/amd64 平台已核验。本次新版本尚未由本聊天部署到 ACK，测试环境升级结果待部署团队反馈。
 
 ## 代码与合并
 
@@ -40,8 +40,24 @@
 - 本次没有操作原业务容器；前后核对 ID 均一致：frontend 47f5e60a32f8、backend 125d37b8f539、redis 3119aace5127、mysql 3215f4c64d8e、minio a0a861a15813。
 - 验证完成后已清理本次全部 order-show-ack-smoke 容器和网络，保留本地新旧 ACK 镜像。
 
-## 后续使用与回退
+## CODING 交付结果
 
-本次隔离验证使用 deploy/verify/compose.yaml，默认 ACK_IMAGE_TAG=20261015.1，可显式设置为已验证版本。仅对 order-show-ack-smoke 做生命周期操作。
+用户在本地终端完成前后端推送后，2026-10-15 再次通过 docker buildx imagetools inspect 查询两个远端标签，均成功；索引摘要与上表本地已验证镜像一致，业务平台均为 linux/amd64。
 
-推送仓库和云端部署另行执行；当前不应把这些本地标签视为已在 CODING 存在。旧镜像和合并前提交保留；代码回退应使用新的 revert 提交，数据库回退由 DBA 评估，不能通过切换镜像自动撤销 V039。
+前端：
+`g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261015.1`
+
+后端：
+`g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261015.1`
+
+此前多次上传曾出现超时、broken pipe、连接关闭或 Docker 引擎不可用，部分层已上传。上述失败均为历史状态；最终两个标签已经存在并核验成功。新旧本地运行层对比：前端 9 层中 8 层不同，后端 9 层中 3 层不同。用户最后一次推送复用了此前成功上传的层。不能据此单独确定最初网络故障原因。
+
+## 测试环境增量升级与回退
+
+用户确认旧 20261012.1 已部署测试环境。本次由部署团队将两个应用更新为上述新地址，保留原数据库、Redis、OSS、业务密钥和其他环境配置；镜像上传本身不修改云端数据。
+
+DBA 改表前备份并确认当前结构版本：已有 V038 只执行 db/migrations/V039__activity_backgrounds.sql 并记录 V039，已执行则不重复执行。严禁对已有业务库执行 fresh-install.sql、重建业务库或覆盖导入数据。V039 增加背景引用字段和外键、扩展文件用途约束，不包含删除业务数据操作。
+
+数据库准备完成后更新后端和前端，检查健康状态、已有活动及订单数据、登录、H5 入口、活动背景、重新开放订货和展示页面。真实云资源与浏览器验收仍由部署团队完成并反馈。
+
+旧 20261012.1 仓库版本保留用于应用回退；数据库回退由 DBA 评估，切换镜像不会撤销 V039。本地隔离验证配置默认 ACK_IMAGE_TAG=20261015.1；仅对 order-show-ack-smoke 做隔离测试生命周期操作。
