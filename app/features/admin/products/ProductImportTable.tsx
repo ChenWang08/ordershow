@@ -12,6 +12,7 @@ import { DeleteConfirmDialog } from "../shared/DeleteConfirmDialog";
 export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false, allowDeleteAll = false, readOnly = false }: { rows: ProductImportRow[]; onEdit: (row: ProductImportRow) => void; onDelete?: (ids: string[]) => void; allowDelete?: boolean; allowDeleteAll?: boolean; readOnly?: boolean }) {
   const [customerType, setCustomerType] = useState("全部");
   const [rebate, setRebate] = useState("全部");
+  const [projectGroup, setProjectGroup] = useState("");
   const [imageFilter, setImageFilter] = useState("全部");
   const [statusFilter, setStatusFilter] = useState("全部");
   const [priceFilter, setPriceFilter] = useState("全部");
@@ -21,6 +22,15 @@ export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [deleteTarget, setDeleteTarget] = useState<DeleteTarget | null>(null);
   const [imagePreview, setImagePreview] = useState<{ productName: string; images: ProductImageAsset[]; status: string } | null>(null);
+  const projectGroupOptions = useMemo(() => [...new Set(rows.map((row) => row.line.trim()))]
+    .sort((a, b) => a.localeCompare(b, "zh-CN"))
+    .map((name) => ({ value: `group:${name}`, label: name === "全部" || name === "未填写项目组" ? `${name}（项目组名称）` : name || "未填写项目组" })), [rows]);
+  // A removed group resets the filter and selection before rendering the replacement data.
+  if (projectGroup && !projectGroupOptions.some((option) => option.value === projectGroup)) {
+    setProjectGroup("");
+    setPage(1);
+    setSelectedIds([]);
+  }
   const heads = ["序号", "客户类型", "是否返利", "产品大类", "项目组", "物料代码", "物料名称", "产品说明", "商品图片", "品牌", "品种", "规格", "箱规", "元/瓶", "元/箱", "每吨箱数（箱/吨）", "是否礼盒", "分公司限制", "经销商限制", "状态", "操作"];
   const filteredRows = useMemo(() => {
     const normalizedKeyword = normalizeSearchText(searchKeyword);
@@ -38,14 +48,15 @@ export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false
         || (customerType === "未指定" ? row.customerType === "" : row.customerType === customerType);
       const matchesRebate = rebate === "全部"
         || (rebate === "未指定" ? row.rebate === "" : row.rebate === rebate);
-      const matchesFilters = matchesCustomerType && matchesRebate
+      const matchesProjectGroup = !projectGroup || `group:${row.line.trim()}` === projectGroup;
+      const matchesFilters = matchesCustomerType && matchesRebate && matchesProjectGroup
         && (statusFilter === "全部" || row.status === statusFilter) && matchesImage && matchesPrice;
       const matchesSearch = !normalizedKeyword
         || normalizeSearchText(row.materialName).includes(normalizedKeyword)
         || normalizeMaterialCode(row.materialCode).includes(normalizedCodeKeyword);
       return matchesFilters && matchesSearch;
     });
-  }, [rows, customerType, rebate, imageFilter, statusFilter, priceFilter, searchKeyword]);
+  }, [rows, customerType, rebate, projectGroup, imageFilter, statusFilter, priceFilter, searchKeyword]);
   const imageCounts = useMemo(() => ({
     matched: rows.filter((row) => row.imageStatus === "已匹配").length,
     unmatched: rows.filter((row) => row.imageStatus === "未匹配").length,
@@ -101,6 +112,7 @@ export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false
       <div className="data-filters product-data-filters">
         <label><span>客户类型</span><select value={customerType} onChange={(e) => { setCustomerType(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>特渠</option><option>综合</option><option>未指定</option></select></label>
         <label><span>是否参与返利</span><select value={rebate} onChange={(e) => { setRebate(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>参与</option><option>不参与</option><option>未指定</option></select></label>
+        <label><span>项目组</span><select aria-label="项目组" value={projectGroup} onChange={(e) => { setProjectGroup(e.target.value); setPage(1); setSelectedIds([]); }}><option value="">全部</option>{projectGroupOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
         <label><span>商品状态</span><select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>有效</option><option>待核对</option><option>待完善</option></select></label>
         <label><span>价格状态</span><select value={priceFilter} onChange={(e) => { setPriceFilter(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>价格有效</option><option>价格待完善</option></select></label>
         <label><span>商品图片</span><select value={imageFilter} onChange={(e) => { setImageFilter(e.target.value); setPage(1); setSelectedIds([]); }}><option>全部</option><option>已匹配</option><option>待确认</option><option>未匹配</option></select></label>

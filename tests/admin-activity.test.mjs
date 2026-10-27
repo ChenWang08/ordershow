@@ -6,6 +6,29 @@ import { loadModule } from "./helpers/load-ts-module.mjs";
 
 const { ActivityOverview } = loadModule("app/features/admin/ActivityOverview.tsx", { "./ActivityBackgroundCard": { ActivityBackgroundCard: () => null }, "./ActivityLiveRoomCard": { ActivityLiveRoomCard: () => null }, "../../admin-context": { useAdminIdentity: () => ({ roleCode: "DEPARTMENT_ADMIN" }) } });
 const noop = () => {};
+
+test("new activities request the designed 90-company and 30-branch ranking limits", async () => {
+  let saved;
+  const { createActivity, updateActivity } = loadModule("app/services/api/activity.ts", {
+    "./context": { activeActivityPath: () => "fixture" },
+    "./client": { api: async (path, options, csrf) => {
+      saved = { path, body: JSON.parse(options.body), csrf };
+      return { data: { id: 1 } };
+    } },
+  });
+  await createActivity({ name: "排行测试", startsAt: "2099-01-02T10:00", endsAt: "2099-01-02T12:00", eventEndsAt: "2099-01-02T16:00" });
+  assert.equal(saved.path, "/admin/activities");
+  assert.equal(saved.csrf, "admin");
+  assert.equal(saved.body.companyRankingTopN, 90);
+  assert.equal(saved.body.branchRankingTopN, 30);
+
+  // Editing names/times must preserve an explicitly customized ranking limit.
+  await updateActivity({ id: 1, version: 3, companyRankingTopN: 12, branchRankingTopN: 7 }, {
+    name: "保留自定义排行", startsAt: "2099-01-02T10:00", endsAt: "2099-01-02T12:00", eventEndsAt: "2099-01-02T16:00",
+  });
+  assert.equal(saved.body.companyRankingTopN, 12);
+  assert.equal(saved.body.branchRankingTopN, 7);
+});
 const viewProps = {
   activityCode: "HD-TEST", activityName: "测试活动", departmentName: "测试部门",
   activityEndAt: "2099-01-02T12:00", activityEventEndAt: "2099-01-02T16:00",

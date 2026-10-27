@@ -3,9 +3,11 @@
 ## 测试分工
 
 - `rendered-html.test.mjs`：运行构建后的服务端入口，检查实际 HTML 与必要资源。
+- `product-project-filter.test.mjs`：项目组动态选项、组合筛选、空值、分页与勾选重置、全选范围及只读列表；`scripts/test-product-project-filter-browser.mjs` 使用合成数据挂载真实商品表格与样式，验证 React 生命周期和宽窄布局，不访问业务接口。运行方式见 [项目组筛选验证说明](../docs/testing/product-project-filter-2026-10-27.md)。
 - `admin-*.test.mjs`、`workspace-orders.test.mjs`、`h5-flow.test.mjs`、`screens.test.mjs`：验证业务计算、操作结果、组件渲染及部分状态行为。其中 Hook 操作测试使用显式状态适配器，不能代替真实 React 浏览器生命周期测试。
 - `source-contracts.test.mjs`：保留的源码、迁移和接口文档约束检查。它们不是运行时覆盖率；本轮移除了一批已有行为测试覆盖的函数名和实现细节断言。后续需求优先增加行为测试，再按覆盖情况逐项替换剩余源码约束。
 - `backend/src/test`：Java 单元、接口契约和隔离 API E2E。
+- 排行上限回归：`admin-activity.test.mjs` 检查新建 90/30 与修改时保留自定义配置；`screens.test.mjs` 检查两种排行的 22/90 人完整渲染和全部/特渠/综合各大区参数。Java `RankingDatabaseIntegrationTest` 在独立 MySQL 上执行生产 SQL，覆盖 0/20/22/89/90/91 人、公司 90/分公司 30、排序、先筛选再取前 N 名、撤回/作废排除、缺失/部分/零吨数、自定义上限和历史快照重建。它只在 `ORDER_SHOW_RANKING_TEST=order-show-e2e` 时运行，固定使用测试端口 33306 的 `order_show_ranking_test`，不访问业务库。
 - `time.test.mjs`、`time-monitoring.test.mjs`、Java `UtcTimeConfigurationTest` / `UtcDatabaseIntegrationTest` 及审核 API E2E：覆盖北京时间展示与表单转换、UTC 数据库默认值、跨 JVM/浏览器时区、审核时间一致性、Excel 导出及负通知延迟。真实浏览器运行 `scripts/test-time-browser.mjs`，见 [时间回归说明](../docs/testing/utc-time-2026-10-19.md)。
 - 本地历史校正工具及配套 3 项测试已按用户要求移出项目并归档，不再属于常规测试入口。已执行的真实历史副本校正/回退、实际 Excel、新申请审核和三个浏览器时区结果保留在 [历史时间回归](../docs/testing/time-history-2026-10-19.md)。
 - `scripts/browser-regression.mjs`：真实浏览器关键流程，包括活动切换、H5、管理员订单编辑、大屏筛选、趋势交互和响应式布局。
@@ -20,6 +22,17 @@
 浏览器脚本只使用固定的 3100/8180 测试端口，并依赖 API E2E 生成的夹具。测试会创建和修改订单、截止测试活动，因此整套复跑前必须重新生成隔离数据。验证后使用 `scripts/test-env.ps1 reset` 清理测试环境。
 
 当前结果和未覆盖范围见 `docs/testing/refactor-regression-2026-09-07.md`。通过测试不代表此前记录的客户名称标准化缺陷已被修复，也不代表压测、灾备和全部浏览器兼容性已验收。
+
+排行专项数据库测试先启动 `docker compose --project-name order-show-e2e --file docker-compose.test.yml up -d mysql-test`，然后运行：
+
+```powershell
+docker run --rm -e ORDER_SHOW_RANKING_TEST=order-show-e2e `
+  -v order-show-m2:/root/.m2 -v "${PWD}:/workspace" -w /workspace `
+  maven:3.9.11-eclipse-temurin-21 `
+  mvn -f backend/pom.xml '-Dtest=DashboardServiceTest,RankingDatabaseIntegrationTest,ActivityRankingValidationTest' test
+```
+
+完整隔离检查脚本 `scripts/run-automated-tests.ps1` 也已开启排行数据库专项。完成后使用 `scripts/test-env.ps1 reset` 清理独立测试环境。排行修复实测与部署边界见 [排行修复记录](../docs/deployment/2026-10-27-ranking-limits.md)。
 
 ## 性能测试
 

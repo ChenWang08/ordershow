@@ -101,11 +101,14 @@ public class DashboardService {
           AND (? IS NULL OR ? = '' OR o.region_code = ?)
         """, Long.class, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode);
     totals.put("sku_count", skuCount == null ? 0L : skuCount);
+    // A missing factor was historically saved as zero tons (V036). Keep real
+    // calculated zero values, but do not turn an unknown weight into a tons rank.
     List<RankRow> companies = metric == RankingMetric.TONS ? jdbc.query("""
         SELECT o.id, o.dealer_full_name_snapshot name, o.branch_name_snapshot branch, o.total_amount amount,
           o.total_quantity quantity, item_tons.tons
         FROM customer_order o
-        JOIN (SELECT order_id, COALESCE(SUM(line_tons), 0) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
+        JOIN (SELECT order_id, SUM(CASE WHEN ton_case_factor IS NOT NULL OR line_tons > 0 THEN line_tons END) tons
+              FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
         WHERE o.activity_id = ? AND o.status = 'SUBMITTED' AND item_tons.tons IS NOT NULL
           AND (? IS NULL OR ? = '' OR o.customer_type = ?)
           AND (? IS NULL OR ? = '' OR o.region_code = ?)
@@ -129,7 +132,8 @@ public class DashboardService {
         SELECT o.branch_name_snapshot name, SUM(o.total_amount) amount, SUM(o.total_quantity) quantity,
           SUM(item_tons.tons) tons
         FROM customer_order o
-        JOIN (SELECT order_id, COALESCE(SUM(line_tons), 0) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
+        JOIN (SELECT order_id, SUM(CASE WHEN ton_case_factor IS NOT NULL OR line_tons > 0 THEN line_tons END) tons
+              FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
         WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
           AND (? IS NULL OR ? = '' OR o.customer_type = ?)
           AND (? IS NULL OR ? = '' OR o.region_code = ?)
