@@ -6,6 +6,8 @@ import com.fengyi.ordershow.audit.AuditService;
 import com.fengyi.ordershow.security.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
@@ -118,7 +120,8 @@ public class ActivityController {
   public record ActivityRequest(@Size(max = 64) String code, @NotBlank @Size(max = 200) String name,
       @Size(max = 2000) String description, @NotBlank String timezone, @NotNull Instant startsAt, @NotNull Instant endsAt,
       @NotNull Instant eventEndsAt,
-      @NotBlank String customerScope, int companyRankingTopN, int branchRankingTopN, int tonDisplayScale,
+      @NotBlank String customerScope, @Min(1) @Max(500) int companyRankingTopN,
+      @Min(1) @Max(500) int branchRankingTopN, int tonDisplayScale,
       List<RegionRequest> regions, Long departmentId) {
     ActivityService.ActivityWrite toWrite() {
       return new ActivityService.ActivityWrite(code, name, description, timezone, startsAt, endsAt, eventEndsAt, customerScope,

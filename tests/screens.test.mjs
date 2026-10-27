@@ -128,6 +128,50 @@ test("ranking board exposes amount and tonnage ranking modes", () => {
   assert.match(html, /分公司订货榜/);
 });
 
+for (const metric of ["AMOUNT", "TONS"]) {
+  for (const count of [0, 1, 2, 20, 22, 90]) {
+    test(`ranking board renders every returned company: ${metric}, ${count} companies`, () => {
+      const dashboard = {
+        totals: { total_amount: 1234, total_tons: 12 }, branches: [],
+        companies: Array.from({ length: count }, (_, index) => ({ rank: index + 1, name: `排行客户${index + 1}`, amount: 1000 - index, tons: count - index })),
+      };
+      const { RankingBoard } = loadModule("app/features/screens/RankingBoard.tsx", {
+        react: { ...React, useState: initial => [initial === null ? dashboard : initial === "AMOUNT" ? metric : initial, () => {}] },
+        "../../api": {},
+      });
+      const html = renderToStaticMarkup(React.createElement(RankingBoard, { activity: { ...activity, status: "FINISHED" } }));
+      assert.equal((html.match(/class="rank-row\b/g) ?? []).length, count);
+      assert.equal((html.match(/class="rank-column"/g) ?? []).length, Math.max(1, Math.min(count, 3)));
+      if (count) assert.match(html, new RegExp(`>排行客户${count}<`));
+      assert.match(html, /1,234\.00/);
+    });
+  }
+  for (const channel of ["ALL", "SPECIAL", "GENERAL:NORTH", "GENERAL:EAST", "GENERAL:SOUTH"]) {
+    test(`ranking board sends the selected filter before ranking: ${metric}, ${channel}`, async () => {
+      let effect;
+      const requests = [];
+      const { RankingBoard } = loadModule("app/features/screens/RankingBoard.tsx", {
+        react: { ...React,
+          useState: initial => [initial === "ALL" ? channel : initial === "AMOUNT" ? metric : initial, () => {}],
+          useEffect: callback => { effect = callback; },
+        },
+        "../../api": { loadDashboard: async filters => { requests.push(filters); return { totals: {}, companies: [], branches: [] }; } },
+      });
+      renderToStaticMarkup(React.createElement(RankingBoard, { activity: { ...activity, status: "FINISHED", regions: [
+        { code: "NORTH", name: "北区" }, { code: "EAST", name: "东区" }, { code: "SOUTH", name: "南区" },
+      ] } }));
+      const cleanup = effect();
+      await settle();
+      const [customerType, regionCode] = channel.split(":");
+      assert.equal(requests.length, 1);
+      assert.equal(requests[0].customerType, customerType);
+      assert.equal(requests[0].regionCode, regionCode);
+      assert.equal(requests[0].metric, metric);
+      cleanup();
+    });
+  }
+}
+
 for (const selected of ["综合客户各大区金额及合计", "综合客户大区金额与项目组金额同屏展示"]) {
   test(`report selection renders district amounts: ${selected}`, () => {
     const { ReportBoard } = loadModule("app/features/screens/ReportBoard.tsx", {

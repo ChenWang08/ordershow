@@ -45,6 +45,7 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
   const ranking = dashboard?.companies ?? [];
   const branchRanking = dashboard?.branches ?? [];
   const chunkSize = Math.max(1, Math.ceil(ranking.length / 3));
+  const columnStarts = [0, chunkSize, chunkSize * 2].filter(start => start === 0 || start < ranking.length);
   const isBranchOverflowing = branchRanking.length > branchPageSize;
   const selectedLabel = options.find((option) => option.value === effectiveChannel)?.label ?? "订货";
   const totalAmount = Number(dashboard?.totals.total_amount ?? 0);
@@ -78,7 +79,7 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
       {error && <div className="warning-box"><b>{historical ? "历史看板加载异常" : "实时数据连接异常"}</b><span>{error}</span></div>}
       <div className="ranking-layout">
         <div className="ranking-columns">
-          {[0, chunkSize, chunkSize * 2].map((start) => (
+          {columnStarts.map((start) => (
             <div className="rank-column" key={start}>
               <h2>公司{tonnageRanking ? "订货吨数" : "订单金额"}排行 {ranking.length ? start + 1 : 0}–{Math.min(start + chunkSize, ranking.length)}<small>单位：{tonnageRanking ? "吨" : "元"}</small></h2>
               {ranking.slice(start, start + chunkSize).map((item) => (

@@ -2,7 +2,7 @@
   .prototype-nav { gap: 8px; padding: 0 12px; }
   .prototype-title { min-width: 155px; }.prototype-title p small, .prototype-status { display: none; }
   .surface-tabs button { min-width: 82px; padding: 8px; }
-  .ranking-layout { grid-template-columns: 1fr; }.branch-rank { display: none; }
+  .ranking-layout { grid-template-columns: 1fr; }.branch-rank { border-left: 0; }
   .report-content.dual { gap: 15px; padding-right: 25px; padding-left: 25px; }
   .admin-app { grid-template-columns: 175px 1fr; }
   .order-dashboard-kpis { grid-template-columns: repeat(3, minmax(0,1fr)); }
@@ -25,7 +25,7 @@
   .screen-title h1 { font-size: 22px; }
   .ranking-heading select { min-width: 150px; }
   .ranking-layout { padding: 0 8px 60px; }
-  .ranking-columns { grid-template-columns: 1fr; }.rank-column:not(:first-child) { display: none; }
+  .ranking-columns { grid-template-columns: 1fr; }
   .report-header { padding: 14px 12px; }.report-header h1 { font-size: 24px; }.report-header select { min-width: 0; width: 230px; }
   .report-content, .report-content.dual { display: grid; grid-template-columns: 1fr; gap: 12px; padding: 8px 12px 70px; }
   .metric-table, .top-five { width: 100%; margin-top: 25px; border-radius: 14px; }.metric-table h2, .top-five h2 { width: 78%; margin-top: -25px; margin-bottom: 14px; padding: 9px 25px; font-size: 17px; }.metric-table > div { margin-right: 7px; margin-left: 7px; }.metric-table > div span, .metric-table > div b { padding: 10px 9px; font-size: 13px; }.metric-table > div b { font-size: 13px; }.metric-table .metric-total span { gap: 8px; font-size: 18px; }.metric-table .metric-total span::before { width: 25px; height: 25px; font-size: 12px; }.metric-table .metric-total b { font-size: 17px; }.top-five > div { margin-right: 7px; margin-left: 7px; padding: 10px 13px; }.top-five > div b { font-size: 15px; }.total-performance strong { font-size: 72px; }
