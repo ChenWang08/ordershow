@@ -227,9 +227,9 @@
 .data-filters input:focus { border-color: #ae4b45; box-shadow: 0 0 0 3px rgba(169,35,33,.08); }
 .data-filters .data-filter-search { min-width: 260px; flex: 1.5 1 260px; }
 .data-filters small { flex: 0 0 100%; margin: 0; color: #8d7d74; font-size: 8px; line-height: 1.6; }
-.product-data-filters { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)) minmax(220px, 1.35fr); align-items: end; }
-.product-data-filters label, .product-data-filters .data-filter-search { min-width: 0; }
-.product-data-filters small { grid-column: 1 / -1; }
+.product-data-filters label { min-width: 0; flex: 1 1 130px; }
+.product-data-filters .data-filter-search { min-width: min(220px, 100%); flex: 1.5 1 220px; }
+.product-data-filters select, .product-data-filters input { width: 100%; min-width: 0; max-width: 100%; text-overflow: ellipsis; }
 .clickable-row { width: 100%; padding: 0; color: inherit; border: 0; background: #fff; text-align: left; cursor: pointer; }
 .clickable-row:hover { background: #fff8f5; box-shadow: inset 3px 0 #ad2522; }
 .import-mode { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 14px; padding: 12px 14px; border: 1px solid #e4d9d2; border-radius: 9px; background: #faf8f6; }

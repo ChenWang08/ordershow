@@ -3,6 +3,7 @@
 ## 测试分工
 
 - `rendered-html.test.mjs`：运行构建后的服务端入口，检查实际 HTML 与必要资源。
+- `product-project-filter.test.mjs`：项目组动态选项、组合筛选、空值、分页与勾选重置、全选范围及只读列表；`scripts/test-product-project-filter-browser.mjs` 使用合成数据挂载真实商品表格与样式，验证 React 生命周期和宽窄布局，不访问业务接口。运行方式见 [项目组筛选验证说明](../docs/testing/product-project-filter-2026-10-27.md)。
 - `admin-*.test.mjs`、`workspace-orders.test.mjs`、`h5-flow.test.mjs`、`screens.test.mjs`：验证业务计算、操作结果、组件渲染及部分状态行为。其中 Hook 操作测试使用显式状态适配器，不能代替真实 React 浏览器生命周期测试。
 - `source-contracts.test.mjs`：保留的源码、迁移和接口文档约束检查。它们不是运行时覆盖率；本轮移除了一批已有行为测试覆盖的函数名和实现细节断言。后续需求优先增加行为测试，再按覆盖情况逐项替换剩余源码约束。
 - `backend/src/test`：Java 单元、接口契约和隔离 API E2E。
