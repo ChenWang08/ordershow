@@ -1,6 +1,6 @@
 # 本地 ACK 镜像验证记录：20261019.1
 
-日期：2026-10-19（Asia/Shanghai）。状态：本地构建及隔离验证通过；未推送 CODING，未部署 ACK。
+日期：2026-10-19（Asia/Shanghai）。状态：本地构建及隔离验证通过；已推送 CODING 并核验远端摘要和平台，未部署 ACK。
 
 ## 合并与镜像
 
@@ -11,7 +11,7 @@
 | order-show-ack-frontend:20261019.1 | sha256:08cc883f68d777e0cd54587d182c84c60d66314ef5be76e1a3f8bb102182eb50 |
 | order-show-ack-backend:20261019.1 | sha256:36e228bd0091d7bbd8e73622d3d18780bf50ebb44a97787857f8bc0e83d19576 |
 
-平台均为 linux/amd64。前端 NEXT_PUBLIC_API_BASE=/api/v1；后端 SKIP_TESTS=false。旧 20261015.1、20261012 镜像保留，本次未添加远端仓库标签或推送。
+平台均为 linux/amd64。前端 NEXT_PUBLIC_API_BASE=/api/v1；后端 SKIP_TESTS=false。旧 20261015.1、20261012 镜像保留，后续已添加对应 CODING 标签并成功推送，镜像内容未变。
 
 ## 实际验证
 
@@ -42,3 +42,13 @@ UTC 修复不会自动校正历史时间。发布前由 DBA/部署团队使用 s
 本次检查开始时原业务容器已停止；没有启动、重启或替换它们。原业务容器 ID：frontend ba2adb824d61、backend c3924fdfe540、redis 6a08bc666fbe、mysql 3dd238fecd02、minio a0a861a15813。
 
 隔离测试完成后清理本次 smoke 容器和网络，保留新旧镜像。旧镜像可用于应用回退，但旧后端可能再次写入不同口径时间；若未来执行历史修正，回退镜像不会撤销数据修改，应由 DBA 单独评估，不能整库还原覆盖新业务数据。
+
+## CODING 推送与交付
+
+2026-10-19 前后端 docker push 均退出码 0；随后 docker buildx imagetools inspect 核验两个远端索引摘要与上表完全一致，业务平台均为 linux/amd64。仓库原有层已复用，缺少的层及元数据已上传。旧 20261015.1 标签未覆盖。
+
+前端：`g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261019.1`
+
+后端：`g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261019.1`
+
+用户确认 20261015.1 已部署测试环境；本次仅推送新版，未操作测试环境或数据库。部署团队需按上述 UTC 切换和历史时间核查要求安排更新，保留数据库、Redis、OSS 和业务密钥；已有 V039 不重复执行结构脚本。真实测试环境升级与验收待反馈。
