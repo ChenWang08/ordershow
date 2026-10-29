@@ -23,6 +23,7 @@ function OrderShowContent({ initialSurface = "h5", showSurfaceTabs = true }: Ord
   const [surface, setSurface] = useState<Surface>(initialSurface);
   const standaloneH5 = surface === "h5" && !showSurfaceTabs;
   const collapsibleScreen = ["dashboard", "ranking", "report", "lottery"].includes(surface);
+  const manualScreen = ["dashboard", "ranking", "report"].includes(surface);
   const { activityName, runtimeConnected, runtimeActivity } = useActivityWorkspace();
   const h5Background = useBackgroundImage(surface === "h5" ? runtimeActivity?.h5BackgroundUrl : null);
   const desktopBackground = useBackgroundImage(["ranking", "report", "lottery"].includes(surface) ? runtimeActivity?.desktopBackgroundUrl : null);
@@ -39,7 +40,7 @@ function OrderShowContent({ initialSurface = "h5", showSurfaceTabs = true }: Ord
     { key: "admin", label: "管理后台", sub: "运营端" },
   ];
   const navigation = <nav className="prototype-nav">
-        <div className="prototype-title"><span>金</span><p><b>{surface === "admin" ? "订购会管理平台" : activityName}</b><small>{surface === "admin" ? (runtimeConnected ? "多活动运营 · 实时数据" : "多活动运营 · 服务连接中") : runtimeConnected ? "业务系统 · 实时数据" : "业务服务连接中"}</small></p></div>
+        <div className="prototype-title"><span>金</span><p><b>{surface === "admin" ? "订购会管理平台" : activityName}</b><small>{surface === "admin" ? (runtimeConnected ? "多活动运营 · 实时数据" : "多活动运营 · 服务连接中") : runtimeConnected ? manualScreen ? "业务系统 · 手动更新" : "业务系统 · 实时数据" : "业务服务连接中"}</small></p></div>
         {showSurfaceTabs && <div className="surface-tabs">{surfaces.map((item) => <button key={item.key} className={surface === item.key ? "active" : ""} onClick={() => setSurface(item.key)}><b>{item.label}</b><small>{item.sub}</small></button>)}</div>}
         <div className="prototype-status"><i /> {runtimeConnected ? "服务已连接" : "服务未连接"}</div>
       </nav>;
