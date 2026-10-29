@@ -94,12 +94,14 @@ public class OrderService {
     if (current != null && request.expectedLockVersion() != null && request.expectedLockVersion() != current.lockVersion()) {
       throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单状态已变化，请刷新后重新确认");
     }
-    if (current != null && "SUBMITTED".equals(current.status()) && repository.hasReducedItems(current.id(), quantities)) {
+    Map<Long, Long> previousQuantities = current != null && "SUBMITTED".equals(current.status())
+        ? repository.currentQuantities(current.id()) : null;
+    if (previousQuantities != null && OrderRepository.hasReducedItems(previousQuantities, quantities)) {
       throw DomainException.conflict("ORDER_CHANGE_REVIEW_REQUIRED", "减少或删除商品需要提交后台审核");
     }
     List<ProductSnapshot> products = repository.loadProducts(activity.id(), customer.customerId(), customer.customerType(), customer.branchName(), quantities.keySet());
     if (products.size() != quantities.size()) throw DomainException.unprocessable("PRODUCT_NOT_ORDERABLE", "订单中包含不可订、已删除或不属于当前客户的商品");
-    if (current != null && "SUBMITTED".equals(current.status()) && repository.sameItems(current.id(), quantities)) {
+    if (previousQuantities != null && previousQuantities.equals(quantities)) {
       repository.deleteDraft(activity.id(), customer.customerId());
       OrderView result = repository.order(current.id(), includeHistory);
       repository.completeH5Submission(activity.id(), customer.customerId(), idempotencyKey, result);
