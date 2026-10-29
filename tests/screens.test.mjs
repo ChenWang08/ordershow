@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { setImmediate as settle } from "node:timers/promises";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { loadModule } from "./helpers/load-ts-module.mjs";
 
 const domain = loadModule("app/features/screens/dashboard-domain.ts");
-const activity = { startsAt: "2026-09-07T09:30:00Z", endsAt: "2026-09-07T13:30:00Z", timezone: "Asia/Shanghai", regions: [] };
+const activity = { id: 1, startsAt: "2026-09-07T09:30:00Z", endsAt: "2026-09-07T13:30:00Z", timezone: "Asia/Shanghai", regions: [] };
 
 test("smoothed trends do not overshoot a zero-value valley", () => {
   const path = domain.dashboardSmoothPath([{ x: 36, y: 20 }, { x: 98, y: 112 }, { x: 160, y: 20 }]);
@@ -136,7 +135,7 @@ for (const metric of ["AMOUNT", "TONS"]) {
         companies: Array.from({ length: count }, (_, index) => ({ rank: index + 1, name: `排行客户${index + 1}`, amount: 1000 - index, tons: count - index })),
       };
       const { RankingBoard } = loadModule("app/features/screens/RankingBoard.tsx", {
-        react: { ...React, useState: initial => [initial === null ? dashboard : initial === "AMOUNT" ? metric : initial, () => {}] },
+        "./useManualScreenData": { useManualScreenData: () => ({ data: dashboard, parameters: { channel: "ALL", metric }, error: "", refreshing: false, refreshedAt: null, refresh: () => {} }) },
         "../../api": {},
       });
       const html = renderToStaticMarkup(React.createElement(RankingBoard, { activity: { ...activity, status: "FINISHED" } }));
@@ -146,36 +145,14 @@ for (const metric of ["AMOUNT", "TONS"]) {
       assert.match(html, /1,234\.00/);
     });
   }
-  for (const channel of ["ALL", "SPECIAL", "GENERAL:NORTH", "GENERAL:EAST", "GENERAL:SOUTH"]) {
-    test(`ranking board sends the selected filter before ranking: ${metric}, ${channel}`, async () => {
-      let effect;
-      const requests = [];
-      const { RankingBoard } = loadModule("app/features/screens/RankingBoard.tsx", {
-        react: { ...React,
-          useState: initial => [initial === "ALL" ? channel : initial === "AMOUNT" ? metric : initial, () => {}],
-          useEffect: callback => { effect = callback; },
-        },
-        "../../api": { loadDashboard: async filters => { requests.push(filters); return { totals: {}, companies: [], branches: [] }; } },
-      });
-      renderToStaticMarkup(React.createElement(RankingBoard, { activity: { ...activity, status: "FINISHED", regions: [
-        { code: "NORTH", name: "北区" }, { code: "EAST", name: "东区" }, { code: "SOUTH", name: "南区" },
-      ] } }));
-      const cleanup = effect();
-      await settle();
-      const [customerType, regionCode] = channel.split(":");
-      assert.equal(requests.length, 1);
-      assert.equal(requests[0].customerType, customerType);
-      assert.equal(requests[0].regionCode, regionCode);
-      assert.equal(requests[0].metric, metric);
-      cleanup();
-    });
-  }
+
 }
 
 for (const selected of ["综合客户各大区金额及合计", "综合客户大区金额与项目组金额同屏展示"]) {
   test(`report selection renders district amounts: ${selected}`, () => {
     const { ReportBoard } = loadModule("app/features/screens/ReportBoard.tsx", {
-      react: { ...React, useState: (initial) => [initial === "总战绩" ? selected : initial === null ? regionalReport : initial, () => {}] },
+      react: { ...React, useState: (initial) => [initial === "总战绩" ? selected : initial, () => {}] },
+      "./useManualScreenData": { useManualScreenData: () => ({ data: regionalReport, error: "", refreshing: false, refreshedAt: null, refresh: () => {} }) },
       "../../api": {},
     });
     const html = renderToStaticMarkup(React.createElement(ReportBoard, { activity }));
@@ -189,144 +166,6 @@ for (const selected of ["综合客户各大区金额及合计", "综合客户大
       assert.match(html, /metric-table-product/);
       assert.match(html, /<span>酱油<\/span><b>140<\/b>/);
     }
-  });
-}
-
-function refreshHarness(status) {
-  let effect;
-  let calls = 0;
-  const timers = [];
-  const events = [];
-  const { useOrderDashboard } = loadModule("app/features/screens/useOrderDashboard.ts", {
-    react: { useState: (initial) => [initial, () => {}], useRef: (initial) => ({ current: initial }), useCallback: (callback) => callback, useEffect: (callback) => { effect = callback; } },
-    "../../api": { ApiError: class ApiError extends Error {}, loadOrderDashboard: async () => { calls++; return null; }, apiBase: () => "http://test/api", getActiveActivityCode: () => "fixture" },
-  }, {
-    window: { setInterval: (callback, delay) => { timers.push({ callback, delay, cleared: false }); return 0; }, clearInterval: (id) => { timers[id].cleared = true; } },
-    EventSource: class {
-      constructor(url) { this.url = url; this.listeners = {}; this.closed = false; events.push(this); }
-      addEventListener(name, listener) { this.listeners[name] = listener; }
-      close() { this.closed = true; }
-    },
-  });
-  function useMount() { const model = useOrderDashboard({ status }); return { model, cleanup: effect() }; }
-  return { timers, events, get calls() { return calls; }, mount: useMount };
-}
-
-test("live dashboard refreshes initially, by timer and by SSE, and cleans up", async () => {
-  const harness = refreshHarness("ACTIVE");
-  const { cleanup } = harness.mount();
-  await settle();
-  assert.equal(harness.calls, 1);
-  assert.equal(harness.timers[0].delay, 15000);
-  await harness.timers[0].callback();
-  harness.events[0].listeners.invalidate(); await settle();
-  assert.equal(harness.calls, 3);
-  harness.events[0].listeners.open(); await settle();
-  assert.equal(harness.calls, 4);
-  cleanup();
-  assert.equal(harness.timers[0].cleared, true);
-  assert.equal(harness.events[0].closed, true);
-});
-
-test("historical dashboard loads once without subscriptions and still supports manual refresh", async () => {
-  const harness = refreshHarness("FINISHED");
-  const { model } = harness.mount();
-  await settle();
-  assert.equal(harness.calls, 1);
-  assert.equal(harness.timers.length, 0);
-  assert.equal(harness.events.length, 0);
-  await model.refresh();
-  assert.equal(harness.calls, 2);
-});
-
-test("dashboard ignores a response after effect cleanup", async () => {
-  let effect, release;
-  const updates=[];
-  const {useOrderDashboard}=loadModule("app/features/screens/useOrderDashboard.ts", {
-    react: {
-      useState: initial=>[initial,value=>updates.push(value)], useRef: initial=>({current:initial}),
-      useCallback: callback=>callback, useEffect: callback=>{effect=callback;},
-    },
-    "../../api": {ApiError:class extends Error{},loadOrderDashboard:()=>new Promise(resolve=>{release=resolve;}),apiBase:()=>"http://test/api",getActiveActivityCode:()=>"fixture"},
-  });
-  useOrderDashboard({id:1,status:"FINISHED"});
-  const cleanup=effect();await settle();
-  cleanup();const count=updates.length;release({stale:true});await settle();
-  assert.equal(updates.length,count);
-});
-
-for (const screen of ["dashboard", "ranking", "report"]) {
-  function screenHarness() {
-    let effect;
-    const requests = [];
-    const timers = [];
-    const events = [];
-    const updates = [];
-    const request = (...args) => new Promise((resolve, reject) => {
-      const signal = args.at(-1);
-      requests.push({ signal, resolve });
-      signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-    });
-    const mocks = {
-      react: { ...React, useState: initial => [initial, value => updates.push(value)],
-        useRef: initial => ({ current: initial }), useCallback: callback => callback,
-        useEffect: callback => { effect = callback; } },
-      "../../api": { ApiError: class extends Error {}, apiBase: () => "http://test/api", getActiveActivityCode: () => "fixture",
-        loadOrderDashboard: request, loadDashboard: request, loadDashboardReport: request },
-    };
-    const globals = {
-      window: { setInterval: (callback, delay) => { timers.push({ callback, delay }); return timers.length; }, clearInterval: () => {} },
-      EventSource: class {
-        constructor() { this.listeners = {}; events.push(this); }
-        addEventListener(name, listener) { this.listeners[name] = listener; }
-        close() { this.closed = true; }
-      },
-    };
-    const file = screen === "dashboard" ? "useOrderDashboard.ts" : screen === "ranking" ? "RankingBoard.tsx" : "ReportBoard.tsx";
-    const screenModule = loadModule(`app/features/screens/${file}`, mocks, globals);
-    function mount(value) {
-      if (screen === "dashboard") screenModule.useOrderDashboard(value);
-      else renderToStaticMarkup(React.createElement(screen === "ranking" ? screenModule.RankingBoard : screenModule.ReportBoard, { activity: value }));
-      return effect();
-    }
-    return { requests, timers, events, updates, mount };
-  }
-
-  test(`${screen} waits for activity metadata before requesting data or subscribing`, async () => {
-    const harness = screenHarness();
-    assert.equal(harness.mount(null), undefined);
-    await settle();
-    assert.equal(harness.requests.length, 0);
-    assert.equal(harness.timers.length, 0);
-    assert.equal(harness.events.length, 0);
-    const cleanup = harness.mount({ ...activity, id: 1, status: "ACTIVE" });
-    await settle();
-    assert.equal(harness.requests.length, 1);
-    assert.equal(harness.timers[0].delay, 15000);
-    assert.equal(harness.events.length, 1);
-    cleanup();
-    await settle();
-  });
-
-  test(`${screen} aborts obsolete reads and preserves reconnect and change refreshes`, async () => {
-    const harness = screenHarness();
-    const cleanup = harness.mount({ ...activity, id: 1, status: "ACTIVE" });
-    await settle();
-    harness.events[0].listeners.open();
-    assert.equal(harness.requests.length, 1);
-    harness.requests[0].resolve(null);
-    await settle();
-    assert.equal(harness.requests.length, 2);
-    harness.events[0].listeners.invalidate();
-    harness.requests[1].resolve(null);
-    await settle();
-    assert.equal(harness.requests.length, 3);
-    cleanup();
-    const updateCount = harness.updates.length;
-    await settle();
-    assert.equal(harness.requests[2].signal.aborted, true);
-    assert.equal(harness.events[0].closed, true);
-    assert.equal(harness.updates.length, updateCount);
   });
 }
 

@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ApiError, apiBase, getActiveActivityCode, loadDashboardReport, type DashboardReport, type RuntimeActivity } from "../../api";
+import { useState } from "react";
+import { loadDashboardReport, type DashboardReport, type RuntimeActivity } from "../../api";
 import { FestivalDecor } from "../shared/components/FestivalDecor";
 import { isUnspecifiedCustomerTypeActivity } from "./dashboard-domain";
 import { MetricTable } from "./ReportMetricTable";
-import { createRefreshQueue } from "./refresh-queue";
+import { useManualScreenData } from "./useManualScreenData";
+import { ScreenRefreshControls } from "./ScreenRefreshControls";
 
 const reports = [
   "特渠专业客户 TOP5",
@@ -21,31 +22,12 @@ const reports = [
 
 export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) {
   const [report, setReport] = useState(reports[2]);
-  const [data, setData] = useState<DashboardReport | null>(null);
-  const [error, setError] = useState("");
-  const activityReady = activity !== null;
-  const historical = activity?.status === "FINISHED" || activity?.status === "ARCHIVED";
   const unspecifiedCustomerType = isUnspecifiedCustomerTypeActivity(activity);
-  useEffect(() => {
-    if (!activityReady) return;
-    let active = true;
-    if (unspecifiedCustomerType) {
-      return () => { active = false; };
-    }
-    const controller = new AbortController();
-    const queue = createRefreshQueue(async () => {
-      try { const next = await loadDashboardReport(report, controller.signal); if (active) { setData(next); setError(""); } }
-      catch (reason) { if (active) setError(reason instanceof ApiError ? reason.message : "战报数据加载失败"); }
-    });
-    const refresh = queue.refresh;
-    void refresh();
-    if (historical) return () => { active = false; queue.dispose(); controller.abort(); };
-    const timer = window.setInterval(refresh, 15000);
-    const events = new EventSource(`${apiBase()}/screen/activities/${encodeURIComponent(getActiveActivityCode())}/events`);
-    events.addEventListener("invalidate", () => void refresh());
-    events.addEventListener("open", () => void refresh());
-    return () => { active = false; queue.dispose(); controller.abort(); window.clearInterval(timer); events.close(); };
-  }, [activity?.id, activityReady, report, historical, unspecifiedCustomerType]);
+  const { data, error, refreshing, refreshedAt, refresh } = useManualScreenData<DashboardReport, string>(
+    activity?.id ?? null, loadDashboardReport, "总战绩", "战报数据加载失败", !unspecifiedCustomerType,
+  );
+  const status = data?.dashboard.status ?? activity?.status;
+  const historical = status === "FINISHED" || status === "ARCHIVED";
   const isTop = report.includes("TOP5");
   const isTotal = report === "总战绩";
   const isDual = report === reports[8];
@@ -74,13 +56,14 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
       <header className="report-header">
         <span className="report-heading-placeholder" aria-hidden="true">调味品事业部新品发布及旺季动员会</span>
         <h1><span className="report-heading-placeholder" aria-hidden="true">月满家圆 · 味启新程</span>{historical && <small> · 历史回看</small>}</h1>
-        <label>当前看板：
+        <div className="report-tools"><label>当前看板：
           <select value={report} disabled={unspecifiedCustomerType} onChange={(e) => setReport(e.target.value)}>
             {reports.map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>
+        <ScreenRefreshControls refreshing={refreshing} refreshedAt={refreshedAt} historical={historical} disabled={!activity || unspecifiedCustomerType} onRefresh={() => void refresh(report)} /></div>
       </header>
-      {error && !unspecifiedCustomerType && <div className="warning-box"><b>{historical ? "历史战报加载异常" : "实时数据连接异常"}</b><span>{error}</span></div>}
+      {error && !unspecifiedCustomerType && <div className="warning-box" role="alert"><b>战报刷新失败</b><span>{error}。{data ? "当前显示上次成功加载的数据，请点击手动刷新重试。" : "请点击手动刷新重试。"}</span></div>}
       {unspecifiedCustomerType ? <div className="screen-data-unavailable" role="status"><strong>当前活动未区分客户类型</strong><span>白名单客户类型全部为空，暂不展示专题战报数据。</span></div> : <div className={`report-content ${isDual ? "dual" : ""}`}>
         {isTotal ? (
           <div className="total-performance"><span>总战绩</span><strong>{totalAmount >= 100000000 ? (totalAmount / 100000000).toFixed(2) : totalAmount.toLocaleString()}<small>{totalAmount >= 100000000 ? "亿" : "元"}</small></strong></div>
