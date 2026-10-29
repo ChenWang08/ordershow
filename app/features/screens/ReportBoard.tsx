@@ -23,26 +23,29 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
   const [report, setReport] = useState(reports[2]);
   const [data, setData] = useState<DashboardReport | null>(null);
   const [error, setError] = useState("");
+  const activityReady = activity !== null;
   const historical = activity?.status === "FINISHED" || activity?.status === "ARCHIVED";
   const unspecifiedCustomerType = isUnspecifiedCustomerTypeActivity(activity);
   useEffect(() => {
+    if (!activityReady) return;
     let active = true;
     if (unspecifiedCustomerType) {
       return () => { active = false; };
     }
+    const controller = new AbortController();
     const queue = createRefreshQueue(async () => {
-      try { const next = await loadDashboardReport(report); if (active) { setData(next); setError(""); } }
+      try { const next = await loadDashboardReport(report, controller.signal); if (active) { setData(next); setError(""); } }
       catch (reason) { if (active) setError(reason instanceof ApiError ? reason.message : "战报数据加载失败"); }
     });
     const refresh = queue.refresh;
     void refresh();
-    if (historical) return () => { active = false; queue.dispose(); };
-    const timer = window.setInterval(refresh, 15000);
+    if (historical) return () => { active = false; queue.dispose(); controller.abort(); };
+    const timer = window.setInterval(queue.periodic, 15000);
     const events = new EventSource(`${apiBase()}/screen/activities/${encodeURIComponent(getActiveActivityCode())}/events`);
-    events.addEventListener("invalidate", () => void refresh());
+    events.addEventListener("invalidate", (event) => void queue.invalidate((event as MessageEvent | undefined)?.data));
     events.addEventListener("open", () => void refresh());
-    return () => { active = false; queue.dispose(); window.clearInterval(timer); events.close(); };
-  }, [activity?.id, report, historical, unspecifiedCustomerType]);
+    return () => { active = false; queue.dispose(); controller.abort(); window.clearInterval(timer); events.close(); };
+  }, [activity?.id, activityReady, report, historical, unspecifiedCustomerType]);
   const isTop = report.includes("TOP5");
   const isTotal = report === "总战绩";
   const isDual = report === reports[8];

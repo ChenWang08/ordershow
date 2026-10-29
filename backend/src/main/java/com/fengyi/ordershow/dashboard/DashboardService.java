@@ -76,6 +76,11 @@ public class DashboardService {
 
   private Dashboard liveRanking(ActivityService.ActivityView activity, String customerType, String regionCode,
                                 int minimumTopN, RankingMetric metric) {
+    return liveRanking(activity, customerType, regionCode, minimumTopN, metric, null);
+  }
+
+  private Dashboard liveRanking(ActivityService.ActivityView activity, String customerType, String regionCode,
+                                int minimumTopN, RankingMetric metric, List<ProductLineTotal> reportLines) {
     Map<String, Object> totals = new LinkedHashMap<>(jdbc.queryForMap("""
         SELECT COUNT(*) order_count, COALESCE(SUM(total_quantity), 0) total_quantity,
           COALESCE(SUM(total_amount), 0) total_amount,
@@ -84,15 +89,6 @@ public class DashboardService {
           AND (? IS NULL OR ? = '' OR customer_type = ?)
           AND (? IS NULL OR ? = '' OR region_code = ?)
         """, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode));
-    BigDecimal totalTons = jdbc.queryForObject("""
-        SELECT COALESCE(SUM(i.line_tons), 0)
-        FROM order_item i JOIN customer_order o ON o.id = i.order_id
-        WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
-          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
-          AND (? IS NULL OR ? = '' OR o.region_code = ?)
-        """, BigDecimal.class, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode);
-    totals.put("total_tons", totalTons);
-    totals.put("dealer_count", totals.get("order_count"));
     Long skuCount = jdbc.queryForObject("""
         SELECT COUNT(DISTINCT i.activity_product_id)
         FROM order_item i JOIN customer_order o ON o.id = i.order_id
@@ -100,65 +96,75 @@ public class DashboardService {
           AND (? IS NULL OR ? = '' OR o.customer_type = ?)
           AND (? IS NULL OR ? = '' OR o.region_code = ?)
         """, Long.class, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode);
+    RankingRows ranks = rankingRows(activity, customerType, regionCode, minimumTopN, metric);
+    totals.put("total_tons", ranks.totalTons());
+    totals.put("dealer_count", totals.get("order_count"));
     totals.put("sku_count", skuCount == null ? 0L : skuCount);
-    // A missing factor was historically saved as zero tons (V036). Keep real
-    // calculated zero values, but do not turn an unknown weight into a tons rank.
-    List<RankRow> companies = metric == RankingMetric.TONS ? jdbc.query("""
-        SELECT o.id, o.dealer_full_name_snapshot name, o.branch_name_snapshot branch, o.total_amount amount,
-          o.total_quantity quantity, item_tons.tons
-        FROM customer_order o
-        JOIN (SELECT order_id, SUM(CASE WHEN ton_case_factor IS NOT NULL OR line_tons > 0 THEN line_tons END) tons
-              FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
-        WHERE o.activity_id = ? AND o.status = 'SUBMITTED' AND item_tons.tons IS NOT NULL
-          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
-          AND (? IS NULL OR ? = '' OR o.region_code = ?)
-        ORDER BY item_tons.tons DESC, o.total_amount DESC, o.last_submitted_at, o.id LIMIT ?
-        """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), rs.getString("branch"),
-        rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
-        customerType, customerType, customerType, regionCode, regionCode, regionCode, Math.max(activity.companyRankingTopN(), minimumTopN))
-        : jdbc.query("""
-        SELECT o.id, o.dealer_full_name_snapshot name, o.branch_name_snapshot branch, o.total_amount amount,
-          o.total_quantity quantity, item_tons.tons
-        FROM customer_order o
-        LEFT JOIN (SELECT order_id, COALESCE(SUM(line_tons), 0) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
-        WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
-          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
-          AND (? IS NULL OR ? = '' OR o.region_code = ?)
-        ORDER BY o.total_amount DESC, o.last_submitted_at, o.id LIMIT ?
-        """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), rs.getString("branch"),
-        rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
-        customerType, customerType, customerType, regionCode, regionCode, regionCode, Math.max(activity.companyRankingTopN(), minimumTopN));
-    List<RankRow> branches = metric == RankingMetric.TONS ? jdbc.query("""
-        SELECT o.branch_name_snapshot name, SUM(o.total_amount) amount, SUM(o.total_quantity) quantity,
-          SUM(item_tons.tons) tons
-        FROM customer_order o
-        JOIN (SELECT order_id, SUM(CASE WHEN ton_case_factor IS NOT NULL OR line_tons > 0 THEN line_tons END) tons
-              FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
-        WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
-          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
-          AND (? IS NULL OR ? = '' OR o.region_code = ?)
-        GROUP BY o.branch_name_snapshot
-        HAVING SUM(item_tons.tons) IS NOT NULL
-        ORDER BY tons DESC, amount DESC, name LIMIT ?
-        """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), null,
-        rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
-        customerType, customerType, customerType, regionCode, regionCode, regionCode, Math.max(activity.branchRankingTopN(), minimumTopN))
-        : jdbc.query("""
-        SELECT o.branch_name_snapshot name, SUM(o.total_amount) amount, SUM(o.total_quantity) quantity,
-          SUM(item_tons.tons) tons
-        FROM customer_order o
-        LEFT JOIN (SELECT order_id, COALESCE(SUM(line_tons), 0) tons FROM order_item GROUP BY order_id) item_tons ON item_tons.order_id = o.id
-        WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
-          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
-          AND (? IS NULL OR ? = '' OR o.region_code = ?)
-        GROUP BY o.branch_name_snapshot ORDER BY amount DESC, name LIMIT ?
-        """, (rs, rowNum) -> new RankRow(rowNum + 1, rs.getString("name"), null,
-        rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons")), activity.id(),
-        customerType, customerType, customerType, regionCode, regionCode, regionCode, Math.max(activity.branchRankingTopN(), minimumTopN));
-    return new Dashboard(activity.id(), activity.name(), activity.status(), totals, companies, branches,
-        productLines(activity.id(), customerType, regionCode), latestOrders(activity.id(), customerType, regionCode),
+    return new Dashboard(activity.id(), activity.name(), activity.status(), totals, ranks.companies(), ranks.branches(),
+        reportLines == null ? productLines(activity.id(), customerType, regionCode) : reportLines,
+        latestOrders(activity.id(), customerType, regionCode),
         dashboardVersion(activity.id()), Instant.now());
   }
+
+  private RankingRows rankingRows(ActivityService.ActivityView activity, String customerType, String regionCode,
+                                  int minimumTopN, RankingMetric metric) {
+    boolean tons = metric == RankingMetric.TONS;
+    // A grouped CTE is materialized once for both rankings, after selecting this activity's orders.
+    // Preserve V036's distinction between missing weights and a genuinely calculated zero weight.
+    String weight = tons
+        ? "SUM(CASE WHEN i.ton_case_factor IS NOT NULL OR i.line_tons > 0 THEN i.line_tons END)"
+        : "COALESCE(SUM(i.line_tons), 0)";
+    String join = tons ? "JOIN" : "LEFT JOIN";
+    String companyOrder = tons ? "t.tons DESC, o.total_amount DESC, o.last_submitted_at, o.id"
+        : "o.total_amount DESC, o.last_submitted_at, o.id";
+    String branchOrder = tons ? "tons DESC, amount DESC, name" : "amount DESC, name";
+    String sql = """
+        WITH scoped_orders AS (
+          SELECT id, dealer_full_name_snapshot, branch_name_snapshot, total_amount, total_quantity, last_submitted_at
+          FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED'
+            AND (? IS NULL OR ? = '' OR customer_type = ?)
+            AND (? IS NULL OR ? = '' OR region_code = ?)
+        ), item_tons AS (
+          SELECT i.order_id, %s tons, SUM(i.line_tons) all_tons
+          FROM order_item i JOIN scoped_orders o ON o.id = i.order_id GROUP BY i.order_id
+        ), company_ranks AS (
+          SELECT ROW_NUMBER() OVER (ORDER BY %s) rank_no,
+            o.dealer_full_name_snapshot name, o.branch_name_snapshot branch,
+            o.total_amount amount, o.total_quantity quantity, t.tons
+          FROM scoped_orders o %s item_tons t ON t.order_id = o.id %s
+        ), branch_totals AS (
+          SELECT o.branch_name_snapshot name, SUM(o.total_amount) amount, SUM(o.total_quantity) quantity, SUM(t.tons) tons
+          FROM scoped_orders o %s item_tons t ON t.order_id = o.id
+          GROUP BY o.branch_name_snapshot %s
+        ), branch_ranks AS (
+          SELECT ROW_NUMBER() OVER (ORDER BY %s) rank_no, name, amount, quantity, tons FROM branch_totals
+        )
+        SELECT 0 section, rank_no, name, branch, amount, quantity, tons FROM company_ranks WHERE rank_no <= ?
+        UNION ALL
+        SELECT 1 section, rank_no, name, NULL branch, amount, quantity, tons FROM branch_ranks WHERE rank_no <= ?
+        UNION ALL
+        SELECT 2 section, 0 rank_no, NULL name, NULL branch, NULL amount, NULL quantity, COALESCE(SUM(all_tons), 0) tons
+        FROM item_tons
+        ORDER BY section, rank_no
+        """.formatted(weight, companyOrder, join, tons ? "WHERE t.tons IS NOT NULL" : "", join,
+            tons ? "HAVING SUM(t.tons) IS NOT NULL" : "", branchOrder);
+    List<RankRow> companies = new ArrayList<>();
+    List<RankRow> branches = new ArrayList<>();
+    BigDecimal[] totalTons = {BigDecimal.ZERO};
+    jdbc.query(sql, rs -> {
+      if (rs.getInt("section") == 2) {
+        totalTons[0] = rs.getBigDecimal("tons");
+        return;
+      }
+      var row = new RankRow(rs.getInt("rank_no"), rs.getString("name"), rs.getString("branch"),
+          rs.getBigDecimal("amount"), rs.getLong("quantity"), rs.getBigDecimal("tons"));
+      (rs.getInt("section") == 0 ? companies : branches).add(row);
+    }, activity.id(), customerType, customerType, customerType, regionCode, regionCode, regionCode,
+        Math.max(activity.companyRankingTopN(), minimumTopN), Math.max(activity.branchRankingTopN(), minimumTopN));
+    return new RankingRows(companies, branches, totalTons[0]);
+  }
+
+  private record RankingRows(List<RankRow> companies, List<RankRow> branches, BigDecimal totalTons) {}
 
   public Report report(String activityCode, String reportCode) {
     var activity = activities.byCode(activityCode);
@@ -172,7 +178,8 @@ public class DashboardService {
   }
 
   private Report liveReport(ActivityService.ActivityView activity, String reportCode) {
-    Dashboard dashboard = liveRanking(activity, null, null, 15);
+    ReportProductLines lines = reportProductLines(activity.id());
+    Dashboard dashboard = liveRanking(activity, null, null, 15, RankingMetric.AMOUNT, lines.all());
     List<CustomerTypeTotal> types = jdbc.query("""
         SELECT customer_type, COUNT(*) order_count, SUM(total_amount) amount, SUM(total_quantity) quantity
         FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED' GROUP BY customer_type ORDER BY customer_type
@@ -200,21 +207,56 @@ public class DashboardService {
         WHERE o.activity_id = ? AND o.status = 'SUBMITTED' AND i.is_gift_box = TRUE
         GROUP BY o.customer_type ORDER BY o.customer_type
         """, (rs, rowNum) -> new CustomerTypeTotal(rs.getString(1), rs.getLong(2), rs.getBigDecimal(3), rs.getLong(4)), dashboard.activityId());
-    List<RegionProductLineTotal> regionProductLines = jdbc.query("""
-        SELECT COALESCE(o.region_code, 'UNASSIGNED'), COALESCE(i.product_line, '其他'),
-          SUM(i.line_amount), SUM(i.quantity)
-        FROM order_item i JOIN customer_order o ON o.id = i.order_id
-        WHERE o.activity_id = ? AND o.status = 'SUBMITTED' AND o.customer_type = 'GENERAL'
-        GROUP BY o.region_code, i.product_line
-        ORDER BY o.region_code, SUM(i.line_amount) DESC, i.product_line
-        """, (rs, rowNum) -> new RegionProductLineTotal(rs.getString(1), rs.getString(2),
-        rs.getBigDecimal(3), rs.getLong(4)), dashboard.activityId());
-    List<ProductLineTotal> generalProductLines = productLines(dashboard.activityId(), "GENERAL", null);
-    return new Report(reportCode, dashboard, types, regions, generalProductLines,
-        productLines(dashboard.activityId(), "SPECIAL", null), giftTypes, topCustomers(dashboard.activityId(), "GENERAL"),
-        topCustomers(dashboard.activityId(), "SPECIAL"), trend, regionProductLines,
-        generalRegions(activity, regions, regionProductLines, generalProductLines));
+    return new Report(reportCode, dashboard, types, regions, lines.general(), lines.special(), giftTypes,
+        topCustomers(dashboard.activityId(), "GENERAL"), topCustomers(dashboard.activityId(), "SPECIAL"),
+        trend, lines.regions(), generalRegions(activity, regions, lines.regions(), lines.general()));
   }
+
+  private ReportProductLines reportProductLines(long activityId) {
+    List<ProductLineTotal> all = new ArrayList<>();
+    List<ProductLineTotal> general = new ArrayList<>();
+    List<ProductLineTotal> special = new ArrayList<>();
+    List<RegionProductLineTotal> regions = new ArrayList<>();
+    // Collapse detail rows once; subsequent channel/region groupings only read this small grouped result.
+    // Group on the original nullable keys before applying display labels, as the individual queries did.
+    jdbc.query("""
+        WITH product_totals AS (
+          SELECT o.customer_type, o.region_code, i.product_line, SUM(i.line_amount) amount, SUM(i.quantity) quantity
+          FROM order_item i JOIN customer_order o ON o.id = i.order_id
+          WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
+          GROUP BY o.customer_type, o.region_code, i.product_line
+        )
+        SELECT * FROM (
+          SELECT 0 section, NULL region_code, NULL region_sort, product_line product_sort,
+            COALESCE(product_line, '其他') product_line, SUM(amount) amount, SUM(quantity) quantity
+          FROM product_totals GROUP BY product_line
+          UNION ALL
+          SELECT 1, NULL, NULL, product_line, COALESCE(product_line, '其他'), SUM(amount), SUM(quantity)
+          FROM product_totals WHERE customer_type = 'GENERAL' GROUP BY product_line
+          UNION ALL
+          SELECT 2, NULL, NULL, product_line, COALESCE(product_line, '其他'), SUM(amount), SUM(quantity)
+          FROM product_totals WHERE customer_type = 'SPECIAL' GROUP BY product_line
+          UNION ALL
+          SELECT 3, COALESCE(region_code, 'UNASSIGNED'), region_code, product_line,
+            COALESCE(product_line, '其他'), SUM(amount), SUM(quantity)
+          FROM product_totals WHERE customer_type = 'GENERAL' GROUP BY region_code, product_line
+        ) report_lines
+        ORDER BY section, region_sort, amount DESC, CASE WHEN section = 3 THEN product_sort END
+        """, rs -> {
+      int section = rs.getInt("section");
+      if (section == 3) {
+        regions.add(new RegionProductLineTotal(rs.getString("region_code"), rs.getString("product_line"),
+            rs.getBigDecimal("amount"), rs.getLong("quantity")));
+      } else {
+        List<ProductLineTotal> target = section == 0 ? all : section == 1 ? general : special;
+        target.add(new ProductLineTotal(rs.getString("product_line"), rs.getBigDecimal("amount"), rs.getLong("quantity")));
+      }
+    }, activityId);
+    return new ReportProductLines(all, general, special, regions);
+  }
+
+  private record ReportProductLines(List<ProductLineTotal> all, List<ProductLineTotal> general,
+                                    List<ProductLineTotal> special, List<RegionProductLineTotal> regions) {}
 
   private List<GeneralRegion> generalRegions(ActivityService.ActivityView activity, List<RegionTotal> totals,
                                               List<RegionProductLineTotal> regionLines,

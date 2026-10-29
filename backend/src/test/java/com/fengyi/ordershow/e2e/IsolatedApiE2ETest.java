@@ -11,6 +11,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.net.CookieManager;
 import java.net.CookiePolicy;
 import java.net.URI;
@@ -420,9 +422,49 @@ class IsolatedApiE2ETest {
     ObjectNode resubmitRequestBody = JSON.createObjectNode().put("expectedVersion", 2).put("requestType", "MODIFY");
     resubmitRequestBody.putArray("items").addObject().put("productId", productId).put("quantity", 1);
     resubmitRequestBody.withArray("items").addObject().put("productId", productWithoutTonsId).put("quantity", 1);
-    HttpResponse<String> resubmitRequest = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
-        resubmitRequestBody, h5Csrf, null, UUID.randomUUID().toString());
-    assertEquals(200, resubmitRequest.statusCode(), resubmitRequest.body());
+    String screenPath = "/screen/activities/" + activityCode;
+    long previousEvent = Long.parseLong(data(withdrawnDashboard).path("version").asText());
+    var eventRequest = HttpRequest.newBuilder(URI.create(baseUrl + screenPath + "/events"))
+        .timeout(Duration.ofSeconds(20)).GET().build();
+    var eventStream = client().send(eventRequest, HttpResponse.BodyHandlers.ofInputStream());
+    assertEquals(200, eventStream.statusCode());
+    var notification = new CompletableFuture<Void>();
+    Thread eventReader = Thread.ofVirtual().start(() -> {
+      try (var reader = new BufferedReader(new InputStreamReader(eventStream.body(), StandardCharsets.UTF_8))) {
+        String event = "", line;
+        while ((line = reader.readLine()) != null) {
+          if (line.startsWith("event:")) event = line.substring(6).trim();
+          else if (line.startsWith("data:") && event.equals("invalidate")) {
+            JsonNode change = JSON.readTree(line.substring(5).trim());
+            if (change.path("version").asLong() > previousEvent) { notification.complete(null); return; }
+          }
+        }
+        notification.completeExceptionally(new IllegalStateException("SSE ended before the submitted order notification"));
+      } catch (Exception exception) { notification.completeExceptionally(exception); }
+    });
+    try {
+      var parallelScreens = List.of("/dashboard", "/ranking?metric=AMOUNT", "/ranking?metric=TONS", "/reports/ORDER_DASHBOARD")
+          .stream().map(path -> CompletableFuture.supplyAsync(() -> {
+            try { return send(client(), "GET", screenPath + path, null, null, null); }
+            catch (Exception exception) { throw new java.util.concurrent.CompletionException(exception); }
+          })).toList();
+      HttpResponse<String> resubmitRequest = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
+          resubmitRequestBody, h5Csrf, null, UUID.randomUUID().toString());
+      assertEquals(200, resubmitRequest.statusCode(), resubmitRequest.body());
+      for (var future : parallelScreens) {
+        var response = future.join();
+        assertEquals(200, response.statusCode(), response.body());
+      }
+      notification.get(10, java.util.concurrent.TimeUnit.SECONDS);
+      var refreshed = send(client(), "GET", screenPath + "/dashboard", null, null, null);
+      assertEquals(200, refreshed.statusCode(), refreshed.body());
+      assertEquals(1, data(refreshed).path("dashboard").path("totals").path("order_count").asInt());
+      assertEquals("0.100000", data(refreshed).path("dashboard").path("totals").path("total_tons")
+          .decimalValue().setScale(6).toPlainString());
+    } finally {
+      eventStream.body().close();
+      eventReader.interrupt();
+    }
     JsonNode resubmitted = data(send(h5, "GET", "/h5/activities/" + activityCode + "/order", null, null, null));
     assertEquals("SUBMITTED", resubmitted.path("status").asText());
     assertEquals(3, resubmitted.path("currentVersion").asInt());

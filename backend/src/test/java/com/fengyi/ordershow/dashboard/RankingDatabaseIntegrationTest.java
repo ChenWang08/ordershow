@@ -27,7 +27,8 @@ class RankingDatabaseIntegrationTest {
   private static final String OPTIONS = "?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC";
   private static final String DATABASE = "order_show_ranking_test";
   // Match Spring's ISO timestamp serialization; numeric nanoseconds lose precision in MySQL JSON.
-  private static final ObjectMapper JSON = Jackson2ObjectMapperBuilder.json().build();
+  private static final ObjectMapper JSON = Jackson2ObjectMapperBuilder.json()
+      .featuresToDisable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS).build();
   private static JdbcTemplate jdbc;
   private ActivityService activities;
   private DashboardService service;
@@ -46,14 +47,17 @@ class RankingDatabaseIntegrationTest {
         CREATE TABLE IF NOT EXISTS customer_order (
           id BIGINT PRIMARY KEY, activity_id BIGINT, status VARCHAR(20), customer_type VARCHAR(16), region_code VARCHAR(64),
           dealer_full_name_snapshot VARCHAR(255), branch_name_snapshot VARCHAR(200), order_no VARCHAR(64),
-          total_amount DECIMAL(18,2), total_quantity BIGINT, last_submitted_at DATETIME(3))
+          total_amount DECIMAL(18,2), total_quantity BIGINT, last_submitted_at DATETIME(3), total_tons DECIMAL(18,6),
+          KEY idx_order_scope(activity_id,status,last_submitted_at))
         """);
     jdbc.execute("""
         CREATE TABLE IF NOT EXISTS order_item (id BIGINT AUTO_INCREMENT PRIMARY KEY, order_id BIGINT,
           activity_product_id BIGINT, quantity BIGINT, line_amount DECIMAL(18,2), product_line VARCHAR(200),
-          ton_case_factor DECIMAL(18,8), line_tons DECIMAL(18,6))
+          ton_case_factor DECIMAL(18,8), line_tons DECIMAL(18,6), is_gift_box BOOLEAN DEFAULT FALSE,
+          KEY idx_item_order(order_id), UNIQUE KEY idx_item_product(order_id,activity_product_id))
         """);
     jdbc.execute("CREATE TABLE IF NOT EXISTS domain_event_outbox (id BIGINT PRIMARY KEY, activity_id BIGINT)");
+    jdbc.execute("CREATE TABLE IF NOT EXISTS activity_region (id BIGINT PRIMARY KEY, activity_id BIGINT, region_code VARCHAR(64), region_name VARCHAR(100))");
     jdbc.execute("""
         CREATE TABLE IF NOT EXISTS activity_dashboard_snapshot (activity_id BIGINT, snapshot_key VARCHAR(200),
           payload_json JSON, generated_at DATETIME(3) DEFAULT CURRENT_TIMESTAMP(3), PRIMARY KEY(activity_id,snapshot_key))
@@ -66,7 +70,7 @@ class RankingDatabaseIntegrationTest {
 
   @BeforeEach
   void resetFixtures() throws Exception {
-    for (String table : List.of("order_item", "customer_order", "domain_event_outbox", "activity_dashboard_snapshot")) {
+    for (String table : List.of("order_item", "customer_order", "domain_event_outbox", "activity_dashboard_snapshot", "activity_region")) {
       jdbc.execute("DELETE FROM " + table);
     }
     activities = mock(ActivityService.class);
@@ -77,9 +81,11 @@ class RankingDatabaseIntegrationTest {
   private void useActivity(String status, int companies, int branches) throws Exception {
     var activity = JSON.readValue("""
         {"id":1,"code":"ranking-fixture","name":"排行测试","status":"%s",
-         "companyRankingTopN":%d,"branchRankingTopN":%d,"regions":[]}
+         "companyRankingTopN":%d,"branchRankingTopN":%d,"regions":[],"timezone":"Asia/Shanghai",
+         "startsAt":"2026-10-27T00:00:00Z","endsAt":"2030-10-30T00:00:00Z"}
         """.formatted(status, companies, branches), ActivityService.ActivityView.class);
     when(activities.byCode("ranking-fixture")).thenReturn(activity);
+    when(activities.byId(1)).thenReturn(activity);
   }
 
   private void seed(int count, String type, String region, long base) {
@@ -93,7 +99,9 @@ class RankingDatabaseIntegrationTest {
     }
     if (orders.isEmpty()) return;
     jdbc.batchUpdate("""
-        INSERT INTO customer_order VALUES (?,1,'SUBMITTED',?,?,?,?,?, ?,10,'2026-10-27 00:00:00.000')
+        INSERT INTO customer_order(id,activity_id,status,customer_type,region_code,dealer_full_name_snapshot,
+          branch_name_snapshot,order_no,total_amount,total_quantity,last_submitted_at)
+        VALUES (?,1,'SUBMITTED',?,?,?,?,?, ?,10,'2026-10-27 00:00:00.000')
         """, orders);
     jdbc.batchUpdate("""
         INSERT INTO order_item(order_id,activity_product_id,quantity,line_amount,product_line,ton_case_factor,line_tons)

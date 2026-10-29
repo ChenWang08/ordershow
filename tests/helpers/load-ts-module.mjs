@@ -17,7 +17,7 @@ export function loadModule(path, mocks = {}, globals = {}) {
     fileName: filename,
   });
   runInNewContext(outputText, {
-    module: loadedModule, exports: loadedModule.exports, ...globals,
+    module: loadedModule, exports: loadedModule.exports, AbortController, setTimeout, clearTimeout, ...globals,
     require(id) {
       if (Object.hasOwn(mocks, id)) return mocks[id];
       if (id.startsWith(".")) {

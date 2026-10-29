@@ -193,6 +193,7 @@ for (const selected of ["综合客户各大区金额及合计", "综合客户大
 }
 
 function refreshHarness(status) {
+  let now = 0;
   let effect;
   let calls = 0;
   const timers = [];
@@ -201,6 +202,7 @@ function refreshHarness(status) {
     react: { useState: (initial) => [initial, () => {}], useRef: (initial) => ({ current: initial }), useCallback: (callback) => callback, useEffect: (callback) => { effect = callback; } },
     "../../api": { ApiError: class ApiError extends Error {}, loadOrderDashboard: async () => { calls++; return null; }, apiBase: () => "http://test/api", getActiveActivityCode: () => "fixture" },
   }, {
+    Date: class extends Date { static now() { return now; } },
     window: { setInterval: (callback, delay) => { timers.push({ callback, delay, cleared: false }); return 0; }, clearInterval: (id) => { timers[id].cleared = true; } },
     EventSource: class {
       constructor(url) { this.url = url; this.listeners = {}; this.closed = false; events.push(this); }
@@ -209,7 +211,7 @@ function refreshHarness(status) {
     },
   });
   function useMount() { const model = useOrderDashboard({ status }); return { model, cleanup: effect() }; }
-  return { timers, events, get calls() { return calls; }, mount: useMount };
+  return { timers, events, advance: ms => { now += ms; }, get calls() { return calls; }, mount: useMount };
 }
 
 test("live dashboard refreshes initially, by timer and by SSE, and cleans up", async () => {
@@ -218,6 +220,7 @@ test("live dashboard refreshes initially, by timer and by SSE, and cleans up", a
   await settle();
   assert.equal(harness.calls, 1);
   assert.equal(harness.timers[0].delay, 15000);
+  harness.advance(15000);
   await harness.timers[0].callback();
   harness.events[0].listeners.invalidate(); await settle();
   assert.equal(harness.calls, 3);
@@ -253,4 +256,96 @@ test("dashboard ignores a response after effect cleanup", async () => {
   const cleanup=effect();await settle();
   cleanup();const count=updates.length;release({stale:true});await settle();
   assert.equal(updates.length,count);
+});
+
+for (const screen of ["dashboard", "ranking", "report"]) {
+  function screenHarness() {
+    let effect;
+    const requests = [];
+    const timers = [];
+    const events = [];
+    const updates = [];
+    const request = (...args) => new Promise((resolve, reject) => {
+      const signal = args.at(-1);
+      requests.push({ signal, resolve });
+      signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+    });
+    const mocks = {
+      react: { ...React, useState: initial => [initial, value => updates.push(value)],
+        useRef: initial => ({ current: initial }), useCallback: callback => callback,
+        useEffect: callback => { effect = callback; } },
+      "../../api": { ApiError: class extends Error {}, apiBase: () => "http://test/api", getActiveActivityCode: () => "fixture",
+        loadOrderDashboard: request, loadDashboard: request, loadDashboardReport: request },
+    };
+    const globals = {
+      window: { setInterval: (callback, delay) => { timers.push({ callback, delay }); return timers.length; }, clearInterval: () => {} },
+      EventSource: class {
+        constructor() { this.listeners = {}; events.push(this); }
+        addEventListener(name, listener) { this.listeners[name] = listener; }
+        close() { this.closed = true; }
+      },
+    };
+    const file = screen === "dashboard" ? "useOrderDashboard.ts" : screen === "ranking" ? "RankingBoard.tsx" : "ReportBoard.tsx";
+    const screenModule = loadModule(`app/features/screens/${file}`, mocks, globals);
+    function mount(value) {
+      if (screen === "dashboard") screenModule.useOrderDashboard(value);
+      else renderToStaticMarkup(React.createElement(screen === "ranking" ? screenModule.RankingBoard : screenModule.ReportBoard, { activity: value }));
+      return effect();
+    }
+    return { requests, timers, events, updates, mount };
+  }
+
+  test(`${screen} waits for activity metadata before requesting data or subscribing`, async () => {
+    const harness = screenHarness();
+    assert.equal(harness.mount(null), undefined);
+    await settle();
+    assert.equal(harness.requests.length, 0);
+    assert.equal(harness.timers.length, 0);
+    assert.equal(harness.events.length, 0);
+    const cleanup = harness.mount({ ...activity, id: 1, status: "ACTIVE" });
+    await settle();
+    assert.equal(harness.requests.length, 1);
+    assert.equal(harness.timers[0].delay, 15000);
+    assert.equal(harness.events.length, 1);
+    cleanup();
+    await settle();
+  });
+
+  test(`${screen} aborts obsolete reads and preserves reconnect and change refreshes`, async () => {
+    const harness = screenHarness();
+    const cleanup = harness.mount({ ...activity, id: 1, status: "ACTIVE" });
+    await settle();
+    harness.events[0].listeners.open();
+    assert.equal(harness.requests.length, 1);
+    harness.requests[0].resolve(null);
+    await settle();
+    assert.equal(harness.requests.length, 2);
+    harness.events[0].listeners.invalidate();
+    harness.requests[1].resolve(null);
+    await settle();
+    assert.equal(harness.requests.length, 3);
+    cleanup();
+    const updateCount = harness.updates.length;
+    await settle();
+    assert.equal(harness.requests[2].signal.aborted, true);
+    assert.equal(harness.events[0].closed, true);
+    assert.equal(harness.updates.length, updateCount);
+  });
+}
+
+test("all public statistics requests forward cancellation without changing URLs or response data", async () => {
+  const calls = [];
+  const data = { fixture: true };
+  const api = loadModule("app/services/api/dashboard.ts", {
+    "./client": { api: async (path, init) => { calls.push({ path, init }); return { data }; } },
+    "./context": { activeActivityPath: () => "fixture" },
+  }, { URLSearchParams });
+  const controller = new AbortController();
+  assert.equal(await api.loadOrderDashboard(controller.signal), data);
+  assert.equal(await api.loadDashboard({ customerType: "GENERAL", regionCode: "NORTH", metric: "TONS" }, controller.signal), data);
+  assert.equal(await api.loadDashboardReport("总战绩", controller.signal), data);
+  assert.equal(calls[0].path, "/screen/activities/fixture/dashboard");
+  assert.equal(calls[1].path, "/screen/activities/fixture/ranking?customerType=GENERAL&regionCode=NORTH&metric=TONS");
+  assert.equal(calls[2].path, `/screen/activities/fixture/reports/${encodeURIComponent("总战绩")}`);
+  assert.ok(calls.every(call => call.init.signal === controller.signal));
 });

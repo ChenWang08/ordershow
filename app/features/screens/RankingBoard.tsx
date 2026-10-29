@@ -12,6 +12,7 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
   const [metric, setMetric] = useState<RankingMetric>("AMOUNT");
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [error, setError] = useState("");
+  const activityReady = activity !== null;
   const historical = activity?.status === "FINISHED" || activity?.status === "ARCHIVED";
   const unspecifiedCustomerType = isUnspecifiedCustomerTypeActivity(activity);
   const options = useMemo(() => [
@@ -25,23 +26,25 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
   ], [activity, unspecifiedCustomerType]);
   const effectiveChannel = options.some((option) => option.value === channel) ? channel : options[0]?.value ?? "ALL";
   useEffect(() => {
+    if (!activityReady) return;
     let active = true;
+    const controller = new AbortController();
     const queue = createRefreshQueue(async () => {
       const [customerType, regionCode] = effectiveChannel.split(":");
       try {
-        const data = await loadDashboard({ customerType, regionCode, metric });
+        const data = await loadDashboard({ customerType, regionCode, metric }, controller.signal);
         if (active) { setDashboard(data); setError(""); }
       } catch (reason) { if (active) setError(reason instanceof ApiError ? reason.message : "看板数据加载失败"); }
     });
     const refresh = queue.refresh;
     void refresh();
-    if (historical) return () => { active = false; queue.dispose(); };
-    const timer = window.setInterval(refresh, 15000);
+    if (historical) return () => { active = false; queue.dispose(); controller.abort(); };
+    const timer = window.setInterval(queue.periodic, 15000);
     const events = new EventSource(`${apiBase()}/screen/activities/${encodeURIComponent(getActiveActivityCode())}/events`);
-    events.addEventListener("invalidate", () => void refresh());
+    events.addEventListener("invalidate", (event) => void queue.invalidate((event as MessageEvent | undefined)?.data));
     events.addEventListener("open", () => void refresh());
-    return () => { active = false; queue.dispose(); window.clearInterval(timer); events.close(); };
-  }, [activity?.id, effectiveChannel, historical, metric, unspecifiedCustomerType]);
+    return () => { active = false; queue.dispose(); controller.abort(); window.clearInterval(timer); events.close(); };
+  }, [activity?.id, activityReady, effectiveChannel, historical, metric, unspecifiedCustomerType]);
   const ranking = dashboard?.companies ?? [];
   const branchRanking = dashboard?.branches ?? [];
   const chunkSize = Math.max(1, Math.ceil(ranking.length / 3));

@@ -22,6 +22,7 @@ public class RealtimeEventService {
   static final int MAX_BATCHES_PER_TICK = 8;
   private final Map<Long, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
   private final JdbcTemplate jdbc;
+  private final org.springframework.transaction.support.TransactionOperations publisherTransactions;
   private final Supplier<SseEmitter> emitterFactory;
   private org.springframework.data.redis.core.StringRedisTemplate redis;
   private com.fasterxml.jackson.databind.ObjectMapper json;
@@ -35,11 +36,30 @@ public class RealtimeEventService {
   }
 
   @org.springframework.beans.factory.annotation.Autowired
-  public RealtimeEventService(JdbcTemplate jdbc) { this(jdbc, () -> new SseEmitter(30L * 60 * 1000)); }
+  public RealtimeEventService(JdbcTemplate jdbc, org.springframework.transaction.PlatformTransactionManager manager) {
+    this(jdbc, () -> new SseEmitter(30L * 60 * 1000), publisherTransaction(manager));
+  }
+
+  // Unit tests may supply a transaction operation; production always uses the autowired manager.
+  RealtimeEventService(JdbcTemplate jdbc) { this(jdbc, () -> new SseEmitter(30L * 60 * 1000)); }
 
   RealtimeEventService(JdbcTemplate jdbc, Supplier<SseEmitter> emitterFactory) {
+    this(jdbc, emitterFactory, org.springframework.transaction.support.TransactionOperations.withoutTransaction());
+  }
+
+  RealtimeEventService(JdbcTemplate jdbc, Supplier<SseEmitter> emitterFactory,
+      org.springframework.transaction.support.TransactionOperations publisherTransactions) {
     this.jdbc = jdbc;
     this.emitterFactory = emitterFactory;
+    this.publisherTransactions = publisherTransactions;
+  }
+
+  static org.springframework.transaction.support.TransactionTemplate publisherTransaction(
+      org.springframework.transaction.PlatformTransactionManager manager) {
+    var transaction = new org.springframework.transaction.support.TransactionTemplate(manager);
+    // Avoid gap locks on newly inserted business events while claiming committed pending rows.
+    transaction.setIsolationLevel(org.springframework.transaction.TransactionDefinition.ISOLATION_READ_COMMITTED);
+    return transaction;
   }
 
   public SseEmitter subscribe(long activityId) {
@@ -78,7 +98,7 @@ public class RealtimeEventService {
   // Pub/sub is transient. Also refresh active connections periodically to recover missed messages.
   @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 15000)
   void refreshSubscribers() {
-    for (long id : emitters.keySet()) deliver(id, "invalidate", Map.of("activityId", id, "scope", "ACTIVITY"));
+    for (long id : emitters.keySet()) deliver(id, "invalidate", Map.of("activityId", id, "scope", "ACTIVITY", "reason", "RECOVERY"));
   }
 
   @jakarta.annotation.PreDestroy
@@ -111,12 +131,16 @@ public class RealtimeEventService {
 
   @org.springframework.scheduling.annotation.Scheduled(fixedDelay = 500)
   synchronized void publishOutbox() {
+    publisherTransactions.executeWithoutResult(status -> publishClaimedRows());
+  }
+
+  private void publishClaimedRows() {
     List<OutboxRow> rows = new ArrayList<>();
     long cursor = 0;
     for (int batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
       List<OutboxRow> page = jdbc.query("""
           SELECT id, activity_id, event_type, aggregate_type, aggregate_id, created_at FROM domain_event_outbox
-          WHERE status = 'PENDING' AND available_at <= UTC_TIMESTAMP(3) AND id > ? ORDER BY id LIMIT 1000
+          WHERE status = 'PENDING' AND available_at <= UTC_TIMESTAMP(3) AND id > ? ORDER BY id LIMIT 1000 FOR UPDATE SKIP LOCKED
           """, (rs, rowNum) -> new OutboxRow(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getString(5), UtcTime.read(rs, 6)), cursor);
       rows.addAll(page);
       if (page.size() < BATCH_SIZE) break;
@@ -135,7 +159,8 @@ public class RealtimeEventService {
           "scope", "ACTIVITY", "oldestEventAt", oldest.toString()));
     }
     // Acknowledge only the rows actually read and notified, never id <= cursor: lower IDs may commit late.
-    // Sends happen outside DB transactions. Failed acknowledgements remain retryable (duplicate invalidations are safe).
+    // Row locks span Redis publication and acknowledgement. Failures roll back, leaving every selected row retryable.
+    // A crash after Redis delivery can still duplicate a notification; readers must never deduplicate by MAX(id).
     for (int start = 0; start < rows.size(); start += BATCH_SIZE) {
       var batch = rows.subList(start, Math.min(start + BATCH_SIZE, rows.size()));
       String ids = batch.stream().map(row -> "?").collect(Collectors.joining(","));
