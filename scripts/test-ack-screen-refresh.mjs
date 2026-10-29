@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 
+// This checks backend event fanout; manual-refresh pages do not subscribe to these events.
 // Fixed disposable stack, populated by test-manual-additions.mjs --ack-smoke.
 assert.ok(process.argv.includes('--ack-smoke'), 'Requires the explicit ACK smoke switch');
 assert.equal(execFileSync('docker',['inspect','order-show-ack-smoke-backend-a-1','--format','{{index .Config.Labels "com.docker.compose.project"}}'],{encoding:'utf8'}).trim(),'order-show-ack-smoke');
@@ -92,7 +93,8 @@ try {
  for(const path of ['/admin','/screen/'+code+'/dashboard','/screen/'+code+'/ranking','/screen/'+code+'/report']) {
   const response=await fetch('http://127.0.0.1:18030'+path);assert.equal(response.status,200);await response.text();pages.push(path);
  }
- await mkdir('outputs/ack-screen-20261029.1',{recursive:true});
- await writeFile('outputs/ack-screen-20261029.1/screen-api-result.json',JSON.stringify({assertions,timing,pages,replicas:2,poolLimitPerReplica:10,periodicRecovery:true,normalPublicationDuplicates:0,finalOrderQuantity:order.totalQuantity},null,2));
+ const resultDir='outputs/ack-release-20261029.2';
+ await mkdir(resultDir,{recursive:true});
+ await writeFile(resultDir+'/events-api-result.json',JSON.stringify({assertions,timing,pages,replicas:2,poolLimitPerReplica:10,periodicRecovery:true,normalPublicationDuplicates:0,finalOrderQuantity:order.totalQuantity},null,2));
  console.log('PASS: '+assertions+' API checks, four screen APIs on both replicas, concurrent reads and writes, real Redis notifications, 15-second recovery, approval, withdrawal, historical views and reopen.');
 } finally {await Promise.all(streams.map(s=>s.close()));}
