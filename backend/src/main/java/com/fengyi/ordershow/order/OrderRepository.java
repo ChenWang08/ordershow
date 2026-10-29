@@ -351,6 +351,50 @@ public class OrderRepository {
     return withOrderDetails(rows.getFirst(), includeHistory);
   }
 
+  OrderView orderAfterSubmission(long orderId, List<CalculatedItem> items, boolean includeHistory) {
+    List<OrderView> rows = jdbc.query("""
+        SELECT o.*, c.phone_masked FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id WHERE o.id = ?
+        """, this::mapOrder, orderId);
+    if (rows.size() != 1) throw DomainException.notFound("ORDER_NOT_FOUND", "订单不存在");
+    OrderView base = rows.getFirst();
+    List<ItemView> itemViews = assembleSubmittedItems(orderId, items);
+    List<OrderVersionView> versions = includeHistory ? withVersionItems(jdbc.query("""
+        SELECT v.*, COALESCE(v.actor_identity_snapshot,u.display_name) submitted_by_admin_name FROM order_version v
+        LEFT JOIN admin_user u ON u.id = v.submitted_by_admin_id
+        WHERE v.order_id = ? ORDER BY v.version_no DESC
+        """, this::mapVersion, orderId)) : List.of();
+    List<OperationView> operations = includeHistory ? jdbc.query("""
+        SELECT o.operation_type, o.source, COALESCE(o.actor_identity_snapshot,u.display_name) admin_name, o.order_version_no, o.reason, o.occurred_at
+        FROM order_operation o LEFT JOIN admin_user u ON u.id = o.admin_user_id
+        WHERE o.order_id = ? ORDER BY o.occurred_at DESC, o.id DESC
+        """, this::mapOperation, orderId) : List.of();
+    return new OrderView(base.id(), base.activityId(), base.activityCustomerId(), base.orderNo(), base.status(),
+        base.createdSource(), base.lastModifiedSource(), base.lockVersion(), base.customerType(), base.regionCode(),
+        base.branchName(), base.dealerShortName(), base.dealerFullName(), base.phoneMasked(), base.currentVersion(),
+        base.totalQuantity(), base.totalTons(), base.totalAmount(), base.firstSubmittedAt(), base.lastSubmittedAt(),
+        base.lastModifiedAt(), base.withdrawnAt(), base.withdrawnReason(), base.voidedAt(), base.voidedReason(),
+        itemViews, versions, operations);
+  }
+
+  private List<ItemView> assembleSubmittedItems(long orderId, List<CalculatedItem> items) {
+    if (items == null || items.isEmpty()) return List.of();
+    Map<Integer, Long> lineToId = new HashMap<>();
+    jdbc.query("SELECT id, line_no FROM order_item WHERE order_id = ? ORDER BY line_no", rs -> {
+      lineToId.put(rs.getInt("line_no"), rs.getLong("id"));
+    }, orderId);
+    return items.stream().map(item -> {
+      long id = lineToId.getOrDefault(item.lineNo(), 0L);
+      var p = item.product();
+      var pricing = item.pricing();
+      return new ItemView(id, p.id(), item.lineNo(), p.materialCode(), p.materialName(),
+          p.productLine(), p.specification(), p.casePack(), item.quantity(),
+          pricing.casePriceSnapshot(), pricing.appliedTierMinQuantity(),
+          pricing.baseCasePrice(), pricing.baseQuantity(), pricing.tierCasePrice(),
+          pricing.tierMinQuantity(), pricing.tierQuantity(), pricing.pricingMode(),
+          pricing.lineAmount(), p.tonCaseFactor(), item.lineTons());
+    }).toList();
+  }
+
   private OrderView withOrderDetails(OrderView order, boolean includeHistory) {
     long orderId = order.id();
     List<ItemView> items = jdbc.query("SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no", this::mapItem, orderId);

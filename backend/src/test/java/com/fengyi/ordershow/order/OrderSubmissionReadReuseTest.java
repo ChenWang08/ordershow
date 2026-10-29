@@ -33,6 +33,7 @@ class OrderSubmissionReadReuseTest {
     when(repository.loadProducts(2, 3, "GENERAL", "B", Set.of(10L))).thenReturn(List.of(product));
     when(repository.updateH5Order(eq(2), anyLong(), any(), any(), eq(current), eq(1))).thenReturn(1);
     when(repository.order(7, false)).thenReturn(mock(OrderView.class));
+    when(repository.orderAfterSubmission(eq(7L), anyList(), eq(false))).thenReturn(mock(OrderView.class));
   }
 
   @Test void unchangedOrderStillChecksProductEligibilityAndKeepsNoOpSemantics() {
@@ -72,5 +73,11 @@ class OrderSubmissionReadReuseTest {
   @Test void removalIsAReductionButAddingANewProductIsNot() {
     assertThat(OrderRepository.hasReducedItems(Map.of(10L, 5L), Map.of(11L, 6L))).isTrue();
     assertThat(OrderRepository.hasReducedItems(Map.of(10L, 5L), Map.of(10L, 5L, 11L, 6L))).isFalse();
+  }
+
+  @Test void submitUsesOrderAfterSubmissionWithCalculatedItems() {
+    service.submit("A", customer, new SubmitRequest(1, List.of(new SubmitItem(10, 6))), "key", "trace", false);
+    verify(repository).orderAfterSubmission(eq(7L), argThat(items -> items.size() == 1 && items.getFirst().quantity() == 6), eq(false));
+    verify(repository, never()).order(7L, false);
   }
 }

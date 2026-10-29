@@ -146,7 +146,7 @@ public class OrderService {
     if (!first) changeRequests.rejectPending(orderId, "订单已由客户重新提交生效，本次申请失效");
     repository.writeOutbox(activity.id(), orderId, "ORDER_SUBMITTED", Map.of("orderId", orderId, "version", nextVersion));
     repository.deleteDraft(activity.id(), customer.customerId());
-    OrderView result = repository.order(orderId, includeHistory);
+    OrderView result = repository.orderAfterSubmission(orderId, items, includeHistory);
     repository.completeH5Submission(activity.id(), customer.customerId(), idempotencyKey, result);
     return result;
   }

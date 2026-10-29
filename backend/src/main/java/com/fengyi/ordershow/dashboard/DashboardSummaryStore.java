@@ -32,6 +32,7 @@ public class DashboardSummaryStore {
   /** Called after all detail writes, inside the existing order/price transaction. */
   @Transactional(propagation = Propagation.MANDATORY)
   public void refresh(long orderId) {
+    if (!enabled) return;
     // Serialize with item-trigger invalidations BEFORE reading details. This also protects backfill.
     jdbc.update("INSERT IGNORE INTO order_dashboard_stat(order_id, dirty) VALUES (?, TRUE)", orderId);
     var dirty = jdbc.queryForObject("SELECT dirty FROM order_dashboard_stat WHERE order_id = ? FOR UPDATE", Boolean.class, orderId);
