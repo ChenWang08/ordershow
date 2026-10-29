@@ -157,19 +157,34 @@ public class AuthService {
     if (!List.of("GENERAL", "SPECIAL", "ALL").contains(requestedType)) {
       throw DomainException.badRequest("CUSTOMER_TYPE_INVALID", "客户类型不正确");
     }
-    List<String> whitelistTypes = jdbc.queryForList("""
-        SELECT DISTINCT c.customer_type
-        FROM activity_customer c
-        JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
-          AND b.current_version_id = c.data_version_id
-        JOIN activity a ON a.id = c.activity_id
-        WHERE a.activity_code = ? AND c.is_active = TRUE
-        """, String.class, activityCode);
-    boolean unspecifiedWhitelist = whitelistTypes.contains("ALL");
+    // Resolve once in this transaction, never cache identity/publication state across requests.
+    var scopes = jdbc.query("""
+        SELECT a.id, b.current_version_id,
+          EXISTS (SELECT 1 FROM activity_customer c
+            WHERE c.activity_id = a.id AND c.data_version_id = b.current_version_id
+              AND c.is_active = TRUE AND c.customer_type = 'ALL') unspecified
+        FROM activity a
+        LEFT JOIN activity_data_binding b ON b.activity_id = a.id AND b.data_type = 'WHITELIST'
+        WHERE a.activity_code = ?
+        """, (rs, rowNum) -> new WhitelistScope(rs.getLong("id"),
+            nullableLong(rs.getObject("current_version_id")), rs.getBoolean("unspecified")), activityCode);
+    WhitelistScope scope = scopes.isEmpty() ? null : scopes.getFirst();
+    boolean unspecifiedWhitelist = scope != null && scope.unspecified();
     if (unspecifiedWhitelist != "ALL".equals(requestedType)) {
       throw DomainException.notFound("WHITELIST_MODE_MISMATCH", "当前白名单的客户类型模式与本次选择不一致");
     }
+    if (scope == null) throw DomainException.notFound("WHITELIST_IDENTITY_NOT_FOUND", "该手机号不在所选通道或大区的有效白名单中");
     String requestedRegion = regionCode == null || regionCode.isBlank() ? null : regionCode.trim();
+    // The published path can use every column of the existing phone unique index.
+    // A missing binding deliberately retains the legacy all-version lookup/ambiguity check.
+    String versionPredicate = scope.versionId() == null
+        ? "b.current_version_id IS NULL" : "c.data_version_id = ?";
+    var identityArgs = new java.util.ArrayList<Object>();
+    identityArgs.add(scope.activityId());
+    identityArgs.add(requestedType);
+    identityArgs.add(crypto.lookupHash(normalized));
+    if (scope.versionId() != null) identityArgs.add(scope.versionId());
+    for (int i = 0; i < 6; i++) identityArgs.add(requestedRegion);
     List<H5Principal> customers = jdbc.query("""
         SELECT 0 session_id, c.activity_id, c.id activity_customer_id, a.activity_code,
                c.customer_type, c.region_code, c.branch_name, c.dealer_short_name, c.dealer_full_name, c.phone_masked
@@ -177,11 +192,11 @@ public class AuthService {
         JOIN activity a ON a.id = c.activity_id
         JOIN department d ON d.id = a.department_id AND d.status = 'ACTIVE'
         LEFT JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
-        WHERE a.activity_code = ? AND a.archived_at IS NULL
+        WHERE c.activity_id = ? AND a.archived_at IS NULL
           AND (a.status = 'CLOSED' OR (a.status IN ('SCHEDULED', 'ACTIVE') AND a.starts_at <= UTC_TIMESTAMP(3)))
           AND (a.event_ends_at IS NULL OR a.event_ends_at > UTC_TIMESTAMP(3))
           AND c.customer_type = ? AND c.phone_lookup_hash = ? AND c.is_active = TRUE
-          AND (b.current_version_id IS NULL OR c.data_version_id = b.current_version_id)
+          AND (%s)
           AND (c.customer_type <> 'GENERAL' OR (
             (? IS NULL AND b.current_version_id = c.data_version_id AND NOT EXISTS (
               SELECT 1 FROM activity_customer other_type
@@ -203,11 +218,10 @@ public class AuthService {
             OR (? = 'UNASSIGNED' AND (c.region_code IS NULL OR TRIM(c.region_code) = ''))
             OR (? IS NOT NULL AND ? <> '' AND ? <> 'UNASSIGNED' AND c.region_code = ?)
           ))
-        """, (rs, rowNum) -> new H5Principal(0, rs.getLong("activity_id"), rs.getLong("activity_customer_id"),
+        """.formatted(versionPredicate), (rs, rowNum) -> new H5Principal(0, rs.getLong("activity_id"), rs.getLong("activity_customer_id"),
         rs.getString("activity_code"), rs.getString("customer_type"), rs.getString("region_code"),
         rs.getString("branch_name"), rs.getString("dealer_short_name"), rs.getString("dealer_full_name"),
-        rs.getString("phone_masked")), activityCode, requestedType, crypto.lookupHash(normalized),
-        requestedRegion, requestedRegion, requestedRegion, requestedRegion, requestedRegion, requestedRegion);
+        rs.getString("phone_masked")), identityArgs.toArray());
     if (customers.size() != 1) throw DomainException.notFound("WHITELIST_IDENTITY_NOT_FOUND", "该手机号不在所选通道或大区的有效白名单中");
     H5Principal customer = customers.getFirst();
     String token = randomToken();
@@ -296,4 +310,5 @@ public class AuthService {
   public record LoginResult(long id, String username, String displayName, String roleCode,
                             Long departmentId, String departmentName, boolean mustChangePassword, String csrfToken, java.util.Set<AdminPermission> permissions) {}
   public record H5LoginResult(H5Principal customer, String csrfToken) {}
+  private record WhitelistScope(long activityId, Long versionId, boolean unspecified) {}
 }

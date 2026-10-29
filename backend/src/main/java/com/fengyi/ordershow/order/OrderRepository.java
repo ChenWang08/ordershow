@@ -69,10 +69,10 @@ public class OrderRepository {
     return jdbc.query("""
         SELECT p.*, (SELECT sf.object_key FROM product_image pi JOIN stored_file sf ON sf.id = pi.stored_file_id
           WHERE pi.activity_product_id = p.id AND pi.deleted_at IS NULL ORDER BY pi.is_primary DESC, pi.sort_no, pi.id LIMIT 1) image_key
-          , (SELECT t.min_quantity FROM activity_product_price_tier t WHERE t.activity_product_id = p.id) price_tier_min_quantity
-          , (SELECT t.case_price FROM activity_product_price_tier t WHERE t.activity_product_id = p.id) price_tier_case_price
-          , (SELECT t.pricing_mode FROM activity_product_price_tier t WHERE t.activity_product_id = p.id) price_tier_pricing_mode
+          , t.min_quantity price_tier_min_quantity, t.case_price price_tier_case_price,
+            t.pricing_mode price_tier_pricing_mode
         FROM activity_product p JOIN activity_data_binding b ON b.current_version_id = p.data_version_id AND b.activity_id = p.activity_id AND b.data_type = 'PRODUCT'
+        LEFT JOIN activity_product_price_tier t ON t.activity_product_id = p.id
         WHERE p.activity_id = ? AND (? = 'ALL' OR p.customer_type = ? OR p.customer_type = 'ALL') AND p.is_visible = TRUE AND p.is_orderable = TRUE
           AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id)
                OR EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id AND s.normalized_branch_name = ?))
@@ -138,10 +138,17 @@ public class OrderRepository {
         """, activityId, orderId, operation, source, adminId, version, reason, traceId, adminId, adminId);
   }
 
-  boolean sameItems(long orderId, Map<Long, Long> expected) {
-    Map<Long, Long> current = jdbc.query("SELECT activity_product_id, quantity FROM order_item WHERE order_id = ?",
+  Map<Long, Long> currentQuantities(long orderId) {
+    return jdbc.query("SELECT activity_product_id, quantity FROM order_item WHERE order_id = ?",
         rs -> { Map<Long, Long> map = new HashMap<>(); while (rs.next()) map.put(rs.getLong(1), rs.getLong(2)); return map; }, orderId);
-    return current.equals(expected);
+  }
+
+  boolean sameItems(long orderId, Map<Long, Long> expected) {
+    return currentQuantities(orderId).equals(expected);
+  }
+
+  static boolean hasReducedItems(Map<Long, Long> current, Map<Long, Long> requested) {
+    return current.entrySet().stream().anyMatch(item -> requested.getOrDefault(item.getKey(), 0L) < item.getValue());
   }
 
   boolean hasReducedItems(long orderId, Map<Long, Long> requested) {
