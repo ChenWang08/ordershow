@@ -149,11 +149,11 @@ class AuthServiceSessionCacheTest {
     assertThat(authService.cachedH5SessionCount()).isEqualTo(1);
 
     // Other activity finish does not evict
-    authService.evictFinishedActivitySessions(new ActivityFinishedEvent(888L, "OTHER"));
+    authService.evictFinishedActivitySessions(new ActivityFinishedEvent(888L));
     assertThat(authService.cachedH5SessionCount()).isEqualTo(1);
 
     // Matching activity finish evicts
-    authService.evictFinishedActivitySessions(new ActivityFinishedEvent(activityId, "ACT-999"));
+    authService.evictFinishedActivitySessions(new ActivityFinishedEvent(activityId));
     assertThat(authService.cachedH5SessionCount()).isEqualTo(0);
   }
 
