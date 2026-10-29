@@ -32,6 +32,7 @@ public class TonnageSyncService {
       if (samePriceValue(factor, row.tonCaseFactor()) && samePriceValue(lineTons, row.lineTons())) continue;
       tonnage.updateItem(row.id(), factor, lineTons);
       tonnage.updateOrderTotal(row.orderId());
+      orders.refreshDashboardSummary(row.orderId());
       orders.writeOutbox(activityId, row.orderId(), "ORDER_TONS_UPDATED", Map.of("orderId", row.orderId()));
       count++;
     }

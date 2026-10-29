@@ -36,7 +36,15 @@ import org.springframework.stereotype.Repository;
 public class OrderRepository {
   private final JdbcTemplate jdbc;
   private final ObjectMapper json;
+  private com.fengyi.ordershow.dashboard.DashboardSummaryStore summaries;
   public OrderRepository(JdbcTemplate jdbc, ObjectMapper json) { this.jdbc = jdbc; this.json = json; }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public OrderRepository(JdbcTemplate jdbc, ObjectMapper json,
+      com.fengyi.ordershow.dashboard.DashboardSummaryStore summaries) {
+    this(jdbc, json);
+    this.summaries = summaries;
+  }
 
   AdminOrderView adminOrder(long activityId, long orderId) {
     OrderView order = order(orderId);
@@ -213,6 +221,7 @@ public class OrderRepository {
         """, versionId, orderId);
     int version = jdbc.queryForObject("SELECT current_version_no FROM customer_order WHERE id=?", Integer.class, orderId);
     insertOperation(activityId, orderId, "ADMIN_ADJUST", "ADMIN", adminId, version, reason, batchId.substring(0, Math.min(64, batchId.length())));
+    refreshDashboardSummary(orderId);
     writeOutbox(activityId, orderId, "ORDER_ADMIN_ADJUSTED", Map.of("orderId", orderId, "version", version));
   }
 
@@ -231,6 +240,11 @@ public class OrderRepository {
         item.pricing().baseCasePrice(), item.pricing().baseQuantity(), item.pricing().tierCasePrice(), item.pricing().tierMinQuantity(), item.pricing().tierQuantity(),
         item.pricing().pricingMode(), item.pricing().lineAmount(), item.product().tonCaseFactor(), item.lineTons()}).toList();
     insertItemBatches(sql, rows);
+    refreshDashboardSummary(orderId);
+  }
+
+  void refreshDashboardSummary(long orderId) {
+    if (summaries != null) summaries.refresh(orderId);
   }
 
   long insertVersion(long activityId, long orderId, int version, H5Principal customer, long totalQuantity,
@@ -322,7 +336,7 @@ public class OrderRepository {
   }
 
   void deleteDraft(long activityId, long customerId) {
-    jdbc.update("DELETE FROM h5_order_draft WHERE activity_id = ? AND activity_customer_id = ?", activityId, customerId);
+    OrderDraftWrites.delete(jdbc, activityId, customerId);
   }
 
   OrderView order(long orderId) {

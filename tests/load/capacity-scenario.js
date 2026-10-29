@@ -8,8 +8,8 @@ if (!/^[\w-]+$/.test(fixtureName || '')) throw Error('Invalid fixture name');
 const users = new SharedArray('capacity customers', () => JSON.parse(open(`/results/${fixtureName}-fixture.json`)).customers);
 const mode = __ENV.CAPACITY_MODE;
 const vus = Number(__ENV.VUS), run = __ENV.RUN;
-if (!['consume', 'full', 'verify', 'sustain', 'journey'].includes(mode) || !Number.isInteger(vus) || vus < 1 || vus > users.length || !/^[\w-]+$/.test(run || '')) throw Error('Invalid capacity arguments');
-const steps = mode === 'verify' ? ['verify'] : mode === 'full' ? ['activity', 'verify', 'products', 'draft', 'submit', 'confirm'] : mode === 'journey' ? ['activity', 'verify', 'products', 'current', 'draft', 'submit', 'confirm'] : mode === 'sustain' ? ['current', 'draft', 'submit', 'confirm'] : ['draft', 'submit', 'confirm'];
+if (!['consume', 'full', 'verify', 'sustain', 'journey', 'submit-only'].includes(mode) || !Number.isInteger(vus) || vus < 1 || vus > users.length || !/^[\w-]+$/.test(run || '')) throw Error('Invalid capacity arguments');
+const steps = mode === 'verify' ? ['verify'] : mode === 'full' ? ['activity', 'verify', 'products', 'draft', 'submit', 'confirm'] : mode === 'journey' ? ['activity', 'verify', 'products', 'current', 'draft', 'submit', 'confirm'] : mode === 'submit-only' ? ['current', 'submit', 'confirm'] : mode === 'sustain' ? ['current', 'draft', 'submit', 'confirm'] : ['draft', 'submit', 'confirm'];
 const durations = Object.fromEntries(steps.map(step => [step, new Trend(`${step}_ms`, true)]));
 const attempts = new Counter('flow_attempts'), completed = new Counter('flow_completed'), commits = new Counter('order_commits');
 const verified = new Counter('verified_sessions'), audited = new Counter('write_attempts');
@@ -93,40 +93,49 @@ export default function capacityIteration() {
   }
   let success = false;
   try {
-    if (mode === 'full' || mode === 'journey') {
-      const activity = request('activity', 'GET', `/public/activities/${user.code}`, user);
-      if (!activity.ok || !valid(activity.data?.code === user.code, user)) return;
-    }
-    if (mode === 'full' || mode === 'journey') {
-      const login = request('verify', 'POST', `/public/activities/${user.code}/verify-phone`, user, { phone: user.phone, customerType: user.type, regionCode: user.region });
-      if (!login.ok || !valid(login.data?.customer?.customerId === user.id && login.data.customer.customerType === user.type && Boolean(login.data.csrfToken), user)) return;
-      verified.add(1, tags);
-      user.csrf = login.data.csrfToken;
-      user.cookie = Object.entries(login.response.cookies).flatMap(([name, values]) => values.map(value => `${name}=${value.value}`)).join('; ');
-      const products = request('products', 'GET', path + '/products', user);
-      if (!products.ok || !valid(Array.isArray(products.data) && products.data.length === user.products.length && products.data.every(product => user.products.includes(product.id)), user)) return;
-    }
-    let version = 0, quantity = 1;
-    if (mode === 'sustain' || mode === 'journey') {
-      const current = request('current', 'GET', path + '/order?includeHistory=false', user);
-      if (!current.ok) return;
-      version = current.data?.currentVersion || 0;
-      quantity = (current.data?.items?.[0]?.quantity || 0) + 1;
-    }
-    const items = user.products.map(productId => ({ productId, quantity }));
-    const draft = request('draft', 'PUT', path + '/order-draft', user, { customerId: user.id, baseOrderVersion: version, items });
-    if (!draft.ok || !valid(draft.data?.customerId === user.id && draft.data.items?.length === items.length, user)) return;
-    const order = request('submit', 'PUT', path + '/order?includeHistory=false', user, { expectedVersion: version, items }, `${run}-${__VU}-${__ITER}`);
-    if (!order.ok) return;
-    commits.add(1, tags);
-    if (!validOrder(order.data, user, quantity, version + 1)) return;
-    const confirm = request('confirm', 'GET', path + '/order?includeHistory=false', user);
-    if (!confirm.ok || !validOrder(confirm.data, user, quantity, version + 1) || !valid(confirm.data.id === order.data.id, user)) return;
-    success = true;
+    success = runOrderFlow(user, path, tags);
   } finally {
     failures.add(!success, tags);
     flowing.add(Date.now() - start, tags);
     if (success) completed.add(1, tags);
   }
+}
+
+// Keep early returns in a helper without finally: failed HTTP steps must still
+// produce metrics/summary, not trigger the bundled k6/Sobek return/finally panic.
+function runOrderFlow(user, path, tags) {
+    if (mode === 'full' || mode === 'journey') {
+      const activity = request('activity', 'GET', `/public/activities/${user.code}`, user);
+      if (!activity.ok || !valid(activity.data?.code === user.code, user)) return false;
+    }
+    if (mode === 'full' || mode === 'journey') {
+      const login = request('verify', 'POST', `/public/activities/${user.code}/verify-phone`, user, { phone: user.phone, customerType: user.type, regionCode: user.region });
+      if (!login.ok || !valid(login.data?.customer?.customerId === user.id && login.data.customer.customerType === user.type && Boolean(login.data.csrfToken), user)) return false;
+      verified.add(1, tags);
+      user.csrf = login.data.csrfToken;
+      user.cookie = Object.entries(login.response.cookies).flatMap(([name, values]) => values.map(value => `${name}=${value.value}`)).join('; ');
+      const products = request('products', 'GET', path + '/products', user);
+      if (!products.ok || !valid(Array.isArray(products.data) && products.data.length === user.products.length && products.data.every(product => user.products.includes(product.id)), user)) return false;
+    }
+    let version = 0, quantity = 1;
+    if (mode === 'sustain' || mode === 'journey' || mode === 'submit-only') {
+      const current = request('current', 'GET', path + '/order?includeHistory=false', user);
+      if (!current.ok) return false;
+      version = current.data?.currentVersion || 0;
+      quantity = (current.data?.items?.[0]?.quantity || 0) + 1;
+    }
+    const items = user.products.map(productId => ({ productId, quantity }));
+    // Diagnostic isolation only, never reported as a passing full customer journey.
+    if (mode !== 'submit-only') {
+      const draft = request('draft', 'PUT', path + '/order-draft', user, { customerId: user.id, baseOrderVersion: version, items });
+      if (!draft.ok || !valid(draft.data?.customerId === user.id && draft.data.items?.length === items.length, user)) return false;
+    }
+    const order = request('submit', 'PUT', path + '/order?includeHistory=false', user, { expectedVersion: version, items }, `${run}-${__VU}-${__ITER}`);
+    if (!order.ok) return false;
+    commits.add(1, tags);
+    if (!validOrder(order.data, user, quantity, version + 1)) return false;
+    const confirm = request('confirm', 'GET', path + '/order?includeHistory=false', user);
+    if (!confirm.ok || !validOrder(confirm.data, user, quantity, version + 1) || !valid(confirm.data.id === order.data.id, user)) return false;
+    return true;
 }
 export function handleSummary(data) { return { [`/results/${run}.json`]: JSON.stringify(data, null, 2) }; }

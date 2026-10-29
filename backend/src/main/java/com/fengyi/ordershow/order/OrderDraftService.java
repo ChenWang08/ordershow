@@ -26,11 +26,13 @@ public class OrderDraftService {
   private final JdbcTemplate jdbc;
   private final ActivityService activities;
   private final ObjectMapper json;
+  private final DraftSaveTransactions transactions;
 
-  public OrderDraftService(JdbcTemplate jdbc, ActivityService activities, ObjectMapper json) {
+  public OrderDraftService(JdbcTemplate jdbc, ActivityService activities, ObjectMapper json, DraftSaveTransactions transactions) {
     this.jdbc = jdbc;
     this.activities = activities;
     this.json = json;
+    this.transactions = transactions;
   }
 
   public DraftView current(String activityCode, H5Principal customer) {
@@ -44,8 +46,11 @@ public class OrderDraftService {
     return rows.isEmpty() ? null : map(rows.getFirst());
   }
 
-  @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public DraftView save(String activityCode, H5Principal customer, SaveDraftRequest request) {
+    return transactions.save(() -> saveOnce(activityCode, customer, request));
+  }
+
+  private DraftView saveOnce(String activityCode, H5Principal customer, SaveDraftRequest request) {
     var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
     requireOwner(customer, request.customerId());
@@ -59,13 +64,8 @@ public class OrderDraftService {
     String serialized;
     try { serialized = json.writeValueAsString(items); }
     catch (Exception exception) { throw new IllegalStateException("订单草稿序列化失败", exception); }
-    jdbc.update("""
-        INSERT INTO h5_order_draft(activity_id, activity_customer_id, base_order_version, items_json, expires_at,
-          created_at, updated_at)
-        VALUES (?, ?, ?, CAST(? AS JSON), ?, UTC_TIMESTAMP(3), UTC_TIMESTAMP(3))
-        ON DUPLICATE KEY UPDATE base_order_version = VALUES(base_order_version), items_json = VALUES(items_json),
-          expires_at = VALUES(expires_at), lock_version = lock_version + 1, updated_at = UTC_TIMESTAMP(3)
-        """, activity.id(), customer.customerId(), request.baseOrderVersion(), serialized, UtcTime.database(activity.endsAt()));
+    OrderDraftWrites.save(jdbc, activity.id(), customer.customerId(), request.baseOrderVersion(), serialized,
+        UtcTime.database(activity.endsAt()));
     return current(activityCode, customer);
   }
 
@@ -75,8 +75,7 @@ public class OrderDraftService {
     requireIdentity(activity.id(), customer);
     requireOwner(customer, ownerCustomerId);
     OrderWriteLock.acquire(jdbc, activity.id(), customer.customerId());
-    return jdbc.update("DELETE FROM h5_order_draft WHERE activity_id = ? AND activity_customer_id = ?",
-        activity.id(), customer.customerId()) > 0;
+    return OrderDraftWrites.delete(jdbc, activity.id(), customer.customerId());
   }
 
   private List<DraftItem> validateItems(long activityId, H5Principal customer, List<DraftItem> requested) {

@@ -5,8 +5,9 @@ import { readFileSync, existsSync, mkdirSync, appendFileSync, writeFileSync } fr
 import { spawn, execFileSync } from 'node:child_process';
 import { compose, docker, guard, sql, save, base, project, resultsRoot, request } from './lib.mjs';
 
-assert.equal(project, 'order-show-load-20261029', 'This suite only manages its dated isolated project');
-assert.equal(resultsRoot.replaceAll('\\', '/').replace(/^\.\//, ''), 'outputs/load-20261029');
+assert(['order-show-load-20261029', 'order-show-load-summary'].includes(project), 'This suite only manages its isolated capacity projects');
+assert.equal(resultsRoot.replaceAll('\\', '/').replace(/^\.\//, ''),
+  project === 'order-show-load-summary' ? 'outputs/load-summary' : 'outputs/load-20261029');
 const [mode, label, argument = '10', duration = '3m'] = process.argv.slice(2);
 assert(/^[a-z0-9-]+$/.test(label || ''), 'Provide a fixture/run label');
 mkdirSync(resultsRoot, { recursive: true });
@@ -99,7 +100,7 @@ if (mode === 'smoke') {
   save(`${label}-smoke.json`, { checks }); console.log(JSON.stringify({ smoke: label, checked: checks.length })); process.exit(0);
 }
 
-assert(['consume', 'full', 'verify', 'sustain', 'journey'].includes(mode));
+assert(['consume', 'full', 'verify', 'sustain', 'journey', 'submit-only'].includes(mode));
 const vus = Number(argument);
 assert(Number.isInteger(vus) && vus >= 2 && vus <= fixture.customers.length);
 assert(/^\d+[smh]$/.test(duration));
@@ -112,10 +113,13 @@ const before = counts();
 const backendId = docker([...compose, 'ps', '-q', 'backend']).trim();
 const backend = JSON.parse(docker(['inspect', backendId]))[0];
 const config = { mode, label, vus, duration, population: fixture.population, general: fixture.customers.filter(user => user.type === 'GENERAL').length, special: fixture.customers.filter(user => user.type === 'SPECIAL').length,
-  image: backend.Image, memory: backend.HostConfig.Memory, nanoCpus: backend.HostConfig.NanoCpus, settings: backend.Config.Env.filter(value => /^(DB_POOL_SIZE|JAVA_TOOL_OPTIONS|HTTP_MAX_THREADS|SERVER_TOMCAT_THREADS_MAX|H5_WRITE_CONCURRENCY|VIRTUAL_THREADS_ENABLED)=/.test(value)) };
+  image: backend.Image, memory: backend.HostConfig.Memory, nanoCpus: backend.HostConfig.NanoCpus,
+  settings: backend.Config.Env.filter(value => /^(DB_POOL_SIZE|JAVA_TOOL_OPTIONS|HTTP_MAX_THREADS|SERVER_TOMCAT_THREADS_MAX|H5_WRITE_CONCURRENCY|VIRTUAL_THREADS_ENABLED|DASHBOARD_SUMMARY_ENABLED|DASHBOARD_SUMMARY_ACTIVITIES)=/.test(value)),
+  mountedJarSha256: backend.Mounts.some(mount => mount.Destination === '/app/app.jar')
+    ? createHash('sha256').update(readFileSync('backend/target/order-show-backend-0.1.0.jar')).digest('hex') : null };
 function databaseSnapshot() {
   return docker([...compose, 'exec', '-T', '-e', 'MYSQL_PWD=load_only_root', 'mysql', 'mysql', '-uroot', '--batch', '-e',
-    "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_running','Slow_queries','Innodb_row_lock_waits','Innodb_row_lock_time','Innodb_deadlocks'); SELECT COUNT(*) lock_waits FROM performance_schema.data_lock_waits; SELECT LEFT(DIGEST_TEXT,400) sql_text, COUNT_STAR calls,SUM_TIMER_WAIT total_ps FROM performance_schema.events_statements_summary_by_digest WHERE SCHEMA_NAME='order_show_load' ORDER BY SUM_TIMER_WAIT DESC LIMIT 20;"]);
+    "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_running','Slow_queries','Innodb_row_lock_waits','Innodb_row_lock_time','Innodb_deadlocks'); SELECT COUNT(*) lock_waits FROM performance_schema.data_lock_waits; SELECT LEFT(DIGEST_TEXT,400) sql_text, COUNT_STAR calls,SUM_TIMER_WAIT total_ps FROM performance_schema.events_statements_summary_by_digest WHERE SCHEMA_NAME='order_show_load' ORDER BY SUM_TIMER_WAIT DESC LIMIT 20; SHOW ENGINE INNODB STATUS;"]);
 }
 const databaseBefore = databaseSnapshot();
 const samples = [], resources = [], started = Date.now();
@@ -124,7 +128,7 @@ const sample = async () => {
   if (sampling) return;
   sampling = true;
   try {
-    const values = await Promise.all(['jvm.memory.used', 'jvm.gc.pause', 'hikaricp.connections.active', 'hikaricp.connections.pending', 'hikaricp.connections.acquire', 'hikaricp.connections.usage', 'order_show.h5.write.admission.active', 'order_show.h5.write.admission.waiting', 'process.cpu.usage'].map(async name => {
+    const values = await Promise.all(['jvm.memory.used', 'jvm.gc.pause', 'hikaricp.connections.active', 'hikaricp.connections.pending', 'hikaricp.connections.acquire', 'hikaricp.connections.usage', 'order_show.h5.write.admission.active', 'order_show.h5.write.admission.waiting', 'process.cpu.usage', 'order_show.h5.draft.deadlocks', 'order_show.h5.draft.retries', 'order_show.h5.draft.retry_exhausted', 'order_show.h5.draft.retry_recovered'].map(async name => {
       try { const response = await fetch(`${base}/actuator/metrics/${name}`, { signal: AbortSignal.timeout(2500) }); const data = await response.json(); return { name, measurements: data.measurements }; } catch { return { name, unavailable: true }; }
     }));
     const point = { time: new Date().toISOString(), values }; samples.push(point);
@@ -146,7 +150,10 @@ let code;
 try { code = await new Promise((resolve, reject) => { child.on('close', resolve); child.on('error', reject); }); }
 finally { clearInterval(timer); clearInterval(progress); stats.kill(); }
 while (sampling) await new Promise(resolve => setTimeout(resolve, 100));
+await sample();
 const after = counts();
+// Preserve server-side evidence even when the runner exits without a summary.
+writeFileSync(`${resultsRoot}/${run}-backend.log`, docker([...compose, 'logs', '--no-color', '--since', new Date(started).toISOString(), 'backend']));
 if (!existsSync(`${resultsRoot}/${run}.json`)) {
   save(`${run}-result.json`, { run, config, exitCode: code, passed: false, notMeasured: true, log, before, after });
   save(`${run}-monitor.json`, { config, samples, resources, databaseBefore, databaseAfter: databaseSnapshot() });
@@ -162,17 +169,21 @@ for (let attempt = 0; attempt < 30; attempt++) {
   if (auditRows >= expectedAudits) break;
   await new Promise(resolve => setTimeout(resolve, 200));
 }
-const integrityErrors = values(`SELECT COUNT(*) FROM customer_order o LEFT JOIN (SELECT i.order_id,SUM(i.quantity) qty,SUM(i.line_amount) amount,COUNT(*) item_count FROM order_item i JOIN customer_order x ON x.id=i.order_id WHERE x.activity_id=${fixture.activityId} GROUP BY i.order_id) t ON t.order_id=o.id WHERE o.activity_id=${fixture.activityId} AND (t.qty<>o.total_quantity OR t.amount<>o.total_amount OR t.item_count<>IF(o.customer_type='GENERAL',180,41));`)[0];
+const integrityErrors = values(`SELECT COUNT(*) FROM customer_order o LEFT JOIN (SELECT i.order_id,SUM(i.quantity) qty,SUM(i.line_amount) amount,COUNT(*) item_count FROM order_item i JOIN customer_order x ON x.id=i.order_id WHERE x.activity_id=${fixture.activityId} GROUP BY i.order_id) t ON t.order_id=o.id WHERE o.activity_id=${fixture.activityId} AND (NOT(t.qty <=> o.total_quantity) OR NOT(t.amount <=> o.total_amount) OR NOT(t.item_count <=> IF(o.customer_type='GENERAL',180,41)));`)[0];
 const reconciliation = { before, after, acknowledgedCommits: count('order_commits'), versionIncrease: after[1] - before[1], verifiedSessions: count('verified_sessions'), sessionIncrease: after[2] - before[2], expectedAudits, auditRows, uniqueAudits, integrityErrors };
 const reconciled = reconciliation.acknowledgedCommits === reconciliation.versionIncrease && reconciliation.verifiedSessions === reconciliation.sessionIncrease && auditRows === expectedAudits && uniqueAudits === auditRows && integrityErrors === 0;
 const thresholdFailures = Object.entries(metrics).flatMap(([name, metric]) => Object.entries(metric.thresholds || {}).filter(([, value]) => !value.ok).map(([threshold]) => `${name}: ${threshold}`));
 const requestedMs = Number(duration.slice(0, -1)) * ({ s: 1000, m: 60000, h: 3600000 }[duration.at(-1)]);
 const durationPassed = ['consume', 'full'].includes(mode) || summary.state.testRunDurationMs >= requestedMs - 1000;
-const result = { run, config, startedAt: new Date(started).toISOString(), elapsedMs: Date.now() - started, measurementDurationMs: summary.state.testRunDurationMs, durationPassed, exitCode: code, passed: code === 0 && reconciled && thresholdFailures.length === 0 && durationPassed, thresholdFailures, reconciliation,
+const draftRetryMetrics = Object.fromEntries(['deadlocks', 'retries', 'retry_exhausted', 'retry_recovered'].map(key => {
+  const value = point => point?.values.find(metric => metric.name === `order_show.h5.draft.${key}`)?.measurements?.find(m => m.statistic === 'COUNT')?.value;
+  const first = value(samples[0]), last = value(samples.at(-1));
+  return [key, first === undefined || last === undefined ? null : last - first];
+}));
+const result = { run, config, startedAt: new Date(started).toISOString(), elapsedMs: Date.now() - started, measurementDurationMs: summary.state.testRunDurationMs, durationPassed, exitCode: code, passed: code === 0 && reconciled && thresholdFailures.length === 0 && durationPassed, thresholdFailures, reconciliation, draftRetryMetrics,
   metrics: Object.fromEntries(Object.entries(metrics).filter(([name]) => /(_ms|flow_|order_commits|verified_sessions|server_failures|payload_errors|response_status|response_code|http_reqs|http_req_failed)/.test(name)).map(([name, metric]) => [name, metric.values])) };
 save(`${run}-monitor.json`, { config, samples, resources, databaseBefore, databaseAfter: databaseSnapshot() });
 save(`${run}-result.json`, result);
 save('latest-result.json', result);
-writeFileSync(`${resultsRoot}/${run}-backend.log`, docker([...compose, 'logs', '--no-color', '--since', new Date(started).toISOString(), 'backend']));
-console.log(JSON.stringify({ run, passed: result.passed, durationSeconds: summary.state.testRunDurationMs / 1000, flows: count('flow_completed'), commits: count('order_commits'), flowFailureRate: metrics.flow_failures?.values.rate, submitP95: metrics.submit_ms?.values['p(95)'], verifyP95: metrics.verify_ms?.values['p(95)'], thresholdFailures, reconciliation }));
+console.log(JSON.stringify({ run, passed: result.passed, durationSeconds: summary.state.testRunDurationMs / 1000, flows: count('flow_completed'), commits: count('order_commits'), flowFailureRate: metrics.flow_failures?.values.rate, submitP95: metrics.submit_ms?.values['p(95)'], verifyP95: metrics.verify_ms?.values['p(95)'], thresholdFailures, reconciliation, draftRetryMetrics }));
 process.exitCode = result.passed ? 0 : 1;

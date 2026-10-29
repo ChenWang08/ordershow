@@ -28,6 +28,8 @@ spring:
         rewriteBatchedStatements: true
   flyway:
     enabled: true
+    user: ${DB_MIGRATION_USERNAME:${DB_USERNAME:order_show}}
+    password: ${DB_MIGRATION_PASSWORD:${DB_PASSWORD:order_show_local}}
     locations: classpath:db/migration
     validate-migration-naming: true
   data:
@@ -55,6 +57,9 @@ management:
         enabled: true
 
 order-show:
+  dashboard:
+    summary-enabled: ${DASHBOARD_SUMMARY_ENABLED:false}
+    summary-activities: ${DASHBOARD_SUMMARY_ACTIVITIES:}
   public-origin: ${PUBLIC_ORIGIN:http://localhost:3000}
   cookie-secure: ${COOKIE_SECURE:false}
   admin-session-hours: ${ADMIN_SESSION_HOURS:12}

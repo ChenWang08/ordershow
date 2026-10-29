@@ -36,6 +36,8 @@ docker run --rm -e ORDER_SHOW_RANKING_TEST=order-show-e2e `
 
 ## 性能测试
 
+看板汇总层新增 V040、原查询差分测试、逐单回填/对账和专用压测。执行入口、隔离库、迁移权限、按活动开关及结果见 [汇总层验收记录](../docs/testing/dashboard-summary-2026-10-29.md)。默认不启用汇总读取；本次代码交付不代表部署。
+
 独立压测环境使用 `docker-compose.load.yml`，项目名 `order-show-load`，后端端口8280。
 启动、生成数据、执行k6/SSE及清理方法见 [load/README.md](load/README.md)。
 执行范围见[性能计划](../docs/testing/performance-test-plan.md)，本机实测与未验收项见[性能报告](../docs/testing/performance-test-report.md)。

@@ -1280,7 +1280,32 @@ class IsolatedApiE2ETest {
     HttpRequest.BodyPublisher publisher = body == null ? HttpRequest.BodyPublishers.noBody()
         : HttpRequest.BodyPublishers.ofString(JSON.writeValueAsString(body), StandardCharsets.UTF_8);
     request.method(method, publisher);
-    return client.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    var response = client.send(request.build(), HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+    if ("true".equals(System.getenv("ORDER_SHOW_SUMMARY_CHECK")) && !"GET".equals(method)
+        && response.statusCode() >= 200 && response.statusCode() < 300) {
+      assertDashboardSummariesAfterWrite();
+    }
+    return response;
+  }
+
+  /** Opt-in exact DB reconciliation after every successful API mutation, including lifecycle/price changes. */
+  private void assertDashboardSummariesAfterWrite() {
+    assertEquals("http://host.docker.internal:8180/api/v1", baseUrl);
+    var source = new org.springframework.jdbc.datasource.DriverManagerDataSource(
+        "jdbc:mysql://host.docker.internal:33306/order_show_e2e?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC",
+        "root", "e2e_root_only_not_for_business");
+    var jdbc = new org.springframework.jdbc.core.JdbcTemplate(source);
+    var maintenance = new com.fengyi.ordershow.dashboard.DashboardSummaryMaintenance(jdbc,
+        new org.springframework.jdbc.datasource.DataSourceTransactionManager(source));
+    for (long id : jdbc.queryForList("SELECT DISTINCT activity_id FROM customer_order", Long.class)) {
+      long after = 0;
+      while (true) {
+        var batch = maintenance.reconcile(id, after, 200);
+        assertTrue(batch.differences().isEmpty(), "Summary differences after API write: " + batch.differences());
+        after = batch.nextAfterId();
+        if (batch.checked() < 200) break;
+      }
+    }
   }
 
   private JsonNode json(HttpResponse<String> response) throws Exception {
