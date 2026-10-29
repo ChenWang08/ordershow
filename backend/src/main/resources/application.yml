@@ -19,7 +19,8 @@ spring:
     password: ${DB_PASSWORD:order_show_local}
     hikari:
       connection-init-sql: SET time_zone = '+00:00'
-      maximum-pool-size: ${DB_POOL_SIZE:20}
+      maximum-pool-size: ${DB_POOL_SIZE:60}
+      minimum-idle: ${DB_POOL_MIN_IDLE:30}
       connection-timeout: 5000
       data-source-properties:
         connectionTimeZone: UTC
