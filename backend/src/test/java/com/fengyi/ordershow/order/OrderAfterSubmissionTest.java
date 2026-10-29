@@ -26,8 +26,8 @@ class OrderAfterSubmissionTest {
     var product1 = new ProductSnapshot(101L, "M101", "Product 101", "Category", "Line A", "Brand", "Variety", "Spec", "10", "GENERAL", "ALL", false, new BigDecimal("100"), new BigDecimal("0.5"), "img1.png", null, null, null);
     var product2 = new ProductSnapshot(102L, "M102", "Product 102", "Category", "Line B", "Brand", "Variety", "Spec", "10", "GENERAL", "ALL", false, new BigDecimal("80"), new BigDecimal("0.4"), "img2.png", 5L, new BigDecimal("70"), "WHOLE_ORDER");
 
-    var pricing1 = new PricingResult(new BigDecimal("100"), null, new BigDecimal("100"), 5L, null, null, null, "STANDARD", new BigDecimal("500"));
-    var pricing2 = new PricingResult(new BigDecimal("70"), 5L, new BigDecimal("80"), 0L, new BigDecimal("70"), 5L, 10L, "WHOLE_ORDER", new BigDecimal("700"));
+    var pricing1 = new PricingResult(new BigDecimal("100"), new BigDecimal("100"), 5L, null, null, 0L, "STANDARD", null, new BigDecimal("500"));
+    var pricing2 = new PricingResult(new BigDecimal("80"), new BigDecimal("80"), 0L, new BigDecimal("70"), 5L, 10L, "WHOLE_ORDER", 5L, new BigDecimal("700"));
 
     var items = List.of(
         new OrderData.CalculatedItem(1, product1, 5L, pricing1, new BigDecimal("2.5")),
