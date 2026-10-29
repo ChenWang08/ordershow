@@ -2,6 +2,31 @@
 
 2026-10-29 白名单验证与大订单提交的代码优化、独立快照对照和实时回归见[本轮优化报告](../../docs/testing/h5-verification-submit-performance-2026-10-29.md)。`h5-screen-live.mjs` 只连接经过 `lib.mjs` 校验的隔离压测项目，使用当前前端刷新队列及真实 SSE，持续读取看板、金额/吨数排行和战报。调用形式为 `node tests/load/h5-screen-live.mjs <合成夹具标签> <观察毫秒数> <结果名称>`；写入负载必须先于观察窗口结束，脚本会在结束时核对四类页面总数、金额、数量、吨数与数据库一致。结果不包含浏览器绘制时间。
 
+2026-10-29本轮完整结果见[最新综合/特渠混合容量报告](../../docs/testing/h5-capacity-2026-10-29.md)。请区分已验证客户首次下单、包含验证的完整首次流程、持续高频变更和纯手机号验证，避免沿用9月10商品/单的200用户结果解释当前180/41商品/单场景。
+
+2026-10-29 最新源码的综合/特渠混合容量测试使用 `capacity.mjs`、`capacity-scenario.js` 和 `capacity-suite.mjs`。固定隔离项目 `order-show-load-20261029`、本地端口8380及 `outputs/load-20261029`；不连接业务库。每个新样本包含综合1072/特渠548名客户，同一活动内每单分别提交180/41种商品，数量均1。夹具包含合成图片元数据，不下载图片；统一箱价100，不代表真实阶梯价、分公司商品限制或线上数据库快照。`full`执行活动信息→手机号验证→商品→草稿→首次下单→确认，`consume`使用预置会话执行草稿→首次下单→确认，`verify`反复真实验证手机号并写入会话，`sustain`循环读取订单、仅增加全部商品数量后保存草稿/提交/确认。持续场景无思考时间，不能解释为普通在线人数。
+
+新脚本使用 `includeHistory=false`，不自动重试失败请求；分别统计两类客户。验收：verify/商品/查单P95<500ms、活动信息P95<300ms、草稿/下单P95<1000ms、链失败率<1%、无5xx或数据错误；两类客户的单项也须通过。首次下单还要求1620名样本全部完成，防止漏发/提前停止。SQL核对提交与版本增量、验证与会话增量、审计完整/唯一、当前明细数量与金额。单档样本结束即停止，不将短波次称为持续容量；边界档另做持续复测。`journey`持续执行活动信息→验证→商品→当前订单→草稿→增加数量提交→确认，使用固定且不同的客户，所有数量只增不减；这与每名客户仅一次首次下单分开报告。每档使用新活动/客户，但同一数据库持续累积历史，属于本机限额下的容量观测，不是相同数据库快照的严格A/B。
+
+```powershell
+$env:LOAD_PROJECT='order-show-load-20261029'
+$env:LOAD_RESULTS_ROOT='./outputs/load-20261029'
+$env:LOAD_BACKEND_PORT='8380'
+# 确认已从当前源码构建、启动专用后端及专属数据库后执行
+node tests/load/capacity-suite.mjs full
+node tests/load/capacity-suite.mjs verify
+# 可选第三个参数为复跑后缀，避免覆盖之前样本，例如 verify r2
+node tests/load/capacity-suite.mjs consume
+# 持续复测先用新label生成1620样本，再运行sustain；不复用首次下单样本
+node tests/load/capacity.mjs seed sustain-example 1620
+node tests/load/capacity.mjs smoke sustain-example
+node tests/load/capacity.mjs sustain sustain-example 10 5m
+# 含每轮真实手机号验证和商品读取的持续链路：
+node tests/load/capacity.mjs journey sustain-example 10 5m
+```
+
+上述套件保留失败档并停止继续升压，最多做两次区间细化；同名样本拒绝覆盖，复跑请使用新标签。输出夹具含测试会话，保持在忽略目录内。首次构建/挂载等基础设施失败不计作容量测量；完整原始报告、日志、监控与对账随各run保留。
+
 2026-09-10虚拟线程、H5写入隔离和全新环境A/B见[高频优化报告](../../docs/testing/high-frequency-admission-report.md)。可用`LOAD_PROJECT`、`LOAD_BACKEND_PORT`、`LOAD_RESULTS_ROOT`和`LOAD_BACKEND_IMAGE`创建互不共享数据库卷/结果的隔离对照项目；项目名必须以`order-show-load`开头，结果必须位于`outputs/load-*`。`renew-sessions.mjs`只续期固定LOAD活动和既有虚构会话，不改订单/版本。
 
 启动预热、同步批量审计和订单号碰撞修复的最新验证见[启动/审计优化报告](../../docs/testing/startup-audit-optimization-report.md)。`node tests/load/startup.mjs`仅重建隔离后端，记录就绪前503及预热前后数据计数；默认开启预热，`LOAD_H5_WARMUP_ENABLED=false`仅用于对照诊断。
