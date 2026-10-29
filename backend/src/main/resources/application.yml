@@ -26,6 +26,11 @@ spring:
         forceConnectionTimeZoneToSession: true
         preserveInstants: true
         rewriteBatchedStatements: true
+        cachePrepStmts: true
+        prepStmtCacheSize: 250
+        prepStmtCacheSqlLimit: 2048
+        useServerPrepStmts: true
+        useLocalSessionState: true
   flyway:
     enabled: true
     user: ${DB_MIGRATION_USERNAME:${DB_USERNAME:order_show}}
