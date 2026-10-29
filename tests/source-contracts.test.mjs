@@ -289,7 +289,7 @@ test("derives H5 and dashboard regions from the current whitelist", async () => 
   assert.match(prototype, /nextChannel === "综合客户" && regionalized \? "region"/);
   assert.match(prototype, /whitelistCustomerTypeMode === "UNSPECIFIED"/);
   assert.match(prototype, /value: "ALL", label: "全部客户"/);
-  assert.match(prototype, /loadDashboard\(\{ customerType, regionCode, metric \}\)/);
+  assert.match(prototype, /loadDashboard\(\{ customerType, regionCode, metric \}(?:, [^)]+)?\)/);
   assert.match(prototype, /订单额占比/);
   assert.match(prototype, /const singleTypeLabel = unspecifiedCustomerType \? "全部客户"/);
   assert.match(prototype, /\{singleTypeLabel\} <b>\{dashboardCompactAmount\(amount\)\} · \{amount > 0 \? "100%" : "0%"\}<\/b>/);
