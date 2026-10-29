@@ -1,6 +1,6 @@
 # 本地 ACK 镜像验证记录：20261027.1
 
-日期：2026-10-27（Asia/Shanghai）。本地构建与隔离验证通过；未推送 CODING，未部署 ACK。
+日期：2026-10-27（Asia/Shanghai）。本地构建与隔离验证通过；已推送 CODING 并核验远端摘要与 linux/amd64 平台，未部署 ACK。
 
 ## 合并与镜像
 
@@ -11,7 +11,17 @@ ACK 从 723751d 合入 main 34d73b1，无冲突，新增两项提交：510767a�
 | order-show-ack-frontend:20261027.1 | sha256:137c6d07cfdde4236a2d5821fcfa1f705c8a9d3b578d67e7febfeba5c556ea02 |
 | order-show-ack-backend:20261027.1 | sha256:d4ae85c6577506fd3efd8161ccee6fcca544646ae1b84155f0419c7982216001 |
 
-平台均为 linux/amd64。前端 NEXT_PUBLIC_API_BASE=/api/v1，后端 SKIP_TESTS=false。保留 20261019.1、20261015.1、20261012 旧镜像；没有添加 CODING 标签或推送。
+平台均为 linux/amd64。前端 NEXT_PUBLIC_API_BASE=/api/v1，后端 SKIP_TESTS=false。保留 20261019.1、20261015.1、20261012 旧镜像；随后已添加对应 CODING 标签并成功推送，镜像内容未变。
+
+## CODING 推送交付
+
+2026-10-27 按用户授权推送两个已验证的本地镜像，未重新构建。前后端 docker push 均退出码 0；随后分别从仓库读取索引，摘要与上表完全一致，业务平台均为 linux/amd64。仓库已有层复用，缺少的层及新版本元数据已上传；没有覆盖 20261019.1 标签。
+
+前端：`g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261027.1`
+
+后端：`g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261027.1`
+
+本次仅上传镜像，没有更新测试环境容器、执行数据库脚本或修改云端数据。用户确认测试环境原版本为 20261019.1；部署团队后续同时更新前后端至 20261027.1，并按下文审核已有活动榜单配置及历史快照处理。真实云端部署和验收待完成。
 
 ## 验证结果
 
