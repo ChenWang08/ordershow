@@ -93,7 +93,9 @@ try {
  for(const path of ['/admin','/screen/'+code+'/dashboard','/screen/'+code+'/ranking','/screen/'+code+'/report']) {
   const response=await fetch('http://127.0.0.1:18030'+path);assert.equal(response.status,200);await response.text();pages.push(path);
  }
- const resultDir='outputs/ack-release-20261029.2';
+ const releaseTag=process.env.ACK_IMAGE_TAG??'20261029.3';
+ assert.match(releaseTag,/^\d{8}\.\d+$/);
+ const resultDir='outputs/ack-release-'+releaseTag;
  await mkdir(resultDir,{recursive:true});
  await writeFile(resultDir+'/events-api-result.json',JSON.stringify({assertions,timing,pages,replicas:2,poolLimitPerReplica:10,periodicRecovery:true,normalPublicationDuplicates:0,finalOrderQuantity:order.totalQuantity},null,2));
  console.log('PASS: '+assertions+' API checks, four screen APIs on both replicas, concurrent reads and writes, real Redis notifications, 15-second recovery, approval, withdrawal, historical views and reopen.');

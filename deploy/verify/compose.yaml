@@ -44,7 +44,7 @@ services:
       MINIO_ROOT_PASSWORD: isolated_smoke_minio_password
     tmpfs: [/data]
   backend-a:
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261029.2}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261029.3}
     environment: *backend-env
     ports: ["127.0.0.1:18081:8080"]
     depends_on:
@@ -52,7 +52,7 @@ services:
       redis: {condition: service_started}
       minio: {condition: service_started}
   backend-b:
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261029.2}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261029.3}
     environment:
       <<: *backend-env
       ORDER_SHOW_BOOTSTRAP_ENABLED: "false"
@@ -61,7 +61,7 @@ services:
     depends_on:
       backend-a: {condition: service_healthy}
   frontend:
-    image: order-show-ack-frontend:${ACK_IMAGE_TAG:-20261029.2}
+    image: order-show-ack-frontend:${ACK_IMAGE_TAG:-20261029.3}
     ports: ["127.0.0.1:18030:3000"]
   redis-cloud-check:
     profiles: [cloud-check]
@@ -70,7 +70,7 @@ services:
     tmpfs: [/data]
   cloud-check:
     profiles: [cloud-check]
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261029.2}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261029.3}
     ports: ["127.0.0.1:18083:8080"]
     environment:
       <<: *backend-env

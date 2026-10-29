@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {readFileSync,writeFileSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {randomUUID} from 'node:crypto';
 assert(process.argv.includes('--ack-smoke'));
@@ -42,5 +42,8 @@ for(const [type,size,phone] of [['GENERAL',180,'13900000801'],['SPECIAL',41,'139
  const values=execFileSync('docker',['exec','-e','MYSQL_PWD=isolated_smoke_password','order-show-ack-smoke-mysql-1','mysql','-uack_smoke','-N','ack_smoke','-e',sql],{encoding:'utf8'}).trim().split('\t').map(Number);
  assert.deepEqual(values,[size,2,size*2]);records.push({type,size,orderId:order.id,counts:values,scenarioMs:performance.now()-start});
 }
-writeFileSync('outputs/ack-release-20261029.2/h5-submission-result.json',JSON.stringify({checks,records},null,2));
+const releaseTag=process.env.ACK_IMAGE_TAG??'20261029.3';
+assert.match(releaseTag,/^\d{8}\.\d+$/);
+const resultDir='outputs/ack-release-'+releaseTag;mkdirSync(resultDir,{recursive:true});
+writeFileSync(resultDir+'/h5-submission-result.json',JSON.stringify({checks,records},null,2));
 console.log('PASS',JSON.stringify({checks,records}));
