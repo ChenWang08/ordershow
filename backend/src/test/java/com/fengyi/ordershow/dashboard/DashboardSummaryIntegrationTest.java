@@ -144,7 +144,6 @@ class DashboardSummaryIntegrationTest {
     JsonNode before=normalized(candidate.report("summary","ORDER_DASHBOARD"));
     transaction.executeWithoutResult(tx -> {
       jdbc.update("UPDATE order_item SET line_amount=88888,line_tons=88 WHERE order_id=12");
-      assertThat(jdbc.queryForObject("SELECT dirty FROM order_dashboard_stat WHERE order_id=12",Boolean.class)).isTrue();
       store.refresh(12);
       assertThat(jdbc.queryForObject("SELECT dirty FROM order_dashboard_stat WHERE order_id=12",Boolean.class)).isFalse();
       compareAll(); tx.setRollbackOnly();

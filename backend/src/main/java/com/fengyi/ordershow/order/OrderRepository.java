@@ -54,7 +54,9 @@ public class OrderRepository {
 
   List<OrderVersionView> versions(long activityId, long orderId) {
     requireOrderAccess(activityId, orderId);
-    return withVersionItems(jdbc.query("""
+    int currentVersion = jdbc.queryForObject(
+        "SELECT current_version_no FROM customer_order WHERE id = ?", Integer.class, orderId);
+    return withCurrentVersionItems(orderId, currentVersion, jdbc.query("""
         SELECT v.*, COALESCE(v.actor_identity_snapshot,u.display_name) submitted_by_admin_name FROM order_version v
         LEFT JOIN admin_user u ON u.id = v.submitted_by_admin_id
         WHERE v.order_id = ? ORDER BY v.version_no DESC
@@ -73,18 +75,47 @@ public class OrderRepository {
   List<ProductSnapshot> loadProducts(long activityId, long activityCustomerId, String customerType, String branchName, Set<Long> ids) {
     if (ids.isEmpty()) return List.of();
     String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
-    List<Object> args = new ArrayList<>(); args.add(activityId); args.add(customerType); args.add(customerType); args.add(normalize(branchName)); args.add(activityCustomerId); args.addAll(ids);
+    Integer dealerScopes = jdbc.queryForObject("""
+        SELECT EXISTS(SELECT 1 FROM activity_product_dealer_scope s
+          JOIN activity_product dp ON dp.id = s.activity_product_id WHERE dp.activity_id = ?)
+        """, Integer.class, activityId);
+    boolean dealerScoped = dealerScopes != null && dealerScopes == 1;
+    String dealerSql = dealerScoped ? """
+          AND (NOT EXISTS (SELECT 1 FROM activity_product_dealer_scope ds
+                 WHERE ds.activity_product_id = p.id AND ds.normalized_branch_name = dc.normalized_branch_name)
+            OR EXISTS (SELECT 1 FROM activity_product_dealer_member dm
+                 WHERE dm.activity_product_id = p.id AND dm.normalized_branch_name = dc.normalized_branch_name
+                   AND dm.customer_id = dc.customer_id AND dm.customer_type = dc.customer_type
+                   AND dm.normalized_dealer_full_name = dc.normalized_dealer_full_name))
+        """ : "";
+    List<Object> args = new ArrayList<>();
+    args.addAll(ids);
+    args.add(activityId); args.add(customerType); args.add(customerType); args.add(normalize(branchName)); args.add(activityCustomerId); args.addAll(ids);
     return jdbc.query("""
-        SELECT p.*, (SELECT sf.object_key FROM product_image pi JOIN stored_file sf ON sf.id = pi.stored_file_id
-          WHERE pi.activity_product_id = p.id AND pi.deleted_at IS NULL ORDER BY pi.is_primary DESC, pi.sort_no, pi.id LIMIT 1) image_key
-          , t.min_quantity price_tier_min_quantity, t.case_price price_tier_case_price,
-            t.pricing_mode price_tier_pricing_mode
-        FROM activity_product p JOIN activity_data_binding b ON b.current_version_id = p.data_version_id AND b.activity_id = p.activity_id AND b.data_type = 'PRODUCT'
+        SELECT p.*, img.object_key image_key, t.min_quantity price_tier_min_quantity, t.case_price price_tier_case_price,
+          t.pricing_mode price_tier_pricing_mode
+        FROM activity_product p
+        JOIN activity_data_binding b ON b.current_version_id = p.data_version_id AND b.activity_id = p.activity_id AND b.data_type = 'PRODUCT'
         LEFT JOIN activity_product_price_tier t ON t.activity_product_id = p.id
+        LEFT JOIN (
+          SELECT activity_product_id, object_key FROM (
+            SELECT pi.activity_product_id, sf.object_key,
+              ROW_NUMBER() OVER (PARTITION BY pi.activity_product_id ORDER BY pi.is_primary DESC, pi.sort_no, pi.id) rn
+            FROM product_image pi JOIN stored_file sf ON sf.id = pi.stored_file_id
+            WHERE pi.deleted_at IS NULL AND pi.activity_product_id IN (""" + placeholders + """
+            )
+          ) ranked WHERE rn = 1
+        ) img ON img.activity_product_id = p.id
         WHERE p.activity_id = ? AND (? = 'ALL' OR p.customer_type = ? OR p.customer_type = 'ALL') AND p.is_visible = TRUE AND p.is_orderable = TRUE
           AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id)
                OR EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id = p.id AND s.normalized_branch_name = ?))
-          """ + com.fengyi.ordershow.catalog.ProductDealerScopeService.ALLOWED_SQL + " AND p.id IN (" + placeholders + ") ORDER BY p.sort_no, p.id", this::mapProduct, args.toArray());
+          AND EXISTS (SELECT 1 FROM activity_customer dc
+            JOIN activity_data_binding db ON db.activity_id = dc.activity_id AND db.data_type = 'WHITELIST'
+              AND db.current_version_id = dc.data_version_id
+            WHERE dc.id = ? AND dc.activity_id = p.activity_id AND dc.is_active = TRUE
+              AND (p.customer_type = 'ALL' OR p.customer_type = dc.customer_type)
+        """ + dealerSql + """
+          ) AND p.id IN (""" + placeholders + ") ORDER BY p.sort_no, p.id", this::mapProduct, args.toArray());
   }
 
   CustomerSnapshot adminCustomer(long activityId, long activityCustomerId) {
@@ -177,8 +208,30 @@ public class OrderRepository {
     OrderWriteLock.acquire(jdbc, activityId, customerId);
   }
 
+  /** Freeze the still-current version before its lines or its version number change. An existing snapshot is left as-is. */
+  void snapshotCurrentVersion(long orderId) {
+    jdbc.update("""
+        INSERT INTO order_version_item(order_version_id, line_no, activity_product_id, material_code, material_name,
+          category_name, product_line, brand_name, variety_name, specification, case_pack, customer_type, rebate_status,
+          is_gift_box, primary_image_object_key, quantity, case_price, applied_tier_min_quantity, base_case_price,
+          base_price_quantity, tier_case_price, tier_min_quantity, tier_price_quantity, pricing_mode, line_amount,
+          ton_case_factor, line_tons)
+        SELECT v.id, i.line_no, i.activity_product_id, i.material_code, i.material_name, i.category_name, i.product_line,
+          i.brand_name, i.variety_name, i.specification, i.case_pack, o.customer_type, i.rebate_status, i.is_gift_box,
+          i.primary_image_object_key, i.quantity, i.case_price, i.applied_tier_min_quantity, i.base_case_price,
+          i.base_price_quantity, i.tier_case_price, i.tier_min_quantity, i.tier_price_quantity, i.pricing_mode,
+          i.line_amount, i.ton_case_factor, i.line_tons
+        FROM order_item i
+        JOIN customer_order o ON o.id = i.order_id
+        JOIN order_version v ON v.order_id = o.id AND v.version_no = o.current_version_no
+        WHERE i.order_id = ?
+          AND NOT EXISTS (SELECT 1 FROM order_version_item existing WHERE existing.order_version_id = v.id)
+        """, orderId);
+  }
+
   void saveRepriced(long activityId, long orderId, Map<Long, PricingResult> prices, long adminId,
                     String reason, String batchId) {
+    snapshotCurrentVersion(orderId);
     for (var entry : prices.entrySet()) {
       var p = entry.getValue();
       jdbc.update("""
@@ -204,21 +257,6 @@ public class OrderRepository {
         """, adminId, reason, batchId, orderId);
     long versionId = jdbc.queryForObject("SELECT id FROM order_version WHERE order_id=? AND request_idempotency_key=?", Long.class, orderId, batchId);
     snapshotVersionActor(versionId, adminId);
-    jdbc.update("""
-        INSERT INTO order_version_item(order_version_id,line_no,activity_product_id,material_code,material_name,
-          category_name,product_line,brand_name,variety_name,specification,case_pack,customer_type,rebate_status,
-          is_gift_box,primary_image_object_key,quantity,case_price,applied_tier_min_quantity,base_case_price,
-          base_price_quantity,tier_case_price,tier_min_quantity,tier_price_quantity,pricing_mode,line_amount,ton_case_factor,line_tons)
-        SELECT ?,i.line_no,i.activity_product_id,i.material_code,i.material_name,i.category_name,i.product_line,
-          i.brand_name,i.variety_name,i.specification,i.case_pack,old.customer_type,i.rebate_status,i.is_gift_box,
-          i.primary_image_object_key,i.quantity,i.case_price,i.applied_tier_min_quantity,i.base_case_price,
-          i.base_price_quantity,i.tier_case_price,i.tier_min_quantity,i.tier_price_quantity,i.pricing_mode,
-          i.line_amount,i.ton_case_factor,i.line_tons FROM order_item i
-        JOIN customer_order o ON o.id=i.order_id
-        JOIN order_version v ON v.order_id=o.id AND v.version_no=o.current_version_no-1
-        JOIN order_version_item old ON old.order_version_id=v.id AND old.line_no=i.line_no
-        WHERE i.order_id=?
-        """, versionId, orderId);
     int version = jdbc.queryForObject("SELECT current_version_no FROM customer_order WHERE id=?", Integer.class, orderId);
     insertOperation(activityId, orderId, "ADMIN_ADJUST", "ADMIN", adminId, version, reason, batchId.substring(0, Math.min(64, batchId.length())));
     refreshDashboardSummary(orderId);
@@ -358,7 +396,7 @@ public class OrderRepository {
     if (rows.size() != 1) throw DomainException.notFound("ORDER_NOT_FOUND", "订单不存在");
     OrderView base = rows.getFirst();
     List<ItemView> itemViews = assembleSubmittedItems(orderId, items);
-    List<OrderVersionView> versions = includeHistory ? withVersionItems(jdbc.query("""
+    List<OrderVersionView> versions = includeHistory ? withCurrentVersionItems(orderId, base.currentVersion(), jdbc.query("""
         SELECT v.*, COALESCE(v.actor_identity_snapshot,u.display_name) submitted_by_admin_name FROM order_version v
         LEFT JOIN admin_user u ON u.id = v.submitted_by_admin_id
         WHERE v.order_id = ? ORDER BY v.version_no DESC
@@ -398,7 +436,7 @@ public class OrderRepository {
   private OrderView withOrderDetails(OrderView order, boolean includeHistory) {
     long orderId = order.id();
     List<ItemView> items = jdbc.query("SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no", this::mapItem, orderId);
-    List<OrderVersionView> versions = includeHistory ? withVersionItems(jdbc.query("""
+    List<OrderVersionView> versions = includeHistory ? withCurrentVersionItems(orderId, order.currentVersion(), jdbc.query("""
         SELECT v.*, COALESCE(v.actor_identity_snapshot,u.display_name) submitted_by_admin_name FROM order_version v
         LEFT JOIN admin_user u ON u.id = v.submitted_by_admin_id
         WHERE v.order_id = ? ORDER BY v.version_no DESC
@@ -449,6 +487,19 @@ public class OrderRepository {
         v.submittedAt(), v.submittedSource(), v.submittedByAdminName(), v.reason(), List.copyOf(byVersion.getOrDefault(v.id(), List.of())))).toList();
   }
 
+  /** A version with no copied lines is the live version: project order_item. Older empty versions stay empty. */
+  List<OrderVersionView> withCurrentVersionItems(long orderId, int currentVersion, List<OrderVersionView> versions) {
+    List<OrderVersionView> loaded = withVersionItems(versions);
+    boolean projectCurrent = loaded.stream().anyMatch(version -> version.version() == currentVersion && version.items().isEmpty());
+    if (!projectCurrent) return loaded;
+    List<ItemView> currentItems = jdbc.query(
+        "SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no", this::mapItem, orderId);
+    return loaded.stream().map(version -> version.version() == currentVersion && version.items().isEmpty()
+        ? new OrderVersionView(version.id(), version.version(), version.totalQuantity(), version.totalTons(), version.totalAmount(),
+            version.submittedAt(), version.submittedSource(), version.submittedByAdminName(), version.reason(), currentItems)
+        : version).toList();
+  }
+
   IdempotencyResult beginIdempotency(long activityId, long actorId, String endpoint, String key, byte[] hash) {
     return beginIdempotency(activityId, "H5_CUSTOMER", actorId, endpoint, key, hash);
   }
@@ -479,18 +530,19 @@ public class OrderRepository {
         throw DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "同一幂等键不能用于不同请求");
       if (!"COMPLETED".equals(row.get("status")))
         throw DomainException.conflict("REQUEST_IN_PROGRESS", "相同请求正在处理中，请稍后重试");
-      // Legacy records cannot truthfully reproduce the original response. Never re-execute them.
-      if (!modern || !saved.hasNonNull("resultJson"))
-        throw DomainException.conflict("IDEMPOTENCY_RESULT_UNAVAILABLE", "此前提交已成功，请加载最新订单核对");
-      return json.readValue(saved.get("resultJson").asText(), OrderView.class);
+      // Rows written before the compact format still carry the original response. Prefer that over a later re-read.
+      if (modern && saved.hasNonNull("resultJson"))
+        return json.readValue(saved.get("resultJson").asText(), OrderView.class);
+      if (modern && saved.hasNonNull("orderId"))
+        return order(saved.get("orderId").asLong(), saved.path("includeHistory").asBoolean(false));
+      throw DomainException.conflict("IDEMPOTENCY_RESULT_UNAVAILABLE", "此前提交已成功，请加载最新订单核对");
     } catch (java.io.IOException error) { throw new IllegalStateException("Invalid submission snapshot",error); }
   }
 
-  void completeH5Submission(long activityId, long customerId, String key, OrderView result) {
+  void completeH5Submission(long activityId, long customerId, String key, OrderView result, boolean includeHistory) {
     try {
-      // Keep monetary decimals inside a JSON string; MySQL JSON numeric coercion must not round a snapshot.
-      String snapshot = json.writeValueAsString(Map.of("format",2,"orderId",result.id(),
-          "orderVersion",result.currentVersion(),"resultJson",json.writeValueAsString(result)));
+      String snapshot = json.writeValueAsString(Map.of("format", 2, "orderId", result.id(),
+          "orderVersion", result.currentVersion(), "includeHistory", includeHistory));
       int changed = jdbc.update("""
           UPDATE api_idempotency SET status='COMPLETED',http_status=200,resource_type='ORDER',
             resource_id=?,response_json=?,completed_at=UTC_TIMESTAMP(3)

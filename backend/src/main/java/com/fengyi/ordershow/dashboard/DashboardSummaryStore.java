@@ -33,8 +33,11 @@ public class DashboardSummaryStore {
   @Transactional(propagation = Propagation.MANDATORY)
   public void refresh(long orderId) {
     if (!enabled) return;
-    // Serialize with item-trigger invalidations BEFORE reading details. This also protects backfill.
-    jdbc.update("INSERT IGNORE INTO order_dashboard_stat(order_id, dirty) VALUES (?, TRUE)", orderId);
+    // One mark per order, after the detail writes. INSERT IGNORE would leave an existing clean row clean and skip the rebuild.
+    jdbc.update("""
+        INSERT INTO order_dashboard_stat(order_id, dirty) VALUES (?, TRUE)
+        ON DUPLICATE KEY UPDATE dirty = TRUE
+        """, orderId);
     var dirty = jdbc.queryForObject("SELECT dirty FROM order_dashboard_stat WHERE order_id = ? FOR UPDATE", Boolean.class, orderId);
     if (!Boolean.TRUE.equals(dirty)) return;
     jdbc.update("DELETE FROM order_dashboard_product_line_stat WHERE order_id = ?", orderId);

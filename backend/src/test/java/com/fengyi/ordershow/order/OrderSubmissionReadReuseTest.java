@@ -45,7 +45,7 @@ class OrderSubmissionReadReuseTest {
     verify(repository, never()).deleteCurrentItems(anyLong());
     verify(repository, never()).insertCurrentItems(anyLong(), anyList());
     verify(repository, never()).writeOutbox(anyLong(), anyLong(), anyString(), anyMap());
-    verify(repository).completeH5Submission(eq(2L), eq(3L), eq("key"), any());
+    verify(repository).completeH5Submission(eq(2L), eq(3L), eq("key"), any(), eq(false));
   }
 
   @Test void unchangedQuantitiesDoNotBypassAnUnorderableProduct() {
@@ -61,13 +61,32 @@ class OrderSubmissionReadReuseTest {
     verify(repository, never()).loadProducts(anyLong(), anyLong(), anyString(), anyString(), anySet());
   }
 
-  @Test void increaseUsesOneReadAndWritesBothSnapshotsAndEvent() {
+  @Test void increaseFreezesTheCurrentVersionBeforeReplacingItems() {
     service.submit("A", customer, new SubmitRequest(1, List.of(new SubmitItem(10, 6))), "key", "trace", false);
     verify(repository, times(1)).currentQuantities(7);
-    verify(repository).insertCurrentItems(eq(7L), argThat(items -> items.size() == 1 && items.getFirst().quantity() == 6 && items.getFirst().pricing().lineAmount().compareTo(new BigDecimal("600")) == 0));
-    verify(repository).insertVersionItems(anyLong(), argThat(items -> items.getFirst().quantity() == 6));
+    var ordered = inOrder(repository);
+    ordered.verify(repository).snapshotCurrentVersion(7L);
+    ordered.verify(repository).updateH5Order(eq(2), anyLong(), any(), any(), eq(current), eq(1));
+    ordered.verify(repository).deleteCurrentItems(7L);
+    ordered.verify(repository).insertCurrentItems(eq(7L), argThat(items -> items.size() == 1 && items.getFirst().quantity() == 6 && items.getFirst().pricing().lineAmount().compareTo(new BigDecimal("600")) == 0));
+    verify(repository, never()).insertVersionItems(anyLong(), anyList());
+    verify(repository).insertVersion(eq(2L), eq(7L), eq(2), eq(customer), eq(6L), any(), any(), eq("key"));
     verify(repository).writeOutbox(2, 7, "ORDER_SUBMITTED", Map.of("orderId", 7L, "version", 2));
+    verify(repository).completeH5Submission(eq(2L), eq(3L), eq("key"), any(), eq(false));
     verify(changes).rejectPending(eq(7L), anyString());
+  }
+
+  @Test void firstSubmitWritesCurrentItemsWithoutAVersionLineCopy() {
+    when(repository.lockOrder(2, 3)).thenReturn(null);
+    when(repository.insertH5Order(eq(2L), eq(customer), eq(6L), any(), any())).thenReturn(8L);
+    when(repository.orderAfterSubmission(eq(8L), anyList(), eq(false))).thenReturn(mock(OrderView.class));
+    service.submit("A", customer, new SubmitRequest(0, List.of(new SubmitItem(10, 6))), "key", "trace", false);
+    verify(repository).insertCurrentItems(eq(8L), argThat(items -> items.size() == 1 && items.getFirst().quantity() == 6));
+    verify(repository).insertVersion(eq(2L), eq(8L), eq(1), eq(customer), eq(6L), any(), any(), eq("key"));
+    verify(repository, never()).snapshotCurrentVersion(anyLong());
+    verify(repository, never()).insertVersionItems(anyLong(), anyList());
+    verify(repository, never()).deleteCurrentItems(anyLong());
+    verify(repository).completeH5Submission(eq(2L), eq(3L), eq("key"), any(), eq(false));
   }
 
   @Test void removalIsAReductionButAddingANewProductIsNot() {

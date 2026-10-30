@@ -1088,24 +1088,6 @@ CREATE TABLE order_dashboard_product_line_stat (
   CONSTRAINT fk_dashboard_line_order FOREIGN KEY (order_id) REFERENCES customer_order(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
--- Mark only the changed order. This also protects reads after maintenance SQL or an older app write.
--- Do not aggregate per detail row: normal writes rebuild once at the end of the business transaction.
-CREATE TRIGGER dashboard_item_insert AFTER INSERT ON order_item FOR EACH ROW
-  INSERT INTO order_dashboard_stat(order_id, dirty) VALUES (NEW.order_id, TRUE)
-  ON DUPLICATE KEY UPDATE dirty = TRUE;
-
-CREATE TRIGGER dashboard_item_delete AFTER DELETE ON order_item FOR EACH ROW
-  INSERT INTO order_dashboard_stat(order_id, dirty) VALUES (OLD.order_id, TRUE)
-  ON DUPLICATE KEY UPDATE dirty = TRUE;
-
-DELIMITER $$
-CREATE TRIGGER dashboard_item_update AFTER UPDATE ON order_item FOR EACH ROW
-BEGIN
-  INSERT INTO order_dashboard_stat(order_id, dirty) VALUES (OLD.order_id, TRUE)
-  ON DUPLICATE KEY UPDATE dirty = TRUE;
-  IF NEW.order_id <> OLD.order_id THEN
-    INSERT INTO order_dashboard_stat(order_id, dirty) VALUES (NEW.order_id, TRUE)
-    ON DUPLICATE KEY UPDATE dirty = TRUE;
-  END IF;
-END$$
-DELIMITER ;
+-- V041 drops the per-row order_item triggers. When the summary reader is enabled, DashboardSummaryStore.refresh
+-- marks this order dirty once at the end of the business transaction and rebuilds. Raw SQL that changes order_item
+-- does not mark the order dirty; use DashboardSummaryCommand (check / rebuild / repair).

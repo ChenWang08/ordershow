@@ -34,8 +34,10 @@ class TonnageSyncServiceTest {
     var sequence = inOrder(orders, tonnage, dashboards);
     sequence.verify(orders).lockPricing(7);
     sequence.verify(tonnage).submittedItems(7, 21);
+    sequence.verify(orders).snapshotCurrentVersion(101);
     sequence.verify(tonnage).updateItem(10, new BigDecimal("5"), new BigDecimal("2.000000"));
     sequence.verify(tonnage).updateOrderTotal(101);
+    sequence.verify(orders).refreshDashboardSummary(101);
     sequence.verify(orders).writeOutbox(7, 101, "ORDER_TONS_UPDATED", Map.of("orderId", 101L));
     sequence.verify(dashboards).refreshFinalSnapshots(7);
     sequence.verifyNoMoreInteractions();
@@ -47,6 +49,7 @@ class TonnageSyncServiceTest {
 
     assertThat(service.sync(7, 21, null)).isEqualTo(1);
 
+    verify(orders).snapshotCurrentVersion(101);
     verify(tonnage).updateItem(10, null, new BigDecimal("0.000000"));
     verify(tonnage).updateOrderTotal(101);
     verify(orders).writeOutbox(7, 101, "ORDER_TONS_UPDATED", Map.of("orderId", 101L));
@@ -61,6 +64,7 @@ class TonnageSyncServiceTest {
 
     verify(tonnage, never()).updateItem(anyLong(), any(), any());
     verify(tonnage, never()).updateOrderTotal(anyLong());
+    verify(orders, never()).snapshotCurrentVersion(anyLong());
     verify(orders, never()).writeOutbox(anyLong(), anyLong(), anyString(), any());
     verifyNoInteractions(dashboards);
   }
@@ -72,6 +76,7 @@ class TonnageSyncServiceTest {
     assertThat(service.sync(7, 21, null)).isZero();
 
     verify(tonnage, never()).updateItem(anyLong(), any(), any());
+    verify(orders, never()).snapshotCurrentVersion(anyLong());
     verifyNoInteractions(dashboards);
   }
 
@@ -83,6 +88,7 @@ class TonnageSyncServiceTest {
 
     org.assertj.core.api.Assertions.assertThatThrownBy(() -> service.sync(7, 21, new BigDecimal("5"))).isSameAs(failure);
 
+    verify(orders).snapshotCurrentVersion(101);
     verify(tonnage).updateItem(10, new BigDecimal("5"), new BigDecimal("2.000000"));
     verify(orders, never()).writeOutbox(anyLong(), anyLong(), anyString(), any());
     verifyNoInteractions(dashboards);

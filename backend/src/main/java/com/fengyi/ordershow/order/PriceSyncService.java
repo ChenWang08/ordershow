@@ -45,6 +45,7 @@ public class PriceSyncService {
           && Objects.equals(price.pricingMode(), row.pricingMode())
           && samePriceValue(price.lineAmount(), row.lineAmount())) continue;
 
+      orders.snapshotCurrentVersion(row.orderId());
       prices.updateItem(row.id(), price);
       prices.updateOrderTotal(row.orderId());
       orders.refreshDashboardSummary(row.orderId());
