@@ -1,6 +1,41 @@
 # 压力与性能测试
 
+2026-10-30 最新本机结果见[功能、汇总与混合压测报告](../../docs/testing/local-summary-validation-2026-10-30.md)：开启汇总的 10 写＋5 读、90 秒及 5 分钟通过现有脚本门槛；关闭模式对照提交未达标。后续按开启汇总测试，旧失败结果保留。读脚本没有延迟阈值，不能把混合脚本通过说成所有看板低于 1 秒。日常系统已另行[本地部署](../../docs/deployment/2026-10-30-summary-local.md)，禁止将压测入口改指日常库。
+
+该轮显式采用 `LOAD_DASHBOARD_SUMMARY_ENABLED=true`、`LOAD_HTTP_MAX_THREADS=60`、MySQL 512MiB 缓冲池；缓冲池由忽略目录中的本机测试覆盖配置设置，基础 load Compose 仍只有慢查询配置。复跑时先核对实际容器配置，不要把基础 Compose 的默认值当成这轮实测值。V041 下曾关闭汇总且有写入的旧测试库，应先 `repair`、`check`，再恢复开启，不能仅翻转开关。
+
+看板汇总改造可使用明确隔离的 `order-show-load-summary` 项目、8480端口和 `outputs/load-summary`。`capacity.mjs` 支持该项目，`summary-read.mjs <fixture-label> <并发数1..20> <秒数5..300>` 读取金额榜、吨数榜、看板、战报并保存延迟与错误。与持续提交叠加时，分别报告读取及提交指标；步骤和边界见 [汇总层验收](../../docs/testing/dashboard-summary-2026-10-29.md)。
+
+`capacity.mjs submit-only <fixture-label> <并发数> <时长>` 仅用于隔离诊断：执行当前订单→增加数量提交→确认，省略草稿保存，仍校验版本/金额/数量/审计且不自动重试失败。其结果不能替代含草稿的 `sustain` 完整流程验收。报告记录汇总开关和挂载jar的SHA-256；压测引擎提前终止时保留服务日志及InnoDB快照，不把剩余只读时段当成持续混合负载。
+
+草稿修复后的完整混合入口：设置上述summary项目/8480/结果目录后执行 `node tests/load/summary-mixed.mjs summary-main 90`，同启10个完整持续下单客户端和5个看板客户端；秒数可为5～300。两边实际起止时间仍以各自结果为准。先检查每轮结果，再决定是否重复或延长，不因脚本退出就默认通过。提交结果新增草稿死锁/重试/耗尽/恢复的计数增量，指标缺失记null而非0。
+
 2026-10-29 白名单验证与大订单提交的代码优化、独立快照对照和实时回归见[本轮优化报告](../../docs/testing/h5-verification-submit-performance-2026-10-29.md)。`h5-screen-live.mjs` 只连接经过 `lib.mjs` 校验的隔离压测项目，使用当前前端刷新队列及真实 SSE，持续读取看板、金额/吨数排行和战报。调用形式为 `node tests/load/h5-screen-live.mjs <合成夹具标签> <观察毫秒数> <结果名称>`；写入负载必须先于观察窗口结束，脚本会在结束时核对四类页面总数、金额、数量、吨数与数据库一致。结果不包含浏览器绘制时间。
+
+2026-10-29本轮完整结果见[最新综合/特渠混合容量报告](../../docs/testing/h5-capacity-2026-10-29.md)。请区分已验证客户首次下单、包含验证的完整首次流程、持续高频变更和纯手机号验证，避免沿用9月10商品/单的200用户结果解释当前180/41商品/单场景。
+
+2026-10-29 最新源码的综合/特渠混合容量测试使用 `capacity.mjs`、`capacity-scenario.js` 和 `capacity-suite.mjs`。固定隔离项目 `order-show-load-20261029`、本地端口8380及 `outputs/load-20261029`；不连接业务库。每个新样本包含综合1072/特渠548名客户，同一活动内每单分别提交180/41种商品，数量均1。夹具包含合成图片元数据，不下载图片；统一箱价100，不代表真实阶梯价、分公司商品限制或线上数据库快照。`full`执行活动信息→手机号验证→商品→草稿→首次下单→确认，`consume`使用预置会话执行草稿→首次下单→确认，`verify`反复真实验证手机号并写入会话，`sustain`循环读取订单、仅增加全部商品数量后保存草稿/提交/确认。持续场景无思考时间，不能解释为普通在线人数。
+
+新脚本使用 `includeHistory=false`，不自动重试失败请求；分别统计两类客户。验收：verify/商品/查单P95<500ms、活动信息P95<300ms、草稿/下单P95<1000ms、链失败率<1%、无5xx或数据错误；两类客户的单项也须通过。首次下单还要求1620名样本全部完成，防止漏发/提前停止。SQL核对提交与版本增量、验证与会话增量、审计完整/唯一、当前明细数量与金额。单档样本结束即停止，不将短波次称为持续容量；边界档另做持续复测。`journey`持续执行活动信息→验证→商品→当前订单→草稿→增加数量提交→确认，使用固定且不同的客户，所有数量只增不减；这与每名客户仅一次首次下单分开报告。每档使用新活动/客户，但同一数据库持续累积历史，属于本机限额下的容量观测，不是相同数据库快照的严格A/B。
+
+```powershell
+$env:LOAD_PROJECT='order-show-load-20261029'
+$env:LOAD_RESULTS_ROOT='./outputs/load-20261029'
+$env:LOAD_BACKEND_PORT='8380'
+# 确认已从当前源码构建、启动专用后端及专属数据库后执行
+node tests/load/capacity-suite.mjs full
+node tests/load/capacity-suite.mjs verify
+# 可选第三个参数为复跑后缀，避免覆盖之前样本，例如 verify r2
+node tests/load/capacity-suite.mjs consume
+# 持续复测先用新label生成1620样本，再运行sustain；不复用首次下单样本
+node tests/load/capacity.mjs seed sustain-example 1620
+node tests/load/capacity.mjs smoke sustain-example
+node tests/load/capacity.mjs sustain sustain-example 10 5m
+# 含每轮真实手机号验证和商品读取的持续链路：
+node tests/load/capacity.mjs journey sustain-example 10 5m
+```
+
+上述套件保留失败档并停止继续升压，最多做两次区间细化；同名样本拒绝覆盖，复跑请使用新标签。输出夹具含测试会话，保持在忽略目录内。首次构建/挂载等基础设施失败不计作容量测量；完整原始报告、日志、监控与对账随各run保留。
 
 2026-09-10虚拟线程、H5写入隔离和全新环境A/B见[高频优化报告](../../docs/testing/high-frequency-admission-report.md)。可用`LOAD_PROJECT`、`LOAD_BACKEND_PORT`、`LOAD_RESULTS_ROOT`和`LOAD_BACKEND_IMAGE`创建互不共享数据库卷/结果的隔离对照项目；项目名必须以`order-show-load`开头，结果必须位于`outputs/load-*`。`renew-sessions.mjs`只续期固定LOAD活动和既有虚构会话，不改订单/版本。
 
@@ -10,7 +45,7 @@
 
 长稳可并行运行`node tests/load/soak-watch.mjs 3660`，约每30秒只读检查待发布事件年龄和看板API，异常即退出失败；这不等于连续SSE连接或浏览器渲染验证。SSE短探针必须在写负载前后运行，避免其额外写入污染版本计数。
 
-最新H5高频诊断、批量写入和线程上限对照见[H5优化报告](../../docs/testing/h5-throughput-optimization-report.md)。当前后端HTTP线程默认上限40，数据库连接仍20；线程数不是在线人数。需要复现旧200线程配置时，设置`$env:LOAD_HTTP_MAX_THREADS='200'`后重建隔离backend容器，测试完恢复默认，不改变业务Compose。
+历史H5高频诊断、批量写入和线程上限对照见[H5优化报告](../../docs/testing/h5-throughput-optimization-report.md)。该历史阶段使用HTTP线程40、数据库连接20；当前 load Compose 默认HTTP线程40、数据库池60，本轮显式覆盖HTTP线程为60。线程数不是在线人数。需要复现旧200线程配置时，设置`$env:LOAD_HTTP_MAX_THREADS='200'`后重建隔离backend容器，测试完恢复本轮明确配置，不改变业务Compose。
 
 千人场景和60分钟长稳见[执行说明](../../docs/testing/thousand-peak-soak-plan.md)及[本轮结果](../../docs/testing/thousand-peak-soak-report.md)。运行入口为`node tests/load/thousand-soak.mjs`；首次下单样本必须未下过单，重跑前按说明准备隔离夹具。
 

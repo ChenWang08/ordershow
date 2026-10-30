@@ -19,10 +19,12 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 @Service
+@org.springframework.transaction.annotation.Transactional(isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
 public class DashboardService {
   private final JdbcTemplate jdbc;
   private final ActivityService activities;
   private final ObjectMapper json;
+  private DashboardSummaryStore summaries;
 
   public enum RankingMetric {
     AMOUNT, TONS;
@@ -36,6 +38,16 @@ public class DashboardService {
 
   public DashboardService(JdbcTemplate jdbc, ActivityService activities, ObjectMapper json) {
     this.jdbc = jdbc; this.activities = activities; this.json = json;
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public DashboardService(JdbcTemplate jdbc, ActivityService activities, ObjectMapper json, DashboardSummaryStore summaries) {
+    this(jdbc, activities, json);
+    this.summaries = summaries;
+  }
+
+  private boolean useSummary(long activityId) {
+    return summaries != null && summaries.useSummary(activityId);
   }
 
   public Dashboard ranking(String activityCode) {
@@ -111,9 +123,6 @@ public class DashboardService {
     boolean tons = metric == RankingMetric.TONS;
     // A grouped CTE is materialized once for both rankings, after selecting this activity's orders.
     // Preserve V036's distinction between missing weights and a genuinely calculated zero weight.
-    String weight = tons
-        ? "SUM(CASE WHEN i.ton_case_factor IS NOT NULL OR i.line_tons > 0 THEN i.line_tons END)"
-        : "COALESCE(SUM(i.line_tons), 0)";
     String join = tons ? "JOIN" : "LEFT JOIN";
     String companyOrder = tons ? "t.tons DESC, o.total_amount DESC, o.last_submitted_at, o.id"
         : "o.total_amount DESC, o.last_submitted_at, o.id";
@@ -125,8 +134,7 @@ public class DashboardService {
             AND (? IS NULL OR ? = '' OR customer_type = ?)
             AND (? IS NULL OR ? = '' OR region_code = ?)
         ), item_tons AS (
-          SELECT i.order_id, %s tons, SUM(i.line_tons) all_tons
-          FROM order_item i JOIN scoped_orders o ON o.id = i.order_id GROUP BY i.order_id
+          %s
         ), company_ranks AS (
           SELECT ROW_NUMBER() OVER (ORDER BY %s) rank_no,
             o.dealer_full_name_snapshot name, o.branch_name_snapshot branch,
@@ -146,7 +154,7 @@ public class DashboardService {
         SELECT 2 section, 0 rank_no, NULL name, NULL branch, NULL amount, NULL quantity, COALESCE(SUM(all_tons), 0) tons
         FROM item_tons
         ORDER BY section, rank_no
-        """.formatted(weight, companyOrder, join, tons ? "WHERE t.tons IS NOT NULL" : "", join,
+        """.formatted(DashboardSummaryStore.tonsSource(useSummary(activity.id()), tons), companyOrder, join, tons ? "WHERE t.tons IS NOT NULL" : "", join,
             tons ? "HAVING SUM(t.tons) IS NOT NULL" : "", branchOrder);
     List<RankRow> companies = new ArrayList<>();
     List<RankRow> branches = new ArrayList<>();
@@ -202,11 +210,15 @@ public class DashboardService {
         GROUP BY region_code ORDER BY SUM(total_amount) DESC
         """, (rs, rowNum) -> new RegionTotal(rs.getString(1), rs.getBigDecimal(2), rs.getLong(3)), dashboard.activityId());
     List<CustomerTypeTotal> giftTypes = jdbc.query("""
+        WITH scoped_orders AS (
+          SELECT id,customer_type FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED'
+        ), line_items AS (%s)
         SELECT o.customer_type, COUNT(DISTINCT o.id), SUM(i.line_amount), SUM(i.quantity)
-        FROM order_item i JOIN customer_order o ON o.id = i.order_id
-        WHERE o.activity_id = ? AND o.status = 'SUBMITTED' AND i.is_gift_box = TRUE
+        FROM line_items i JOIN scoped_orders o ON o.id = i.order_id
+        WHERE i.is_gift_box = TRUE
         GROUP BY o.customer_type ORDER BY o.customer_type
-        """, (rs, rowNum) -> new CustomerTypeTotal(rs.getString(1), rs.getLong(2), rs.getBigDecimal(3), rs.getLong(4)), dashboard.activityId());
+        """.formatted(DashboardSummaryStore.lineSource(useSummary(activity.id()))),
+        (rs, rowNum) -> new CustomerTypeTotal(rs.getString(1), rs.getLong(2), rs.getBigDecimal(3), rs.getLong(4)), dashboard.activityId());
     return new Report(reportCode, dashboard, types, regions, lines.general(), lines.special(), giftTypes,
         topCustomers(dashboard.activityId(), "GENERAL"), topCustomers(dashboard.activityId(), "SPECIAL"),
         trend, lines.regions(), generalRegions(activity, regions, lines.regions(), lines.general()));
@@ -220,10 +232,11 @@ public class DashboardService {
     // Collapse detail rows once; subsequent channel/region groupings only read this small grouped result.
     // Group on the original nullable keys before applying display labels, as the individual queries did.
     jdbc.query("""
-        WITH product_totals AS (
+        WITH scoped_orders AS (
+          SELECT id,customer_type,region_code FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED'
+        ), line_items AS (%s), product_totals AS (
           SELECT o.customer_type, o.region_code, i.product_line, SUM(i.line_amount) amount, SUM(i.quantity) quantity
-          FROM order_item i JOIN customer_order o ON o.id = i.order_id
-          WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
+          FROM line_items i JOIN scoped_orders o ON o.id = i.order_id
           GROUP BY o.customer_type, o.region_code, i.product_line
         )
         SELECT * FROM (
@@ -242,7 +255,7 @@ public class DashboardService {
           FROM product_totals WHERE customer_type = 'GENERAL' GROUP BY region_code, product_line
         ) report_lines
         ORDER BY section, region_sort, amount DESC, CASE WHEN section = 3 THEN product_sort END
-        """, rs -> {
+        """.formatted(DashboardSummaryStore.lineSource(useSummary(activityId))), rs -> {
       int section = rs.getInt("section");
       if (section == 3) {
         regions.add(new RegionProductLineTotal(rs.getString("region_code"), rs.getString("product_line"),
@@ -377,13 +390,16 @@ public class DashboardService {
 
   private List<ProductLineTotal> productLines(long activityId, String customerType, String regionCode) {
     return jdbc.query("""
+        WITH scoped_orders AS (
+          SELECT id FROM customer_order WHERE activity_id = ? AND status = 'SUBMITTED'
+            AND (? IS NULL OR ? = '' OR customer_type = ?)
+            AND (? IS NULL OR ? = '' OR region_code = ?)
+        ), line_items AS (%s)
         SELECT COALESCE(product_line, '其他') product_line, SUM(line_amount) amount, SUM(quantity) quantity
-        FROM order_item i JOIN customer_order o ON o.id = i.order_id
-        WHERE o.activity_id = ? AND o.status = 'SUBMITTED'
-          AND (? IS NULL OR ? = '' OR o.customer_type = ?)
-          AND (? IS NULL OR ? = '' OR o.region_code = ?)
+        FROM line_items
         GROUP BY product_line ORDER BY amount DESC
-        """, (rs, rowNum) -> new ProductLineTotal(rs.getString(1), rs.getBigDecimal(2), rs.getLong(3)), activityId,
+        """.formatted(DashboardSummaryStore.lineSource(useSummary(activityId))),
+        (rs, rowNum) -> new ProductLineTotal(rs.getString(1), rs.getBigDecimal(2), rs.getLong(3)), activityId,
         customerType, customerType, customerType, regionCode, regionCode, regionCode);
   }
 

@@ -1,0 +1,10 @@
+services:
+  backend-test:
+    image: eclipse-temurin:21-jre
+    entrypoint: ["java", "-jar", "/app/app.jar"]
+    volumes:
+      - ./backend/target/order-show-backend-0.1.0.jar:/app/app.jar:ro
+    environment:
+      DASHBOARD_SUMMARY_ENABLED: "true"
+      SPRING_FLYWAY_USER: root
+      SPRING_FLYWAY_PASSWORD: e2e_root_only_not_for_business

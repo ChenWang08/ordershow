@@ -155,10 +155,18 @@
       "sha256": "34e898edc743807d838ff6bf8804c1b266d0b10255b914d05182ac981d418227"
     },
     {
+      "file": "V040__dashboard_order_summaries.sql",
+      "sha256": "092778629bce9694ffed537bb600b3df1f3039a780292704103a936af199af92"
+    },
+    {
+      "file": "V041__drop_order_item_dashboard_triggers.sql",
+      "sha256": "70cc7fae805dce2e54d67e40f1751610b983fb97b6251fcb1e0816fb07834f4a"
+    },
+    {
       "file": "V037__unify_product_completeness.java",
       "action": "EMPTY_DATABASE_NO_OP",
       "sha256": "059c82a580cf0f64e6603360b3f68340f19dc5a1552bedef3e9f0b42922906c1"
     }
   ],
-  "bundleSha256": "102a13376064a9ac311f3aee5e7e37ed75d62b7490790baf998a726bc0628961"
+  "bundleSha256": "d8eb5fd1fa344af9a9aec48e00d2206c241694abd0e496f700b6b969f35a4bf2"
 }

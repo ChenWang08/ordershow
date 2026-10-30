@@ -30,8 +30,10 @@ public class TonnageSyncService {
     for (var row : rows) {
       BigDecimal lineTons = calculateTons(row.quantity(), factor);
       if (samePriceValue(factor, row.tonCaseFactor()) && samePriceValue(lineTons, row.lineTons())) continue;
+      orders.snapshotCurrentVersion(row.orderId());
       tonnage.updateItem(row.id(), factor, lineTons);
       tonnage.updateOrderTotal(row.orderId());
+      orders.refreshDashboardSummary(row.orderId());
       orders.writeOutbox(activityId, row.orderId(), "ORDER_TONS_UPDATED", Map.of("orderId", row.orderId()));
       count++;
     }

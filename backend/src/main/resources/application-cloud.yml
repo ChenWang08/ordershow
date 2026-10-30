@@ -4,6 +4,9 @@ spring:
     url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+      minimum-idle: ${DB_POOL_MIN_IDLE:2}
   flyway:
     enabled: false
   data:
@@ -22,6 +25,9 @@ management:
         readiness:
           include: readinessState,db,redis
 order-show:
+  # Per-instance identity caches cannot immediately observe another replica's revocation.
+  # Keep shared database authority by default; this is NOT the dashboard summary switch.
+  h5-session-cache-ttl-ms: 0
   bootstrap-enabled: false
   legacy-migration-enabled: false
   price-backfill-enabled: false

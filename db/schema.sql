@@ -1065,3 +1065,29 @@ CREATE TABLE order_change_request (
   original_order_json JSON NULL,
   UNIQUE KEY uk_order_change_pending (pending_order_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Derived data only. Existing orders deliberately remain on the raw-query fallback until rebuilt.
+CREATE TABLE order_dashboard_stat (
+  order_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  dirty BOOLEAN NOT NULL DEFAULT TRUE,
+  item_count BIGINT NOT NULL DEFAULT 0,
+  all_tons DECIMAL(38,6) NULL,
+  eligible_tons DECIMAL(38,6) NULL,
+  rebuilt_at DATETIME(3) NULL,
+  CONSTRAINT fk_dashboard_stat_order FOREIGN KEY (order_id) REFERENCES customer_order(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE order_dashboard_product_line_stat (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  order_id BIGINT UNSIGNED NOT NULL,
+  product_line VARCHAR(200) NULL,
+  is_gift_box BOOLEAN NOT NULL,
+  line_amount DECIMAL(38,2) NULL,
+  quantity DECIMAL(38,0) NULL,
+  KEY idx_dashboard_line_order (order_id),
+  CONSTRAINT fk_dashboard_line_order FOREIGN KEY (order_id) REFERENCES customer_order(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- V041 drops the per-row order_item triggers. When the summary reader is enabled, DashboardSummaryStore.refresh
+-- marks this order dirty once at the end of the business transaction and rebuilds. Raw SQL that changes order_item
+-- does not mark the order dirty; use DashboardSummaryCommand (check / rebuild / repair).

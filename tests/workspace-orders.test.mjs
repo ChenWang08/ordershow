@@ -74,6 +74,20 @@ const customer = { id: 12, customerType: "GENERAL", branchName: "测试分公司
 const product = { id: 21, materialName: "测试商品", casePrice: 100, customerType: "GENERAL", branchScope: [], orderable: true };
 const runtimeOrder = { id: 31, activityCustomerId: 12, orderNo: "TEST-ORDER", customerType: "GENERAL", dealerFullName: "测试客户", phone: "13800000000", currentVersion: 2, lockVersion: 3, totalQuantity: 2, totalAmount: 200, status: "SUBMITTED", versions: [], operations: [], items: [{ productId: 21, materialName: "测试商品", quantity: 2, casePrice: 100, lineAmount: 200 }] };
 
+test("history display ignores storage-row IDs but preserves product identity and business values", () => {
+  const { toOrderRecord } = loadModule("app/components/orders/order-domain.ts", { "../../api": { ApiError: class extends Error {} } });
+  const original = { ...runtimeOrder, versions: [{ id: 10, version: 1, totalQuantity: 2, totalAmount: 200,
+    submittedSource: "H5", submittedAt: "2026-10-30T01:00:00Z", items: [{ ...runtimeOrder.items[0], id: 9 }] }] };
+  const copied = structuredClone(original);
+  copied.versions[0].items[0].id = 23;
+  assert.deepEqual(toOrderRecord(original), toOrderRecord(copied));
+  for (const [field, value] of [["productId", 22], ["quantity", 3], ["casePrice", 110], ["lineAmount", 220]]) {
+    const changed = structuredClone(copied);
+    changed.versions[0].items[0][field] = value;
+    assert.notDeepEqual(toOrderRecord(original).versions, toOrderRecord(changed).versions, `${field} must remain visible`);
+  }
+});
+
 function editorHarness(overrides = {}, confirm = () => true) {
   const calls = [];
   const adapter = stateAdapter();

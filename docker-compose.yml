@@ -22,7 +22,7 @@ services:
       MYSQL_PASSWORD: ${DB_PASSWORD:-order_show_local}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-order_show_root_local}
       TZ: Asia/Shanghai
-    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--innodb-buffer-pool-size=536870912"]
     ports:
       - "${MYSQL_PORT:-3306}:3306"
     volumes:
@@ -71,13 +71,15 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      DB_URL: jdbc:mysql://mysql:3306/order_show?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false
+      DB_URL: jdbc:mysql://mysql:3306/order_show?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048&rewriteBatchedStatements=true
       DB_USERNAME: order_show
-      HTTP_MAX_THREADS: ${HTTP_MAX_THREADS:-40}
-      H5_WARMUP_ENABLED: ${H5_WARMUP_ENABLED:-true}
-      H5_WRITE_CONCURRENCY: ${H5_WRITE_CONCURRENCY:-12}
-      VIRTUAL_THREADS_ENABLED: ${VIRTUAL_THREADS_ENABLED:-true}
       DB_PASSWORD: ${DB_PASSWORD:-order_show_local}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-60}
+      HTTP_MAX_THREADS: ${HTTP_MAX_THREADS:-60}
+      H5_WARMUP_ENABLED: ${H5_WARMUP_ENABLED:-true}
+      H5_WRITE_CONCURRENCY: ${H5_WRITE_CONCURRENCY:-36}
+      DASHBOARD_SUMMARY_ENABLED: ${DASHBOARD_SUMMARY_ENABLED:-false}
+      VIRTUAL_THREADS_ENABLED: ${VIRTUAL_THREADS_ENABLED:-true}
       REDIS_HOST: redis
       S3_ENDPOINT: http://minio:9000
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-order_show_minio}

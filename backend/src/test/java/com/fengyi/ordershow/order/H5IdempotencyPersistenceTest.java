@@ -33,7 +33,7 @@ class H5IdempotencyPersistenceTest {
     return connection;
   }
 
-  @Test void rollbackDoesNotLeaveAPoisonedKeyAndReplayReturnsTheStoredSnapshot() throws Exception {
+  @Test void rollbackDoesNotLeaveAPoisonedKeyAndCompactResultPreservesRequestIdentity() throws Exception {
     try (var connection=connection()) {
       var source = new SingleConnectionDataSource(connection,true);
       var jdbc = new JdbcTemplate(source);
@@ -44,23 +44,31 @@ class H5IdempotencyPersistenceTest {
       byte[] hash = H5SubmitFingerprint.digest(body,false);
       var result = json.readValue("{\"id\":11,\"currentVersion\":1,\"totalAmount\":1234567890123456.78,\"items\":[],\"versions\":[],\"operations\":[]}",OrderService.OrderView.class);
       assertThrows(IllegalStateException.class,() -> tx.execute(status -> {
-        assertNull(repository.beginH5Submission(1,3,"k",hash,hash));
-        repository.completeH5Submission(1,3,"k",result);
+        assertNull(repository.beginH5Submission(1,3,"k",hash,hash,false));
+        repository.completeH5Submission(1,3,"k",result,false);
         throw new IllegalStateException("fail before commit");
       }));
       assertEquals(0,jdbc.queryForObject("SELECT COUNT(*) FROM api_idempotency",Integer.class));
       tx.executeWithoutResult(status -> {
-        assertNull(repository.beginH5Submission(1,3,"k",hash,hash));
-        repository.completeH5Submission(1,3,"k",result);
+        assertNull(repository.beginH5Submission(1,3,"k",hash,hash,false));
+        repository.completeH5Submission(1,3,"k",result,false);
       });
-      assertEquals(result,tx.execute(status -> repository.beginH5Submission(1,3,"k",hash,hash)));
       assertEquals(1,jdbc.queryForObject("SELECT COUNT(*) FROM api_idempotency",Integer.class));
+      assertEquals("2",jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(response_json,'$.format')) FROM api_idempotency",String.class));
+      assertEquals("11",jdbc.queryForObject("SELECT JSON_UNQUOTE(JSON_EXTRACT(response_json,'$.orderId')) FROM api_idempotency",String.class));
+      assertEquals(0,jdbc.queryForObject("SELECT JSON_CONTAINS_PATH(response_json,'one','$.resultJson') FROM api_idempotency",Integer.class));
       var changed=H5SubmitFingerprint.digest(new OrderService.SubmitRequest(1,body.items()),false);
       assertEquals("IDEMPOTENCY_KEY_REUSED",assertThrows(DomainException.class,
-          () -> tx.execute(status -> repository.beginH5Submission(1,3,"k",changed,hash))).code());
+          () -> tx.execute(status -> repository.beginH5Submission(1,3,"k",changed,hash,false))).code());
+      assertEquals("IDEMPOTENCY_KEY_REUSED",assertThrows(DomainException.class,
+          () -> tx.execute(status -> repository.beginH5Submission(1,3,"k",H5SubmitFingerprint.digest(body,true),hash,true))).code());
+      jdbc.update("UPDATE api_idempotency SET status='PROCESSING'");
+      assertEquals("REQUEST_IN_PROGRESS",assertThrows(DomainException.class,
+          () -> tx.execute(status -> repository.beginH5Submission(1,3,"k",hash,hash,false))).code());
+      jdbc.update("UPDATE api_idempotency SET status='COMPLETED'");
       jdbc.update("UPDATE api_idempotency SET response_json=JSON_OBJECT('orderId',11)");
       assertEquals("IDEMPOTENCY_RESULT_UNAVAILABLE",assertThrows(DomainException.class,
-          () -> tx.execute(status -> repository.beginH5Submission(1,3,"k",hash,hash))).code());
+          () -> tx.execute(status -> repository.beginH5Submission(1,3,"k",hash,hash,false))).code());
     }
   }
 

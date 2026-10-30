@@ -2,6 +2,7 @@ package com.fengyi.ordershow.security;
 
 import com.fengyi.ordershow.common.UtcTime;
 
+import com.fengyi.ordershow.activity.ActivityFinishedEvent;
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.config.OrderShowProperties;
 import jakarta.servlet.http.Cookie;
@@ -9,40 +10,69 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 @Service
 public class AuthService {
   public static final String ADMIN_REQUEST_ATTRIBUTE = "orderShowAdminPrincipal";
   public static final String H5_REQUEST_ATTRIBUTE = "orderShowH5Principal";
+  private static final String ADMIN_CSRF_HASH_ATTRIBUTE = "orderShowAdminCsrfHash";
+  private static final String H5_CSRF_HASH_ATTRIBUTE = "orderShowH5CsrfHash";
   private static final String ADMIN_COOKIE = "ORDER_SHOW_ADMIN_SESSION";
   private static final String H5_COOKIE = "ORDER_SHOW_H5_SESSION";
   private static final String ADMIN_CSRF_COOKIE = "ORDER_SHOW_ADMIN_CSRF";
   private static final String H5_CSRF_COOKIE = "ORDER_SHOW_H5_CSRF";
   private static final SecureRandom RANDOM = new SecureRandom();
 
+  private static final int H5_SESSION_CACHE_MAX_ENTRIES = 50_000;
+
   private final JdbcTemplate jdbc;
   private final PasswordEncoder passwordEncoder;
   private final CryptoService crypto;
   private final OrderShowProperties properties;
+  /**
+   * Short-lived, per-instance cache of resolved H5 sessions keyed by token hash. Revocation, activity end,
+   * department disable and whitelist republish take effect on this instance after at most the TTL.
+   * A TTL of 0 disables the cache and restores a database lookup on every H5 request.
+   */
+  private final long h5SessionCacheTtlNanos;
+  private final ConcurrentHashMap<String, CachedH5Session> h5Sessions = new ConcurrentHashMap<>();
 
   public AuthService(JdbcTemplate jdbc, PasswordEncoder passwordEncoder, CryptoService crypto,
                      OrderShowProperties properties) {
+    this(jdbc, passwordEncoder, crypto, properties, 0);
+  }
+
+  @Autowired
+  public AuthService(JdbcTemplate jdbc, PasswordEncoder passwordEncoder, CryptoService crypto,
+                     OrderShowProperties properties,
+                     @Value("${H5_SESSION_CACHE_TTL_MS:${order-show.h5-session-cache-ttl-ms:2000}}") long h5SessionCacheTtlMs) {
+    if (h5SessionCacheTtlMs < 0) throw new IllegalArgumentException("H5_SESSION_CACHE_TTL_MS must not be negative");
     this.jdbc = jdbc;
     this.passwordEncoder = passwordEncoder;
     this.crypto = crypto;
     this.properties = properties;
+    this.h5SessionCacheTtlNanos = TimeUnit.MILLISECONDS.toNanos(h5SessionCacheTtlMs);
   }
 
   @Transactional
@@ -97,22 +127,28 @@ public class AuthService {
     if (existing instanceof AdminPrincipal principal) return principal;
     String token = cookie(request, ADMIN_COOKIE);
     if (token == null) throw DomainException.unauthorized("请先登录管理后台");
+    byte[][] csrfHash = new byte[1][];
     List<AdminPrincipal> rows = jdbc.query("""
         SELECT u.id, u.username, u.display_name, u.role_code, u.department_id, d.department_name,
-               CASE WHEN u.role_code = 'SUPER_ADMIN' THEN u.must_change_password ELSE FALSE END AS must_change_password
+               CASE WHEN u.role_code = 'SUPER_ADMIN' THEN u.must_change_password ELSE FALSE END AS must_change_password,
+               s.csrf_token_hash
         FROM admin_session s JOIN admin_user u ON u.id = s.admin_user_id
         LEFT JOIN department d ON d.id = u.department_id
         WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > UTC_TIMESTAMP(3) AND u.status = 'ACTIVE'
           AND (u.role_code = 'SUPER_ADMIN' OR d.status = 'ACTIVE')
-        """, (rs, rowNum) -> new AdminPrincipal(rs.getLong("id"), rs.getString("username"),
-        rs.getString("display_name"), rs.getString("role_code"),
-        rs.getObject("department_id", Long.class), rs.getString("department_name"),
-        rs.getBoolean("must_change_password")), crypto.sha256(token));
+        """, (rs, rowNum) -> {
+          csrfHash[0] = rs.getBytes("csrf_token_hash");
+          return new AdminPrincipal(rs.getLong("id"), rs.getString("username"),
+              rs.getString("display_name"), rs.getString("role_code"),
+              rs.getObject("department_id", Long.class), rs.getString("department_name"),
+              rs.getBoolean("must_change_password"));
+        }, crypto.sha256(token));
     if (rows.size() != 1) throw DomainException.unauthorized("登录已失效，请重新登录");
     AdminPrincipal row = rows.getFirst();
     AdminPrincipal principal = new AdminPrincipal(row.id(), row.username(), row.displayName(), row.roleCode(),
         row.departmentId(), row.departmentName(), row.mustChangePassword(), permissions(row.id()));
     request.setAttribute(ADMIN_REQUEST_ATTRIBUTE, principal);
+    if (csrfHash[0] != null) request.setAttribute(ADMIN_CSRF_HASH_ATTRIBUTE, csrfHash[0]);
     return principal;
   }
 
@@ -126,9 +162,19 @@ public class AuthService {
     if (existing instanceof H5Principal principal) return principal;
     String token = cookie(request, H5_COOKIE);
     if (token == null) throw DomainException.unauthorized("请先验证白名单手机号");
+    byte[] tokenHash = crypto.sha256(token);
+    String cacheKey = cacheKey(tokenHash);
+    CachedH5Session cached = cachedH5Session(cacheKey);
+    if (cached != null) {
+      request.setAttribute(H5_REQUEST_ATTRIBUTE, cached.principal());
+      request.setAttribute(H5_CSRF_HASH_ATTRIBUTE, cached.csrfHash());
+      return cached.principal();
+    }
+    byte[][] csrfHash = new byte[1][];
     List<H5Principal> rows = jdbc.query("""
         SELECT s.id session_id, s.activity_id, s.activity_customer_id, a.activity_code,
-               c.customer_type, c.region_code, c.branch_name, c.dealer_short_name, c.dealer_full_name, c.phone_masked
+               c.customer_type, c.region_code, c.branch_name, c.dealer_short_name, c.dealer_full_name, c.phone_masked,
+               s.csrf_token_hash
         FROM h5_session s
         JOIN activity a ON a.id = s.activity_id
         JOIN department d ON d.id = a.department_id AND d.status = 'ACTIVE'
@@ -138,13 +184,23 @@ public class AuthService {
           AND a.status IN ('SCHEDULED', 'ACTIVE', 'CLOSED')
           AND (a.event_ends_at IS NULL OR a.event_ends_at > UTC_TIMESTAMP(3))
           AND c.is_active = TRUE AND (b.current_version_id IS NULL OR c.data_version_id = b.current_version_id)
-        """, (rs, rowNum) -> new H5Principal(rs.getLong("session_id"), rs.getLong("activity_id"),
-        rs.getLong("activity_customer_id"), rs.getString("activity_code"), rs.getString("customer_type"),
-        rs.getString("region_code"), rs.getString("branch_name"), rs.getString("dealer_short_name"),
-        rs.getString("dealer_full_name"), rs.getString("phone_masked")), crypto.sha256(token));
-    if (rows.size() != 1) throw DomainException.unauthorized("身份验证已失效，请重新验证");
+        """, (rs, rowNum) -> {
+          csrfHash[0] = rs.getBytes("csrf_token_hash");
+          return new H5Principal(rs.getLong("session_id"), rs.getLong("activity_id"),
+              rs.getLong("activity_customer_id"), rs.getString("activity_code"), rs.getString("customer_type"),
+              rs.getString("region_code"), rs.getString("branch_name"), rs.getString("dealer_short_name"),
+              rs.getString("dealer_full_name"), rs.getString("phone_masked"));
+        }, tokenHash);
+    if (rows.size() != 1) {
+      h5Sessions.remove(cacheKey);
+      throw DomainException.unauthorized("身份验证已失效，请重新验证");
+    }
     H5Principal principal = rows.getFirst();
     request.setAttribute(H5_REQUEST_ATTRIBUTE, principal);
+    if (csrfHash[0] != null) {
+      request.setAttribute(H5_CSRF_HASH_ATTRIBUTE, csrfHash[0]);
+      cacheH5Session(cacheKey, principal, csrfHash[0]);
+    }
     return principal;
   }
 
@@ -227,11 +283,39 @@ public class AuthService {
     String token = randomToken();
     String csrf = randomToken();
     Instant expires = Instant.now().plus(Duration.ofHours(properties.h5SessionHours()));
-    jdbc.update("""
-        INSERT INTO h5_session(activity_id, activity_customer_id, token_hash, csrf_token_hash, expires_at, last_seen_at, ip_address, user_agent)
-        VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(3), INET6_ATON(?), ?)
-        """, customer.activityId(), customer.customerId(), crypto.sha256(token), crypto.sha256(csrf),
-        UtcTime.database(expires), remoteIp(request), userAgent(request));
+    byte[] tokenHash = crypto.sha256(token);
+    byte[] csrfHash = crypto.sha256(csrf);
+    GeneratedKeyHolder keys = new GeneratedKeyHolder();
+    jdbc.update(connection -> {
+      var statement = connection.prepareStatement("""
+          INSERT INTO h5_session(activity_id, activity_customer_id, token_hash, csrf_token_hash, expires_at, last_seen_at, ip_address, user_agent)
+          VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(3), INET6_ATON(?), ?)
+          """, Statement.RETURN_GENERATED_KEYS);
+      int i = 0;
+      statement.setLong(++i, customer.activityId());
+      statement.setLong(++i, customer.customerId());
+      statement.setBytes(++i, tokenHash);
+      statement.setBytes(++i, csrfHash);
+      statement.setObject(++i, UtcTime.database(expires));
+      statement.setString(++i, remoteIp(request));
+      statement.setString(++i, userAgent(request));
+      return statement;
+    }, keys);
+    Number sessionId = keys.getKey();
+    if (sessionId != null) {
+      H5Principal session = new H5Principal(sessionId.longValue(), customer.activityId(), customer.customerId(),
+          customer.activityCode(), customer.customerType(), customer.regionCode(), customer.branchName(),
+          customer.dealerShortName(), customer.dealerFullName(), customer.phoneMasked());
+      String cacheKey = cacheKey(tokenHash);
+      // Only a committed session may be served from the cache.
+      if (TransactionSynchronizationManager.isSynchronizationActive()) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+          @Override public void afterCommit() { cacheH5Session(cacheKey, session, csrfHash); }
+        });
+      } else {
+        cacheH5Session(cacheKey, session, csrfHash);
+      }
+    }
     addCookie(response, H5_COOKIE, token, true, Duration.ofHours(properties.h5SessionHours()));
     addCookie(response, H5_CSRF_COOKIE, csrf, false, Duration.ofHours(properties.h5SessionHours()));
     return new H5LoginResult(customer, csrf);
@@ -243,6 +327,14 @@ public class AuthService {
     String token = cookie(request, admin ? ADMIN_COOKIE : H5_COOKIE);
     if (csrf == null || csrfCookie == null || token == null || !MessageDigest.isEqual(csrf.getBytes(), csrfCookie.getBytes())) {
       throw DomainException.forbidden("CSRF_INVALID", "安全令牌无效，请刷新页面后重试");
+    }
+    // requireAdmin/requireH5 already validated this session in the same request; reuse its CSRF hash.
+    Object resolved = request.getAttribute(admin ? ADMIN_CSRF_HASH_ATTRIBUTE : H5_CSRF_HASH_ATTRIBUTE);
+    if (resolved instanceof byte[] expected) {
+      if (!MessageDigest.isEqual(expected, crypto.sha256(csrf))) {
+        throw DomainException.forbidden("CSRF_INVALID", "安全令牌无效，请重新登录");
+      }
+      return;
     }
     String table = admin ? "admin_session" : "h5_session";
     Integer matches = jdbc.queryForObject("SELECT COUNT(*) FROM " + table + " WHERE token_hash = ? AND csrf_token_hash = ? AND revoked_at IS NULL AND expires_at > UTC_TIMESTAMP(3)",
@@ -280,6 +372,40 @@ public class AuthService {
     return null;
   }
 
+  /** Finishing an activity revokes its H5 sessions in the database; drop this instance's cached copies too. */
+  @TransactionalEventListener(fallbackExecution = true)
+  public void evictFinishedActivitySessions(ActivityFinishedEvent event) {
+    h5Sessions.values().removeIf(entry -> entry.principal().activityId() == event.activityId());
+  }
+
+  int cachedH5SessionCount() { return h5Sessions.size(); }
+
+  private CachedH5Session cachedH5Session(String key) {
+    if (h5SessionCacheTtlNanos == 0) return null;
+    CachedH5Session cached = h5Sessions.get(key);
+    if (cached == null) return null;
+    if (System.nanoTime() - cached.cachedAtNanos() >= h5SessionCacheTtlNanos) {
+      h5Sessions.remove(key, cached);
+      return null;
+    }
+    return cached;
+  }
+
+  private void cacheH5Session(String key, H5Principal principal, byte[] csrfHash) {
+    if (h5SessionCacheTtlNanos == 0) return;
+    if (h5Sessions.size() >= H5_SESSION_CACHE_MAX_ENTRIES) {
+      long now = System.nanoTime();
+      h5Sessions.values().removeIf(entry -> now - entry.cachedAtNanos() >= h5SessionCacheTtlNanos);
+      // Still full means a burst of distinct sessions within one TTL; fall back to database lookups.
+      if (h5Sessions.size() >= H5_SESSION_CACHE_MAX_ENTRIES) return;
+    }
+    h5Sessions.put(key, new CachedH5Session(principal, csrfHash.clone(), System.nanoTime()));
+  }
+
+  private static String cacheKey(byte[] tokenHash) {
+    return HexFormat.of().formatHex(tokenHash);
+  }
+
   private static String randomToken() {
     byte[] bytes = new byte[32];
     RANDOM.nextBytes(bytes);
@@ -311,4 +437,5 @@ public class AuthService {
                             Long departmentId, String departmentName, boolean mustChangePassword, String csrfToken, java.util.Set<AdminPermission> permissions) {}
   public record H5LoginResult(H5Principal customer, String csrfToken) {}
   private record WhitelistScope(long activityId, Long versionId, boolean unspecified) {}
+  private record CachedH5Session(H5Principal principal, byte[] csrfHash, long cachedAtNanos) {}
 }

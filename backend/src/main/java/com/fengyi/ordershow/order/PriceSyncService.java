@@ -45,8 +45,10 @@ public class PriceSyncService {
           && Objects.equals(price.pricingMode(), row.pricingMode())
           && samePriceValue(price.lineAmount(), row.lineAmount())) continue;
 
+      orders.snapshotCurrentVersion(row.orderId());
       prices.updateItem(row.id(), price);
       prices.updateOrderTotal(row.orderId());
+      orders.refreshDashboardSummary(row.orderId());
       orders.writeOutbox(activityId, row.orderId(), "ORDER_PRICE_UPDATED", Map.of("orderId", row.orderId()));
       count++;
     }

@@ -25,7 +25,7 @@ public class H5WriteAdmissionFilter extends OncePerRequestFilter {
   private final AtomicInteger waiting = new AtomicInteger();
 
   @Autowired
-  public H5WriteAdmissionFilter(@Value("${H5_WRITE_CONCURRENCY:12}") int concurrency,
+  public H5WriteAdmissionFilter(@Value("${H5_WRITE_CONCURRENCY:36}") int concurrency,
       @Value("${H5_WRITE_WAIT_TIMEOUT_MS:12000}") long timeoutMs, MeterRegistry meters) {
     this(concurrency,timeoutMs);
     meters.gauge("order_show.h5.write.admission.active",active);

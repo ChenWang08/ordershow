@@ -1,0 +1,9 @@
+# syntax=docker/dockerfile:1.7
+FROM maven:3.9.11-eclipse-temurin-21
+WORKDIR /workspace
+COPY backend/pom.xml backend/pom.xml
+COPY db/migrations db/migrations
+COPY docs/design/openapi/order-show-api.yaml docs/design/openapi/order-show-api.yaml
+COPY backend/src backend/src
+ENV ORDER_SHOW_SUMMARY_TEST=order-show-ack-smoke
+RUN --mount=type=cache,target=/root/.m2 mvn -f backend/pom.xml -Dtest=DashboardSummaryIntegrationTest test

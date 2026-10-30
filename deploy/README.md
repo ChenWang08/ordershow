@@ -20,6 +20,10 @@
 | DB_URL | JDBC MySQL URL；PolarDB 主写端点，不使用只读节点；明确时区和 TLS | ConfigMap |
 | DB_USERNAME / DB_PASSWORD | 业务账号，仅业务库 DML 权限 | ConfigMap / Secret |
 | DB_POOL_SIZE | 每个副本最大连接数，模板 10 | ConfigMap |
+| DB_POOL_MIN_IDLE | 每个副本最小空闲连接，模板 2 | ConfigMap |
+| H5_SESSION_CACHE_TTL_MS | ACK 固定建议 0；避免单副本身份缓存延迟感知跨副本撤销 | ConfigMap |
+| DASHBOARD_SUMMARY_ENABLED | 本版模板 true；已有库先升 V041、逐活动 repair/check，再启用 | ConfigMap |
+| DASHBOARD_SUMMARY_ACTIVITIES | 空值表示所有活动；仅限制读取，不限制汇总维护 | ConfigMap |
 | REDIS_HOST / REDIS_PORT | 云 Redis 地址和端口；模板按单入口连接 | ConfigMap |
 | REDIS_USERNAME / REDIS_PASSWORD | 按托管 Redis 认证要求填写；无 ACL 用户名可留空 | ConfigMap / Secret |
 | REDIS_SSL_ENABLED | 是否启用 TLS；模板 true，须与实例匹配 | ConfigMap |
@@ -46,7 +50,7 @@ PolarDB 需要支持项目 SQL 使用的 MySQL 8 能力，具体版本须测试�
 
 ## 镜像构建与推送
 
-最新本地验证版本为 `20261029.3`，见[干净重建与验证记录](local-images-20261029.3.md)。业务源码与20261029.2一致（main 74e5b8d及ac92fc6）；本轮使用标准多阶段Dockerfile，从干净Java/Node运行环境重建前后端，不再继承旧业务镜像。后端从969.9MB降至627.5MB，前端从1.351GB降至1.310GB（Docker本机显示口径）。20261029.2保留可回退。2026-10-29已将这两个20261029.3镜像推送CODING，并核验远端摘要与本地一致、平台linux/amd64。未推送Git、未部署云端、未替换原本地业务服务。ACK_IMAGE_TAG可选择隔离版本。
+本轮交付标签为 `20261030.1`，同步 main 至 `9b8df44`（业务源码基线 `d36cbca`），包含看板汇总、草稿并发、订单写入及旧请求重试修复。保留 ACK 云配置和多副本适配，详细验收状态见 [本轮记录](local-images-20261030.1.md)。未推送 CODING 或 Git、未部署云端；不覆盖日常本地镜像。旧 `20261029.3` 已推送的历史记录见 [上轮记录](local-images-20261029.3.md)。旧标签保留不等于可在新数据上直接回滚。
 
 20261027.1 无新增数据库结构迁移。已有活动的 20/20 上限与 FINISHED 历史快照不会随镜像自动修正；由 DBA 按[排行部署说明](../docs/deployment/2026-10-27-ranking-limits.md)审核目标环境名单再处理，保留自定义值，ARCHIVED 不自动处理。原本地数据与修正名单不能照搬到云端。
 
@@ -67,7 +71,7 @@ docker push REGISTRY/order-show/frontend:VERSION
 
 ## 数据库准备
 
-当前结构版本为 V039；已有 V038 云库须由 DBA 先执行 `db/migrations/V039__activity_backgrounds.sql` 并记录版本，再更新应用。不得对已有库重跑空库包。
+当前结构版本为 V041。空库使用最新 fresh-install.sql；已有 V039 库由 DBA 停止所有写入、备份后执行 `deploy/dba/generated/upgrade-v039-v041.sql`，逐活动补齐并对账汇总，再启用新应用与汇总读取。已有 V038 库先按历史步骤升至 V039。不得对已有库重跑空库包，迁移和回填不在应用启动时执行。
 
 先阅读 [DBA 执行说明](dba/README.md)。运行 `node scripts/package-dba.mjs` 生成空库初始化包，DBA 建库并执行，再创建初始管理员。V037 是 Java 数据清理迁移，此次全新空库明确不适用，已在 manifest 中标记。应用不会自动改表，也不会在云端创建本地演示活动。
 
@@ -95,6 +99,7 @@ Secret/ConfigMap 作为环境变量加载，变更后需 `rollout restart deploy
 ## 多副本机制及人工扩缩容
 
 - 会话、权限、CSRF 校验依托数据库；各副本共用业务密钥，不需要粘性会话。
+- ACK 的 H5 身份缓存 TTL 为 0，每次请求校验共享数据库；与保持开启的看板汇总完全独立。不应直接复制 main 的 2 秒实例缓存或单副本 60 个数据库连接配置。两个副本各 10 连接、滚动额外一个副本时，应用连接上限为 30，另为维护工具（每进程 2）、监控等留余量。
 - Outbox 事件通过 Redis 发布，各副本监听同一环境通道，再通知自身 SSE 客户端。发布器保留 READ COMMITTED 事务及 FOR UPDATE SKIP LOCKED 领取、发送后确认、失败回滚重试，故障窗口允许重复通知。服务端15秒 RECOVERY 补偿及抽奖等实时功能保留。自20261029.2起，订单看板、订货排行、专题战报不订阅统计 SSE，也不做15秒统计轮询或重连补拉：首次读取后仅手动刷新。活动元数据检查仍保留。旧浏览器页面需重新加载才能使用新行为，不能仅更新后端就认定自动查询已停止。
 - 导入任务通过 `FOR UPDATE SKIP LOCKED` 在同一事务中领取和发布；容器崩溃会回滚领取，其他副本可重新处理。活动级锁串行化同活动发布。对象上传与数据库不是分布式事务，失败可能留下未引用对象，不影响当前已发布数据。
 - 定时状态切换使用条件更新并与事件写入处于事务内；幂等记录清理可重复执行。订单和抽奖已有数据库锁/唯一约束，扩容仍须执行并发验收。
@@ -113,6 +118,6 @@ kubectl -n order-show-test scale deployment/frontend --replicas=3
 - 检查管理员登录/首次改密、正式数据导入、图片、H5 下单及变更审核、看板、抽奖。至少两副本测试跨副本会话、通知、重复请求和任务发布，再测试重启及手工扩缩容。
 - 看日志：`kubectl -n order-show-test logs deployment/backend --all-pods=true --tail=200`；旧版 kubectl 不支持时逐 Pod 查看。看事件：`kubectl -n order-show-test describe pod POD_NAME`。
 - ImagePullBackOff 检查仓库权限/标签；配置占位符报错检查 Secret/ConfigMap；SQL 错误先检查 DBA 版本；Redis 失败检查认证/TLS/网络和订阅权限；文件错误检查 Bucket 地域、AK/SK 和对象权限；SSE 延迟检查 Ingress 缓冲/超时。
-- 应用回滚：`kubectl -n order-show-test rollout undo deployment/backend`，前端同理；同时恢复对应配置版本并验证。数据库结构不随镜像自动回滚，需 DBA 先确认兼容性。运维负责数据库与 OSS 备份及恢复演练。
+- 本版启用订单历史写时复制：当前版本的历史明细可能尚未实体化。新版本产生写入后，不能直接换回旧后端或执行 rollout undo；旧程序可能无法正确读取这些历史。回退须停写，由 DBA 评估历史补齐/经验证的兼容回退，或经业务确认恢复升级前备份（升级后数据会丢失，须另行处理）。数据库结构不随镜像自动回滚。
 
 实际验证状态见 [验证记录](verification.md)。通用模板无法替代真实 ACK、PolarDB、托管 Redis TLS 和 OSS AK/SK 联调。

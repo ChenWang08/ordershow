@@ -26,15 +26,23 @@ spring:
     password: ${DB_PASSWORD:order_show_local}
     hikari:
       connection-init-sql: SET time_zone = '+00:00'
-      maximum-pool-size: ${DB_POOL_SIZE:20}
+      maximum-pool-size: ${DB_POOL_SIZE:60}
+      minimum-idle: ${DB_POOL_MIN_IDLE:30}
       connection-timeout: 5000
       data-source-properties:
         connectionTimeZone: UTC
         forceConnectionTimeZoneToSession: true
         preserveInstants: true
         rewriteBatchedStatements: true
+        cachePrepStmts: true
+        prepStmtCacheSize: 250
+        prepStmtCacheSqlLimit: 2048
+        useServerPrepStmts: true
+        useLocalSessionState: true
   flyway:
     enabled: ${DB_MIGRATION_ENABLED:true}
+    user: ${DB_MIGRATION_USERNAME:${DB_USERNAME:order_show}}
+    password: ${DB_MIGRATION_PASSWORD:${DB_PASSWORD:order_show_local}}
     locations: classpath:db/migration
     validate-migration-naming: true
   data:
@@ -65,6 +73,9 @@ management:
         enabled: true
 
 order-show:
+  dashboard:
+    summary-enabled: ${DASHBOARD_SUMMARY_ENABLED:false}
+    summary-activities: ${DASHBOARD_SUMMARY_ACTIVITIES:}
   public-origin: ${PUBLIC_ORIGIN:http://localhost:3000}
   cookie-secure: ${COOKIE_SECURE:false}
   admin-session-hours: ${ADMIN_SESSION_HOURS:12}

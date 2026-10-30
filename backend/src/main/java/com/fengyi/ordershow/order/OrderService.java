@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class OrderService {
+  private static final org.slf4j.Logger SUBMIT_LOG = org.slf4j.LoggerFactory.getLogger(OrderService.class);
   private final OrderRepository repository;
   private final ActivityService activities;
   private final DashboardService dashboards;
@@ -71,6 +72,7 @@ public class OrderService {
   @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public OrderView submit(String activityCode, H5Principal customer, SubmitRequest request, String idempotencyKey,
                           String traceId, boolean includeHistory, Runnable onReplay) {
+    long __t0 = System.nanoTime();
     var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
     repository.lockCustomerSubmission(activity.id(), customer.customerId());
@@ -82,7 +84,7 @@ public class OrderService {
       if (quantities.put(item.productId(), item.quantity()) != null) throw DomainException.unprocessable("ORDER_ITEM_DUPLICATE", "同一商品不能重复提交");
     }
     OrderView replay = repository.beginH5Submission(activity.id(), customer.customerId(), idempotencyKey,
-        H5SubmitFingerprint.digest(request, includeHistory), hash(request));
+        H5SubmitFingerprint.digest(request, includeHistory), hash(request), includeHistory);
     if (replay != null) {
       onReplay.run();
       return replay;
@@ -99,12 +101,14 @@ public class OrderService {
     if (previousQuantities != null && OrderRepository.hasReducedItems(previousQuantities, quantities)) {
       throw DomainException.conflict("ORDER_CHANGE_REVIEW_REQUIRED", "减少或删除商品需要提交后台审核");
     }
+    long __tPre = System.nanoTime();
     List<ProductSnapshot> products = repository.loadProducts(activity.id(), customer.customerId(), customer.customerType(), customer.branchName(), quantities.keySet());
+    long __tRead = System.nanoTime();
     if (products.size() != quantities.size()) throw DomainException.unprocessable("PRODUCT_NOT_ORDERABLE", "订单中包含不可订、已删除或不属于当前客户的商品");
     if (previousQuantities != null && previousQuantities.equals(quantities)) {
       repository.deleteDraft(activity.id(), customer.customerId());
       OrderView result = repository.order(current.id(), includeHistory);
-      repository.completeH5Submission(activity.id(), customer.customerId(), idempotencyKey, result);
+      repository.completeH5Submission(activity.id(), customer.customerId(), idempotencyKey, result, includeHistory);
       return result;
     }
 
@@ -122,6 +126,7 @@ public class OrderService {
       totalAmount = totalAmount.add(pricing.lineAmount());
       totalTons = totalTons.add(lineTons);
     }
+    long __tCalc = System.nanoTime();
     int nextVersion = currentVersion + 1;
     boolean first = current == null;
     boolean resubmit = current != null && !"SUBMITTED".equals(current.status());
@@ -129,14 +134,15 @@ public class OrderService {
     if (first) {
       orderId = repository.insertH5Order(activity.id(), customer, totalQuantity, totalTons, totalAmount);
     } else {
+      // Freeze the version about to be superseded while its rows are still current.
+      repository.snapshotCurrentVersion(current.id());
       int changed = repository.updateH5Order(nextVersion, totalQuantity, totalTons, totalAmount, current, currentVersion);
       if (changed != 1) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单已在其他页面更新，请刷新后重试");
       orderId = current.id();
       repository.deleteCurrentItems(orderId);
     }
     repository.insertCurrentItems(orderId, items);
-    long versionId = repository.insertVersion(activity.id(), orderId, nextVersion, customer, totalQuantity, totalTons, totalAmount, idempotencyKey);
-    repository.insertVersionItems(versionId, items);
+    repository.insertVersion(activity.id(), orderId, nextVersion, customer, totalQuantity, totalTons, totalAmount, idempotencyKey);
     if (resubmit) {
       repository.insertOperation(activity.id(), orderId, "RESUBMIT", "H5", null, nextVersion,
           "VOIDED".equals(current.status()) ? "客户重新订货，恢复已作废订单" : "客户重新订货，恢复已撤回订单", traceId);
@@ -146,9 +152,52 @@ public class OrderService {
     if (!first) changeRequests.rejectPending(orderId, "订单已由客户重新提交生效，本次申请失效");
     repository.writeOutbox(activity.id(), orderId, "ORDER_SUBMITTED", Map.of("orderId", orderId, "version", nextVersion));
     repository.deleteDraft(activity.id(), customer.customerId());
-    OrderView result = repository.order(orderId, includeHistory);
-    repository.completeH5Submission(activity.id(), customer.customerId(), idempotencyKey, result);
+    long __tWrite = System.nanoTime();
+    OrderView result = repository.orderAfterSubmission(orderId, items, includeHistory);
+    long __tReadback = System.nanoTime();
+    repository.completeH5Submission(activity.id(), customer.customerId(), idempotencyKey, result, includeHistory);
+    long __tIdem = System.nanoTime();
+    logSubmitTiming(traceId, items.size(), first ? "first" : (resubmit ? "resubmit" : "modify"),
+        __t0, __tPre, __tRead, __tCalc, __tWrite, __tReadback, __tIdem);
     return result;
+  }
+
+  /**
+   * Breaks the H5 submit latency into its in-transaction phases plus the post-return commit (fsync).
+   * Emits one ASCII line per submit so a remote GBK console cannot corrupt it; all times are millis.
+   * The commit phase is captured via a transaction synchronization, so it only appears when a real
+   * transaction is active (production); in non-transactional unit tests it is quietly omitted.
+   */
+  private void logSubmitTiming(String traceId, int lines, String kind, long t0, long tPre, long tRead,
+                               long tCalc, long tWrite, long tReadback, long tIdem) {
+    if (!SUBMIT_LOG.isInfoEnabled()) return;
+    double preflight = (tPre - t0) / 1_000_000.0;
+    double readProducts = (tRead - tPre) / 1_000_000.0;
+    double calc = (tCalc - tRead) / 1_000_000.0;
+    double write = (tWrite - tCalc) / 1_000_000.0;
+    double readback = (tReadback - tWrite) / 1_000_000.0;
+    double idemComplete = (tIdem - tReadback) / 1_000_000.0;
+    double preCommitTotal = (tIdem - t0) / 1_000_000.0;
+    String tag = traceId == null ? "-" : traceId;
+    if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+      final long[] commitStart = {0L};
+      org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+          new org.springframework.transaction.support.TransactionSynchronization() {
+            @Override public void beforeCommit(boolean readOnly) { commitStart[0] = System.nanoTime(); }
+            @Override public void afterCompletion(int status) {
+              double commit = commitStart[0] == 0L ? -1.0 : (System.nanoTime() - commitStart[0]) / 1_000_000.0;
+              SUBMIT_LOG.info(String.format(
+                  "h5.submit.timing trace=%s lines=%d kind=%s status=%d preflight=%.1f read_products=%.1f calc=%.1f write=%.1f readback=%.1f idem_complete=%.1f pre_commit_total=%.1f commit=%.1f total=%.1f",
+                  tag, lines, kind, status, preflight, readProducts, calc, write, readback, idemComplete,
+                  preCommitTotal, commit, preCommitTotal + (commit < 0 ? 0 : commit)));
+            }
+          });
+    } else {
+      SUBMIT_LOG.info(String.format(
+          "h5.submit.timing trace=%s lines=%d kind=%s status=NA preflight=%.1f read_products=%.1f calc=%.1f write=%.1f readback=%.1f idem_complete=%.1f pre_commit_total=%.1f commit=NA total=%.1f",
+          tag, lines, kind, preflight, readProducts, calc, write, readback, idemComplete,
+          preCommitTotal, preCommitTotal));
+    }
   }
 
   @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
@@ -264,13 +313,13 @@ public class OrderService {
     String reason = "H5订单变更申请 #" + request.id() + " 审核通过" + (note == null ? "" : "：" + note);
     if ("MODIFY".equals(request.requestType())) {
       CalculatedOrder calculated = calculate(activityId, customer, requestItems(request));
+      repository.snapshotCurrentVersion(request.orderId());
       int changed = repository.adjustOrder(activityId, request.orderId(), current, version + 1, calculated, admin.id());
       if (changed != 1) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单已被其他操作更新，请刷新后重试");
       repository.deleteCurrentItems(request.orderId());
       repository.insertCurrentItems(request.orderId(), calculated.items());
-      long versionId = repository.insertVersion(activityId, request.orderId(), version + 1, customer, calculated.totalQuantity(), calculated.totalTons(),
+      repository.insertVersion(activityId, request.orderId(), version + 1, customer, calculated.totalQuantity(), calculated.totalTons(),
           calculated.totalAmount(), "ADMIN", admin.id(), reason, idempotencyKey);
-      repository.insertVersionItems(versionId, calculated.items());
       repository.insertOperation(activityId, request.orderId(), "H5_CHANGE_APPROVED", "ADMIN", admin.id(), version + 1, reason, traceId);
       afterAdminOrderChange(activity, request.orderId(), "ORDER_CHANGE_APPROVED", version + 1);
     } else {
@@ -334,9 +383,8 @@ public class OrderService {
     CalculatedOrder calculated = calculate(activityId, customer, quantities);
     long orderId = repository.insertAdminOrder(activityId, customer, calculated, admin.id());
     repository.insertCurrentItems(orderId, calculated.items());
-    long versionId = repository.insertVersion(activityId, orderId, 1, customer, calculated.totalQuantity(), calculated.totalTons(),
+    repository.insertVersion(activityId, orderId, 1, customer, calculated.totalQuantity(), calculated.totalTons(),
         calculated.totalAmount(), "ADMIN", admin.id(), reason, idempotencyKey);
-    repository.insertVersionItems(versionId, calculated.items());
     repository.insertOperation(activityId, orderId, "ADMIN_CREATE", "ADMIN", admin.id(), 1, reason, traceId);
     repository.completeIdempotency(activityId, "ADMIN", admin.id(), "ADMIN_ORDER_CREATE", idempotencyKey, orderId);
     afterAdminOrderChange(activity, orderId, "ORDER_ADMIN_CREATED", 1);
@@ -383,13 +431,13 @@ public class OrderService {
     CustomerSnapshot customer = repository.orderCustomer(activityId, current.customerId());
     CalculatedOrder calculated = calculate(activityId, customer, quantities);
     int nextVersion = current.version() + 1;
+    repository.snapshotCurrentVersion(orderId);
     int changed = repository.adjustOrder(activityId, orderId, current, nextVersion, calculated, admin.id());
     if (changed != 1) throw DomainException.conflict("ORDER_VERSION_CONFLICT", "订单已被其他操作更新，请刷新后重试");
     repository.deleteCurrentItems(orderId);
     repository.insertCurrentItems(orderId, calculated.items());
-    long versionId = repository.insertVersion(activityId, orderId, nextVersion, customer, calculated.totalQuantity(), calculated.totalTons(),
+    repository.insertVersion(activityId, orderId, nextVersion, customer, calculated.totalQuantity(), calculated.totalTons(),
         calculated.totalAmount(), "ADMIN", admin.id(), reason, idempotencyKey);
-    repository.insertVersionItems(versionId, calculated.items());
     String operation = "SUBMITTED".equals(current.status()) ? "ADMIN_ADJUST" : "ADMIN_RESTORE";
     repository.insertOperation(activityId, orderId, operation, "ADMIN", admin.id(), nextVersion, reason, traceId);
     repository.completeIdempotency(activityId, "ADMIN", admin.id(), "ADMIN_ORDER_ADJUST", idempotencyKey, orderId);

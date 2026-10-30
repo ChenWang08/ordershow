@@ -24,7 +24,13 @@ export function AdminGateway({ children }: { children: React.ReactNode }) {
       if (active && (value.id !== admin.id || value.departmentId !== admin.departmentId || value.roleCode !== admin.roleCode)) {
         setAdminPreferenceOwner(null); setAdmin(null);
       } else if (active && JSON.stringify(value) !== JSON.stringify(admin)) { setAdmin(value); }
-    }).catch(() => { if (active) { setAdminPreferenceOwner(null); setAdmin(null); } }); };
+    }).catch((reason) => {
+      // Network and service errors do not prove that the server session has expired.
+      // Keep the workspace mounted and retry on the next scheduled or focus check.
+      if (active && reason instanceof ApiError && reason.status === 401) {
+        setAdminPreferenceOwner(null); setAdmin(null);
+      }
+    }); };
     window.addEventListener("focus", check);
     window.addEventListener("admin-permissions-changed", check);
     const timer = window.setInterval(check, 15000);

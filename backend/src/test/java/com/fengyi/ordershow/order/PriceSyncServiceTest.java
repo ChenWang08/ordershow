@@ -38,6 +38,7 @@ class PriceSyncServiceTest {
     sequence.verify(orders).lockPricing(7);
     sequence.verify(prices).submittedItems(7, 21);
     verify(prices, never()).updateItem(anyLong(), any());
+    verify(orders, never()).snapshotCurrentVersion(anyLong());
     verifyNoInteractions(dashboards);
   }
 
@@ -49,6 +50,7 @@ class PriceSyncServiceTest {
         .satisfies(error -> assertThat(((DomainException) error).code()).isEqualTo("PRODUCT_PRICE_REQUIRED"));
     verify(prices, never()).updateItem(anyLong(), any());
     verify(prices, never()).updateOrderTotal(anyLong());
+    verify(orders, never()).snapshotCurrentVersion(anyLong());
     verify(orders, never()).writeOutbox(anyLong(), anyLong(), anyString(), any());
     verifyNoInteractions(dashboards);
   }
@@ -59,6 +61,7 @@ class PriceSyncServiceTest {
     assertThat(service.sync(7, 21, new BigDecimal("100.00"), null, null, null)).isZero();
     verify(prices, never()).updateItem(anyLong(), any());
     verify(prices, never()).updateOrderTotal(anyLong());
+    verify(orders, never()).snapshotCurrentVersion(anyLong());
     verify(orders, never()).writeOutbox(anyLong(), anyLong(), anyString(), any());
     verifyNoInteractions(dashboards);
   }
@@ -70,11 +73,15 @@ class PriceSyncServiceTest {
     var sequence = inOrder(orders, prices, dashboards);
     sequence.verify(orders).lockPricing(7);
     sequence.verify(prices).submittedItems(7, 21);
+    sequence.verify(orders).snapshotCurrentVersion(101);
     sequence.verify(prices).updateItem(eq(10L), any());
     sequence.verify(prices).updateOrderTotal(101);
+    sequence.verify(orders).refreshDashboardSummary(101);
     sequence.verify(orders).writeOutbox(7, 101, "ORDER_PRICE_UPDATED", Map.of("orderId", 101L));
+    sequence.verify(orders).snapshotCurrentVersion(102);
     sequence.verify(prices).updateItem(eq(11L), any());
     sequence.verify(prices).updateOrderTotal(102);
+    sequence.verify(orders).refreshDashboardSummary(102);
     sequence.verify(orders).writeOutbox(7, 102, "ORDER_PRICE_UPDATED", Map.of("orderId", 102L));
     sequence.verify(dashboards).refreshFinalSnapshots(7);
     sequence.verifyNoMoreInteractions();
@@ -86,6 +93,7 @@ class PriceSyncServiceTest {
     var failure = new IllegalStateException("database unavailable");
     doThrow(failure).when(prices).updateOrderTotal(101);
     assertThatThrownBy(() -> service.sync(7, 21, new BigDecimal("110"), null, null, null)).isSameAs(failure);
+    verify(orders).snapshotCurrentVersion(101);
     verify(prices).updateItem(eq(10L), any());
     verify(orders, never()).writeOutbox(anyLong(), anyLong(), anyString(), any());
     verifyNoInteractions(dashboards);

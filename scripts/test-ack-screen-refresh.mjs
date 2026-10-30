@@ -93,7 +93,7 @@ try {
  for(const path of ['/admin','/screen/'+code+'/dashboard','/screen/'+code+'/ranking','/screen/'+code+'/report']) {
   const response=await fetch('http://127.0.0.1:18030'+path);assert.equal(response.status,200);await response.text();pages.push(path);
  }
- const releaseTag=process.env.ACK_IMAGE_TAG??'20261029.3';
+ const releaseTag=process.env.ACK_IMAGE_TAG??'20261030.1';
  assert.match(releaseTag,/^\d{8}\.\d+$/);
  const resultDir='outputs/ack-release-'+releaseTag;
  await mkdir(resultDir,{recursive:true});

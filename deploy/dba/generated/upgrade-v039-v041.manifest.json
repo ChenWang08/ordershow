@@ -1,0 +1,16 @@
+{
+  "scope": "existing V039 database only",
+  "from": "V039",
+  "to": "V041",
+  "migrations": [
+    {
+      "file": "V040__dashboard_order_summaries.sql",
+      "sha256": "092778629bce9694ffed537bb600b3df1f3039a780292704103a936af199af92"
+    },
+    {
+      "file": "V041__drop_order_item_dashboard_triggers.sql",
+      "sha256": "70cc7fae805dce2e54d67e40f1751610b983fb97b6251fcb1e0816fb07834f4a"
+    }
+  ],
+  "bundleSha256": "b5cdca9ef541e598eedc89b7f1392df7e0f9c04c717eb6711a5d07c319ddf723"
+}

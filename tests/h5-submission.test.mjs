@@ -27,6 +27,21 @@ test("lost response retries the identical key and payload and clears only on suc
   assert.equal(h.data.size,0);
 });
 
+test("recovery accepts the latest admin-adjusted order without resubmitting the old quantities", async () => {
+  let offline = true;
+  const latest = { id: 9, currentVersion: 2, lockVersion: 3, status: "SUBMITTED",
+    totalQuantity: 1, totalAmount: 100, items: [{ productId: 1, quantity: 1, lineAmount: 100 }] };
+  const h = harness(async () => { if (offline) throw new TypeError("response lost after commit"); return latest; });
+  await assert.rejects(h.create().submit(scope, body));
+  offline = false;
+  const manager = h.create();
+  assert.deepEqual(await manager.recover(scope), latest);
+  assert.deepEqual(h.calls[2], h.calls[0], "Recovery must keep the original command and idempotency key");
+  assert.equal(h.calls.length, 3, "Receiving changed quantities must not trigger a corrective submission");
+  assert.equal(h.data.size, 0);
+  assert.equal(manager.read(scope), undefined);
+});
+
 test("503 honors Retry-After and manual recovery after reload retains the original request", async () => {
   let offline = true;
   const h = harness(async () => { if (offline) throw new ApiError(503,"H5_WRITE_BUSY","busy",undefined,2000); return result; });

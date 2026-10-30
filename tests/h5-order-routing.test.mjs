@@ -82,6 +82,26 @@ test("an uncertain increase is recovered with the same key and lock version", as
   assert.equal(h.render().pendingSubmission, false); assert.equal(h.render().step, "success");
 });
 
+test("recovery displays the administrator's latest quantities instead of the pending submission", async () => {
+  const h = await harness();
+  h.render().setQuantities({ 1: 12 }); h.fail(true);
+  await h.render().submitOrder();
+  assert.equal(h.render().pendingSubmission, true);
+  const latest = { ...h.render().runtimeOrder, currentVersion: 4, lockVersion: 6,
+    totalQuantity: 8, totalAmount: 80, items: [item(1, 8)] };
+  h.api.saveH5Order = async (...args) => { h.calls.push(["direct", ...args]); return latest; };
+  await h.render().recoverSubmission();
+  assert.equal(h.calls[0][3], h.calls.at(-1)[3], "Recovery must retain the original idempotency key");
+  assert.equal(h.calls.at(-1)[2][0].quantity, 12, "Recovery resends the same command, not a new edit");
+  assert.equal(h.calls.length, 3, "No extra corrective submission may follow the replay");
+  const model = h.render();
+  assert.equal(model.pendingSubmission, false);
+  assert.equal(model.runtimeOrder.currentVersion, 4);
+  assert.equal(model.quantities[1], 8);
+  assert.equal(model.orderViewBoxes, 8);
+  assert.equal(model.orderViewAmount, 80);
+});
+
 test("editing during a pending withdrawal starts from the effective items", async () => {
   const h = await harness("SUBMITTED", { id: 7, status: "PENDING", requestType: "WITHDRAW", items: [] });
   h.render().startEditingOrder();
