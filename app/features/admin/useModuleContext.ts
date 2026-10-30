@@ -1,16 +1,18 @@
 "use client";
-import { useEffect, useState } from "react";
-import { loadModuleContext, type ModuleContext } from "../../api";
+import { useCallback, useEffect } from "react";
+import { loadModuleContext } from "../../api";
+import { useAdminQuery } from "./useAdminQuery";
 
-export function useModuleContext(activityId: string, enabled: boolean) {
-  const [context, setContext] = useState<ModuleContext | null>(null);
+export function useModuleContext(activityId: string, scope: string | null, revision: number) {
+  // Invalidate an in-flight read after a relevant successful mutation, not on every render.
+  const loader = useCallback((_key: string, signal: AbortSignal) => {
+    void revision;
+    return loadModuleContext(Number(activityId), signal);
+  }, [activityId, revision]);
+  const query = useAdminQuery(scope === null ? null : activityId, loader);
+  const { refresh } = query;
   useEffect(() => {
-    if (!enabled) return;
-    let active = true;
-    const refresh = () => { void loadModuleContext(Number(activityId)).then(value => { if (active) setContext(value); }).catch(() => undefined); };
-    refresh();
-    const timer = window.setInterval(refresh, 15000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [activityId, enabled]);
-  return context;
+    if (scope !== null) void refresh();
+  }, [scope, refresh]);
+  return query;
 }

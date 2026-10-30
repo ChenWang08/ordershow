@@ -23,6 +23,11 @@ function gatewayHarness() {
       AdminSessionContext: { Provider: "session-provider" },
     },
     react: {
+      useRef(initial) {
+        const index = cursor++;
+        if (!(index in slots)) slots[index] = { current: initial };
+        return slots[index];
+      },
       useState(initial) {
         const index = cursor++;
         if (!(index in slots)) slots[index] = initial;
@@ -59,8 +64,8 @@ function gatewayHarness() {
     get requests() { return requests; },
     respond: callback => { me = callback; },
     flush,
-    async check(event) {
-      const callbacks = event ? listeners.get(event) : timers.values();
+    async check(event = "admin-permissions-changed") {
+      const callbacks = listeners.get(event) || [];
       for (const callback of [...callbacks]) callback();
       await flush();
     },
@@ -74,10 +79,11 @@ function expectWorkspace(harness) {
   assert.equal(harness.owners.includes(null), false, "the account's activity preference must be retained");
 }
 
-test("temporary network, parsing and server failures across one minute retain the workspace and recover", async () => {
+test("event-triggered checks retain the workspace on temporary failures and recover without polling", async () => {
   const h = gatewayHarness();
   await h.flush();
   expectWorkspace(h);
+  assert.equal(h.timers.size, 0, "login must not install a polling timer");
   const failures = [
     new TypeError("Failed to fetch"), new ApiError(500, "INTERNAL_ERROR", "busy"),
     new ApiError(502, "REQUEST_FAILED", "gateway"), new ApiError(503, "REQUEST_FAILED", "busy"),
@@ -142,4 +148,25 @@ test("a late unauthorized response after unmount cannot clear another login", as
   rejectCheck(new ApiError(401, "UNAUTHORIZED", "expired"));
   await settle();
   assert.deepEqual(h.owners, [identity.id]);
+});
+
+test("401 from any admin operation invalidates login without waiting for focus", async () => {
+  const h = gatewayHarness(); await h.flush();
+  await h.check("admin-session-invalid");
+  assert.equal(h.tree.type, "section");
+  assert.equal(h.owners.at(-1), null);
+  h.unmount();
+});
+
+test("focus storms and simultaneous permission events share a pending identity check", async () => {
+  const h = gatewayHarness(); await h.flush();
+  let resolve;
+  h.respond(() => new Promise(yes => { resolve = yes; }));
+  await h.check("focus");
+  await h.check("focus");
+  await h.check("admin-permissions-changed");
+  assert.equal(h.requests, 2);
+  resolve(identity); await h.flush();
+  assert.equal(h.timers.size, 0);
+  h.unmount();
 });

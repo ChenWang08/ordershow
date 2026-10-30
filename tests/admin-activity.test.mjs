@@ -80,6 +80,8 @@ function settingsHarness(overrides = {}, apiOverrides = {}, confirm = true) {
   let cursor = 0;
   const { useActivitySettings } = loadModule("app/features/admin/useActivitySettings.ts", {
     "../../api": api,
+    // Action-only harness; the real refresh lifecycle is exercised in admin-manual-refresh.test.mjs.
+    "./useAdminQuery": { useAdminQuery: () => ({ loading: false, error: "", refresh: async () => undefined }) },
     react: { useRef(initial) {
       const index = cursor++;
       if (!(index in slots)) slots[index] = { current: initial };

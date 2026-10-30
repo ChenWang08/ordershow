@@ -19,6 +19,18 @@ function cookie(name: string) {
   return document.cookie.split("; ").find((part) => part.startsWith(`${name}=`))?.split("=").slice(1).join("=") || "";
 }
 
+/** Shared by JSON requests and the binary order export. Business denials are not logout events. */
+export function notifyAdminAccessFailure(path: string, status: number, code?: string) {
+  if (typeof window === "undefined" || !path.startsWith("/admin/") || path === "/admin/auth/login") return;
+  if (status === 401) window.dispatchEvent(new Event("admin-session-invalid"));
+  if (status === 403 && ["MODULE_PERMISSION_REQUIRED", "MANAGER_REQUIRED", "SUPER_ADMIN_REQUIRED"].includes(code || "")) {
+    window.dispatchEvent(new Event("admin-permissions-changed"));
+  }
+  if (status === 404 && (code === "ACTIVITY_NOT_FOUND" || /^\/admin\/activities\/\d+\/?$/.test(path))) {
+    window.dispatchEvent(new Event("admin-access-invalid"));
+  }
+}
+
 export async function api<T>(path: string, init: RequestInit = {}, csrfKind?: "admin" | "h5"): Promise<T> {
   const headers = new Headers(init.headers);
   if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
@@ -27,20 +39,13 @@ export async function api<T>(path: string, init: RequestInit = {}, csrfKind?: "a
     if (value) headers.set("X-CSRF-Token", value);
   }
   const response = await fetch(`${apiBase()}${path}`, { ...init, headers, credentials: "include" });
+  const requestPath = path.split("?")[0];
+  // A non-JSON or truncated 401 still invalidates the session.
+  if (response.status === 401) notifyAdminAccessFailure(requestPath, response.status);
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("json") ? await response.json() : await response.text();
   const errorBody = body as { code?: string; detail?: string; message?: string; traceId?: string } | null;
-  const requestPath = path.split("?")[0];
-  const requestMethod = (init.method || "GET").toUpperCase();
-  const isReadRequest = requestMethod === "GET" || requestMethod === "HEAD";
-  const permissionChanged = response.status === 403 && errorBody?.code === "MODULE_PERMISSION_REQUIRED";
-  if (permissionChanged && typeof window !== "undefined") window.dispatchEvent(new Event("admin-permissions-changed"));
-  const lostReadAccess = isReadRequest && [401, 403].includes(response.status) && !permissionChanged;
-  const missingActivity = isReadRequest && response.status === 404 && /^\/admin\/activities\/\d+\/?$/.test(requestPath);
-  if (!response.ok && typeof window !== "undefined" && path.startsWith("/admin/activities/")
-      && (lostReadAccess || missingActivity)) {
-    window.dispatchEvent(new Event("admin-access-invalid"));
-  }
+  if (response.status !== 401) notifyAdminAccessFailure(requestPath, response.status, errorBody?.code);
   if (!response.ok) {
     const retryAfter = response.headers.get("Retry-After");
     const retryAfterMs = retryAfter == null ? undefined : /^\d+$/.test(retryAfter)

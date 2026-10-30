@@ -19,6 +19,6 @@ export type ModuleContext = {
   customerCount: number; customersByType: Record<string, number>; customerTypeMode: "TYPED" | "UNSPECIFIED";
   attendeeCount: number; whitelistPublished: boolean;
 };
-export async function loadModuleContext(activityId: number) {
-  return (await api<Envelope<ModuleContext>>(`/admin/activities/${activityId}/module-context`)).data;
+export async function loadModuleContext(activityId: number, signal?: AbortSignal) {
+  return (await api<Envelope<ModuleContext>>(`/admin/activities/${activityId}/module-context`, { signal })).data;
 }

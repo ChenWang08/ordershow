@@ -8,6 +8,11 @@ import {
 import { beijingDateTimeMillis } from "../shared/time";
 import type { ActivityStatus } from "../shared/types";
 import { runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
+import { useAdminQuery } from "./useAdminQuery";
+
+function readActivity(id: string, signal: AbortSignal) {
+  return loadAdminActivity(Number(id), signal);
+}
 
 type ActivitySettingsOptions = {
   activityId: string;
@@ -26,10 +31,11 @@ type ActivitySettingsOptions = {
   onActivityEventEndAtChange: (value: string) => void;
   setActionNotice: (value: string) => void;
   recordOperation: (action: string, target: string, detail: string) => void;
+  onActivityLoaded?: (activity: RuntimeActivity) => void;
 };
 
 export function useActivitySettings({
-  activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, productImportCompleted, whitelistImportCompleted, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation,
+  activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, productImportCompleted, whitelistImportCompleted, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation, onActivityLoaded,
 }: ActivitySettingsOptions) {
   const [activityStartDraft, setActivityStartDraft] = useState(activityStartAt);
   const [activityEndDraft, setActivityEndDraft] = useState(activityEndAt);
@@ -38,7 +44,12 @@ export function useActivitySettings({
   const [reopenDraft, setReopenDraft] = useState<{ activity: RuntimeActivity; endsAt: string; eventEndsAt: string; reason: string; error: string } | null>(null);
   const [reopenBusy, setReopenBusy] = useState(false);
   const reopenPending = useRef(false);
+  const activityQuery = useAdminQuery(activityId, readActivity);
+  const refreshPending = useRef(false);
+  const actionPending = useRef(false);
+  const [activityActionBusy, setActivityActionBusy] = useState(false);
   const applyActivity = (activity: RuntimeActivity) => {
+    onActivityLoaded?.(activity);
     const nextStatus = runtimeActivityStatus(activity.status);
     onActivityStatusChange(nextStatus);
     onActivityNameChange(activity.name);
@@ -49,6 +60,20 @@ export function useActivitySettings({
     setActivityStartDraft(toDateTimeLocal(activity.startsAt));
     setActivityEndDraft(toDateTimeLocal(activity.endsAt));
     setActivityEventEndDraft(toDateTimeLocal(activity.eventEndsAt || new Date(new Date(activity.endsAt).getTime() + 4 * 60 * 60 * 1000).toISOString()));
+  };
+  const refreshActivity = async () => {
+    if (refreshPending.current || reopenPending.current || actionPending.current) return;
+    const dirty = activityNameDraft !== activityName || activityStartDraft !== activityStartAt
+      || activityEndDraft !== activityEndAt || activityEventEndDraft !== activityEventEndAt;
+    if (dirty && !window.confirm("活动设置有未保存的修改。刷新将丢弃这些修改，是否继续？")) return;
+    refreshPending.current = true;
+    try {
+      const activity = await activityQuery.refresh();
+      if (activity) {
+        applyActivity(activity);
+        setActionNotice("活动信息已更新；概览统计仍需点击“刷新统计”。");
+      }
+    } finally { refreshPending.current = false; }
   };
   const saveActivityConfig = async (): Promise<boolean> => {
     if (!activityNameDraft.trim()) {
@@ -198,6 +223,16 @@ export function useActivitySettings({
       setReopenDraft({ ...reopenDraft, error: error instanceof ApiError ? error.message : "重新开放失败，请稍后重试。" });
     } finally { reopenPending.current = false; setReopenBusy(false); }
   };
-  return { activityNameDraft, setActivityNameDraft, activityStartDraft, setActivityStartDraft, activityEndDraft, setActivityEndDraft, activityEventEndDraft, setActivityEventEndDraft, saveActivityConfig, publishCurrentActivity, withdrawCurrentActivity, closeCurrentActivity, finishCurrentActivity,
+  const runAction = async <T,>(action: () => Promise<T>): Promise<T | undefined> => {
+    if (actionPending.current || refreshPending.current || reopenPending.current) return undefined;
+    actionPending.current = true; setActivityActionBusy(true);
+    try { return await action(); }
+    finally { actionPending.current = false; setActivityActionBusy(false); }
+  };
+  return { refreshActivity, activityRefreshing: activityQuery.loading || activityActionBusy || reopenBusy, activityRefreshError: activityQuery.error,
+    activityNameDraft, setActivityNameDraft, activityStartDraft, setActivityStartDraft, activityEndDraft, setActivityEndDraft, activityEventEndDraft, setActivityEventEndDraft,
+    saveActivityConfig: async () => (await runAction(saveActivityConfig)) ?? false,
+    publishCurrentActivity: () => runAction(publishCurrentActivity), withdrawCurrentActivity: () => runAction(withdrawCurrentActivity),
+    closeCurrentActivity: () => runAction(closeCurrentActivity), finishCurrentActivity: () => runAction(finishCurrentActivity),
     reopenDraft, setReopenDraft, reopenBusy, openReopenDialog, closeReopenDialog, submitReopen };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, adminLogin, adminLogout, adminMe, changeAdminPassword, type AdminIdentity } from "../../api";
 import { AdminIdentityContext, AdminSessionContext } from "../../admin-context";
 import { setAdminPreferenceOwner } from "../../api";
@@ -12,6 +12,7 @@ export function AdminGateway({ children }: { children: React.ReactNode }) {
   const [password, setPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [error, setError] = useState("");
+  const lastFocusCheck = useRef(0);
   useEffect(() => {
     let active = true;
     void adminMe().then((value) => { if (active) { setAdminPreferenceOwner(value.id); setAdmin(value); } }).catch(() => { if (active) setAdmin(null); }).finally(() => { if (active) setLoading(false); });
@@ -20,21 +21,37 @@ export function AdminGateway({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!admin) return;
     let active = true;
-    const check = () => { void adminMe().then((value) => {
+    let running = false;
+    const invalidate = () => {
+      if (!active) return;
+      active = false;
+      setAdminPreferenceOwner(null); setAdmin(null);
+      setError("登录已失效，请重新登录。");
+    };
+    const check = () => {
+      if (!active || running) return;
+      running = true;
+      void adminMe().then((value) => {
       if (active && (value.id !== admin.id || value.departmentId !== admin.departmentId || value.roleCode !== admin.roleCode)) {
-        setAdminPreferenceOwner(null); setAdmin(null);
+        invalidate();
       } else if (active && JSON.stringify(value) !== JSON.stringify(admin)) { setAdmin(value); }
     }).catch((reason) => {
       // Network and service errors do not prove that the server session has expired.
-      // Keep the workspace mounted and retry on the next scheduled or focus check.
+      // Keep the workspace mounted; retry on the next user-triggered check, never on a timer.
       if (active && reason instanceof ApiError && reason.status === 401) {
-        setAdminPreferenceOwner(null); setAdmin(null);
+        invalidate();
       }
-    }); };
-    window.addEventListener("focus", check);
+    }).finally(() => { running = false; }); };
+    const focusCheck = () => {
+      const now = Date.now();
+      if (now - lastFocusCheck.current < 1000) return;
+      lastFocusCheck.current = now;
+      check();
+    };
+    window.addEventListener("focus", focusCheck);
     window.addEventListener("admin-permissions-changed", check);
-    const timer = window.setInterval(check, 15000);
-    return () => { active = false; window.removeEventListener("focus", check); window.removeEventListener("admin-permissions-changed", check); window.clearInterval(timer); };
+    window.addEventListener("admin-session-invalid", invalidate);
+    return () => { active = false; window.removeEventListener("focus", focusCheck); window.removeEventListener("admin-permissions-changed", check); window.removeEventListener("admin-session-invalid", invalidate); };
   }, [admin]);
   const login = async () => {
     setLoading(true); setError("");

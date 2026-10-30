@@ -514,7 +514,7 @@ test("uses live overview data, full admin phones, Chinese regions, and linked at
   ]);
 
   assert.doesNotMatch(prototype, /19,457,005\.28|38,620|1,316\.0/);
-  assert.match(prototype, /loadAdminDashboard\(Number\(activityId\), \{ customerType: "GENERAL" \}\)/);
+  assert.match(prototype, /loadAdminDashboard\(Number\(activityId\), \{ customerType: "GENERAL" \}, signal\)/);
   assert.match(prototype, /regionOptions\.find\(\(item\) => item\.value === identityRegionCode\)\?\.name/);
   assert.match(prototype, /row\.activityCustomerId !== null/);
   assert.match(prototype, /白名单实时试算/);

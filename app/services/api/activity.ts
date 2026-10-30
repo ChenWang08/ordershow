@@ -13,8 +13,8 @@ export async function loadAdminActivities() {
   return (await api<Envelope<RuntimeActivity[]>>("/admin/activities")).data;
 }
 
-export async function loadAdminActivity(id: number) {
-  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${id}`)).data;
+export async function loadAdminActivity(id: number, signal?: AbortSignal) {
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${id}`, { signal })).data;
 }
 
 export async function saveActivityBackground(activityId: number, kind: "h5" | "desktop", file: File | null) {

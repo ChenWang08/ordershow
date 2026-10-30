@@ -31,6 +31,8 @@ export function useActivityRuntime(adminActivity?: RuntimeActivity) {
     return () => { active = false; };
   }, [adminActivity]);
   useEffect(() => {
+    // Admin updates explicitly after actions; public surfaces retain their existing polling.
+    if (adminActivityId != null) return;
     let active = true;
     const timer = window.setInterval(() => {
       void (adminActivityId != null ? loadAdminActivity(adminActivityId) : loadActivity()).then((activity) => {
@@ -45,5 +47,5 @@ export function useActivityRuntime(adminActivity?: RuntimeActivity) {
     }, 15_000);
     return () => { active = false; window.clearInterval(timer); };
   }, [adminActivityId]);
-  return { lotteryRounds, setLotteryRounds, activityName, setActivityName, activityId, setActivityId, activityStatus, setActivityStatus, activityStartAt, setActivityStartAt, activityEndAt, setActivityEndAt, activityEventEndAt, setActivityEventEndAt, runtimeActivity, runtimeConnected };
+  return { lotteryRounds, setLotteryRounds, activityName, setActivityName, activityId, setActivityId, activityStatus, setActivityStatus, activityStartAt, setActivityStartAt, activityEndAt, setActivityEndAt, activityEventEndAt, setActivityEventEndAt, runtimeActivity, setRuntimeActivity, runtimeConnected };
 }

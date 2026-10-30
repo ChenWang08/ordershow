@@ -2,11 +2,11 @@ import { api } from "./client";
 import { activeActivityPath } from "./context";
 import type { DashboardData, DashboardReport, Envelope, RankingMetric } from "./types";
 
-export async function loadAdminDashboard(activityId: number, filters: { customerType?: string; metric?: RankingMetric } = {}) {
+export async function loadAdminDashboard(activityId: number, filters: { customerType?: string; metric?: RankingMetric } = {}, signal?: AbortSignal) {
   const query = new URLSearchParams();
   if (filters.customerType) query.set("customerType", filters.customerType);
   if (filters.metric) query.set("metric", filters.metric);
-  return (await api<Envelope<DashboardData>>(`/admin/activities/${activityId}/ranking?${query}`)).data;
+  return (await api<Envelope<DashboardData>>(`/admin/activities/${activityId}/ranking?${query}`, { signal })).data;
 }
 
 export async function loadDashboard(filters: { customerType?: string; regionCode?: string; metric?: RankingMetric } = {}, signal?: AbortSignal) {
