@@ -505,7 +505,8 @@ public class OrderRepository {
   }
 
   /** Caller holds the activity/customer locks in the order shared by all order writers. */
-  OrderView beginH5Submission(long activityId, long customerId, String key, byte[] fingerprint, byte[] legacyHash) {
+  OrderView beginH5Submission(long activityId, long customerId, String key, byte[] fingerprint, byte[] legacyHash,
+                             boolean includeHistory) {
     if (key == null || key.isBlank() || key.length() > 128)
       throw DomainException.badRequest("IDEMPOTENCY_KEY_REQUIRED", "缺少有效的 Idempotency-Key");
     int inserted = jdbc.update("""
@@ -530,11 +531,12 @@ public class OrderRepository {
         throw DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "同一幂等键不能用于不同请求");
       if (!"COMPLETED".equals(row.get("status")))
         throw DomainException.conflict("REQUEST_IN_PROGRESS", "相同请求正在处理中，请稍后重试");
-      // Rows written before the compact format still carry the original response. Prefer that over a later re-read.
-      if (modern && saved.hasNonNull("resultJson"))
-        return json.readValue(saved.get("resultJson").asText(), OrderView.class);
+      // Both compact receipts and older format-2 snapshots identify the completed
+      // command, not the order state to display. Re-read without re-executing it.
+      // Old snapshots lack includeHistory; the already-validated request carries
+      // the response mode (it is part of the format-2 fingerprint).
       if (modern && saved.hasNonNull("orderId"))
-        return order(saved.get("orderId").asLong(), saved.path("includeHistory").asBoolean(false));
+        return order(saved.get("orderId").asLong(), includeHistory);
       throw DomainException.conflict("IDEMPOTENCY_RESULT_UNAVAILABLE", "此前提交已成功，请加载最新订单核对");
     } catch (java.io.IOException error) { throw new IllegalStateException("Invalid submission snapshot",error); }
   }

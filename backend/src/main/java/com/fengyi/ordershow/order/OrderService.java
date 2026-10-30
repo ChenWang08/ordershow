@@ -84,7 +84,7 @@ public class OrderService {
       if (quantities.put(item.productId(), item.quantity()) != null) throw DomainException.unprocessable("ORDER_ITEM_DUPLICATE", "同一商品不能重复提交");
     }
     OrderView replay = repository.beginH5Submission(activity.id(), customer.customerId(), idempotencyKey,
-        H5SubmitFingerprint.digest(request, includeHistory), hash(request));
+        H5SubmitFingerprint.digest(request, includeHistory), hash(request), includeHistory);
     if (replay != null) {
       onReplay.run();
       return replay;

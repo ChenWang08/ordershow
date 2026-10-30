@@ -62,6 +62,7 @@ class IsolatedApiE2ETest {
   private long orderId;
   private String orderNo;
   private String firstSubmissionKey;
+  private String lightweightSubmissionKey;
   private JsonNode firstSubmissionResult;
 
   @BeforeAll
@@ -327,6 +328,14 @@ class IsolatedApiE2ETest {
     assertEquals(409, reused.statusCode());
     assertEquals("IDEMPOTENCY_KEY_REUSED", json(reused).path("code").asText());
 
+    // Exercise the production phone client's lightweight response as well as the full-history API.
+    lightweightSubmissionKey = UUID.randomUUID().toString();
+    var lightweight = send(h5, "PUT", "/h5/activities/" + activityCode + "/order?includeHistory=false",
+        orderBody(1, productId, 2), h5Csrf, null, lightweightSubmissionKey);
+    assertEquals(200, lightweight.statusCode(), lightweight.body());
+    assertEquals(1, data(lightweight).path("currentVersion").asInt());
+    assertTrue(data(lightweight).path("versions").isEmpty());
+
     HttpResponse<String> modificationDraft = send(h5, "PUT", "/h5/activities/" + activityCode + "/order-draft",
         draftBody(h5CustomerId, 1, productId, 3), h5Csrf, null);
     assertEquals(200, modificationDraft.statusCode(), modificationDraft.body());
@@ -384,9 +393,14 @@ class IsolatedApiE2ETest {
     var newerDraft = send(h5,"PUT","/h5/activities/"+activityCode+"/order-draft",
         draftBody(h5CustomerId,2,productId,5),h5Csrf,null);
     assertEquals(200,newerDraft.statusCode());
-    var oldReplay = send(h5,"PUT","/h5/activities/"+activityCode+"/order",first,h5Csrf,null,firstKey);
-    assertEquals(200,oldReplay.statusCode(),oldReplay.body());
-    assertEquals(firstSubmissionResult,data(oldReplay));
+    assertLatestReplayDoesNotMutate(first, firstKey, true);
+    assertLatestReplayDoesNotMutate(orderBody(1, productId, 2), lightweightSubmissionKey, false);
+    // Reproduce the exact pre-compact format on synthetic receipts only. The
+    // original response is deliberately stale and has no includeHistory flag.
+    storeLegacySubmissionReceipt(firstKey, firstSubmissionResult);
+    storeLegacySubmissionReceipt(lightweightSubmissionKey, data(lightweight));
+    assertLatestReplayDoesNotMutate(first, firstKey, true);
+    assertLatestReplayDoesNotMutate(orderBody(1, productId, 2), lightweightSubmissionKey, false);
     var preservedDraft = send(h5,"GET","/h5/activities/"+activityCode+"/order-draft",null,null,null);
     assertEquals(5,data(preservedDraft).path("items").get(0).path("quantity").asInt());
     var latestAfterReplay = send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null);
@@ -653,10 +667,8 @@ class IsolatedApiE2ETest {
     assertFalse(Instant.parse(data(cutoffReject).path("reviewedAt").asText())
         .isBefore(Instant.parse(data(cutoffReject).path("requestedAt").asText())));
 
-    var replayAfterClose = send(h5,"PUT","/h5/activities/"+activityCode+"/order",
-        orderBody(0,productId,2),h5Csrf,null,firstSubmissionKey);
-    assertEquals(200,replayAfterClose.statusCode(),replayAfterClose.body());
-    assertEquals(firstSubmissionResult,data(replayAfterClose));
+    assertLatestReplayDoesNotMutate(orderBody(0, productId, 2), firstSubmissionKey, true);
+    assertLatestReplayDoesNotMutate(orderBody(1, productId, 2), lightweightSubmissionKey, false);
 
     HttpResponse<String> afterClose = send(h5, "PUT", "/h5/activities/" + activityCode + "/order",
         orderBody(3, productId, 2), h5Csrf, null, UUID.randomUUID().toString());
@@ -1062,6 +1074,7 @@ class IsolatedApiE2ETest {
         .put("priceTierSet",true).put("priceTierMinQuantity",100).put("priceTierCasePrice",80)
         .put("priceTierPricingMode","WHOLE_ORDER");
     JsonNode updated=original;
+    JsonNode frozenVersions=null;
     for(String mode:List.of("WHOLE_ORDER","INCREMENTAL","REMOVE","REPEAT")) {
       if(mode.equals("INCREMENTAL")) patch.put("priceTierPricingMode","INCREMENTAL");
       if(mode.equals("REMOVE")) { patch.put("casePrice",110).putNull("priceTierMinQuantity").putNull("priceTierCasePrice"); }
@@ -1071,7 +1084,10 @@ class IsolatedApiE2ETest {
       JsonNode current=data(send(h5,"GET","/h5/activities/"+activityCode+"/order",null,null,null));
       String amount=mode.equals("WHOLE_ORDER")?"16000":mode.equals("INCREMENTAL")?"17980":"22000";
       assertEquals(0,new java.math.BigDecimal(amount).compareTo(current.path("items").get(0).path("lineAmount").decimalValue()));
-      assertEquals(original.path("versions"),current.path("versions"));
+      assertEquals(historyBusinessContent(original.path("versions")), historyBusinessContent(current.path("versions")),
+          "Repricing must preserve every historical business field; only copied detail-row IDs may differ");
+      if (frozenVersions == null) frozenVersions = current.path("versions").deepCopy();
+      else assertEquals(frozenVersions, current.path("versions"), "Once copied, historical rows must remain unchanged");
       assertEquals(original.path("operations"),current.path("operations"));
       assertEquals(original.path("currentVersion"),current.path("currentVersion"));
       assertEquals(original.path("totalQuantity"),current.path("totalQuantity"));
@@ -1286,6 +1302,73 @@ class IsolatedApiE2ETest {
       assertDashboardSummariesAfterWrite();
     }
     return response;
+  }
+
+  /** Exclude only the storage-row ID; retain order-version ID, product ID, prices, quantities and all other fields. */
+  private static JsonNode historyBusinessContent(JsonNode versions) {
+    JsonNode result = versions.deepCopy();
+    for (JsonNode version : result) {
+      var ids = new java.util.HashSet<Long>();
+      for (JsonNode item : version.path("items")) {
+        assertTrue(item.path("id").asLong() > 0, "History detail must have a valid storage-row ID");
+        assertTrue(ids.add(item.path("id").asLong()), "History detail-row IDs must not repeat within a version");
+        ((ObjectNode) item).remove("id");
+      }
+    }
+    return result;
+  }
+
+  private void storeLegacySubmissionReceipt(String key, JsonNode original) throws Exception {
+    assertEquals("http://host.docker.internal:8180/api/v1", baseUrl);
+    var jdbc = new org.springframework.jdbc.core.JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(
+        "jdbc:mysql://host.docker.internal:33306/order_show_e2e?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC",
+        "order_show_e2e", "e2e_mysql_only_not_for_business"));
+    String receipt = JSON.writeValueAsString(java.util.Map.of("format", 2, "orderId", original.path("id").asLong(),
+        "orderVersion", original.path("currentVersion").asInt(), "resultJson", original.toString()));
+    assertEquals(1, jdbc.update("""
+        UPDATE api_idempotency SET response_json=?
+        WHERE activity_id=? AND actor_type='H5_CUSTOMER' AND actor_id=? AND endpoint_code='ORDER_SUBMIT'
+          AND idempotency_key=? AND status='COMPLETED'
+        """, receipt, activityId, h5CustomerId, key));
+  }
+
+  /** A retry returns current server state, without replaying the write or clearing a newer draft. */
+  private void assertLatestReplayDoesNotMutate(JsonNode originalBody, String key, boolean includeHistory) throws Exception {
+    String path = "/h5/activities/" + activityCode + "/order?includeHistory=" + includeHistory;
+    var current = send(h5, "GET", path, null, null, null);
+    assertEquals(200, current.statusCode(), current.body());
+    JsonNode expected = data(current).deepCopy();
+    var draftBefore = json(send(h5, "GET", "/h5/activities/" + activityCode + "/order-draft", null, null, null)).path("data");
+    var countsBefore = replayPersistenceCounts();
+    var retries = new ArrayList<CompletableFuture<HttpResponse<String>>>();
+    for (int i = 0; i < 4; i++) retries.add(CompletableFuture.supplyAsync(() -> {
+      try { return send(h5, "PUT", path, originalBody, h5Csrf, null, key); }
+      catch (Exception error) { throw new java.util.concurrent.CompletionException(error); }
+    }));
+    for (var retry : retries) {
+      var response = retry.get(30, java.util.concurrent.TimeUnit.SECONDS);
+      assertEquals(200, response.statusCode(), response.body());
+      assertEquals(expected, data(response), "Retry must return the latest order, not the original submitted snapshot");
+    }
+    assertEquals(expected, data(send(h5, "GET", path, null, null, null)), "Retry must not overwrite current order");
+    assertEquals(countsBefore, replayPersistenceCounts(), "Retry must not create orders, versions, items, operations or keys");
+    assertEquals(draftBefore, json(send(h5, "GET", "/h5/activities/" + activityCode + "/order-draft", null, null, null)).path("data"),
+        "Retry must preserve a newer draft, including its version and timestamp");
+  }
+
+  private java.util.Map<String, Object> replayPersistenceCounts() {
+    assertEquals("http://host.docker.internal:8180/api/v1", baseUrl);
+    var jdbc = new org.springframework.jdbc.core.JdbcTemplate(new org.springframework.jdbc.datasource.DriverManagerDataSource(
+        "jdbc:mysql://host.docker.internal:33306/order_show_e2e?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC",
+        "order_show_e2e", "e2e_mysql_only_not_for_business"));
+    return jdbc.queryForMap("""
+        SELECT (SELECT COUNT(*) FROM customer_order WHERE activity_id=? AND activity_customer_id=?) orders,
+          (SELECT COUNT(*) FROM order_version WHERE order_id=?) versions,
+          (SELECT COUNT(*) FROM order_item WHERE order_id=?) items,
+          (SELECT COUNT(*) FROM order_version_item i JOIN order_version v ON v.id=i.order_version_id WHERE v.order_id=?) history_items,
+          (SELECT COUNT(*) FROM order_operation WHERE order_id=?) operations,
+          (SELECT COUNT(*) FROM api_idempotency WHERE activity_id=? AND actor_type='H5_CUSTOMER' AND actor_id=? AND endpoint_code='ORDER_SUBMIT') submission_keys
+        """, activityId, h5CustomerId, orderId, orderId, orderId, orderId, activityId, h5CustomerId);
   }
 
   /** Opt-in exact DB reconciliation after every successful API mutation, including lifecycle/price changes. */

@@ -134,7 +134,7 @@ class OrderSubmitWritePathTest {
   }
 
   @Test
-  void replayPrefersStoredJsonAndOtherwiseRereadsTheOrder() throws Exception {
+  void replayReturnsLatestForBothCompactAndPreviouslyStoredResponses() throws Exception {
     OrderRepository orders = spy(repository);
     byte[] hash = new byte[] {7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     OrderView stored = orderView();
@@ -144,21 +144,25 @@ class OrderSubmitWritePathTest {
     when(jdbc.queryForList(anyString(), any(Object[].class))).thenAnswer(invocation -> rows.get());
     rows.set(List.of(row(hash, pointer(false))));
     doReturn(reread).when(orders).order(11L, false);
-    assertThat(orders.beginH5Submission(1, 3, "k", hash, hash)).isEqualTo(reread);
+    assertThat(orders.beginH5Submission(1, 3, "k", hash, hash, false)).isEqualTo(reread);
 
     rows.set(List.of(row(hash, pointer(true))));
     doReturn(reread).when(orders).order(11L, true);
-    assertThat(orders.beginH5Submission(1, 3, "k", hash, hash).currentVersion()).isEqualTo(2);
+    assertThat(orders.beginH5Submission(1, 3, "k", hash, hash, true).currentVersion()).isEqualTo(2);
     verify(orders).order(11L, true);
 
     String legacy = json.writeValueAsString(Map.of("format", 2, "orderId", 11, "orderVersion", 1,
         "resultJson", json.writeValueAsString(stored)));
     rows.set(List.of(row(hash, legacy)));
-    assertThat(orders.beginH5Submission(1, 3, "k", hash, hash)).isEqualTo(stored);
-    verify(orders, times(2)).order(anyLong(), any(Boolean.class));
+    // Confirmed business rule applies across upgrades too: an old response snapshot
+    // must not hide a later administrator edit from a recovering phone client.
+    assertThat(orders.beginH5Submission(1, 3, "k", hash, hash, false)).isEqualTo(reread);
+    assertThat(orders.beginH5Submission(1, 3, "k", hash, hash, true)).isEqualTo(reread);
+    verify(orders, times(2)).order(11L, false);
+    verify(orders, times(2)).order(11L, true);
 
     rows.set(List.of(row(hash, "{\"orderId\":11}")));
-    assertThatThrownBy(() -> orders.beginH5Submission(1, 3, "k", hash, hash))
+    assertThatThrownBy(() -> orders.beginH5Submission(1, 3, "k", hash, hash, false))
         .isInstanceOf(DomainException.class)
         .extracting(error -> ((DomainException) error).code())
         .isEqualTo("IDEMPOTENCY_RESULT_UNAVAILABLE");

@@ -312,16 +312,22 @@ class DashboardSummaryIntegrationTest {
     for (String sourceSql : List.of(DashboardSummaryStore.lineSource(true),
         DashboardSummaryStore.tonsSource(true, true), DashboardSummaryStore.tonsSource(true, false))) {
       String predicate = sourceSql.contains("is_gift_box") ? " WHERE is_gift_box=TRUE" : "";
+      // Give only the raw branch an unambiguous alias. MySQL may choose an index
+      // lookup or a hash-join table scan; either is safe only when never executed.
+      int fallbackStart = sourceSql.indexOf("UNION ALL ");
+      assertThat(fallbackStart).isGreaterThanOrEqualTo(0);
+      String identifiedSql = sourceSql.substring(0, fallbackStart)
+          + sourceSql.substring(fallbackStart).replace("order_item i ", "order_item raw_fallback ").replace("i.", "raw_fallback.");
       String plan = jdbc.queryForObject("""
           EXPLAIN ANALYZE WITH scoped_orders AS (
             SELECT id FROM customer_order WHERE activity_id=1 AND status='SUBMITTED'
           ), derived_items AS (%s) SELECT COUNT(*) FROM derived_items%s
-          """.formatted(sourceSql, predicate), String.class);
+          """.formatted(identifiedSql, predicate), String.class);
       // Inspect the actual execution, not just estimated cost or the SQL string.
-      // Only the raw fallback uses uk_product on alias i in this fixture schema.
-      String detailLookup = plan.lines().filter(line -> line.contains("on i using uk_product")).findFirst().orElse("");
-      assertThat(detailLookup).as("clean orders must not touch raw items: %s", plan)
-          .contains("never executed");
+      var detailReads = plan.lines().filter(line -> line.matches(".*(?:scan|lookup) on raw_fallback(?:\\s|$).*" )).toList();
+      assertThat(detailReads).as("raw fallback must be identified in the actual plan: %s", plan).isNotEmpty();
+      assertThat(detailReads).as("clean orders must not touch raw items: %s", plan)
+          .allSatisfy(line -> assertThat(line).contains("never executed"));
       System.out.println("SUMMARY_CLEAN_FALLBACK_PLAN " + plan);
     }
   }
