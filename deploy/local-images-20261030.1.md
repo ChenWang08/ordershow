@@ -4,7 +4,16 @@
 
 同步 main 至 `9b8df44`（业务源码 `d36cbca`），合入看板 SQL/汇总、草稿死锁重试、订单历史写时复制、精简提交回执、旧格式回执重试返回最新订单，以及后台登录临时故障处理。保留 ACK 云存储、共享会话、事件领取、双副本、非 root 镜像与 DBA 迁移边界。
 
-标签为 `20261030.1`；本记录在最终构建后补齐镜像身份和验收结果。未推送 Git 或 CODING，未部署 ACK，不替换日常本地系统。main 文档提交为 `9b8df44`。
+标签为 `20261030.1`，源码合并提交 `22ec17b7f9769d88a37e2b09c62885f9734a1e25`，父提交为 ACK `ea002fb` 和 main `9b8df44`。最终构建和本轮验收完成，后续仅补交付记录，不改变镜像代码。未推送 Git 或 CODING，未部署 ACK，不替换日常本地系统。main 文档提交为 `9b8df44`。
+
+## 最终镜像身份
+
+- 后端 `order-show-ack-backend:20261030.1`：`sha256:08516685269e3971cb28625b797efbf817fa50ae8aeff88222e6586968368877`，627,995,205 字节，用户 ordershow。
+- 前端 `order-show-ack-frontend:20261030.1`：`sha256:c4f658a96be11d297a13ae769be0f3f5f5db3e7567b74d371a699be9035d5b2e`，1,309,606,181 字节，用户 node。
+- 两者均为 linux/amd64，镜像 `org.opencontainers.image.revision` 均指向上述完整源码提交；标准多阶段 Dockerfile 构建，前端编译使用相对 API `/api/v1`，未直接挪用日常本地前端镜像。
+- 最终后端再次执行全部默认构建测试，250 项中 189 通过、61 条件跳过。与受压测后端 BOOT-INF 下 453 个文件逐字节一致（业务类、配置、迁移和依赖）。
+- 已用最终镜像重建隔离双后端及前端，实际容器镜像 ID 与本节一致，readiness 通过，两个副本共八个统计响应与原始订单汇总一致，前端 `/admin` HTTP 200。最终字节一致性与启动核验不冒充再次五分钟压测。
+- 旧 `20261029.3` 标签保留，不覆盖其镜像。以上大小是本机 image inspect 口径，不是仓库压缩传输大小。
 
 ## 必须一起交付的配置和数据库
 
@@ -49,3 +58,22 @@
 本机双副本测试不能替代 ACK 实际容量验收。真实 PolarDB 版本与迁移权限、Redis TLS、OSS 文件访问、Ingress、资源配额和更大存量数据须在目标环境复测。本轮未重复真实浏览器长时静置手动刷新实验，前端源码回归及四类统计 API 回归不等同于该浏览器实验。
 
 原始证据保存在忽略目录 `outputs/ack-release-20261030.1/`，包含合成凭证的文件不提交 Git。部署请以最终镜像摘要与本文最终验收状态为准，不用旧文档中的推送记录推断新标签已上传。
+
+## 隔离复测顺序与清理
+
+先按标准 Dockerfile 构建本轮 ACK 镜像，再在 ACK 工作树执行以下步骤；只用于固定隔离项目。不要把脚本改成业务服务地址。前端测试、类型检查、规范检查和汇总专项构建单独进行，不与压测并行。
+
+```sh
+node scripts/package-dba.mjs
+docker compose -p order-show-ack-smoke -f deploy/verify/compose.yaml up -d
+node scripts/test-ack-replicas.mjs
+node scripts/test-manual-additions.mjs --ack-smoke
+node scripts/test-ack-screen-refresh.mjs --ack-smoke
+node scripts/test-ack-h5-submission.mjs --ack-smoke
+node scripts/test-ack-dba-upgrade.mjs --ack-smoke
+node scripts/test-ack-summary-load.mjs --ack-smoke --seconds=90
+# 仅短测通过后运行：
+node scripts/test-ack-summary-load.mjs --ack-smoke --seconds=300
+```
+
+2026-10-30 12:48:47（北京时间）完成最终核验和隔离环境清理；仅删除本轮合成测试容器、匿名测试卷及临时数据，可按上面脚本重新生成。证据和镜像保留。清理前后再次核对：原日常五个业务容器 ID、镜像、启动时间、挂载和环境散列不变；旧 ACK 20261029.3 前后端摘要不变。未推送镜像或 Git，未操作云端数据库、未部署云端。
