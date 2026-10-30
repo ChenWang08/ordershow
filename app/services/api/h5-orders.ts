@@ -3,10 +3,15 @@ import { api, ApiError } from "./client";
 import { activeActivityPath } from "./context";
 import type { Envelope, OrderChangeRequest, RuntimeIdentity, RuntimeOrder, RuntimeOrderDraft, RuntimeProduct } from "./types";
 
-export async function verifyPhone(customerType: "GENERAL" | "SPECIAL" | "ALL" | "", regionCode: string, phone: string) {
-  return (await api<Envelope<{ customer: RuntimeIdentity; csrfToken: string }>>(`/public/activities/${activeActivityPath()}/verify-phone`, {
-    method: "POST", body: JSON.stringify({ customerType: customerType || null, regionCode: regionCode || null, phone }),
-  })).data.customer;
+export type H5CustomerType = "GENERAL" | "SPECIAL" | "ALL";
+export type H5VerificationResult =
+  | { selectionRequired: true; customerTypes: Array<"GENERAL" | "SPECIAL"> }
+  | { selectionRequired: false; customer: RuntimeIdentity; csrfToken: string };
+
+export async function verifyPhone(phone: string, customerType?: H5CustomerType): Promise<H5VerificationResult> {
+  return (await api<Envelope<H5VerificationResult>>(`/public/activities/${activeActivityPath()}/verify-phone`, {
+    method: "POST", body: JSON.stringify({ phone, ...(customerType ? { customerType } : {}) }),
+  })).data;
 }
 
 export async function loadH5Products() {

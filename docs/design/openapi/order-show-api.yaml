@@ -294,7 +294,7 @@ paths:
     post:
       operationId: verifyActivityPhone
       tags: [Public]
-      summary: 按活动客户类型模式和手机号验证 H5 身份
+      summary: 手机号识别 H5 身份，多类型同号时选择后登录
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
       requestBody:
@@ -305,7 +305,7 @@ paths:
               $ref: '#/components/schemas/PhoneVerificationRequest'
       responses:
         '200':
-          description: 验证成功
+          description: 唯一身份登录成功，或返回待选择的综合/特渠类型（待选择时不创建会话、不设置登录 Cookie）
           headers:
             Set-Cookie:
               description: 服务端设置的 Secure、HttpOnly、SameSite H5 会话 Cookie
@@ -2994,12 +2994,13 @@ components:
       properties:
         customerType:
           $ref: '#/components/schemas/CustomerType'
-          description: 有类型白名单时传 GENERAL 或 SPECIAL；白名单全为空时传 ALL 或省略。
+          description: 首次省略以自动识别；返回多身份时传 GENERAL 或 SPECIAL 确认。兼容明确传 ALL 的旧请求。
         regionCode:
           oneOf:
             - $ref: '#/components/schemas/RegionCode'
             - type: 'null'
-          description: 仅有综合客户的已发布有效白名单允许省略或传 null，服务端按手机号读取真实大区；显式提交大区仍须匹配。双类型白名单中综合客户继续按现有规则选择大区，有大区配置时不可省略，未分配客户传 UNASSIGNED。特渠及 ALL 不要求大区。
+          deprecated: true
+          description: 旧请求兼容字段；登录不再要求或校验用户选择的大区，实际大区来自白名单身份。
         phone:
           type: string
           minLength: 1
@@ -3010,22 +3011,44 @@ components:
       properties:
         data:
           type: object
-          required: [csrfToken, expiresAt, customer, activity]
+          required: [selectionRequired]
           properties:
-            permissions:
+            selectionRequired:
+              type: boolean
+              description: true 时只返回 customerTypes；false 时返回 customer 和 csrfToken。
+            customerTypes:
               type: array
               uniqueItems: true
               items:
-                $ref: '#/components/schemas/MemberPermission'
+                type: string
+                enum: [GENERAL, SPECIAL]
             csrfToken:
               type: string
-            expiresAt:
-              type: string
-              format: date-time
             customer:
-              $ref: '#/components/schemas/ActivityCustomerSummary'
-            activity:
-              $ref: '#/components/schemas/PublicActivity'
+              type: object
+              required: [sessionId, activityId, customerId, activityCode, customerType, phoneMasked]
+              properties:
+                sessionId:
+                  type: integer
+                  description: 兼容原登录返回值 0；真实会话以 HttpOnly Cookie 识别。
+                activityId:
+                  $ref: '#/components/schemas/Id'
+                customerId:
+                  $ref: '#/components/schemas/Id'
+                activityCode:
+                  type: string
+                customerType:
+                  $ref: '#/components/schemas/CustomerType'
+                regionCode:
+                  type: [string, 'null']
+                branchName:
+                  type: [string, 'null']
+                dealerShortName:
+                  type: [string, 'null']
+                dealerFullName:
+                  type: [string, 'null']
+                phoneMasked:
+                  type: string
         traceId:
           type: string
     ActivityCustomerSummary:

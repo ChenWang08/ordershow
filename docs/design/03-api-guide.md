@@ -111,16 +111,17 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 ### 4.2 H5
 
 1. `GET /public/activities/{activityCode}` 获取活动公开信息；
-2. 当前白名单有客户类型时，用户选择客户类型并调用 `POST /public/activities/{activityCode}/verify-phone`；客户类型全部为空时不展示通道/大区选择，直接调用验证接口；
-3. 后端标准化手机号并计算 HMAC：有类型时按客户类型精确匹配，空类型时按内部 `ALL` 精确匹配；
-4. 验证成功设置 H5 HttpOnly Cookie，返回 CSRF Token、客户展示信息和截止时间；
-5. Cookie 最晚在活动结束时过期，且服务端每次访问检查该活动客户状态，只能访问该活动客户的商品和订单。
+2. 用户只输入手机号，调用 `POST /public/activities/{activityCode}/verify-phone`，首次不传 `customerType`；不再预选通道或大区；
+3. 后端标准化手机号并计算 HMAC，查询当前活动、当前有效发布版本下的身份。唯一身份直接登录；综合与特渠同号时返回 `selectionRequired:true` 和 `customerTypes:["GENERAL","SPECIAL"]`，不返回客户详情、CSRF 或登录 Cookie，也不创建会话；
+4. 弹窗仅展示“综合”“特渠”。选择后向同一接口提交手机号与 `customerType`，后端重新校验当前身份，再在事务内创建会话。成功返回 `selectionRequired:false`、`customer`、`csrfToken`；只在事务提交成功后设置 H5 Cookie；
+5. 客户类型、大区、分公司和经销商名称自动从身份记录带出。`regionCode` 作为旧请求兼容字段接受，但不再限制登录、也不改变记录的大区；
+6. 会话默认有效期 12 小时（可配置），服务端身份检查仍受活动状态、结束时间、客户启用状态及发布版本约束。只能访问该活动客户的商品和订单。所有验证响应 `Cache-Control:no-store`。
 
 H5 与 API 默认通过同站点托管入口提供。H5 的写请求必须携带 CSRF Header，并校验 `Origin`；Cookie 不放入 URL、`localStorage` 或 `sessionStorage`。若部署为跨站 API，才启用 Bearer 方案，并显式配置 CORS 和凭证撤销。
 
-相同手机号可在综合和特渠分别匹配；通道不一致返回 `CUSTOMER_CHANNEL_MISMATCH`，不自动切换身份。客户类型全部为空时进入“不区分客户类型”模式，不要求客户选择通道，且该模式的客户可以读取全部适用客户类型的商品。
+相同手机号可在综合和特渠分别匹配，不修改原 `(activity_id,data_version_id,customer_type,phone_lookup_hash)` 唯一约束。明确指定类型但未匹配时返回 `WHITELIST_IDENTITY_NOT_FOUND`，不自动切换到另一身份。唯一 `ALL` 身份直接登录。相同类型多重匹配或 `ALL` 与其他类型同时匹配时返回 `WHITELIST_IDENTITY_AMBIGUOUS`，不能取第一条。
 
-综合客户的大区选项由当前生效白名单动态产生，不使用固定枚举。大区字段为空时，H5 可进入“不分大区”路径并仅匹配未填写大区的客户；若当前综合白名单全部为空，则跳过大区选择直接验证。提交具体大区时，服务端校验其与白名单一致，前端选择不能覆盖白名单身份。
+活动公开信息中的大区数据继续供展示和看板使用，但 H5 登录不再要求用户选择大区。正常已发布活动不匹配历史名单；缺失或空白名单版本绑定时暂保留旧的跨版本兼容查找，多个同类型匹配仍拒绝。此兼容分支不代表建议新活动绕过白名单发布。
 
 H5 商品展示按当前可见商品目录动态处理返利页签：只有同时存在参与和不参与两种明确返利状态时显示“返利产品”和“非返利产品”，否则显示“全部商品”；返利字段为空的商品属于通用商品，在全部商品或两个筛选页签中均可见。商品说明作为纯文本返回并显示在商品卡片说明区，说明过长时由前端在卡片内部纵向滚动，价格和数量控件不被挤出可视区域。
 

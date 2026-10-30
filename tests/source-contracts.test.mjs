@@ -286,7 +286,7 @@ test("derives H5 and dashboard regions from the current whitelist", async () => 
   assert.match(prototype, /generalRegions/);
   assert.match(prototype, /regionProductCards\.length > 0/);
   assert.match(prototype, /maxAmount=\{regionProductMax\}/);
-  assert.match(prototype, /nextChannel === "综合客户" && regionalized \? "region"/);
+  assert.doesNotMatch(prototype, /nextChannel === "综合客户" && regionalized \? "region"/);
   assert.match(prototype, /whitelistCustomerTypeMode === "UNSPECIFIED"/);
   assert.match(prototype, /value: "ALL", label: "全部客户"/);
   assert.match(prototype, /loadDashboard\(\{ customerType, regionCode, metric: selection\.metric \}, signal\)/);
@@ -301,7 +301,7 @@ test("derives H5 and dashboard regions from the current whitelist", async () => 
   assert.match(dashboardService, /record GeneralRegion/);
   assert.match(dashboardService, /"未分大区"/);
   assert.match(activityService, /b\.current_version_id = c\.data_version_id/);
-  assert.match(authService, /\? = 'UNASSIGNED'/);
+  assert.doesNotMatch(authService, /\? = 'UNASSIGNED'/);
   assert.match(importService, /regions\.resolveCode/);
 });
 
@@ -402,7 +402,9 @@ test("supports one admin entry, current H5 resolution, paging, and fulfillment e
   assert.match(orderService, /订单商品明细/);
   assert.match(orderService, /有效商品汇总/);
   assert.match(orderService, /有效分公司汇总/);
-  assert.match(authService, /a\.status = 'CLOSED'.*a\.starts_at <= UTC_TIMESTAMP/s);
+  const verification = await readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/security/H5PhoneVerificationService.java", import.meta.url), "utf8");
+  assert.match(verification, /a\.status = 'CLOSED'.*a\.starts_at <= UTC_TIMESTAMP/s);
+  assert.match(authService, /createH5Session/);
 });
 
 test("uses published, time-driven activity lifecycle controls", async () => {

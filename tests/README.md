@@ -36,6 +36,8 @@ docker run --rm -e ORDER_SHOW_RANKING_TEST=order-show-e2e `
 
 ## 性能测试
 
+手机号优先登录专项见 [本地验证记录](../docs/testing/h5-phone-first-2026-10-30.md)：`tests/phone-verification.compose.yml` 使用专用无宿主端口 MySQL 合成库，`ORDER_SHOW_PHONE_BENCHMARK=true` 才开启服务级性能对照；`scripts/test-h5-phone-entry-browser.mjs` 用实际组件和模拟 HTTP 验证手机/桌面弹窗，不连接业务 API。本轮不部署业务服务。
+
 看板汇总层新增 V040、原查询差分测试、逐单回填/对账和专用压测。执行入口、隔离库、迁移权限、按活动开关及结果见 [汇总层验收记录](../docs/testing/dashboard-summary-2026-10-29.md)。默认不启用汇总读取；本次代码交付不代表部署。
 
 独立压测环境使用 `docker-compose.load.yml`，项目名 `order-show-load`，后端端口8280。

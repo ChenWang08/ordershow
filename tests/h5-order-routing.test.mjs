@@ -14,7 +14,12 @@ async function harness(status = "SUBMITTED", pending = null, activity = { code: 
     items: [item(1, 10)], operations: [], lastModifiedAt: "2026-10-10T01:00:00Z" };
   const api = {
     ApiError, apiAssetUrl: url => url,
-    verifyPhone: async (type, region, phone) => { calls.push(["verify", type, region, phone]); return { activityId: 1, customerId: type === "SPECIAL" ? 3 : 2, customerType: type, regionCode: region, dealerFullName: "测试客户" }; },
+    verifyPhone: async (phone, selectedType) => {
+      calls.push(["verify", phone, selectedType]);
+      const type = selectedType || activity.availableCustomerTypes?.[0] || "ALL";
+      return { selectionRequired: false, csrfToken: "test", customer: { activityId: 1, customerId: type === "SPECIAL" ? 3 : 2,
+        customerType: type, regionCode: type === "GENERAL" ? "NORTH" : null, dealerFullName: "测试客户" } };
+    },
     loadH5Products: async () => [1, 2].map(id => ({ id, materialName: "商品" + id, images: [], casePrice: 10, customerType: "ALL", rebateStatus: "ALL", orderable: true })),
     loadH5Order: async () => order,
     loadH5OrderChangeRequest: async () => pending,
@@ -43,6 +48,7 @@ async function harness(status = "SUBMITTED", pending = null, activity = { code: 
     getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k),
   } } });
   const render = function useTestRender() { cursor = 0; return useH5OrderFlow({ activityStatus: "running", runtimeActivity: activity }); };
+  render().setPhone("13800000001");
   await render().verifyIdentity();
   calls.length = 0;
   return { render, calls, draft, api, fail: value => { fail = value; } };
@@ -112,22 +118,22 @@ test("editing during a pending withdrawal starts from the effective items", asyn
 
 const mixedActivity = { code: "A", availableCustomerTypes: ["GENERAL", "SPECIAL"], regions: [{ code: "NORTH", name: "北区" }] };
 
-test("returning home clears the old identity and both channel switches verify the selected scope", async () => {
+test("returning home clears the old identity and type confirmation selects the new scope", async () => {
   const h = await harness("SUBMITTED", null, mixedActivity);
-  for (const [channel, type, region] of [["综合客户", "GENERAL", "NORTH"], ["特渠专业客户", "SPECIAL", ""], ["综合客户", "GENERAL", "NORTH"]]) {
+  const login = h.api.verifyPhone;
+  h.api.verifyPhone = async (phone, type) => type ? login(phone, type) : { selectionRequired: true, customerTypes: ["GENERAL", "SPECIAL"] };
+  for (const type of ["GENERAL", "SPECIAL", "GENERAL"]) {
     await h.render().resetEntry();
     assert.equal(h.render().phone, "");
     assert.equal(h.render().runtimeOrder, null);
     assert.equal(h.render().orderStatus, "none");
     assert.equal(Object.keys(h.render().quantities).length, 0);
-    await h.render().resetEntry(channel);
-    h.render().setRegion(region);
-    h.render().setStep("verify");
-    assert.equal(h.render().channel, channel);
-    assert.match(h.render().identityLabel, new RegExp(channel));
+    assert.equal(h.render().visibleStep, "verify");
+    assert.equal(h.render().identityLabel, "手机号验证");
     h.render().setPhone("13800000001");
     await h.render().verifyIdentity();
-    assert.deepEqual(h.calls.at(-1), ["verify", type, region, "13800000001"]);
+    await h.render().verifyIdentity(type);
+    assert.deepEqual(h.calls.at(-1), ["verify", "13800000001", type]);
     assert.equal(h.render().step, "submitted");
   }
 });
@@ -156,12 +162,13 @@ test("a failed draft flush keeps the original customer and order", async () => {
 });
 
 test("single-type and unspecified activities retain their direct entry policy after reset", async () => {
-  for (const [activity, type] of [[{ code: "A", availableCustomerTypes: ["GENERAL"], regions: [] }, "GENERAL"], [{ code: "A", availableCustomerTypes: ["SPECIAL"], regions: [] }, "SPECIAL"], [{ code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] }, "ALL"]]) {
+  for (const activity of [{ code: "A", availableCustomerTypes: ["GENERAL"], regions: [] }, { code: "A", availableCustomerTypes: ["SPECIAL"], regions: [] }, { code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] }]) {
     const h = await harness("SUBMITTED", null, activity);
     await h.render().resetEntry();
     assert.equal(h.render().visibleStep, "verify");
+    h.render().setPhone("13800000001");
     await h.render().verifyIdentity();
-    assert.equal(h.calls.at(-1)[1], type);
+    assert.deepEqual(h.calls.at(-1), ["verify", "13800000001", undefined]);
   }
 });
 
@@ -173,7 +180,7 @@ test("failed verification after a switch cannot expose the previous order", asyn
   await h.render().verifyIdentity();
   assert.equal(h.render().step, "verify");
   assert.equal(h.render().runtimeOrder, null);
-  assert.equal(h.render().identityLabel, "综合客户 · SOUTH");
+  assert.equal(h.render().identityLabel, "手机号验证");
   assert.notEqual(h.render().verifyError, "");
 });
 
@@ -182,7 +189,8 @@ test("verification is serialized with channel switching even before rerender", a
   await h.render().resetEntry("特渠专业客户");
   let release;
   let requests = 0;
-  h.api.verifyPhone = async () => { requests++; await new Promise(resolve => { release = resolve; }); return { activityId: 1, customerId: 3, customerType: "SPECIAL" }; };
+  h.api.verifyPhone = async () => { requests++; await new Promise(resolve => { release = resolve; }); return { selectionRequired: false, customer: { activityId: 1, customerId: 3, customerType: "SPECIAL" }, csrfToken: "test" }; };
+  h.render().setPhone("13800000001");
   const model = h.render();
   const verifying = model.verifyIdentity();
   await model.verifyIdentity();
