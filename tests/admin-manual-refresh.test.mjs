@@ -7,14 +7,14 @@ import { loadModule } from "./helpers/load-ts-module.mjs";
 const { ApiError } = loadModule("app/services/api/client.ts");
 const context = { customerCount: 20, customersByType: { GENERAL: 15, SPECIAL: 5 }, customerTypeMode: "TYPED", attendeeCount: 4, whitelistPublished: true };
 const dashboard = { totals: { order_count: 10, total_amount: 100, total_quantity: 20, total_tons: 2 } };
+const overview = { ...dashboard, ...context, submittedByType: { GENERAL: 8, SPECIAL: 2 } };
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
 test("overview is never auto-loaded, shares repeated clicks, and commits all statistics and counts together", async () => {
   const calls = [], counts = deferred();
   const h = hookHarness("app/features/admin/useActivityOverview.ts", "useActivityOverview", ["1", true], {
     "../../api": {
-      loadAdminDashboard: async (id, filters, signal) => { calls.push({ id, filters, signal }); return dashboard; },
-      loadModuleContext: (_id, signal) => { calls.push({ counts: true, signal }); return counts.promise; },
+      loadActivityOverview: (id, signal) => { calls.push({ id, signal }); return counts.promise; },
     },
   });
   await h.flush();
@@ -25,16 +25,20 @@ test("overview is never auto-loaded, shares repeated clicks, and commits all sta
   const first = h.model.refresh();
   assert.equal(h.model.refresh(), first);
   await h.flush();
-  assert.equal(calls.length, 4);
-  assert.equal(h.model.loaded, false, "partial ranking responses must not publish a partial snapshot");
-  counts.resolve(context); await first; await h.flush();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].id, 1);
+  assert.equal(calls[0].signal.aborted, false);
+  assert.equal(h.model.loaded, false, "statistics and counts must publish together");
+  counts.resolve(overview); await first; await h.flush();
   assert.equal(h.model.loaded, true);
   assert.equal(h.model.progressRows[0].total, 20);
   assert.equal(h.model.progressRows[0].submitted, 10);
+  assert.equal(h.model.progressRows[1].submitted, 8);
+  assert.equal(h.model.progressRows[2].submitted, 2);
   const time = h.model.updatedAt;
   for (let i = 0; i < 10; i++) h.render();
   await h.flush();
-  assert.equal(calls.length, 4, "tab switches/rerenders must not reload the snapshot");
+  assert.equal(calls.length, 1, "tab switches/rerenders must not reload the snapshot");
   assert.equal(h.model.updatedAt, time);
   h.unmount();
 });
@@ -42,7 +46,7 @@ test("overview is never auto-loaded, shares repeated clicks, and commits all sta
 test("overview failure preserves the last complete snapshot and timestamp; activity switch hides old data", async () => {
   let fail = false;
   const h = hookHarness("app/features/admin/useActivityOverview.ts", "useActivityOverview", ["1", true], {
-    "../../api": { loadAdminDashboard: async () => { if(fail) throw new Error("503"); return dashboard; }, loadModuleContext: async () => context },
+    "../../api": { loadActivityOverview: async () => { if(fail) throw new Error("503"); return overview; } },
   });
   await h.model.refresh(); await h.flush();
   const time = h.model.updatedAt;
@@ -55,6 +59,22 @@ test("overview failure preserves the last complete snapshot and timestamp; activ
   assert.equal(h.model.updatedAt, null);
   h.unmount();
 });
+
+for (const type of ["GENERAL", "SPECIAL", "ALL"]) {
+  test(`overview preserves single-channel and unspecified progress: ${type}`, async () => {
+    const h = hookHarness("app/features/admin/useActivityOverview.ts", "useActivityOverview", ["1", true], {
+      "../../api": { loadActivityOverview: async () => ({ ...dashboard, customerCount: 20,
+        customersByType: { [type]: 20 }, submittedByType: { [type]: 10 },
+        customerTypeMode: type === "ALL" ? "UNSPECIFIED" : "TYPED" }) },
+    });
+    await h.model.refresh(); await h.flush();
+    assert.equal(h.model.progressRows[0].submitted, 10);
+    assert.equal(h.model.progressRows[0].percentage, 50);
+    assert.deepEqual(Array.from(h.model.progressRows.slice(1), row => [row.total, row.submitted]),
+      type === "GENERAL" ? [[20,10],[0,0]] : type === "SPECIAL" ? [[0,0],[20,10]] : [[0,0],[0,0]]);
+    h.unmount();
+  });
+}
 
 test("obsolete activity reads are cancelled and cannot overwrite the next activity or unmounted state", async () => {
   const pending = [], loader = (key, signal) => { const d = deferred(); pending.push({ key, signal, ...d }); return d.promise; };

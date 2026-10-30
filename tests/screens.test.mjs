@@ -113,6 +113,32 @@ test("order dashboard uses district terminology without changing region rows", (
   assert.doesNotMatch(html, /片区/);
 });
 
+for (const types of [["GENERAL"], ["SPECIAL"], ["GENERAL", "SPECIAL"], ["ALL"]]) {
+  for (const submitted of [false, true]) {
+    test(`dedicated dashboard payload preserves whitelist layout: ${types.join("+")}, submitted=${submitted}`, () => {
+      const dual = types.length === 2;
+      const unspecified = types[0] === "ALL";
+      const data = { ...regionalReport,
+        dashboard: { ...regionalReport.dashboard, totals: { total_amount: submitted ? 140 : 0 }, latestOrders: [] },
+        customerTypes: submitted ? [{ customerType: types[0], amount: 140 }] : [],
+        giftCustomerTypes: [], topGeneral: [], topSpecial: [],
+      };
+      const { OrderDashboard } = loadModule("app/features/screens/OrderDashboard.tsx", {
+        "./useOrderDashboard": { useOrderDashboard: () => ({ data, error: "", refreshing: false, historical: false, refresh: () => {} }) },
+      });
+      const html = renderToStaticMarkup(React.createElement(OrderDashboard, { activity: { ...activity,
+        availableCustomerTypes: types, whitelistCustomerTypeMode: unspecified ? "UNSPECIFIED" : "TYPED" } }));
+      assert.equal(html.includes("各渠道项目组订单额对比"), dual);
+      assert.equal(html.includes("综合客户 · 大区订单额分布"), types.includes("GENERAL"));
+      assert.equal(html.includes("order-dashboard-trend-full"), !dual);
+      assert.match(html, /分公司订单额排名 TOP 15/);
+      assert.match(html, /经销商订单额排名 TOP 15/);
+      assert.doesNotMatch(html, /NaN|Infinity/);
+      if (unspecified) assert.match(html, /全部客户/);
+    });
+  }
+}
+
 test("ranking board exposes amount and tonnage ranking modes", () => {
   const { RankingBoard } = loadModule("app/features/screens/RankingBoard.tsx", {
     "../../api": {
@@ -183,5 +209,7 @@ test("all public statistics requests forward cancellation without changing URLs 
   assert.equal(calls[0].path, "/screen/activities/fixture/dashboard");
   assert.equal(calls[1].path, "/screen/activities/fixture/ranking?customerType=GENERAL&regionCode=NORTH&metric=TONS");
   assert.equal(calls[2].path, `/screen/activities/fixture/reports/${encodeURIComponent("总战绩")}`);
+  assert.equal(await api.loadActivityOverview(123, controller.signal), data);
+  assert.equal(calls[3].path, "/admin/activities/123/overview");
   assert.ok(calls.every(call => call.init.signal === controller.signal));
 });

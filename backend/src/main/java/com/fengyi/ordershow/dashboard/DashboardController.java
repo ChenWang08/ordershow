@@ -16,11 +16,11 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 @RestController
 @RequestMapping("/screen/activities/{activityCode}")
 public class DashboardController {
-  private final DashboardService dashboards;
+  private final PageStatisticsService dashboards;
   private final ActivityService activities;
   private final RealtimeEventService events;
 
-  public DashboardController(DashboardService dashboards, ActivityService activities, RealtimeEventService events) {
+  public DashboardController(PageStatisticsService dashboards, ActivityService activities, RealtimeEventService events) {
     this.dashboards = dashboards; this.activities = activities; this.events = events;
   }
 
@@ -34,12 +34,12 @@ public class DashboardController {
 
   @GetMapping("/dashboard")
   ApiResponse<DashboardService.Report> dashboard(@PathVariable String activityCode, HttpServletRequest request) {
-    return ApiResponse.of(dashboards.report(activityCode, "ORDER_DASHBOARD"), TraceFilter.id(request));
+    return ApiResponse.of(dashboards.dashboard(activityCode), TraceFilter.id(request));
   }
 
   @GetMapping("/reports/{reportCode}")
   ApiResponse<DashboardService.Report> report(@PathVariable String activityCode, @PathVariable String reportCode, HttpServletRequest request) {
-    return ApiResponse.of(dashboards.report(activityCode, reportCode), TraceFilter.id(request));
+    return ApiResponse.of(dashboards.reports(activityCode, reportCode), TraceFilter.id(request));
   }
 
   @GetMapping(value = "/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

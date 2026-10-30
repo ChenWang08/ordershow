@@ -36,8 +36,10 @@ try {
       if (path === "/admin/me") return identityFailure ? route.fulfill({ status: 503, json: { message: "服务繁忙" } }) : reply(identity);
       if (path === "/admin/activities") return reply([activity]);
       if (path === "/admin/activities/987") return detailFailure ? route.fulfill({ status: 503, json: { message: "服务繁忙" } }) : reply(activity);
-      if (path.endsWith("/ranking")) return rankingFailure ? route.fulfill({ status: 503, json: { message: "统计繁忙" } }) : reply({
-        activityId: 987, status: "DRAFT", totals: { order_count: 10, total_amount: 12345, total_quantity: 120, total_tons: 2.5 }, companies: [], branches: [], productLines: [], latestOrders: [] });
+      if (path.endsWith("/overview")) return rankingFailure ? route.fulfill({ status: 503, json: { message: "统计繁忙" } }) : reply({
+        totals: { order_count: 10, total_amount: 12345, total_quantity: 120, total_tons: 2.5 },
+        submittedByType: { GENERAL: 8, SPECIAL: 2 }, customerCount: 20,
+        customersByType: { GENERAL: 15, SPECIAL: 5 }, customerTypeMode: "TYPED" });
       if (path.endsWith("/module-context")) return reply({ customerCount: 20, customersByType: { GENERAL: 15, SPECIAL: 5 }, customerTypeMode: "TYPED", attendeeCount: 4, whitelistPublished: true });
       if (/\/(customers|attendees|orders|order-change-requests\/page)$/.test(path)) return route.fulfill({ json: { data: [], page: { totalPages: 1, totalElements: 0 } } });
       if (path.endsWith("/product-dealer-scopes")) return reply({});
@@ -52,6 +54,7 @@ try {
     await page.waitForLoadState("networkidle");
     const count = suffix => requests.filter(path => path.endsWith(suffix)).length;
     assert.equal(count("/ranking"), 0);
+    assert.equal(count("/overview"), 0);
     assert.equal(count("/module-context"), 0);
     assert.ok((await page.locator(".admin-stats").innerText()).includes("尚未加载"));
     let before = requests.length;
@@ -60,15 +63,16 @@ try {
     await page.screenshot({ path: fileURLToPath(new URL(`empty-${width}.png`, output)), fullPage: true });
     await page.getByRole("button", { name: "刷新统计", exact: true }).click();
     await page.getByText("¥12,345.00", { exact: true }).waitFor();
-    assert.equal(count("/ranking"), 3); assert.equal(count("/module-context"), 1);
+    assert.equal(count("/overview"), 1); assert.equal(count("/ranking"), 0); assert.equal(count("/module-context"), 0);
     const nav = page.getByRole("navigation", { name: "后台导航" });
     await nav.getByRole("button", { name: /白名单/ }).click();
     await page.getByRole("button", { name: "刷新基础信息" }).waitFor();
     await page.waitForLoadState("networkidle");
-    assert.equal(count("/module-context"), 2);
+    assert.equal(count("/module-context"), 1);
     await nav.getByRole("button", { name: /活动概览/ }).click();
     await page.getByText("¥12,345.00", { exact: true }).waitFor();
-    assert.equal(count("/ranking"), 3, "returning to overview must reuse the snapshot");
+    assert.equal(count("/overview"), 1, "returning to overview must reuse the snapshot");
+    assert.equal(count("/ranking"), 0);
     rankingFailure = true;
     await page.getByRole("button", { name: "刷新统计", exact: true }).click();
     await page.getByRole("alert").filter({ hasText: "统计刷新失败" }).waitFor();

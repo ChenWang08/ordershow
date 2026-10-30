@@ -49,7 +49,7 @@ public class MemberPermissionService {
       case "attendees" -> AdminPermission.ATTENDANCE;
       case "orders", "order-change-requests" -> AdminPermission.ORDER;
       case "lottery" -> AdminPermission.LOTTERY;
-      case "ranking" -> AdminPermission.OVERVIEW;
+      case "ranking", "overview" -> AdminPermission.OVERVIEW;
       default -> null;
     };
     if (permission == null) { deny(); return; }

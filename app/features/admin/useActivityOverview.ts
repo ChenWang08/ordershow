@@ -1,25 +1,19 @@
 "use client";
 
-import { loadAdminDashboard, loadModuleContext } from "../../api";
+import { loadActivityOverview } from "../../api";
 import { money } from "../shared/utils";
 import { useAdminQuery } from "./useAdminQuery";
 
 async function readOverview(activityId: string, signal: AbortSignal) {
-  const [all, general, special, context] = await Promise.all([
-    loadAdminDashboard(Number(activityId), {}, signal),
-    loadAdminDashboard(Number(activityId), { customerType: "GENERAL" }, signal),
-    loadAdminDashboard(Number(activityId), { customerType: "SPECIAL" }, signal),
-    loadModuleContext(Number(activityId), signal),
-  ]);
-  return { all, general, special, context };
+  return loadActivityOverview(Number(activityId), signal);
 }
 
 // Keep the snapshot mounted with the shell; returning to the tab never starts a read.
 export function useActivityOverview(activityId: string, enabled = true) {
   const query = useAdminQuery(enabled ? activityId : null, readOverview);
   const { data } = query;
-  const context = data?.context;
-  const overviewTotals = data?.all.totals;
+  const context = data;
+  const overviewTotals = data?.totals;
   const submittedCustomers = Number(overviewTotals?.order_count ?? 0);
   const totalActiveCustomers = context?.customerCount ?? 0;
   const progressRows = ([
@@ -28,7 +22,7 @@ export function useActivityOverview(activityId: string, enabled = true) {
     if (type === "ALL") return { label, total: totalActiveCustomers, submitted: submittedCustomers, percentage: totalActiveCustomers > 0 ? Math.min(100, submittedCustomers / totalActiveCustomers * 100) : 0 };
     if (context?.customerTypeMode === "UNSPECIFIED") return { label, total: 0, submitted: 0, percentage: 0 };
     const total = context?.customersByType[type] ?? 0;
-    const submitted = Number((type === "GENERAL" ? data?.general : data?.special)?.totals.order_count ?? 0);
+    const submitted = Number(data?.submittedByType[type] ?? 0);
     return { label, total, submitted, percentage: total > 0 ? Math.min(100, submitted / total * 100) : 0 };
   });
   const adminStats = [

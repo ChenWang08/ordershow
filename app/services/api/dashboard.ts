@@ -1,6 +1,10 @@
 import { api } from "./client";
 import { activeActivityPath } from "./context";
-import type { DashboardData, DashboardReport, Envelope, RankingMetric } from "./types";
+import type { ActivityOverviewData, DashboardData, DashboardReport, Envelope, RankingMetric } from "./types";
+
+export async function loadActivityOverview(activityId: number, signal?: AbortSignal) {
+  return (await api<Envelope<ActivityOverviewData>>(`/admin/activities/${activityId}/overview`, { signal })).data;
+}
 
 export async function loadAdminDashboard(activityId: number, filters: { customerType?: string; metric?: RankingMetric } = {}, signal?: AbortSignal) {
   const query = new URLSearchParams();

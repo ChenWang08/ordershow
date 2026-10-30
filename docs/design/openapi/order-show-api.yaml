@@ -225,11 +225,34 @@ paths:
             application/json:
               schema: { type: object }
         '403': { $ref: '#/components/responses/Problem' }
+  /admin/activities/{activityId}/overview:
+    get:
+      operationId: getAdminActivityOverview
+      tags: [AdminAuth]
+      summary: 活动概览专用统计与提交进度
+      description: 需要本活动部门访问权限及 OVERVIEW 模块权限。概览只调用此接口；活动统计与当前有效发布白名单人数在同一事务视图读取。历史活动沿用既有冻结统计口径。
+      security:
+        - adminCookie: []
+      parameters:
+        - name: activityId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: 概览统计，不包含排行、项目组、趋势或到场名单
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityOverviewResponse'
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /admin/activities/{activityId}/ranking:
     get:
       operationId: getAdminActivityRanking
       tags: [AdminAuth]
-      summary: 按部门权限读取活动概览统计（含本部门历史活动）
+      summary: 旧版后台排行兼容接口（概览已改用 overview）
       security:
         - adminCookie: []
       parameters:
@@ -2544,6 +2567,7 @@ paths:
       operationId: getRankingDashboard
       tags: [Dashboard]
       summary: 排行榜快照
+      description: 专用排行查询。保留公司/分公司榜、基础总计和 version；不计算 sku_count，productLines/latestOrders 兼容字段为空数组。
       security:
         - screenToken: []
       parameters:
@@ -2581,6 +2605,7 @@ paths:
       operationId: getOrderDashboard
       tags: [Dashboard]
       summary: 订单综合看板快照
+      description: 专用看板查询，保留总计、项目组、客户类型、大区、小时趋势与 TOP15。giftCustomerTypes/topGeneral/topSpecial/dashboard.latestOrders 兼容字段为空数组。
       security:
         - screenToken: []
       parameters:
@@ -2597,6 +2622,7 @@ paths:
       operationId: getTopicReport
       tags: [Dashboard]
       summary: 专题战报快照
+      description: 一次返回全部九类专题所需数据，前端切换专题不重新请求。dashboard.totals 仅含 total_amount；dashboard.companies/dashboard.branches/dashboard.latestOrders/trend 兼容字段为空数组。不会计算完整排行榜、SKU 或趋势。
       security:
         - screenToken: []
       parameters:
@@ -4045,6 +4071,32 @@ components:
               format: date-time
         traceId:
           type: string
+    ActivityOverviewResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        traceId: { type: string }
+        data:
+          type: object
+          required: [totals, submittedByType, customerCount, customersByType, customerTypeMode, generatedAt]
+          properties:
+            totals:
+              type: object
+              required: [order_count, total_amount, total_quantity, total_tons]
+              properties:
+                order_count: { type: integer, format: int64 }
+                total_amount: { type: number }
+                total_quantity: { type: integer, format: int64 }
+                total_tons: { type: number }
+            submittedByType:
+              type: object
+              additionalProperties: { type: integer, format: int64 }
+            customerCount: { type: integer, format: int64 }
+            customersByType:
+              type: object
+              additionalProperties: { type: integer, format: int64 }
+            customerTypeMode: { type: string, enum: [TYPED, UNSPECIFIED] }
+            generatedAt: { type: string, format: date-time }
     DashboardResponse:
       type: object
       required: [data, version, generatedAt, traceId]

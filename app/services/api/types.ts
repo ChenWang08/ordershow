@@ -115,6 +115,12 @@ export type AttendanceMatchPreview = {
 
 export type AdminOrderSummary = Omit<RuntimeOrder, "activityCustomerId" | "items" | "versions" | "operations" | "dealerShortName" | "withdrawnAt" | "withdrawnReason" | "voidedAt" | "voidedReason">;
 
+export type ActivityOverviewData = {
+  totals: DashboardData["totals"]; submittedByType: Record<string, number>;
+  customerCount: number; customersByType: Record<string, number>;
+  customerTypeMode: "TYPED" | "UNSPECIFIED"; generatedAt: string;
+};
+
 export type DashboardData = {
   activityId: number; activityName: string; status: string;
   totals: { order_count?: number; dealer_count?: number; total_quantity?: number; total_amount?: number; total_tons?: number; branch_count?: number; sku_count?: number };

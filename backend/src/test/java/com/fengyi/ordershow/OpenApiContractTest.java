@@ -29,6 +29,10 @@ class OpenApiContractTest {
     assertThat(paths).containsKeys(
         "/admin/members", "/admin/members/{id}",
         "/admin/activities/{activityId}/module-context",
+        "/admin/activities/{activityId}/overview",
+        "/screen/activities/{activityCode}/ranking",
+        "/screen/activities/{activityCode}/dashboard",
+        "/screen/activities/{activityCode}/reports/{reportCode}",
         "/admin/activities/{activityId}/orders/customer-options",
         "/admin/activities/{activityId}/orders/product-options",
         "/admin/activities/{activityId}/orders",
