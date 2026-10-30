@@ -101,6 +101,11 @@ public class DepartmentService {
     }
     jdbc.update("UPDATE department SET department_name = ?, status = ?, lock_version = lock_version + 1 WHERE id = ?",
         nextName, nextStatus, departmentId);
+    if (!nextName.equals(current.name())) {
+      for (Long activityId : jdbc.queryForList("SELECT id FROM activity WHERE department_id = ? AND archived_at IS NULL", Long.class, departmentId)) {
+        com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
+      }
+    }
     // The department name is the account display name by policy; keep the two values synchronized.
     jdbc.update("UPDATE admin_user SET display_name = ?, lock_version = lock_version + 1 WHERE department_id = ? AND role_code = 'DEPARTMENT_ADMIN'",
         nextName, departmentId);

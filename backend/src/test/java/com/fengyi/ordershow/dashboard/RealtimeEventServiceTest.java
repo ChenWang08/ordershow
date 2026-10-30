@@ -90,6 +90,27 @@ class RealtimeEventServiceTest {
   }
 
   @Test
+  void activitySnapshotsAreFilteredBeforeGroupingAndOrdersNeverTriggerThem() {
+    var forwarded = new java.util.ArrayList<Long>();
+    var stream = new RealtimeEventService(jdbc, () -> mock(SseEmitter.class), forwarded::add);
+    var info = new RealtimeEventService.OutboxRow(3,11,"ACTIVITY_INFO_CHANGED","ACTIVITY_INFO","11",java.time.Instant.EPOCH);
+    when(jdbc.query(anyString(),any(RowMapper.class),any(Object[].class))).thenReturn(List.of(
+        row(2,22,"ORDER","7"), info, row(4,11,"ORDER","8")));
+    stream.publishOutbox();
+    assertThat(forwarded).containsExactly(11L);
+    verify(jdbc).update(contains("id IN"),aryEq(new Object[]{2L,3L,4L}));
+  }
+
+  @Test
+  void failedActivityDeliveryRemainsPendingWhileOrderEventsAreAcknowledged() {
+    var stream = new RealtimeEventService(jdbc, () -> mock(SseEmitter.class), ignored -> { throw new IllegalStateException("Redis offline"); });
+    var info = new RealtimeEventService.OutboxRow(3,11,"ACTIVITY_INFO_CHANGED","ACTIVITY_INFO","11",java.time.Instant.EPOCH);
+    when(jdbc.query(anyString(),any(RowMapper.class),any(Object[].class))).thenReturn(List.of(info, row(4,11,"ORDER","8")));
+    stream.publishOutbox();
+    verify(jdbc).update(contains("id IN"),aryEq(new Object[]{4L}));
+  }
+
+  @Test
   void disconnectedSubscriberIsRemovedAndDoesNotBlockOthers() throws Exception {
     var dead=mock(SseEmitter.class);var live=mock(SseEmitter.class);var index=new AtomicInteger();
     var events=new RealtimeEventService(jdbc,()->index.getAndIncrement()==0?dead:live);

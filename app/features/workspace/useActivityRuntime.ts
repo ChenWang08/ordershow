@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { loadActivity, loadAdminActivity, loadPublicLottery, type RuntimeActivity } from "../../api";
+import { useCallback, useEffect, useState } from "react";
+import { getActiveActivityCode, subscribeActiveActivityCode, loadPublicLottery, type RuntimeActivity } from "../../api";
+import { subscribeActivityInfo, type ActivityInfoConnectionState } from "../../services/api/activity-info-stream";
 import { initialLotteryRounds, mapLotteryRule, type LotteryRound } from "../lottery/Lottery";
 import type { ActivityStatus } from "../shared/types";
 import { runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
 
 export function useActivityRuntime(adminActivity?: RuntimeActivity) {
   const adminActivityId = adminActivity?.id;
+  const [publicActivityCode, setPublicActivityCode] = useState(getActiveActivityCode);
   const [lotteryRounds, setLotteryRounds] = useState<LotteryRound[]>(initialLotteryRounds);
   const [activityName, setActivityName] = useState(adminActivity?.name || "2026年中秋订货会");
   const [activityId, setActivityId] = useState(String(adminActivity?.id || 1));
@@ -17,35 +19,57 @@ export function useActivityRuntime(adminActivity?: RuntimeActivity) {
   const [activityEventEndAt, setActivityEventEndAt] = useState(adminActivity ? toDateTimeLocal(adminActivity.eventEndsAt || adminActivity.endsAt) : "2030-07-30T22:30");
   const [runtimeActivity, setRuntimeActivity] = useState<RuntimeActivity | null>(adminActivity || null);
   const [runtimeConnected, setRuntimeConnected] = useState(Boolean(adminActivity));
+  const [runtimeConnectionState, setRuntimeConnectionState] = useState<ActivityInfoConnectionState>(adminActivity ? "connected" : "connecting");
+  const applyActivity = useCallback((activity: RuntimeActivity) => {
+    setRuntimeActivity(activity); setActivityName(activity.name); setActivityId(String(activity.id));
+    setActivityStartAt(toDateTimeLocal(activity.startsAt)); setActivityEndAt(toDateTimeLocal(activity.endsAt));
+    setActivityEventEndAt(toDateTimeLocal(activity.eventEndsAt || activity.endsAt));
+    setActivityStatus(runtimeActivityStatus(activity.status));
+  }, []);
   useEffect(() => {
+    if (adminActivityId != null) return;
+    const unsubscribe = subscribeActiveActivityCode(() => {
+      setRuntimeActivity(null); setRuntimeConnected(false);
+      setRuntimeConnectionState("connecting"); setPublicActivityCode(getActiveActivityCode());
+    });
+    return () => { unsubscribe(); };
+  }, [adminActivityId]);
+  useEffect(() => {
+    if (!adminActivity) return;
     let active = true;
-    void (adminActivity ? Promise.resolve([adminActivity, { rules: [] }] as const) : Promise.all([loadActivity(), loadPublicLottery()])).then(([activity, lottery]) => {
+    void Promise.resolve().then(() => {
       if (!active) return;
-      setRuntimeActivity(activity); setRuntimeConnected(true); setActivityName(activity.name); setActivityId(String(activity.id));
-      setActivityStartAt(toDateTimeLocal(activity.startsAt)); setActivityEndAt(toDateTimeLocal(activity.endsAt));
-      setActivityEventEndAt(toDateTimeLocal(activity.eventEndsAt || new Date(new Date(activity.endsAt).getTime() + 4 * 60 * 60 * 1000).toISOString()));
-      setActivityStatus(runtimeActivityStatus(activity.status));
-      const rule = lottery.rules.find((item) => item.status === "PUBLISHED") ?? lottery.rules[0];
-      if (rule) setLotteryRounds(mapLotteryRule(rule));
-    }).catch(() => { if (active) setRuntimeConnected(false); });
+      applyActivity(adminActivity); setRuntimeConnected(true); setRuntimeConnectionState("connected");
+    });
     return () => { active = false; };
-  }, [adminActivity]);
+  }, [adminActivity, applyActivity]);
   useEffect(() => {
-    // Admin updates explicitly after actions; public surfaces retain their existing polling.
     if (adminActivityId != null) return;
     let active = true;
-    const timer = window.setInterval(() => {
-      void (adminActivityId != null ? loadAdminActivity(adminActivityId) : loadActivity()).then((activity) => {
-        if (!active) return;
-        setRuntimeActivity(activity);
-        setActivityName(activity.name);
-        setActivityStartAt(toDateTimeLocal(activity.startsAt));
-        setActivityEndAt(toDateTimeLocal(activity.endsAt));
-        setActivityEventEndAt(toDateTimeLocal(activity.eventEndsAt || activity.endsAt));
-        setActivityStatus(runtimeActivityStatus(activity.status));
-      }).catch(() => undefined);
-    }, 15_000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [adminActivityId]);
-  return { lotteryRounds, setLotteryRounds, activityName, setActivityName, activityId, setActivityId, activityStatus, setActivityStatus, activityStartAt, setActivityStartAt, activityEndAt, setActivityEndAt, activityEventEndAt, setActivityEventEndAt, runtimeActivity, setRuntimeActivity, runtimeConnected };
+    let unsubscribe: (() => void) | undefined;
+    // StrictMode's discarded mount must not open a second HTTP stream.
+    void Promise.resolve().then(() => {
+      if (!active) return;
+      unsubscribe = subscribeActivityInfo(publicActivityCode, {
+        onActivity: activity => { if (active) applyActivity(activity); },
+        onState: state => { if (active) { setRuntimeConnectionState(state); setRuntimeConnected(state === "connected"); } },
+      });
+    });
+    return () => { active = false; unsubscribe?.(); };
+  }, [adminActivityId, publicActivityCode, applyActivity]);
+  useEffect(() => {
+    if (adminActivityId != null) return;
+    let active = true;
+    // Lottery failure must not prevent the independent activity snapshot from displaying.
+    void Promise.resolve().then(() => active ? loadPublicLottery() : undefined).then(lottery => {
+      if (!active || !lottery) return;
+      const rule = lottery.rules.find(item => item.status === "PUBLISHED") ?? lottery.rules[0];
+      if (rule) setLotteryRounds(mapLotteryRule(rule));
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [adminActivityId, publicActivityCode]);
+  const runtimeMessage = runtimeConnectionState === "unavailable" ? "活动不存在或已不可用，请检查活动链接。"
+    : runtimeConnectionState === "unsupported" ? "当前浏览器无法同步活动信息，请使用新版浏览器打开。"
+    : runtimeConnectionState === "connecting" ? runtimeActivity ? "活动信息正在重新同步，当前显示上次资料。" : "正在加载活动信息…" : "";
+  return { lotteryRounds, setLotteryRounds, activityName, setActivityName, activityId, setActivityId, activityStatus, setActivityStatus, activityStartAt, setActivityStartAt, activityEndAt, setActivityEndAt, activityEventEndAt, setActivityEventEndAt, runtimeActivity, setRuntimeActivity, runtimeConnected, runtimeLoaded: Boolean(runtimeActivity), runtimeConnectionState, runtimeMessage };
 }

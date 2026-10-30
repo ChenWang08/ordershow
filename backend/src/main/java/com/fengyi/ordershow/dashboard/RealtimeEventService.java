@@ -1,6 +1,8 @@
 package com.fengyi.ordershow.dashboard;
 
 import com.fengyi.ordershow.common.UtcTime;
+import com.fengyi.ordershow.activity.ActivityInfoChanges;
+import com.fengyi.ordershow.activity.ActivityInfoRedisBridge;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -23,13 +25,23 @@ public class RealtimeEventService {
   private final Map<Long, CopyOnWriteArrayList<SseEmitter>> emitters = new ConcurrentHashMap<>();
   private final JdbcTemplate jdbc;
   private final Supplier<SseEmitter> emitterFactory;
+  private final java.util.function.LongConsumer activityInfo;
 
   @org.springframework.beans.factory.annotation.Autowired
-  public RealtimeEventService(JdbcTemplate jdbc) { this(jdbc, () -> new SseEmitter(30L * 60 * 1000)); }
+  public RealtimeEventService(JdbcTemplate jdbc, ActivityInfoRedisBridge activityInfo) {
+    this(jdbc, () -> new SseEmitter(30L * 60 * 1000), activityInfo::forward);
+  }
+
+  RealtimeEventService(JdbcTemplate jdbc) { this(jdbc, () -> new SseEmitter(30L * 60 * 1000)); }
 
   RealtimeEventService(JdbcTemplate jdbc, Supplier<SseEmitter> emitterFactory) {
+    this(jdbc, emitterFactory, ignored -> {});
+  }
+
+  RealtimeEventService(JdbcTemplate jdbc, Supplier<SseEmitter> emitterFactory, java.util.function.LongConsumer activityInfo) {
     this.jdbc = jdbc;
     this.emitterFactory = emitterFactory;
+    this.activityInfo = activityInfo;
   }
 
   public SseEmitter subscribe(long activityId) {
@@ -84,8 +96,16 @@ public class RealtimeEventService {
     if (rows.isEmpty()) return;
     Map<Long, List<OutboxRow>> byActivity = rows.stream().collect(Collectors.groupingBy(
         OutboxRow::activityId, LinkedHashMap::new, Collectors.toList()));
+    var retry = new java.util.HashSet<Long>();
     for (var entry : byActivity.entrySet()) {
       var changes = entry.getValue();
+      // Inspect every selected row, not just the batch's last eventType (which may be an order).
+      if (changes.stream().anyMatch(row -> ActivityInfoChanges.EVENT_TYPE.equals(row.eventType()))) {
+        try { activityInfo.accept(entry.getKey()); }
+        catch (RuntimeException error) {
+          changes.stream().filter(row -> ActivityInfoChanges.EVENT_TYPE.equals(row.eventType())).forEach(row -> retry.add(row.id()));
+        }
+      }
       var last = changes.getLast();
       Instant oldest = changes.stream().map(OutboxRow::createdAt).min(Instant::compareTo).orElseThrow();
       // invalidate is a request to reload the whole activity snapshot, not an individual business event.
@@ -95,8 +115,9 @@ public class RealtimeEventService {
     }
     // Acknowledge only the rows actually read and notified, never id <= cursor: lower IDs may commit late.
     // Sends happen outside DB transactions. Failed acknowledgements remain retryable (duplicate invalidations are safe).
-    for (int start = 0; start < rows.size(); start += BATCH_SIZE) {
-      var batch = rows.subList(start, Math.min(start + BATCH_SIZE, rows.size()));
+    var acknowledged = rows.stream().filter(row -> !retry.contains(row.id())).toList();
+    for (int start = 0; start < acknowledged.size(); start += BATCH_SIZE) {
+      var batch = acknowledged.subList(start, Math.min(start + BATCH_SIZE, acknowledged.size()));
       String ids = batch.stream().map(row -> "?").collect(Collectors.joining(","));
       jdbc.update("UPDATE domain_event_outbox SET status = 'PUBLISHED', published_at = UTC_TIMESTAMP(3) WHERE status = 'PENDING' AND id IN ("
           + ids + ")", batch.stream().map(OutboxRow::id).toArray());

@@ -313,6 +313,31 @@ paths:
                 $ref: '#/components/schemas/PublicActivityResponse'
         '404':
           $ref: '#/components/responses/Problem'
+  /public/activities/{activityCode}/events:
+    get:
+      operationId: subscribePublicActivityInfo
+      tags: [Public]
+      summary: 独立的活动公开资料 SSE 同步
+      security: []
+      description: |
+        手机验证前后及公开展示页面共用。建立连接后发送当前 activity 快照；活动资料变化后直接发送最新快照，
+        不通知客户端重查接口。只包含现有公开活动资料，不包含订单、审核、商品目录、客户身份或统计数据。
+        默认每 30 秒发送 heartbeat，心跳不查数据库。断线后退避重连，每次新连接重新同步当前资料，
+        不提供 Last-Event-ID 历史续传。CLOSED/FINISHED 仍可订阅以感知重新开放；活动不存在时发送 unavailable 后结束。
+        服务端返回 Cache-Control: no-cache, no-transform 与 X-Accel-Buffering: no；代理须关闭缓冲并允许长连接。
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      responses:
+        '200':
+          description: |
+            text/event-stream。activity 的 data 为 ActivityInfoSnapshot；heartbeat 的 data 包含 serverTime、heartbeatIntervalMs；
+            unavailable 的 data 包含 code、message，随后结束连接。version 是独立公开资料版本的十进制字符串，
+            与后台保存版本和订单事件编号无关。允许重复快照；同版本只允许较新 serverTime 推进时间派生状态。
+          content:
+            text/event-stream:
+              schema: { type: string }
+              example: "event: heartbeat\ndata: {\"serverTime\":\"2026-10-31T01:00:00Z\",\"heartbeatIntervalMs\":30000}\n\n"
+        '503': { $ref: '#/components/responses/Problem' }
   /public/activities/{activityCode}/verify-phone:
     post:
       operationId: verifyActivityPhone
@@ -2972,7 +2997,7 @@ components:
         eventEndsAt:
           type: string
           format: date-time
-          description: 整场活动结束时间；到时停止抽奖和实时推送，转为历史回看
+          description: 整场活动结束时间；到时停止抽奖，统计转为历史回看；独立活动资料 SSE 保留以感知重新开放
         timezone:
           type: string
         customerScope:
@@ -3006,6 +3031,18 @@ components:
           items:
             type: string
             enum: [GENERAL, SPECIAL]
+    ActivityInfoSnapshot:
+      type: object
+      required: [activityId, version, serverTime, heartbeatIntervalMs, activity]
+      properties:
+        activityId: { type: integer, format: int64 }
+        version:
+          type: string
+          pattern: '^[0-9]+$'
+          description: activity.public_info_version；使用字符串保留 BIGINT 精度，不作为事件续传游标。
+        serverTime: { type: string, format: date-time }
+        heartbeatIntervalMs: { type: integer, minimum: 1000, default: 30000 }
+        activity: { $ref: '#/components/schemas/Activity' }
     PublicActivityResponse:
       type: object
       required: [data, traceId]

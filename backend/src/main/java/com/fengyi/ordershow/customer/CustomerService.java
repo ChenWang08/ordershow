@@ -152,6 +152,9 @@ public class CustomerService {
       throw DomainException.conflict("CUSTOMER_PHONE_EXISTS", "该渠道下手机号已对应其他客户");
     }
     reassociateAttendance(activityId);
+    if (!java.util.Objects.equals(current.regionCode(), regionCode)) {
+      com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
+    }
     return customer(activityId, customerId);
   }
 
@@ -195,6 +198,7 @@ public class CustomerService {
       Long id = jdbc.queryForObject("SELECT id FROM activity_customer WHERE activity_id = ? AND data_version_id = ? AND customer_id = ?",
           Long.class, activityId, source.versionId(), customerId);
       reassociateAttendance(activityId);
+      com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
       return customer(activityId, id);
     } catch (DuplicateKeyException exception) {
       throw DomainException.conflict("CUSTOMER_EXISTS", "当前白名单已存在同名客户或该渠道下手机号已被使用");
@@ -214,6 +218,7 @@ public class CustomerService {
     if (changed != 1) throw DomainException.conflict("CUSTOMER_VERSION_CONFLICT", "客户已被删除或发生变化，请刷新后重试");
     jdbc.update("UPDATE h5_session SET revoked_at = UTC_TIMESTAMP(3) WHERE activity_customer_id = ? AND revoked_at IS NULL", customerId);
     reassociateAttendance(activityId);
+    com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
   }
 
   public PageResponse<AttendeeView> attendees(long activityId, String matchStatus, String keyword, int page, int size, String traceId) {

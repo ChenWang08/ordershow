@@ -188,6 +188,7 @@ public class ActivityService {
         UtcTime.database(endsAtToSave), UtcTime.database(request.eventEndsAt()), request.customerScope(), request.companyRankingTopN(), request.branchRankingTopN(),
         request.tonDisplayScale(), admin.id(), id, expectedVersion);
     if (changed != 1) throw DomainException.conflict("ACTIVITY_VERSION_CONFLICT", "活动配置已被其他页面修改，请刷新后重试");
+    ActivityInfoChanges.record(jdbc, id);
     return byId(id);
   }
 
@@ -556,6 +557,7 @@ public class ActivityService {
         INSERT INTO domain_event_outbox(activity_id, aggregate_type, aggregate_id, event_type, payload_json, available_at)
         VALUES (?, 'ACTIVITY', ?, ?, '{}', UTC_TIMESTAMP(3))
         """, activityId, String.valueOf(activityId), eventType);
+    ActivityInfoChanges.record(jdbc, activityId);
   }
 
   private Instant now() { return clock.instant(); }
@@ -590,6 +592,7 @@ public class ActivityService {
         WHERE id = ? AND version = ? AND archived_at IS NULL
         """, normalized, admin.id(), id, expectedVersion);
     requireChanged(changed);
+    ActivityInfoChanges.record(jdbc, id);
     return byId(id);
   }
 
