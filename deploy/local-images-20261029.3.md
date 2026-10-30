@@ -46,8 +46,17 @@ docker build --platform linux/amd64 --no-cache --build-arg NEXT_PUBLIC_API_BASE=
 
 ## 发布边界与回退
 
-本轮没有推送CODING、Git或镜像，没有部署线上，也没有替换现有本地业务服务。旧浏览器页面需重新加载才能使用已交付的手动刷新代码。没有数据库迁移，无需为镜像回退覆盖数据库。
+构建验证阶段没有推送CODING；随后按用户授权完成下述镜像交付。没有推送Git、部署线上或替换现有本地业务服务。旧浏览器页面需重新加载才能使用已交付的手动刷新代码。没有数据库迁移，无需为镜像回退覆盖数据库。
 
-后续获授权交付时使用本记录镜像摘要，并在实际ACK资源下验证PolarDB、Redis TLS、OSS、Ingress和性能容量。本轮没有高并发容量测试，不把小型接口回归时间当作P95或线上容量结论。
+后续部署使用本记录镜像摘要，并在实际ACK资源下验证PolarDB、Redis TLS、OSS、Ingress和性能容量。本轮没有高并发容量测试，不把小型接口回归时间当作P95或线上容量结论。
+
+## CODING 镜像交付：2026-10-29
+
+按用户授权，为上述两个本地20261029.3镜像添加指定仓库标签并推送，未重新构建。前后端docker push均退出码0；随后分别通过docker buildx imagetools inspect读取仓库，索引摘要与上表本地摘要完全一致，业务平台均为linux/amd64。已有层复用，缺少的层和新版本元数据已上传。原有20261019.1、20261027.1仓库标签未覆盖。
+
+- 前端：`g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261029.3`
+- 后端：`g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261029.3`
+
+本次仅推送镜像，不更新ACK工作负载、不连接或修改测试环境数据库、不操作原本地业务容器。真实测试环境部署与验收仍待部署团队完成。
 
 隔离回退时设置 `ACK_IMAGE_TAG=20261029.2`，按 `deploy/verify/compose.yaml` 重建前后端；云端由运维恢复上一套已验收的前后端摘要。所有本轮日志、镜像信息、内容比对及页面计数位于忽略目录 `outputs/ack-release-20261029.3/`，含配置的私有快照不上传。
