@@ -10,7 +10,7 @@ const item = (productId, quantity) => ({ productId, quantity, materialName: "商
 async function harness(status = "SUBMITTED", pending = null, activity = { code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] }) {
   let cursor = 0, fail = false;
   const slots = [], calls = [], storage = new Map();
-  const order = { id: 1, orderNo: "ORDER1", status, currentVersion: 2, lockVersion: 4,
+  const order = { id: 1, activityCustomerId: 2, orderNo: "ORDER1", status, currentVersion: 2, lockVersion: 4,
     items: [item(1, 10)], operations: [], lastModifiedAt: "2026-10-10T01:00:00Z" };
   const api = {
     ApiError, apiAssetUrl: url => url,
@@ -22,7 +22,7 @@ async function harness(status = "SUBMITTED", pending = null, activity = { code: 
     },
     loadH5Products: async () => [1, 2].map(id => ({ id, materialName: "商品" + id, images: [], casePrice: 10, customerType: "ALL", rebateStatus: "ALL", orderable: true })),
     loadH5Order: async () => order,
-    loadH5OrderChangeRequest: async () => pending,
+    loadH5OrderChangeRequest: async () => pending ? { orderId: 1, baseVersion: 2, currentVersion: 2, ...pending } : null,
     loadH5OrderDraft: async () => null,
     createH5OrderChangeRequest: async (...args) => { calls.push(["review", ...args]); return { id: 8, status: "PENDING", requestType: args[3], items: args[4] }; },
     saveH5Order: async (...args) => {
@@ -39,7 +39,7 @@ async function harness(status = "SUBMITTED", pending = null, activity = { code: 
     "./useH5Draft": { useH5Draft: () => draft },
     "./h5-submission": { createH5SubmissionManager: options => createH5SubmissionManager({ ...options, uuid: randomUUID, sleep: async () => {} }) },
     react: {
-      useEffect() {}, useMemo: fn => fn(),
+      useEffect() {}, useMemo: fn => fn(), useCallback: fn => fn,
       useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
       useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
         return [slots[i], value => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; },
@@ -75,7 +75,7 @@ test("unchanged quantities issue no request and retain the existing application"
 test("withdrawn and voided orders can be edited and directly restored with fewer boxes", async () => {
   for (const status of ["WITHDRAWN", "VOIDED"]) {
     const h = await harness(status); assert.equal(h.render().customerOrderReadOnly, false);
-    h.render().startEditingOrder(); assert.equal(h.render().step, "order");
+    await h.render().startEditingOrder(); assert.equal(h.render().step, "order");
     h.render().setQuantities({ 1: 5 }); await h.render().submitOrder();
     assert.equal(h.calls[0][0], "direct"); assert.equal(h.render().submitMode, "restore");
   }
@@ -110,7 +110,7 @@ test("recovery displays the administrator's latest quantities instead of the pen
 
 test("editing during a pending withdrawal starts from the effective items", async () => {
   const h = await harness("SUBMITTED", { id: 7, status: "PENDING", requestType: "WITHDRAW", items: [] });
-  h.render().startEditingOrder();
+  await h.render().startEditingOrder();
   assert.equal(h.render().quantities[1], 10);
   h.render().setQuantities({ 1: 12 }); await h.render().submitOrder();
   assert.equal(h.calls[0][0], "direct");

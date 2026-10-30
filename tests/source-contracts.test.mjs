@@ -13,11 +13,13 @@ const frontendSourceFiles = [
   "../app/features/h5/H5CatalogPage.tsx",
   "../app/features/h5/H5ConfirmPage.tsx",
   "../app/features/h5/H5SubmittedPage.tsx",
+  "../app/features/h5/H5OrderRefresh.tsx",
   "../app/features/h5/H5ResultPages.tsx",
   "../app/features/h5/h5-domain.ts",
   "../app/features/h5/ProductArt.tsx",
   "../app/features/h5/useH5Draft.ts",
   "../app/features/h5/useH5OrderFlow.ts",
+  "../app/features/h5/useH5OrderSync.ts",
   "../app/features/screens/ScreenBoards.tsx",
   "../app/features/screens/dashboard-domain.ts",
   "../app/features/screens/RankingBoard.tsx",
@@ -320,7 +322,7 @@ test("keeps the hourly order trend inside the activity window and timezone-safe"
   assert.match(prototype, /existing \?\? \{ bucket: new Date\(time\)\.toISOString\(\), amount: 0, orders: 0 \}/);
 });
 
-test("keeps an H5 draft only when the verified customer is unchanged", async () => {
+test("keeps H5 draft persistence scoped to its customer and base order version", async () => {
   const [prototype, api, controller, service, migration] = await Promise.all([
     readFrontendSource(),
     readApiSource(),
@@ -329,9 +331,8 @@ test("keeps an H5 draft only when the verified customer is unchanged", async () 
     readFile(new URL("../db/migrations/V010__h5_order_draft.sql", import.meta.url), "utf8"),
   ]);
 
-  assert.match(prototype, /const preserveDraft = runtimeIdentity\?\.activityId === identity\.activityId\s*&& runtimeIdentity\.customerId === identity\.customerId/);
-  assert.match(prototype, /applyRuntimeOrder\(order, liveCatalog, preserveDraft\)/);
-  assert.match(prototype, /if \(!preserveDraft\) setQuantities\(\{\}\)/);
+  // Actual restoration, version changes and customer switching are covered by
+  // h5-manual-refresh.test.mjs and h5-order-routing.test.mjs.
   assert.match(prototype, /setOrderUpdatedAt\(""\).*setOrderWithdrawnAt\(""\).*setCartOpen\(false\).*setCancelConfirmOpen\(false\)/s);
   assert.match(prototype, /loadH5OrderDraft\(\)/);
   assert.match(prototype, /window\.addEventListener\("pagehide", flushOnPageHide\)/);

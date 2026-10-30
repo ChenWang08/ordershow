@@ -2,6 +2,8 @@
 
 ## 测试分工
 
+- 手机端订单按需刷新：`h5-manual-refresh.test.mjs` 覆盖无轮询、15 秒冷却、共享查询、修改/撤回检查、审核及后台直接修改、草稿版本和迟到响应隔离；`scripts/test-h5-manual-refresh-browser.mjs` 使用真实 H5 组件及合成 HTTP，在手机/桌面验证静置无订单请求、最新购物车和失败恢复，见[验证记录](../docs/testing/h5-manual-refresh-2026-10-30.md)。
+
 - 后台手动刷新：`admin-manual-refresh.test.mjs` / `admin-session.test.mjs` 覆盖按需读取、请求合并、过期响应隔离和身份异常；`scripts/test-admin-refresh-browser.mjs` 用真实后台组件与合成 HTTP 在桌面/窄屏验证静置无轮询、手动刷新及失败恢复，详见 [后台取消轮询验证](../docs/testing/admin-manual-refresh-2026-10-30.md)。
 
 - `rendered-html.test.mjs`：运行构建后的服务端入口，检查实际 HTML 与必要资源。

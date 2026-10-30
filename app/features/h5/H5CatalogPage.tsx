@@ -57,6 +57,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
               </div>
               <div className="policy-note"><b>订货提示</b><span>{activityClosed ? "活动已截止，当前订单仅可查看。" : orderStatus === "none" ? "所有商品按箱订购。增加数量或新增商品直接生效，减少、删除商品或取消订货需要审核。" : "增加数量或新增商品直接生效；减少、删除商品或取消订货需审核。已撤回或已作废订单可重新提交恢复。"}</span></div>
               {draftMessage && <div className="h5-draft-status" role="status">{draftMessage}</div>}
+              {model.runtimeMessage && <div className="verify-error" role="alert">{model.runtimeMessage}</div>}
               <div ref={toolbar} className="product-toolbar">
                 <div className={`segment${hasRebateSplit ? catalogSearch.searching ? " search-segment" : "" : " single"}`} role="tablist" aria-label="商品返利类型">
                   {hasRebateSplit ? <>
