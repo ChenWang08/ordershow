@@ -1,5 +1,7 @@
 # Handoff：H5 下单 30 并发 < 1000ms
 
+> 环境/时点说明（2026-10-30 更新）：本文保留另一台电脑与 `home_server` 当时的交接记录，以下“未提交”“不要打开汇总”等要求仅描述该轮环境和方案，不代表当前 `E:\fengyi\order_show` 本机状态。本机 `main/d36cbca` 已完成独立功能与 10 写＋5 读混合验证，并在备份、升级、回填对账后开启汇总；见[最新本地部署记录](../deployment/2026-10-30-summary-local.md)和[测试报告](../testing/local-summary-validation-2026-10-30.md)。本次未访问或更新远程环境，不据此声称远程 30 并发门槛通过。
+
 日期：2026-10-30（压测时刻约 02:36–02:45 CST，库内时间约 2026-10-29 18:36–18:45 UTC）。
 代码仓库：`/Users/didi/workspace/order_show`。不要在 `/Users/didi/workspace/ra_tools` 里改订货会代码。
 本文件未提交。同目录的 `h5-concurrency-architecture-plan.md` 是更宽的路线图，其中 `innodb_flush_log_at_trx_commit=2`、400–600ms 预期、内存定价引擎都没有被本轮批准。以本 handoff 和当时批准的计划为准。

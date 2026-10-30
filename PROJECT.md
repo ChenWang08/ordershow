@@ -1,6 +1,6 @@
 # 订购会系统项目说明
 
-> 实施状态（2026-10-15）：本文项目说明已同步当前 React 正式前端、Spring Boot 后端、MySQL、Redis、MinIO 和 Docker Compose 实现。此前标注“仅前端内存/正式系统待接入”的段落属于原型阶段历史说明；当前运行与验收方式以根目录 `README.md`、Flyway 迁移、OpenAPI 契约和 `docs/design/07-department-account-and-activity-isolation-plan.md` 为准。商品价格保存后自动同步当前活动有效订单，订单当前明细和看板使用最新金额；订单历史版本保留原提交数据。订单综合看板的完整模块、统计口径、交互和验收规则见 `docs/design/06-order-dashboard-plan.md`。
+> 实施状态（2026-10-30）：最新本地版本、V041 与汇总开启状态见第 3 节及根目录 `README.md`。本文项目说明对应 React 正式前端、Spring Boot 后端、MySQL、Redis、MinIO 和 Docker Compose 实现。此前标注“仅前端内存/正式系统待接入”的段落属于原型阶段历史说明；当前运行与验收方式以根目录 `README.md`、Flyway 迁移、OpenAPI 契约和 `docs/design/07-department-account-and-activity-isolation-plan.md` 为准。商品价格保存后自动同步当前活动有效订单，订单当前明细和看板使用最新金额；订单历史版本保留原提交数据。订单综合看板的完整模块、统计口径、交互和验收规则见 `docs/design/06-order-dashboard-plan.md`。
 
 ## 1. 文档目的
 
@@ -21,6 +21,10 @@
 - 管理后台只允许授权工作人员访问。
 
 ## 3. 当前项目状态
+
+截至 **2026-10-30 11:08（北京时间）**，本机前后端已更新至 `main` 提交 `d36cbca`，镜像标签均为 `local-d36cbca-20261030`。数据库升级至 V041，本地开启汇总读取；11 个活动、456 笔订单回填对账差异 0，原订单与历史数据未改变。开启汇总的 10 下单＋5 看板客户端五分钟混合测试通过现有门槛；此结果不代表 30 并发或远程服务器容量通过。备份、恢复注意事项和只读页面验收见[最新本地部署记录](docs/deployment/2026-10-30-summary-local.md)，完整功能回归与性能边界见[本轮测试报告](docs/testing/local-summary-validation-2026-10-30.md)。
+
+### 历史状态：2026-10-15
 
 截至 **2026-10-15 10:21（北京时间）**，本机 `order-show` 前后端已部署 H5 单一客户类型入口，当前两个镜像标签均为 `h5-entry-20261015-101807`。
 

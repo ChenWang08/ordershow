@@ -1,5 +1,9 @@
 # 压力与性能测试
 
+2026-10-30 最新本机结果见[功能、汇总与混合压测报告](../../docs/testing/local-summary-validation-2026-10-30.md)：开启汇总的 10 写＋5 读、90 秒及 5 分钟通过现有脚本门槛；关闭模式对照提交未达标。后续按开启汇总测试，旧失败结果保留。读脚本没有延迟阈值，不能把混合脚本通过说成所有看板低于 1 秒。日常系统已另行[本地部署](../../docs/deployment/2026-10-30-summary-local.md)，禁止将压测入口改指日常库。
+
+该轮显式采用 `LOAD_DASHBOARD_SUMMARY_ENABLED=true`、`LOAD_HTTP_MAX_THREADS=60`、MySQL 512MiB 缓冲池；缓冲池由忽略目录中的本机测试覆盖配置设置，基础 load Compose 仍只有慢查询配置。复跑时先核对实际容器配置，不要把基础 Compose 的默认值当成这轮实测值。V041 下曾关闭汇总且有写入的旧测试库，应先 `repair`、`check`，再恢复开启，不能仅翻转开关。
+
 看板汇总改造可使用明确隔离的 `order-show-load-summary` 项目、8480端口和 `outputs/load-summary`。`capacity.mjs` 支持该项目，`summary-read.mjs <fixture-label> <并发数1..20> <秒数5..300>` 读取金额榜、吨数榜、看板、战报并保存延迟与错误。与持续提交叠加时，分别报告读取及提交指标；步骤和边界见 [汇总层验收](../../docs/testing/dashboard-summary-2026-10-29.md)。
 
 `capacity.mjs submit-only <fixture-label> <并发数> <时长>` 仅用于隔离诊断：执行当前订单→增加数量提交→确认，省略草稿保存，仍校验版本/金额/数量/审计且不自动重试失败。其结果不能替代含草稿的 `sustain` 完整流程验收。报告记录汇总开关和挂载jar的SHA-256；压测引擎提前终止时保留服务日志及InnoDB快照，不把剩余只读时段当成持续混合负载。
@@ -41,7 +45,7 @@ node tests/load/capacity.mjs journey sustain-example 10 5m
 
 长稳可并行运行`node tests/load/soak-watch.mjs 3660`，约每30秒只读检查待发布事件年龄和看板API，异常即退出失败；这不等于连续SSE连接或浏览器渲染验证。SSE短探针必须在写负载前后运行，避免其额外写入污染版本计数。
 
-最新H5高频诊断、批量写入和线程上限对照见[H5优化报告](../../docs/testing/h5-throughput-optimization-report.md)。当前后端HTTP线程默认上限40，数据库连接仍20；线程数不是在线人数。需要复现旧200线程配置时，设置`$env:LOAD_HTTP_MAX_THREADS='200'`后重建隔离backend容器，测试完恢复默认，不改变业务Compose。
+历史H5高频诊断、批量写入和线程上限对照见[H5优化报告](../../docs/testing/h5-throughput-optimization-report.md)。该历史阶段使用HTTP线程40、数据库连接20；当前 load Compose 默认HTTP线程40、数据库池60，本轮显式覆盖HTTP线程为60。线程数不是在线人数。需要复现旧200线程配置时，设置`$env:LOAD_HTTP_MAX_THREADS='200'`后重建隔离backend容器，测试完恢复本轮明确配置，不改变业务Compose。
 
 千人场景和60分钟长稳见[执行说明](../../docs/testing/thousand-peak-soak-plan.md)及[本轮结果](../../docs/testing/thousand-peak-soak-report.md)。运行入口为`node tests/load/thousand-soak.mjs`；首次下单样本必须未下过单，重跑前按说明准备隔离夹具。
 

@@ -2,6 +2,8 @@
 
 ## 1. 设计原则
 
+V040/V041 订单级看板汇总：新增 `order_dashboard_stat`（每单一行）及 `order_dashboard_product_line_stat`（每单按项目组、礼盒标志聚合）。V041 删除 V040 的三个逐明细触发器；开启汇总时由应用在业务事务中同步标脏/重算，关闭时不维护。汇总是可重建的派生数据，不替代订单、历史版本或冻结展示快照。裸 SQL 修改明细或关闭期间写入后，需显式修复和对账再恢复汇总读取。2026-10-30 本地已升级至 V041 并开启，其他环境需独立升级和回填，见[部署记录](../deployment/2026-10-30-summary-local.md)。
+
 V035 部门成员：取消 `admin_user.department_id` 的全账号唯一约束，改用生成列 `department_admin_scope` 的唯一索引，仅限制每部门一个部门管理员；新增成员角色、模块权限表及操作身份快照。保留已有账号、活动与订单 ID。
 
 V034 审核工作台：`order_change_request` 状态限制为 PENDING/APPROVED/REJECTED；历史 CONFLICTED 转为 REJECTED。生成列 `pending_order_id` 和唯一索引保证每张订单最多一条待审核申请。`original_order_json` 保存申请时原订单快照用于准确对比；迁移前申请使用对应历史版本兜底，不伪造旧价格快照。替换申请和自动驳回保留申请历史及 SYSTEM 操作记录。
