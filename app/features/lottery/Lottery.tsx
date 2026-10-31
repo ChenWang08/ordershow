@@ -4,6 +4,7 @@ import { formatBeijingTime } from "../shared/time";
 
 
 /* eslint-disable @next/next/no-img-element -- prize images come from the runtime file API. */
+import { useLazyAdminQuery } from "../admin/useLazyAdminQuery";
 import { useEffect, useRef, useState } from "react";
 import { apiAssetUrl, ApiError, completeLotteryRound, createLotteryRule, deleteLotteryPrizeImage, drawLotteryRound, loadLotteryStatistics, loadPublicLottery, previewLotteryCandidates, publishLotteryRule, updateLotteryRule, uploadLotteryPrizeImage, type LotteryCandidatePreview, type LotteryRuleApi, type LotteryWinnerApi, type LotteryWinnerStatistics } from "../../api";
 import type { AttendanceCustomerType, AttendanceRow } from "../../domain/import-domain";
@@ -263,16 +264,13 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
 
 
 
-export function LotterySettings({ rounds, attendanceRows, attendeeCount = attendanceRows.length, activityId, customerCount, customerTypeMode = "TYPED", readOnly, onChange }: { rounds: LotteryRound[]; attendanceRows: AttendanceRow[]; activityId: number; customerCount: number; attendeeCount?: number; customerTypeMode?: "TYPED" | "UNSPECIFIED"; readOnly: boolean; onChange: (rounds: LotteryRound[]) => void }) {
+export function LotterySettings({ active = true, revision = "", rounds, attendanceRows, attendeeCount = attendanceRows.length, activityId, customerCount, customerTypeMode = "TYPED", readOnly, onChange, onSaved }: { active?: boolean; revision?: string; onSaved?: () => void; rounds: LotteryRound[]; attendanceRows: AttendanceRow[]; activityId: number; customerCount: number; attendeeCount?: number; customerTypeMode?: "TYPED" | "UNSPECIFIED"; readOnly: boolean; onChange: (rounds: LotteryRound[]) => void }) {
   const [selectedId, setSelectedId] = useState(rounds.find((item) => item.status === "published")?.id ?? rounds[0]?.id ?? -1);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [prizeImageUploading, setPrizeImageUploading] = useState(false);
   const [prizeImageError, setPrizeImageError] = useState("");
-  const [preview, setPreview] = useState<LotteryCandidatePreview | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [statistics, setStatistics] = useState<LotteryWinnerStatistics>({ validWinnerRecords: 0, validWinnerCustomers: 0, invalidatedWinnerRecords: 0 });
   const selected = rounds.find((item) => item.id === selectedId) ?? rounds[0];
   const selectedIndex = Math.max(0, rounds.findIndex((item) => item.id === selected.id));
   const selectedLocked = readOnly || prizeImageUploading || Boolean(selected.serverStatus && !["DRAFT", "READY"].includes(selected.serverStatus));
@@ -316,28 +314,28 @@ export function LotterySettings({ rounds, attendanceRows, attendeeCount = attend
     updateSelected({ prizeImageFileId: undefined, prizeImageUrl: undefined });
     setPrizeImageError("");
   };
-  useEffect(() => {
-    if (!Number.isFinite(activityId) || activityId <= 0 || !selected) return;
-    const timer = window.setTimeout(() => {
-      setPreviewLoading(true); setSaveError("");
-      void previewLotteryCandidates(activityId, {
-        roundNo: selectedIndex + 1, winnerCount: selected.winnerCount,
-        candidateScope: selected.scope === "attended" ? "ATTENDEES" : selected.scope === "ordered" ? "VALID_ORDERS" : "ALL_CUSTOMERS",
-         customerType: lotteryCustomerTypeCode(effectiveSelectedCustomerType),
-         minimumOrderAmount: selected.scope === "ordered" ? selected.minAmount : 0,
-         qualificationMetric: selected.qualificationMetric,
-         probabilityMode: selected.probabilityMode,
-         minimumOrderBoxCount: selected.scope === "ordered" ? selected.minBoxCount : 0,
-        excludePreviousWinners: selectedIndex > 0 && selected.excludeWinners,
-      }).then(setPreview).catch((error) => setSaveError(error instanceof ApiError ? error.message : "候选名单试算失败"))
-        .finally(() => setPreviewLoading(false));
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [activityId, selected, selectedIndex, effectiveSelectedCustomerType]);
-  useEffect(() => {
-    if (!Number.isFinite(activityId) || activityId <= 0) return;
-    void loadLotteryStatistics(activityId).then(setStatistics).catch(() => undefined);
-  }, [activityId, rounds]);
+  const previewInput = {
+    roundNo: selectedIndex + 1, winnerCount: selected.winnerCount,
+    candidateScope: selected.scope === "attended" ? "ATTENDEES" : selected.scope === "ordered" ? "VALID_ORDERS" : "ALL_CUSTOMERS",
+    customerType: lotteryCustomerTypeCode(effectiveSelectedCustomerType),
+    minimumOrderAmount: selected.scope === "ordered" ? selected.minAmount : 0,
+    qualificationMetric: selected.qualificationMetric, probabilityMode: selected.probabilityMode,
+    minimumOrderBoxCount: selected.scope === "ordered" ? selected.minBoxCount : 0,
+    excludePreviousWinners: selectedIndex > 0 && selected.excludeWinners,
+  };
+  const candidateQuery = useLazyAdminQuery<LotteryCandidatePreview>(JSON.stringify([activityId,previewInput,revision]), active, async signal => {
+    await new Promise<void>((resolve,reject) => {
+      signal.throwIfAborted();
+      const abort = () => { window.clearTimeout(timer); reject(signal.reason); };
+      const timer = window.setTimeout(() => { signal.removeEventListener("abort",abort); resolve(); },250);
+      signal.addEventListener("abort",abort,{once:true});
+    });
+    return previewLotteryCandidates(activityId,previewInput,signal);
+  });
+  const statisticsQuery = useLazyAdminQuery<LotteryWinnerStatistics>(JSON.stringify([activityId,rounds.map(round=>[round.id,round.serverStatus]),revision]), active, signal => loadLotteryStatistics(activityId,signal));
+  const preview = candidateQuery.data ?? null;
+  const previewLoading = candidateQuery.loading;
+  const statistics = statisticsQuery.data ?? { validWinnerRecords: 0, validWinnerCustomers: 0, invalidatedWinnerRecords: 0 };
   const addRound = () => {
     if (prizeImageUploading) return;
     const id = Math.min(-1, ...rounds.map((item) => item.id - 1));
@@ -367,7 +365,7 @@ export function LotterySettings({ rounds, attendanceRows, attendeeCount = attend
       const saved = existingRuleId ? await updateLotteryRule(activityId, existingRuleId, body) : await createLotteryRule(activityId, body);
       const published = saved.status === "DRAFT" ? await publishLotteryRule(activityId, saved.id) : saved;
       const mapped = mapLotteryRule(published);
-      onChange(mapped); setSelectedId(mapped[0]?.id ?? -1);
+      onChange(mapped); onSaved?.(); setSelectedId(mapped[0]?.id ?? -1);
     } catch (error) { setSaveError(error instanceof ApiError ? error.message : "抽奖规则保存失败"); }
     finally { setSaving(false); }
   };
@@ -394,7 +392,7 @@ export function LotterySettings({ rounds, attendanceRows, attendeeCount = attend
   return (
     <div className="admin-panel lottery-settings">
       <div className="panel-title"><div><h2>抽奖规则工作台</h2><p>{readOnly ? "整场活动已结束，抽奖规则和结果只读" : "候选按白名单客户 ID 去重并严格按轮次执行；已开始轮次自动锁定"}</p></div><div className="panel-actions"><span className="attendance-not-linked">现场名单已同步 {attendeeCount} 名</span><button className="admin-primary" disabled={readOnly || saving || prizeImageUploading || rounds.length === 0} onClick={saveAndPublish}>{readOnly ? "活动已结束" : saving ? "正在保存…" : rounds.some((round) => round.serverStatus === "READY") ? "保存规则修改" : "保存并发布"}</button></div></div>
-      {saveError && <div className="warning-box"><b>抽奖规则未发布</b><span>{saveError}</span></div>}
+      {(saveError || candidateQuery.error || statisticsQuery.error) && <div className="warning-box"><b>抽奖资料读取或保存失败</b><span>{saveError || candidateQuery.error || statisticsQuery.error}</span></div>}
       <div className="lottery-overview">
         <article><span>抽奖轮次</span><strong>{rounds.length}</strong><small>{rounds.filter((x) => x.status === "completed").length} 轮已完成</small></article>
         <article><span>活动客户</span><strong>{customerCount.toLocaleString()}</strong><small>白名单有效客户</small></article>

@@ -43,9 +43,14 @@ public class ActivityController {
     return ApiResponse.of(service.currentOrderable(), TraceFilter.id(request));
   }
 
-  @GetMapping("/admin/activities")
+  @GetMapping(value = "/admin/activities", params = "!summary")
   ApiResponse<List<ActivityService.ActivityView>> activities(HttpServletRequest request) {
     return ApiResponse.of(service.list(auth.requireAdmin(request)), TraceFilter.id(request));
+  }
+
+  @GetMapping(value = "/admin/activities", params = "summary=true")
+  ApiResponse<List<ActivityService.ActivitySummary>> activitySummaries(HttpServletRequest request) {
+    return ApiResponse.of(service.listSummaries(auth.requireAdmin(request)), TraceFilter.id(request));
   }
 
   @PostMapping("/admin/activities")

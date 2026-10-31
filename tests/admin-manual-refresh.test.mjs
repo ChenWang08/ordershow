@@ -101,10 +101,10 @@ test("module counts load only in a relevant module, on mutation or on explicit r
   h.render(["1", "白名单", 0]); await h.flush(); assert.equal(reads, 1);
   h.render(); await h.flush(); assert.equal(reads, 1);
   h.render(["1", "白名单", 1]); await h.flush(); assert.equal(reads, 2);
-  h.render(["1", "现场到场", 1]); await h.flush(); assert.equal(reads, 3);
-  h.render(["1", null, 2]); await h.flush(); assert.equal(reads, 3);
-  h.render(["1", "商品导入", 2]); await h.flush(); assert.equal(reads, 4);
-  await h.model.refresh(); await h.flush(); assert.equal(reads, 5);
+  h.render(["1", "现场到场", 1]); await h.flush(); assert.equal(reads, 2);
+  h.render(["1", null, 2]); await h.flush(); assert.equal(reads, 2);
+  h.render(["1", "商品导入", 2]); await h.flush(); assert.equal(reads, 3);
+  await h.model.refresh(); await h.flush(); assert.equal(reads, 4);
   assert.equal(h.intervals.size, 0); h.unmount();
 });
 

@@ -6,8 +6,8 @@ export type DepartmentMember = {
   id: number; username: string; displayName: string; departmentId: number; departmentName: string;
   status: "ACTIVE" | "DISABLED"; lockVersion: number; lastLoginAt?: string | null; permissions: MemberPermission[];
 };
-export async function loadMembers(departmentId?: number) {
-  return (await api<Envelope<DepartmentMember[]>>("/admin/members" + (departmentId ? `?departmentId=${departmentId}` : ""))).data;
+export async function loadMembers(departmentId?: number, signal?: AbortSignal) {
+  return (await api<Envelope<DepartmentMember[]>>("/admin/members" + (departmentId ? `?departmentId=${departmentId}` : ""), { signal })).data;
 }
 export async function createMember(input: { username: string; displayName: string; departmentId?: number; password: string; permissions: MemberPermission[] }) {
   return (await api<Envelope<DepartmentMember>>("/admin/members", { method: "POST", body: JSON.stringify(input) }, "admin")).data;

@@ -10,6 +10,7 @@ import { ActivityLiveRoomCard } from "./ActivityLiveRoomCard";
 import { ActivityBackgroundCard } from "./ActivityBackgroundCard";
 import type { useActivitySettings } from "./useActivitySettings";
 import type { useActivityOverview } from "./useActivityOverview";
+import type { RuntimeActivity } from "../../api";
 
 type ActivityOverviewProps = {
   activityId?: number;
@@ -23,11 +24,14 @@ type ActivityOverviewProps = {
   settings: ReturnType<typeof useActivitySettings>;
   overview: ReturnType<typeof useActivityOverview>;
   onViewOrders: () => void;
+  activity?: RuntimeActivity | null;
+  statisticsStale?: boolean;
+  onLiveRoomDirtyChange?: (dirty: boolean) => void;
 };
 
 export function ActivityOverview({
   activityId, activityCode, activityName, activityStatus, activityEventEndAt,
-  minimumFutureAt, departmentName, settings, overview, onViewOrders,
+  minimumFutureAt, departmentName, settings, overview, onViewOrders, activity, statisticsStale, onLiveRoomDirtyChange,
 }: ActivityOverviewProps) {
   const identity = useAdminIdentity();
   const manager = isManager(identity);
@@ -43,6 +47,7 @@ export function ActivityOverview({
               <span>{overview.updatedAt ? `最后更新时间：${formatBeijingTime(overview.updatedAt)} · 数据仅在点击刷新时更新` : "尚未加载，点击刷新查看"}</span>
               <button type="button" className="admin-primary" disabled={overview.loading} onClick={() => void overview.refresh()}>{overview.loading ? "正在刷新…" : "刷新统计"}</button>
               {overview.error && <span role="alert">统计刷新失败：{overview.error}{overview.loaded ? "；当前保留上次成功的数据" : ""}</span>}
+              {statisticsStale && overview.loaded && <span>相关数据有变化，请点击刷新统计。</span>}
             </div>
             <div className="admin-stats">
               {adminStats.map((item) => <article key={item[0]}><span>{item[0]}</span><strong>{item[1]}</strong><small>{item[2]}</small></article>)}
@@ -58,8 +63,8 @@ export function ActivityOverview({
               </article>
              </div>
              {manager && <ReopenActivityDialog settings={settings} />}
-             {activityId && <ActivityBackgroundCard key={`background-${activityId}`} activityId={activityId} editable={manager} />}
-             {activityId && <ActivityLiveRoomCard key={activityId} activityId={activityId} editable={manager} />}
+             {activityId && <ActivityBackgroundCard key={`background-${activityId}`} activityId={activityId} editable={manager} initialActivity={activity} />}
+             {activityId && <ActivityLiveRoomCard key={activityId} activityId={activityId} editable={manager} initialActivity={activity} onDirtyChange={onLiveRoomDirtyChange} />}
              <ActivityEntryLinksCard
                key={activityCode}
                activityCode={activityCode}

@@ -1,7 +1,7 @@
 import { beijingDateTimeToUtc } from "../../features/shared/time";
 import { api } from "./client";
 import { activeActivityPath } from "./context";
-import type { Envelope, RuntimeActivity } from "./types";
+import type { AdminActivitySummary, Envelope, RuntimeActivity } from "./types";
 
 export async function loadActivity() { return (await api<Envelope<RuntimeActivity>>(`/public/activities/${activeActivityPath()}`)).data; }
 
@@ -9,8 +9,8 @@ export async function loadCurrentActivity() {
   return (await api<Envelope<RuntimeActivity>>("/public/activities/current")).data;
 }
 
-export async function loadAdminActivities() {
-  return (await api<Envelope<RuntimeActivity[]>>("/admin/activities")).data;
+export async function loadAdminActivities(signal?: AbortSignal) {
+  return (await api<Envelope<AdminActivitySummary[]>>("/admin/activities?summary=true", { signal })).data;
 }
 
 export async function loadAdminActivity(id: number, signal?: AbortSignal) {

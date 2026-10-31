@@ -35,7 +35,7 @@ type ActivitySettingsOptions = {
 };
 
 export function useActivitySettings({
-  activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, productImportCompleted, whitelistImportCompleted, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation, onActivityLoaded,
+  activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation, onActivityLoaded,
 }: ActivitySettingsOptions) {
   const [activityStartDraft, setActivityStartDraft] = useState(activityStartAt);
   const [activityEndDraft, setActivityEndDraft] = useState(activityEndAt);
@@ -130,10 +130,7 @@ export function useActivitySettings({
     return true;
   };
   const publishCurrentActivity = async () => {
-    if (!productImportCompleted || !whitelistImportCompleted) {
-      setActionNotice("发布活动前必须完成商品和白名单导入。" );
-      return;
-    }
+    // Publishing validates actual server bindings, not unopened modules' local flags.
     if (!window.confirm(`发布后活动将于 ${activityStartDraft.replace("T", " ")} 自动开始，商品和白名单将锁定。确定发布吗？`)) return;
     if (!await saveActivityConfig()) return;
     try {
@@ -229,7 +226,9 @@ export function useActivitySettings({
     try { return await action(); }
     finally { actionPending.current = false; setActivityActionBusy(false); }
   };
-  return { refreshActivity, activityRefreshing: activityQuery.loading || activityActionBusy || reopenBusy, activityRefreshError: activityQuery.error,
+  return { dirty: activityNameDraft !== activityName || activityStartDraft !== activityStartAt
+      || activityEndDraft !== activityEndAt || activityEventEndDraft !== activityEventEndAt,
+    refreshActivity, activityRefreshing: activityQuery.loading || activityActionBusy || reopenBusy, activityRefreshError: activityQuery.error,
     activityNameDraft, setActivityNameDraft, activityStartDraft, setActivityStartDraft, activityEndDraft, setActivityEndDraft, activityEventEndDraft, setActivityEventEndDraft,
     saveActivityConfig: async () => (await runAction(saveActivityConfig)) ?? false,
     publishCurrentActivity: () => runAction(publishCurrentActivity), withdrawCurrentActivity: () => runAction(withdrawCurrentActivity),

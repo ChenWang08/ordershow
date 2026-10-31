@@ -29,7 +29,7 @@ type ProductImportOptions = ProductModuleOptions & {
 export function useProductImport({
   activityId, activityStatus, productRows, setProductRows, productImportHasRun, setProductImportCompleted, onProductImportCommitted,
   serverImportTasks, setServerImportTasks, serverImportBlocking, setServerImportBlocking,
-  setActionNotice, recordOperation,
+  setActionNotice, recordOperation, importWaitOptions,
 }: ProductImportOptions) {
   const activityPublished = activityStatus !== "draft";
   const [productFileName, setProductFileName] = useState("");
@@ -122,7 +122,7 @@ export function useProductImport({
       try {
         await confirmImport(Number(activityId), taskId, productImageUploadFile ?? undefined,
           buildProductImageDecisions(productRows, resolvedProductImageAssets));
-        await waitForImport(Number(activityId), taskId);
+        await waitForImport(Number(activityId), taskId, importWaitOptions?.());
         const [products, imageReviews] = await Promise.all([
           loadAdminProducts(Number(activityId)), loadProductImageReviews(Number(activityId)),
         ]);

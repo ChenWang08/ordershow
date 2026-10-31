@@ -3,14 +3,14 @@ import { createIdempotencyKey } from "./idempotency-key";
 import { api, apiBase, ApiError, notifyAdminAccessFailure } from "./client";
 import type { AdminOrderPreview, AdminOrderSummary, Envelope, OrderChangeRequest, PageEnvelope, RuntimeOrder } from "./types";
 
-export async function loadAdminOrders(activityId: number, filters: { status?: string; customerType?: string; keyword?: string; page?: number; size?: number } = {}) {
+export async function loadAdminOrders(activityId: number, filters: { status?: string; customerType?: string; keyword?: string; page?: number; size?: number } = {}, signal?: AbortSignal) {
   const query = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => { if (value !== undefined && value !== "") query.set(key, String(value)); });
-  return api<PageEnvelope<AdminOrderSummary>>(`/admin/activities/${activityId}/orders?${query.toString()}`);
+  return api<PageEnvelope<AdminOrderSummary>>(`/admin/activities/${activityId}/orders?${query.toString()}`, { signal });
 }
 
-export async function loadAdminOrder(activityId: number, orderId: number) {
-  return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders/${orderId}`)).data;
+export async function loadAdminOrder(activityId: number, orderId: number, signal?: AbortSignal) {
+  return (await api<Envelope<RuntimeOrder>>(`/admin/activities/${activityId}/orders/${orderId}`, { signal })).data;
 }
 
 export async function previewAdminOrder(activityId: number, activityCustomerId: number,
@@ -55,8 +55,8 @@ export function loadOrderChangePage(activityId: number, filters: { status: strin
 export async function loadPendingOrderChanges(activityId: number, signal?: AbortSignal) {
   return (await api<Envelope<Array<{id:number;orderId:number}>>>(`/admin/activities/${activityId}/order-change-requests/pending`, { signal })).data;
 }
-export async function loadOrderChangeDetail(activityId: number, id: number) {
-  return (await api<Envelope<OrderChangeRequest>>(`/admin/activities/${activityId}/order-change-requests/${id}`)).data;
+export async function loadOrderChangeDetail(activityId: number, id: number, signal?: AbortSignal) {
+  return (await api<Envelope<OrderChangeRequest>>(`/admin/activities/${activityId}/order-change-requests/${id}`, { signal })).data;
 }
 
 export async function approveAdminOrderChangeRequest(activityId: number, requestId: number, reason = "") {

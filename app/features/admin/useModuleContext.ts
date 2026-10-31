@@ -1,18 +1,17 @@
 "use client";
-import { useCallback, useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { loadModuleContext } from "../../api";
-import { useAdminQuery } from "./useAdminQuery";
+import { useLazyAdminQuery } from "./useLazyAdminQuery";
 
 export function useModuleContext(activityId: string, scope: string | null, revision: number) {
-  // Invalidate an in-flight read after a relevant successful mutation, not on every render.
-  const loader = useCallback((_key: string, signal: AbortSignal) => {
-    void revision;
-    return loadModuleContext(Number(activityId), signal);
-  }, [activityId, revision]);
-  const query = useAdminQuery(scope === null ? null : activityId, loader);
-  const { refresh } = query;
+  const query = useLazyAdminQuery(activityId, scope !== null, signal => loadModuleContext(Number(activityId), signal));
+  const previous = useRef(revision);
+  const { invalidate, refresh } = query;
   useEffect(() => {
+    if (previous.current === revision) return;
+    previous.current = revision;
+    invalidate();
     if (scope !== null) void refresh();
-  }, [scope, refresh]);
+  }, [revision, scope, invalidate, refresh]);
   return query;
 }

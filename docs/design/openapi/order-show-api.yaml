@@ -876,26 +876,32 @@ paths:
       operationId: listActivities
       tags: [Activities]
       summary: 活动列表
+      description: 传 summary=true 时只返回活动切换所需的摘要字段，不逐场查询客户、大区或模块数据。未传时保留完整列表响应。均按账号所属部门限制范围。
       security:
         - adminCookie: []
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
-        - name: status
+        - name: summary
           in: query
           schema:
-            $ref: '#/components/schemas/ActivityStatus'
-        - name: keyword
-          in: query
-          schema:
-            type: string
+            type: boolean
+            enum: [true]
       responses:
         '200':
-          description: 分页活动
+          description: 当前账号可访问的未归档活动；data 为数组
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActivityPageResponse'
+                type: object
+                required: [data, traceId]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      anyOf:
+                        - $ref: '#/components/schemas/Activity'
+                        - $ref: '#/components/schemas/ActivitySummary'
+                  traceId:
+                    type: string
     post:
       operationId: createActivity
       tags: [Activities]
@@ -1114,15 +1120,26 @@ paths:
         - adminCookie: []
       parameters:
         - $ref: '#/components/parameters/ActivityId'
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
+        - name: importType
+          in: query
+          description: 打开哪个模块就只查询该类型的导入任务；未传时保留全部任务查询，仍受功能权限限制。
+          schema:
+            $ref: '#/components/schemas/ImportType'
       responses:
         '200':
           description: 导入任务列表
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ImportTaskPageResponse'
+                type: object
+                required: [data, traceId]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ImportTask'
+                  traceId:
+                    type: string
     post:
       operationId: createImportTask
       tags: [Imports]
@@ -3915,6 +3932,31 @@ components:
             finishedAt:
               type: [string, 'null']
               format: date-time
+    ActivitySummary:
+      type: object
+      required: [id, departmentId, departmentName, code, name, status, startsAt, endsAt, eventEndsAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        departmentId:
+          $ref: '#/components/schemas/Id'
+        departmentName:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        status:
+          $ref: '#/components/schemas/ActivityStatus'
+        startsAt:
+          type: [string, 'null']
+          format: date-time
+        endsAt:
+          type: [string, 'null']
+          format: date-time
+        eventEndsAt:
+          type: [string, 'null']
+          format: date-time
     ActivityWriteRequest:
       type: object
       required: [name, startsAt, endsAt, eventEndsAt, timezone, customerScope]

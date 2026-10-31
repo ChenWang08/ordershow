@@ -19,22 +19,26 @@ try {
   browser = await chromium.launch({ headless: true });
   for (const width of [1440, 440]) {
     const context = await browser.newContext({ viewport: { width, height: 1000 } });
-    const requests = [], errors = [], unexpected = [];
+    const requests = [], requestUrls = [], finishedRequests = [], errors = [], unexpected = [];
     let rankingFailure = false, detailFailure = false, identityFailure = false;
     const activity = { id: 987, code: "ADMIN_REFRESH_TEST", name: "手动刷新测试活动", status: "DRAFT", version: 1,
       startsAt: "2099-01-01T00:00:00Z", endsAt: "2099-01-02T00:00:00Z", eventEndsAt: "2099-01-03T00:00:00Z",
       departmentId: 1, departmentName: "测试部门", regions: [], companyRankingTopN: 90, branchRankingTopN: 30 };
-    const identity = { id: 1, username: "fixture", displayName: "合成测试管理员", roleCode: "DEPARTMENT_ADMIN", departmentId: 1, departmentName: "测试部门", mustChangePassword: false, csrfToken: "fixture" };
+    const identity = { id: 1, username: "fixture", displayName: "合成测试管理员", roleCode: "SUPER_ADMIN", departmentId: 1, departmentName: "测试部门", mustChangePassword: false, csrfToken: "fixture" };
     await context.route("**/*", async route => {
       const request = route.request(), url = new URL(request.url());
       if (url.origin !== "http://127.0.0.1:4186") { unexpected.push(url.href); return route.abort(); }
       if (!url.pathname.startsWith("/api/v1/")) return route.continue();
       const path = url.pathname.slice("/api/v1".length);
       requests.push(path);
+      requestUrls.push(path + url.search);
       const reply = (data, status = 200) => route.fulfill({ status, json: { data } });
+      if (path.endsWith("/lottery/candidates/preview") && request.method() === "POST") return reply({ qualifiedCustomers: 20, candidateCount: 20, candidates: [] });
       if (request.method() !== "GET") { unexpected.push(`${request.method()} ${path}`); return route.fulfill({ status: 500, json: { message: "Unexpected write" } }); }
       if (path === "/admin/me") return identityFailure ? route.fulfill({ status: 503, json: { message: "服务繁忙" } }) : reply(identity);
       if (path === "/admin/activities") return reply([activity]);
+      if (path === "/admin/departments") return reply([{ id: 1, name: "测试部门", code: "DEFAULT", status: "ACTIVE", activityCount: 1 }]);
+      if (path === "/admin/users" || path === "/admin/members") return reply([]);
       if (path === "/admin/activities/987") return detailFailure ? route.fulfill({ status: 503, json: { message: "服务繁忙" } }) : reply(activity);
       if (path.endsWith("/overview")) return rankingFailure ? route.fulfill({ status: 503, json: { message: "统计繁忙" } }) : reply({
         totals: { order_count: 10, total_amount: 12345, total_quantity: 120, total_tons: 2.5 },
@@ -43,10 +47,13 @@ try {
       if (path.endsWith("/module-context")) return reply({ customerCount: 20, customersByType: { GENERAL: 15, SPECIAL: 5 }, customerTypeMode: "TYPED", attendeeCount: 4, whitelistPublished: true });
       if (/\/(customers|attendees|orders|order-change-requests\/page)$/.test(path)) return route.fulfill({ json: { data: [], page: { totalPages: 1, totalElements: 0 } } });
       if (path.endsWith("/product-dealer-scopes")) return reply({});
+      if (path.endsWith("/products")) return reply([1, 2].map(id => ({ id, materialName: `测试商品${id}`, materialCode: `SKU${id}`, images: [], sortNo: id, customerType: "GENERAL", rebateStatus: "YES", casePrice: 100, tonConversionFactor: 50, version: 1, status: "ACTIVE" })));
+      if (path.endsWith("/lottery/statistics")) return reply({ validWinnerRecords: 0, validWinnerCustomers: 0, invalidatedWinnerRecords: 0 });
       if (/\/(products|product-image-reviews|imports|audit-logs|lottery\/rules|order-change-requests\/pending)$/.test(path)) return reply([]);
       unexpected.push(path); return route.fulfill({ status: 500, json: { message: "Unexpected fixture request" } });
     });
     const page = await context.newPage();
+    page.on("requestfinished", request => finishedRequests.push(new URL(request.url()).pathname));
     page.on("pageerror", error => errors.push(error.message));
     await page.clock.install();
     await page.goto("http://127.0.0.1:4186/tests/fixtures/admin-refresh.html");
@@ -56,6 +63,13 @@ try {
     assert.equal(count("/ranking"), 0);
     assert.equal(count("/overview"), 0);
     assert.equal(count("/module-context"), 0);
+    for (const suffix of ["/products", "/product-image-reviews", "/customers", "/attendees", "/imports", "/orders", "/lottery/rules", "/audit-logs", "/members", "/departments", "/users"]) {
+      assert.equal(count(suffix), 0, `unopened module must not read ${suffix}`);
+    }
+    assert.equal(finishedRequests.filter(path => path === "/api/v1/admin/activities").length, 1,
+      "activity summaries are shared with the switcher; StrictMode aborts the discarded initial read");
+    assert.ok(requestUrls.includes("/admin/activities?summary=true"));
+    assert.equal(count("/987"), 1, "overview cards reuse the selected activity detail");
     assert.ok((await page.locator(".admin-stats").innerText()).includes("尚未加载"));
     let before = requests.length;
     await page.clock.fastForward(65_000); await page.waitForTimeout(100);
@@ -69,6 +83,60 @@ try {
     await page.getByRole("button", { name: "刷新基础信息" }).waitFor();
     await page.waitForLoadState("networkidle");
     assert.equal(count("/module-context"), 1);
+    assert.equal(count("/products"), 0); assert.equal(count("/attendees"), 0);
+    assert.ok(requestUrls.includes("/admin/activities/987/imports?importType=WHITELIST"));
+    const whitelistReads = count("/customers");
+    await nav.getByRole("button", { name: /商品导入/ }).click();
+    const productSearch = page.getByRole("searchbox", { name: "搜索物料代码或物料名称" });
+    await productSearch.waitFor(); await page.waitForLoadState("networkidle");
+    assert.equal(count("/products"), 1); assert.equal(count("/product-image-reviews"), 1);
+    assert.equal(count("/product-dealer-scopes"), 1);
+    assert.equal(count("/customers"), whitelistReads); assert.equal(count("/attendees"), 0);
+    assert.ok(requestUrls.includes("/admin/activities/987/imports?importType=PRODUCT"));
+    await productSearch.fill("SKU1");
+    await nav.getByRole("button", { name: /白名单/ }).click(); await page.waitForLoadState("networkidle");
+    assert.equal(count("/customers"), whitelistReads);
+    await nav.getByRole("button", { name: /商品导入/ }).click(); await productSearch.waitFor();
+    assert.equal(await productSearch.inputValue(), "SKU1"); assert.equal(count("/products"), 1);
+    const moduleDialogs = [];
+    const unexpectedDialog = async dialog => { moduleDialogs.push(dialog.message()); await dialog.dismiss(); };
+    page.on("dialog", unexpectedDialog);
+    const refreshedProducts = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/products"), { timeout: 5000 });
+    await page.getByRole("button", { name: "刷新当前模块", exact: true }).click();
+    page.off("dialog", unexpectedDialog); assert.deepEqual(moduleDialogs, [], "a loaded module has no unsaved changes");
+    await refreshedProducts;
+    await page.waitForLoadState("networkidle");
+    assert.equal(count("/products"), 2); assert.equal(count("/customers"), whitelistReads);
+    assert.equal(await productSearch.inputValue(), "SKU1");
+    const attendanceLoaded = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/attendees"));
+    await nav.getByRole("button", { name: /现场到场/ }).click(); await attendanceLoaded; await page.waitForLoadState("networkidle");
+    assert.equal(count("/attendees"), 1); assert.ok(requestUrls.includes("/admin/activities/987/imports?importType=ATTENDANCE"));
+    const lotteryStatisticsLoaded = page.waitForResponse(response => response.url().endsWith("/lottery/statistics"));
+    const lotteryCandidatesLoaded = page.waitForResponse(response => response.url().endsWith("/lottery/candidates/preview"));
+    await nav.getByRole("button", { name: /抽奖规则/ }).click();
+    await page.getByRole("heading", { name: "抽奖规则工作台", exact: true }).waitFor(); await page.waitForLoadState("networkidle");
+    await page.clock.fastForward(500); await Promise.all([lotteryStatisticsLoaded, lotteryCandidatesLoaded]); await page.waitForLoadState("networkidle");
+    assert.equal(count("/lottery/rules"), 1); assert.equal(count("/lottery/statistics"), 1);
+    const candidateReads = count("/lottery/candidates/preview"); assert.ok(candidateReads >= 1);
+    await nav.getByRole("button", { name: /活动概览/ }).click();
+    await page.clock.fastForward(2000); await page.waitForLoadState("networkidle");
+    assert.equal(count("/lottery/candidates/preview"), candidateReads);
+    await nav.getByRole("button", { name: /抽奖规则/ }).click(); await page.waitForLoadState("networkidle");
+    assert.equal(count("/lottery/rules"), 1); assert.equal(count("/lottery/statistics"), 1);
+    assert.equal(count("/lottery/candidates/preview"), candidateReads);
+    const membersLoaded = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/admin/members"));
+    await nav.getByRole("button", { name: /成员管理/ }).click(); await membersLoaded; await page.waitForLoadState("networkidle");
+    assert.equal(count("/members"), 1); assert.equal(count("/departments"), 1); assert.equal(count("/users"), 0);
+    const accountsLoaded = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/admin/users"));
+    await nav.getByRole("button", { name: /部门与账号/ }).click(); await accountsLoaded; await page.waitForLoadState("networkidle");
+    assert.equal(count("/users"), 1); const departmentReads = count("/departments");
+    await nav.getByRole("button", { name: /成员管理/ }).click(); await page.waitForLoadState("networkidle");
+    assert.equal(count("/members"), 1); assert.equal(count("/departments"), departmentReads);
+    const logsButton = page.getByRole("button", { name: "操作日志", exact: true });
+    const logsLoaded = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/audit-logs"));
+    await logsButton.click(); await logsLoaded; await page.waitForLoadState("networkidle"); assert.equal(count("/audit-logs"), 1);
+    await logsButton.click(); await logsButton.click(); await page.waitForLoadState("networkidle");
+    assert.equal(count("/audit-logs"), 1); await logsButton.click();
     await nav.getByRole("button", { name: /活动概览/ }).click();
     await page.getByText("¥12,345.00", { exact: true }).waitFor();
     assert.equal(count("/overview"), 1, "returning to overview must reuse the snapshot");
@@ -122,7 +190,7 @@ try {
     await page.getByRole("button", { name: "刷新统计", exact: true }).waitFor();
     assert.ok((await page.locator(".admin-stats").innerText()).includes("尚未加载"));
     assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
-    console.log(`PASS ${width}px: idle 65s, manual statistics, module entry, review refresh, dirty drafts, 503 recovery, reload reset`);
+    console.log(`PASS ${width}px: lazy whole modules, retained filters, scoped imports, members/departments/logs, idle 65s, manual statistics, review refresh, dirty drafts, 503 recovery`);
     await context.close();
   }
 } finally { await browser?.close(); await server.close(); }

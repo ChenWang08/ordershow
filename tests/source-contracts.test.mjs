@@ -459,7 +459,7 @@ test("cancels superseded import previews and only blocks publication for newer p
 
   assert.match(api, /loadImportTasks/);
   assert.match(prototype, /await cancelImport\(Number\(activityId\), taskId\)/);
-  assert.match(prototype, /已恢复服务器中尚未确认的导入预览/);
+  assert.match(prototype, /已恢复当前模块尚未确认的导入预览/);
   assert.match(activityService, /t\.id > v\.source_import_task_id/);
   assert.match(activityService, /请确认或取消后再发布活动/);
   assert.match(importService, /cancelReplaceableTasks\(activityId, importType/);

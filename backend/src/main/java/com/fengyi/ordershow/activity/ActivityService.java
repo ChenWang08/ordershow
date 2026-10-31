@@ -105,6 +105,31 @@ public class ActivityService {
         .stream().map(this::withRegions).toList();
   }
 
+  /** The admin switcher needs no customer, region, catalog or dashboard queries. */
+  public List<ActivitySummary> listSummaries(AdminPrincipal admin) {
+    if (!admin.isSuperAdmin() && admin.departmentId() == null) return List.of();
+    String sql = """
+        SELECT a.id,a.department_id,d.department_name,a.activity_code,a.name,a.status,
+          a.starts_at,a.ends_at,a.event_ends_at
+        FROM activity a JOIN department d ON d.id=a.department_id
+        WHERE a.archived_at IS NULL
+        """;
+    Object[] args = admin.isSuperAdmin() ? new Object[] {} : new Object[] { admin.departmentId() };
+    if (!admin.isSuperAdmin()) sql += " AND a.department_id=?";
+    sql += " ORDER BY a.created_at DESC,a.id DESC";
+    Instant at = now();
+    return jdbc.query(sql, (rs, row) -> {
+      Instant starts = UtcTime.read(rs, "starts_at"), ends = UtcTime.read(rs, "ends_at");
+      Instant eventEnds = UtcTime.read(rs, "event_ends_at");
+      return new ActivitySummary(rs.getLong("id"),rs.getLong("department_id"),rs.getString("department_name"),
+          rs.getString("activity_code"),rs.getString("name"),
+          effectiveStatus(rs.getString("status"),starts,ends,eventEnds,at),starts,ends,eventEnds);
+    }, args);
+  }
+
+  public record ActivitySummary(long id,long departmentId,String departmentName,String code,String name,
+                                String status,Instant startsAt,Instant endsAt,Instant eventEndsAt) {}
+
   public List<ActivityView> list(AdminPrincipal admin) {
     if (admin == null || admin.isSuperAdmin()) return list();
     if (admin.departmentId() == null) return List.of();

@@ -48,8 +48,10 @@ public class ImportController {
   }
 
   @GetMapping
-  ApiResponse<List<ImportService.ImportTask>> tasks(@PathVariable long activityId, HttpServletRequest request) {
-    return ApiResponse.of(service.tasks(activityId).stream().filter(task -> auth.requireAdmin(request).hasPermission(com.fengyi.ordershow.security.MemberPermissionService.importPermission(task.importType()))).toList(), TraceFilter.id(request));
+  ApiResponse<List<ImportService.ImportTask>> tasks(@PathVariable long activityId,
+      @RequestParam(required = false) String importType, HttpServletRequest request) {
+    var admin = auth.requireAdmin(request);
+    return ApiResponse.of(service.tasks(activityId, importType).stream().filter(task -> admin.hasPermission(com.fengyi.ordershow.security.MemberPermissionService.importPermission(task.importType()))).toList(), TraceFilter.id(request));
   }
 
   @GetMapping("/{taskId}")

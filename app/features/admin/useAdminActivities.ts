@@ -3,7 +3,7 @@
 
 import { beijingDateTimeMillis } from "../shared/time";
 import { useEffect, useMemo, useState } from "react";
-import { ApiError, createActivity, getPreferredAdminActivityCode, setPreferredAdminActivityCode, loadAdminActivities, loadAdminDepartments, type RuntimeActivity, type AdminDepartment } from "../../api";
+import { ApiError, createActivity, getPreferredAdminActivityCode, setPreferredAdminActivityCode, loadAdminActivities, loadAdminDepartments, type AdminActivitySummary, type AdminDepartment, type RuntimeActivity } from "../../api";
 import { useAdminIdentity } from "../../admin-context";
 import { nextMinuteDateTimeLocal, runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
 
@@ -11,12 +11,15 @@ type AdminActivitiesOptions = {
   activityId: string;
   activityCode: string;
   setActionNotice: (notice: string) => void;
+  initialActivities?: AdminActivitySummary[];
+  activeActivity?: RuntimeActivity | null;
 };
 
-export function useAdminActivities({ activityId, activityCode, setActionNotice }: AdminActivitiesOptions) {
+export function useAdminActivities({ activityId, activityCode, setActionNotice, initialActivities, activeActivity }: AdminActivitiesOptions) {
   const adminIdentity = useAdminIdentity();
-  const [activities, setActivities] = useState<RuntimeActivity[]>([]);
+  const [activities, setActivities] = useState<AdminActivitySummary[]>(initialActivities ?? []);
   const [departments, setDepartments] = useState<AdminDepartment[]>([]);
+  const [departmentsLoaded, setDepartmentsLoaded] = useState(false);
   const [activityDepartmentFilter, setActivityDepartmentFilter] = useState("");
   const [activityMenuOpen, setActivityMenuOpen] = useState(false);
   const [newActivityOpen, setNewActivityOpen] = useState(false);
@@ -25,12 +28,16 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice }
     { name: "", startsAt: nextMinuteDateTimeLocal(), endsAt: "", eventEndsAt: "", departmentId: "" },
   );
   const [minimumFutureAt, setMinimumFutureAt] = useState(nextMinuteDateTimeLocal);
-  const currentActivity = activities.find((item) => item.code === activityCode);
+  const displayedActivities = useMemo(() => activities.map(item => item.id === activeActivity?.id ? { ...item,
+    name: activeActivity.name, status: activeActivity.status, startsAt: activeActivity.startsAt,
+    endsAt: activeActivity.endsAt, eventEndsAt: activeActivity.eventEndsAt } : item), [activities, activeActivity]);
+  const currentActivity = displayedActivities.find((item) => item.code === activityCode);
   const visibleActivities = useMemo(
-    () => activityDepartmentFilter ? activities.filter((item) => String(item.departmentId) === activityDepartmentFilter) : activities,
-    [activities, activityDepartmentFilter],
+    () => activityDepartmentFilter ? displayedActivities.filter((item) => String(item.departmentId) === activityDepartmentFilter) : displayedActivities,
+    [displayedActivities, activityDepartmentFilter],
   );
   useEffect(() => {
+    if (initialActivities !== undefined) return;
     let active = true;
     void loadAdminActivities().then((items) => {
       if (!active) return;
@@ -48,15 +55,15 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice }
       }
     }).catch(() => { if (active) setActivities([]); });
     return () => { active = false; };
-  }, [activityCode, activityId]);
+  }, [activityCode, activityId, initialActivities]);
   useEffect(() => {
-    if (adminIdentity?.roleCode !== "SUPER_ADMIN") {
+    if (adminIdentity?.roleCode !== "SUPER_ADMIN" || departmentsLoaded || (!activityMenuOpen && !newActivityOpen)) {
       return;
     }
     let active = true;
-    void loadAdminDepartments().then((items) => { if (active) setDepartments(items); }).catch(() => { if (active) setDepartments([]); });
+    void loadAdminDepartments().then((items) => { if (active) { setDepartments(items); setDepartmentsLoaded(true); } }).catch(() => { if (active) setActionNotice("部门列表加载失败，请重新打开重试。"); });
     return () => { active = false; };
-  }, [adminIdentity?.roleCode]);
+  }, [adminIdentity?.roleCode, departmentsLoaded, activityMenuOpen, newActivityOpen, setActionNotice]);
   useEffect(() => {
     const refreshMinimum = () => setMinimumFutureAt(nextMinuteDateTimeLocal());
     const timer = window.setInterval(refreshMinimum, 30_000);

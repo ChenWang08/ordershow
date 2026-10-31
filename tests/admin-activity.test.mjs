@@ -110,12 +110,11 @@ test("publication saves valid settings before publishing", async () => {
   assert.deepEqual(harness.calls, ["load", "save", "status:draft", "load", "publish", "status:scheduled"]);
 });
 
-test("publication requires both completed imports", async () => {
+test("publication delegates readiness to the server even when modules have not loaded", async () => {
   for (const missing of ["productImportCompleted", "whitelistImportCompleted"]) {
     const harness = settingsHarness({ [missing]: false });
     await harness.render().publishCurrentActivity();
-    assert.deepEqual(harness.calls, []);
-    assert.match(harness.notices[0], /必须完成商品和白名单导入/);
+    assert.deepEqual(harness.calls, ["load", "save", "status:draft", "load", "publish", "status:scheduled"]);
   }
 });
 

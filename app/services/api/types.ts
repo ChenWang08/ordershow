@@ -2,6 +2,9 @@ export type Envelope<T> = { data: T; traceId: string };
 export type PageEnvelope<T> = { data: T[]; page: { number: number; size: number; totalElements: number; totalPages: number }; traceId: string };
 export type RankingMetric = "AMOUNT" | "TONS";
 
+export type AdminActivitySummary = Pick<RuntimeActivity,
+  "id" | "departmentId" | "departmentName" | "code" | "name" | "status" | "startsAt" | "endsAt" | "eventEndsAt">;
+
 export type RuntimeActivity = {
   h5BackgroundUrl?: string | null;
   desktopBackgroundUrl?: string | null;

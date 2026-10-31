@@ -5,6 +5,7 @@ import type { ActivityStatus } from "../shared/types";
 export type ImportTaskIds = Partial<Record<"PRODUCT" | "WHITELIST" | "ATTENDANCE", number>>;
 
 export type ProductModuleOptions = {
+  importWaitOptions?: () => import("../../api").ImportWaitOptions;
   activityId: string;
   activityStatus: ActivityStatus;
   productRows: ProductImportRow[];
