@@ -7,16 +7,18 @@ import { loadModule } from "./helpers/load-ts-module.mjs";
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 const hook = "app/features/admin/useLazyAdminQuery.ts";
 
-test("unopened modules do not read; loaded modules retain data until invalidated or manually refreshed", async () => {
+test("unopened modules do not read; every entry reads again without idle polling", async () => {
   let reads = 0;
   const loader = async () => ++reads;
   const h = hookHarness(hook, "useLazyAdminQuery", ["one", false, loader]);
   await h.flush(); assert.equal(reads, 0);
   h.render(["one", true, loader]); await h.flush(); assert.equal(h.model.data, 1);
-  h.render(["one", false, loader]); h.render(["one", true, loader]); await h.flush(); assert.equal(reads, 1);
-  h.render(["one", false, loader]); h.model.invalidate(); await h.flush(); assert.equal(reads, 1);
-  h.render(["one", true, loader]); await h.flush(); assert.equal(h.model.data, 2);
-  await Promise.all([h.model.refresh(), h.model.refresh()]); await h.flush(); assert.equal(reads, 3);
+  h.render(["one", false, loader]); h.render(["one", true, loader]); await h.flush(); assert.equal(reads, 2);
+  for (let i = 0; i < 5; i++) h.render();
+  await h.flush(); assert.equal(reads, 2); assert.equal(h.intervals.size, 0);
+  h.render(["one", false, loader]); h.model.invalidate(); await h.flush(); assert.equal(reads, 2);
+  h.render(["one", true, loader]); await h.flush(); assert.equal(h.model.data, 3);
+  await Promise.all([h.model.refresh(), h.model.refresh()]); await h.flush(); assert.equal(reads, 4);
   h.unmount();
 });
 
@@ -27,7 +29,9 @@ test("an invalidated module preserves unfinished edits and previews when reopene
   h.render(["one", false, loader, undefined, true]); h.model.invalidate(); await h.flush();
   h.render(["one", true, loader, undefined, true]); await h.flush();
   assert.equal(reads, 1); assert.equal(h.model.stale, true); assert.equal(h.model.loading, false);
-  await h.model.refresh(); await h.flush(); assert.equal(h.model.data, 2); assert.equal(h.model.stale, false);
+  await h.model.refresh(); await h.flush(); assert.equal(reads, 1, "retry cannot overwrite an edit");
+  h.render(["one", true, loader, undefined, false]); await h.flush();
+  assert.equal(h.model.data, 2); assert.equal(h.model.stale, false);
   h.unmount();
 });
 
@@ -44,6 +48,22 @@ test("hiding or changing activity aborts reads and discards late responses", asy
   calls[2].resolve("new activity"); await h.flush();
   calls[0].resolve("hidden"); calls[1].resolve("old activity"); await h.flush();
   assert.equal(h.model.data, "new activity"); assert.deepEqual(commits, ["new activity"]); h.unmount();
+});
+
+test("starting an edit cancels a pending reload and resumes only when editing ends", async () => {
+  const calls = [], commits = [];
+  const loader = signal => { const d = deferred(); calls.push({ ...d, signal }); return d.promise; };
+  const commit = value => commits.push(value);
+  const h = hookHarness(hook, "useLazyAdminQuery", ["one", true, loader, commit]); await h.flush();
+  calls[0].resolve("original"); await h.flush();
+  h.render(["one", false, loader, commit]); h.render(["one", true, loader, commit]); await h.flush();
+  h.render(["one", true, loader, commit, true]); await h.flush();
+  assert.equal(calls[1].signal.aborted, true);
+  calls[1].resolve("late server response"); await h.flush();
+  assert.deepEqual(commits, ["original"]); assert.equal(h.model.data, "original");
+  h.render(["one", true, loader, commit, false]); await h.flush();
+  calls[2].resolve("after save or cancel"); await h.flush();
+  assert.deepEqual(commits, ["original", "after save or cancel"]); h.unmount();
 });
 
 test("post-save invalidation cancels pre-save reads; failed refresh keeps the last successful snapshot", async () => {

@@ -4,7 +4,7 @@ import { loadModuleContext } from "../../api";
 import { useLazyAdminQuery } from "./useLazyAdminQuery";
 
 export function useModuleContext(activityId: string, scope: string | null, revision: number) {
-  const query = useLazyAdminQuery(activityId, scope !== null, signal => loadModuleContext(Number(activityId), signal));
+  const query = useLazyAdminQuery(activityId, scope !== null, signal => loadModuleContext(Number(activityId), signal), undefined, false, scope ?? "");
   const previous = useRef(revision);
   const { invalidate, refresh } = query;
   useEffect(() => {

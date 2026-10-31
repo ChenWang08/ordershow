@@ -122,17 +122,9 @@ function useAccountTabs() {
 // Account pages also retain forms when there is no selected activity yet.
 function RetainedAccountPages({ tab, visited, children }: { tab: string; visited: string[]; children: ReactNode }) {
   const identity = useAdminIdentity();
-  const [memberDirty, setMemberDirty] = useState(false);
-  const [departmentDirty, setDepartmentDirty] = useState(false);
-  useEffect(() => {
-    if (!memberDirty && !departmentDirty) return;
-    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, [memberDirty, departmentDirty]);
   return <>
-    {visited.includes("成员管理") && isManager(identity) && <div hidden={tab !== "成员管理"}><MemberAdminPanel active={tab === "成员管理"} onDirtyChange={setMemberDirty} /></div>}
-    {visited.includes("部门与账号") && identity?.roleCode === "SUPER_ADMIN" && <div hidden={tab !== "部门与账号"}><DepartmentAdminPanel active={tab === "部门与账号"} onDirtyChange={setDepartmentDirty} /></div>}
+    {visited.includes("成员管理") && isManager(identity) && <div hidden={tab !== "成员管理"}><MemberAdminPanel active={tab === "成员管理"} /></div>}
+    {visited.includes("部门与账号") && identity?.roleCode === "SUPER_ADMIN" && <div hidden={tab !== "部门与账号"}><DepartmentAdminPanel active={tab === "部门与账号"} /></div>}
     {tab !== "成员管理" && tab !== "部门与账号" && children}
   </>;
 }

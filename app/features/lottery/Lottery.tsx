@@ -356,8 +356,8 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
   const loadCandidates = useCallback((_key: string, signal: AbortSignal) =>
     previewLotteryCandidates(activityId,JSON.parse(inputKey),signal),[activityId,inputKey]);
   const candidateQuery = useAdminQuery<LotteryCandidatePreview>(active ? candidateKey : null,loadCandidates);
-  const loadStatistics = useCallback((_key: string,signal: AbortSignal) => loadLotteryStatistics(activityId,signal),[activityId]);
-  const statisticsQuery = useAdminQuery<LotteryWinnerStatistics>(active ? JSON.stringify([activityId,revision]) : null,loadStatistics);
+  const statisticsQuery = useLazyAdminQuery<LotteryWinnerStatistics>(JSON.stringify([activityId,revision]),active,
+    signal => loadLotteryStatistics(activityId,signal));
   const optionsQuery = useLazyAdminQuery<LotteryProductOption[]>(JSON.stringify([activityId,revision]),active && selected.scope === "ordered",
     signal => loadLotteryProductOptions(activityId,signal));
   const optionValue = (value: string | null) => value === null ? "empty" : "value:" + value;
@@ -449,7 +449,7 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
         <article><span>抽奖轮次</span><strong>{rounds.length}</strong><small>{rounds.filter((x) => x.status === "completed").length} 轮已完成</small></article>
         <article><span>活动客户</span><strong>{customerCount.toLocaleString()}</strong><small>白名单有效客户</small></article>
         <article><span>现场到场</span><strong>{attendeeCount}</strong><small>当前到场名单</small></article>
-        <article><span>已中奖客户</span><strong>{statistics?.validWinnerCustomers ?? "—"}</strong><small>{statistics ? `数据库当前有效 · ${statistics.invalidatedWinnerRecords} 条已作废` : "点击刷新后读取"}</small><button type="button" disabled={statisticsQuery.loading} onClick={() => void statisticsQuery.refresh()}>{statisticsQuery.loading ? "读取中…" : "刷新中奖统计"}</button></article>
+        <article><span>已中奖客户</span><strong>{statistics?.validWinnerCustomers ?? "—"}</strong><small>{statistics ? `数据库当前有效 · ${statistics.invalidatedWinnerRecords} 条已作废` : statisticsQuery.error ? "暂未加载" : "正在加载…"}</small>{statisticsQuery.error && <button type="button" disabled={statisticsQuery.loading} onClick={() => void statisticsQuery.refresh()}>重试</button>}</article>
       </div>
       <div className="lottery-config-grid">
         <section className="round-list"><div className="section-heading"><h3>抽奖轮次</h3><span>按顺序执行</span></div>{rounds.map((item, index) => <button key={item.id} className={selected.id === item.id ? "active" : ""} onClick={() => selectSettingsRound(item.id)}><i>{String(index + 1).padStart(2, "0")}</i><span><b>{item.name}</b><small>{item.prize}</small></span><em><small className={`round-status ${item.status}`}>{statusLabel[item.status]}</small>{item.winnerCount} 人</em></button>)}<button className="add-round" disabled={readOnly} onClick={addRound}>＋ 新增抽奖轮次</button></section>
@@ -502,7 +502,7 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
                 <label><input type="checkbox" checked={selectedVarieties === null} onChange={e => changeVarieties(e.target.checked ? null : [])} />全部品种</label>
                 {[...varietyOptions].map(([value,label]) => <label key={value}><input type="checkbox" checked={selectedVarieties?.includes(value) ?? false} onChange={e => changeVarieties(e.target.checked ? [...(selectedVarieties ?? []),value] : (selectedVarieties ?? []).filter(v => v !== value))} />{label}</label>)}
               </fieldset></details>}{!validVarieties && <small className="field-error" role="alert">请至少选择一个品种，或选择全部品种</small>}</div>
-            <small className="lottery-filter-help">金额、箱数、吨数及加权均按匹配商品的小计计算。<button type="button" disabled={optionsQuery.loading} onClick={() => void optionsQuery.refresh()}>{optionsQuery.loading ? "读取选项中…" : "更新商品选项"}</button></small>
+            <small className="lottery-filter-help">金额、箱数、吨数及加权均按匹配商品的小计计算。{optionsQuery.loading && <span>正在加载商品选项…</span>}{optionsQuery.error && <button type="button" disabled={optionsQuery.loading} onClick={() => void optionsQuery.refresh()}>重试</button>}</small>
           </>}
           <label className="check-setting repeat-setting"><input type="checkbox" checked={selectedIndex === 0 ? false : selected.excludeWinners} disabled={selectedLocked || selectedIndex === 0} onChange={(e) => updateSelected({ excludeWinners: e.target.checked })} /><span><b>排除本活动已中奖客户</b><small>{selectedIndex === 0 ? "第一轮暂无历史中奖客户，无需设置" : "按白名单客户 ID 避免跨轮次重复中奖"}</small></span></label>
           <div className="rule-summary"><span>当前规则</span><p>{ruleSummary}</p></div>

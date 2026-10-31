@@ -13,7 +13,6 @@ const frontendSourceFiles = [
   "../app/features/h5/H5CatalogPage.tsx",
   "../app/features/h5/H5ConfirmPage.tsx",
   "../app/features/h5/H5SubmittedPage.tsx",
-  "../app/features/h5/H5OrderRefresh.tsx",
   "../app/features/h5/H5ResultPages.tsx",
   "../app/features/h5/h5-domain.ts",
   "../app/features/h5/ProductArt.tsx",

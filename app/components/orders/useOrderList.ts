@@ -5,7 +5,6 @@ import { ApiError, loadAdminOrders, loadAdminOrder, exportAdminOrders } from "..
 import { toOrderRecord, type OrderRecord, type OrderStatus, type CustomerType } from "./order-domain";
 
 export function useOrderList(activityId: number, activityName: string, enabled = true, revision = 0) {
-  const loadedKey = useRef("");
   const detailController = useRef<AbortController | null>(null);
   useEffect(() => () => { detailController.current?.abort(); }, [activityId, enabled]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
@@ -27,8 +26,6 @@ export function useOrderList(activityId: number, activityName: string, enabled =
 
   useEffect(() => {
     if (!enabled) return;
-    const key = JSON.stringify([activityId, customerType, orderFilter, page, reloadKey, search, revision]);
-    if (loadedKey.current === key) return;
     let active = true;
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
@@ -44,7 +41,6 @@ export function useOrderList(activityId: number, activityName: string, enabled =
           loadAdminOrders(activityId, { status: "VOIDED", page: 1, size: 1 }, controller.signal),
         ]);
         if (!active) return;
-        loadedKey.current = key;
         setOrders(current.data.map(toOrderRecord));
         setTotalPages(Math.max(1, current.page.totalPages));
         setOrderCounts({ all: all.page.totalElements, submitted: submitted.page.totalElements, withdrawn: withdrawn.page.totalElements, voided: voided.page.totalElements });

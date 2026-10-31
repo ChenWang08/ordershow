@@ -132,17 +132,21 @@ function initializationHarness(apiOverrides = {}, identity = { roleCode: "SUPER_
     "../lottery/Lottery": { initialLotteryRounds: [], mapLotteryRule: rule => [rule.id] }, "../../api": api,
   });
   return { ...h, state, calls, reads, notices, api, get model(){return h.model;},
-    async show(tab, logsOpen=false) { options={...options,tab,logsOpen}; h.render([options]); await h.flush(); },
+    async show(tab, logsOpen=false) { options={...options,tab,logsOpen, preservePreviews: {
+      product: Boolean(state.setProductFileName && !state.onProductImportCompleted),
+      whitelist: Boolean(state.setWhitelistFileName && !state.onWhitelistImportCompleted),
+      attendance: Boolean(state.setPendingAttendanceImport), lottery: false,
+    }}; h.render([options]); await h.flush(); },
   };
 }
 
-test("overview initialization performs no module reads; each whole module loads once when opened", async () => {
+test("overview initialization performs no module reads; each whole module reads on every entry", async () => {
   const h=initializationHarness(); await h.flush(); assert.deepEqual(h.reads,[]);
   await h.show("商品导入"); assert.equal(h.state.setProductRows[0].id,"42");
   assert.deepEqual(h.reads.map(r=>r[0]).sort(),["loadAdminProducts","loadImportTasks","loadProductImageReviews"].sort());
   assert.equal(h.reads.find(r=>r[0]==="loadImportTasks")[2],"PRODUCT");
   await h.show("白名单"); assert.equal(h.state.setWhitelistRows[0].region,"华东");
-  await h.show("商品导入"); assert.equal(h.reads.filter(r=>r[0]==="loadAdminProducts").length,1);
+  await h.show("商品导入"); assert.equal(h.reads.filter(r=>r[0]==="loadAdminProducts").length,2);
   await h.show("抽奖规则"); assert.equal(h.state.onLotteryChange[0],2); h.unmount();
 });
 
@@ -185,12 +189,12 @@ for(const [permission,tab] of [["OVERVIEW","活动概览"],["PRODUCT","商品导
   });
 }
 
-test("logs read only when opened, reuse loaded data, and refresh after invalidation",async()=>{
+test("logs read only when opened and reload on every reopening",async()=>{
   const h=initializationHarness(); await h.flush(); assert.equal(h.reads.length,0);
   await h.show("活动概览",true); assert.deepEqual(h.reads.map(r=>r[0]),["loadAuditLogs"]);
   await h.show("活动概览"); h.model.logs.invalidate(); await h.show("活动概览",true);
   assert.equal(h.reads.length,2); await h.show("活动概览"); await h.show("活动概览",true);
-  assert.equal(h.reads.length,2); h.unmount();
+  assert.equal(h.reads.length,3); h.unmount();
 });
 
 test('members cannot open or submit new activities',async()=>{
