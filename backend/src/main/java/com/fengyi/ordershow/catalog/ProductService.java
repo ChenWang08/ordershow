@@ -99,6 +99,7 @@ public class ProductService {
     } catch (DuplicateKeyException exception) {
       throw DomainException.conflict("PRODUCT_EXISTS", duplicateProductMessage());
     }
+    ProductCatalogChanges.products(jdbc, activityId, List.of(productId));
     return product(activityId, productId);
   }
 
@@ -145,6 +146,7 @@ public class ProductService {
       if (id != null) replaceBranchScopes(id, branchScopes);
       if (id != null) new ProductDealerScopeService(jdbc).replace(activityId, id, customerType, branchScopes, request.dealerScope());
       if (id != null) replacePriceTier(id, priceTier);
+      if (id != null) ProductCatalogChanges.products(jdbc, activityId, List.of(id));
       return product(activityId, id);
     } catch (DuplicateKeyException exception) {
       throw DomainException.conflict("PRODUCT_EXISTS", duplicateProductMessage());
@@ -153,6 +155,7 @@ public class ProductService {
 
   @Transactional
   public void delete(long activityId, long productId, int expectedVersion) {
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     var activity = activities.byId(activityId);
     if (!"DRAFT".equals(activity.status())) {
       throw DomainException.conflict("ACTIVITY_IMPORT_LOCKED", "活动发布后不能删除商品");
@@ -163,6 +166,7 @@ public class ProductService {
         WHERE id = ? AND activity_id = ? AND is_visible = TRUE AND lock_version = ?
         """, productId, activityId, expectedVersion);
     if (changed != 1) throw DomainException.conflict("PRODUCT_VERSION_CONFLICT", "商品已被删除或发生变化，请刷新后重试");
+    ProductCatalogChanges.products(jdbc, activityId, List.of(productId));
   }
 
   @Transactional

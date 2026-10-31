@@ -127,4 +127,38 @@ class RealtimeEventServiceTest {
   private static RealtimeEventService.OutboxRow row(long id,long activity,String type,String aggregate) {
     return new RealtimeEventService.OutboxRow(id,activity,"CHANGED",type,aggregate,java.time.Instant.ofEpochMilli(id*100));
   }
+
+  @Test void catalogEventsAreMergedEvenWhenTheLastEventIsAnOrder() {
+    var forwarded=new java.util.ArrayList<com.fengyi.ordershow.catalog.H5CatalogDataService.Change>();
+    var stream=new RealtimeEventService(jdbc,()->mock(SseEmitter.class),ignored->{},forwarded::add,new com.fasterxml.jackson.databind.ObjectMapper());
+    when(jdbc.query(anyString(),any(RowMapper.class),any(Object[].class))).thenReturn(List.of(
+        catalogRow(1,3,"[9]"),catalogRow(2,2,"[8]"),row(3,11,"ORDER","7")));
+    stream.publishOutbox();
+    assertThat(forwarded).containsExactly(new com.fengyi.ordershow.catalog.H5CatalogDataService.Change(11,2,3,java.util.Set.of(8L,9L),false));
+    verify(jdbc).update(contains("id IN"),aryEq(new Object[]{1L,2L,3L}));
+  }
+
+  @Test void catalogRevisionGapForcesFullRefreshAndFailureRetainsOnlyCatalogRows() {
+    var forwarded=new java.util.ArrayList<com.fengyi.ordershow.catalog.H5CatalogDataService.Change>();
+    var stream=new RealtimeEventService(jdbc,()->mock(SseEmitter.class),ignored->{},change->{forwarded.add(change); throw new IllegalStateException("Redis offline");},new com.fasterxml.jackson.databind.ObjectMapper());
+    when(jdbc.query(anyString(),any(RowMapper.class),any(Object[].class))).thenReturn(List.of(
+        catalogRow(1,2,"[8]"),catalogRow(2,4,"[9]"),row(3,11,"ORDER","7")));
+    stream.publishOutbox(); assertThat(forwarded.getFirst().fullReload()).isTrue();
+    verify(jdbc).update(contains("id IN"),aryEq(new Object[]{3L}));
+  }
+
+  @Test void malformedCatalogPayloadSafelyRebuildsAtTheCurrentDatabaseRevision() {
+    var forwarded=new java.util.ArrayList<com.fengyi.ordershow.catalog.H5CatalogDataService.Change>();
+    var stream=new RealtimeEventService(jdbc,()->mock(SseEmitter.class),ignored->{},forwarded::add,new com.fasterxml.jackson.databind.ObjectMapper());
+    when(jdbc.query(anyString(),any(RowMapper.class),any(Object[].class))).thenReturn(List.of(
+        new RealtimeEventService.OutboxRow(1,11,"PRODUCT_CATALOG_CHANGED","PRODUCT_CATALOG","11",java.time.Instant.EPOCH,"{}")));
+    when(jdbc.queryForObject(contains("SELECT product_catalog_version"),eq(Long.class),eq(11L))).thenReturn(7L);
+    stream.publishOutbox(); assertThat(forwarded).containsExactly(
+        new com.fengyi.ordershow.catalog.H5CatalogDataService.Change(11,7,7,java.util.Set.of(),true));
+  }
+
+  private static RealtimeEventService.OutboxRow catalogRow(long id,long revision,String ids) {
+    return new RealtimeEventService.OutboxRow(id,11,"PRODUCT_CATALOG_CHANGED","PRODUCT_CATALOG","11",java.time.Instant.EPOCH,
+        "{\"version\":\""+revision+"\",\"productIds\":"+ids+",\"fullReload\":false}");
+  }
 }

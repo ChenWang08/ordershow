@@ -39,6 +39,7 @@ public class ImportPublisher {
   void publish(long taskId) {
     ImportTask task = tasks.task(taskId);
     long activityId = task.activityId();
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     long adminId = task.confirmedBy();
     jdbc.update("UPDATE import_task SET status = 'MATERIALIZING' WHERE id = ?", taskId);
     Long previous = jdbc.query("SELECT current_version_id FROM activity_data_binding WHERE activity_id = ? AND data_type = ? FOR UPDATE",
@@ -91,6 +92,9 @@ public class ImportPublisher {
     jdbc.update("UPDATE import_publish_version SET status = 'PUBLISHED', published_at = UTC_TIMESTAMP(3) WHERE id = ?", versionId);
     jdbc.update("UPDATE import_task SET status = 'COMPLETED', published_version_id = ?, completed_at = UTC_TIMESTAMP(3), lease_owner = NULL, lease_expires_at = NULL WHERE id = ?", versionId, taskId);
     tasks.cancelReplaceableTasks(activityId, task.importType(), taskId);
+    if (List.of("PRODUCT", "WHITELIST").contains(task.importType())) {
+      com.fengyi.ordershow.catalog.ProductCatalogChanges.all(jdbc, activityId);
+    }
     if ("WHITELIST".equals(task.importType())) {
       com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
     }

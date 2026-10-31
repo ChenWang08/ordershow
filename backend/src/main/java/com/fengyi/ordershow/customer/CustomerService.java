@@ -152,6 +152,10 @@ public class CustomerService {
       throw DomainException.conflict("CUSTOMER_PHONE_EXISTS", "该渠道下手机号已对应其他客户");
     }
     reassociateAttendance(activityId);
+    if (!java.util.Objects.equals(normalize(current.branchName()), normalize(request.branchName()))
+        || !java.util.Objects.equals(normalize(current.dealerFullName()), normalize(request.dealerFullName()))) {
+      com.fengyi.ordershow.catalog.ProductCatalogChanges.all(jdbc, activityId);
+    }
     if (!java.util.Objects.equals(current.regionCode(), regionCode)) {
       com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
     }
@@ -199,6 +203,7 @@ public class CustomerService {
           Long.class, activityId, source.versionId(), customerId);
       reassociateAttendance(activityId);
       com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
+      com.fengyi.ordershow.catalog.ProductCatalogChanges.all(jdbc, activityId);
       return customer(activityId, id);
     } catch (DuplicateKeyException exception) {
       throw DomainException.conflict("CUSTOMER_EXISTS", "当前白名单已存在同名客户或该渠道下手机号已被使用");
@@ -207,6 +212,7 @@ public class CustomerService {
 
   @Transactional
   public void deleteCustomer(long activityId, long customerId, int expectedVersion) {
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     String status = activities.byId(activityId).status();
     if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后数据只读");
     if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后白名单已锁定，请先撤回发布");
@@ -219,6 +225,7 @@ public class CustomerService {
     jdbc.update("UPDATE h5_session SET revoked_at = UTC_TIMESTAMP(3) WHERE activity_customer_id = ? AND revoked_at IS NULL", customerId);
     reassociateAttendance(activityId);
     com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
+    com.fengyi.ordershow.catalog.ProductCatalogChanges.all(jdbc, activityId);
   }
 
   public PageResponse<AttendeeView> attendees(long activityId, String matchStatus, String keyword, int page, int size, String traceId) {
@@ -339,6 +346,7 @@ public class CustomerService {
   }
 
   private void requireCustomerWritable(long activityId, String reason) {
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     String status = activities.byId(activityId).status();
     if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后数据只读");
     if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后白名单已锁定，请先撤回发布");

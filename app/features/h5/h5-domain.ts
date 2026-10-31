@@ -1,4 +1,4 @@
-import { apiAssetUrl, type RuntimeProduct, type RuntimeOrder, type RuntimeActivity } from "../../api";
+import { apiAssetUrl, type H5Product, type RuntimeOrder, type RuntimeActivity } from "../../api";
 import type { ProductImportRow, WhitelistRow } from "../../domain/import-domain";
 import type { ActivityStatus } from "../shared/types";
 import { money } from "../shared/utils";
@@ -63,7 +63,7 @@ export function productRowToProduct(row: ProductImportRow): Product {
   };
 }
 
-export function runtimeProductToProduct(row: RuntimeProduct): Product {
+export function runtimeProductToProduct(row: H5Product): Product {
   const imageUrls = [...row.images]
     .sort((a, b) => Number(b.primary) - Number(a.primary) || a.sortNo - b.sortNo || a.id - b.id)
     .map((image) => apiAssetUrl(image.url));

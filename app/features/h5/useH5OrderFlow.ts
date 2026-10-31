@@ -6,7 +6,7 @@ import { createIdempotencyKey } from "../../services/api/idempotency-key";
 
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, createH5OrderChangeRequest, loadH5OrderDraft, loadH5Products, saveH5Order, verifyPhone, type H5CustomerType, type OrderChangeRequest, type RuntimeIdentity, type RuntimeOrder, type RuntimeProduct } from "../../api";
+import { ApiError, createH5OrderChangeRequest, loadH5OrderDraft, loadH5Products, saveH5Order, verifyPhone, type H5CustomerType, type OrderChangeRequest, type RuntimeIdentity, type RuntimeOrder, type H5Product } from "../../api";
 import type { WhitelistRow } from "../../domain/import-domain";
 import { maskPhone, normalizePhone } from "../shared/utils";
 import { useH5CatalogSearch } from "./useH5CatalogSearch";
@@ -21,7 +21,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const activityNotStarted = activityStatus === "draft" || activityStatus === "scheduled";
   const entryPolicy = h5EntryPolicy(runtimeActivity);
   const directEntry = entryPolicy.mode === "direct";
-  const [runtimeProducts, setRuntimeProducts] = useState<RuntimeProduct[] | null>(null);
+  const [runtimeProducts, setRuntimeProducts] = useState<H5Product[] | null>(null);
   const [runtimeIdentity, setRuntimeIdentity] = useState<RuntimeIdentity | null>(null);
   const unspecifiedWhitelist = runtimeIdentity ? runtimeIdentity.customerType === "ALL" : runtimeActivity?.whitelistCustomerTypeMode === "UNSPECIFIED";
   const [runtimeOrder, setRuntimeOrder] = useState<RuntimeOrder | null>(null);

@@ -8,8 +8,14 @@
 | `ProductCatalogReader` | H5/后台商品查询、客户范围过滤、版本来源及商品附属信息读取 |
 | `ProductImageMatcher` | 图片名称和路径评分、包装冲突判断、候选选择；不读写数据库 |
 | `ProductImageService` | 单图维护、候选确认/排除、ZIP 预览与挂载、图片存储关联 |
+| `H5CatalogService` / `H5Product` | H5 读取入口、当前身份/目录版本校验及精简返回结构 |
+| `H5CatalogDataService` | 一条索引查询读取客户权限上下文；只读一致性事务加载完整或部分商品快照 |
+| `H5CatalogCache` | 按活动共用不可变商品/权限快照、合并加载、容量/并发/等待上限及淘汰 |
+| `ProductCatalogChanges` / `ProductCatalogRedisBridge` | 事务内目录版本/outbox、提交后各副本缓存更新及恢复 |
 
-Controller 和公开 DTO 保持原位置与签名。图片操作仍从 `ProductService` 的原有事务入口进入，辅助服务没有新增事务范围；导入发布中的 ZIP 挂载沿用调用者事务。图片名称、阈值、候选判定和同名商品共享图片规则未改变。
+后台 Controller 和 DTO 保持兼容；H5 商品读取改用独立精简 DTO。图片操作仍从 `ProductService` 的原有事务入口进入；导入发布中的 ZIP 挂载沿用调用者事务。商品/图片/权限维护与发布先锁活动行，再写业务数据、目录版本和 outbox，统一锁顺序。缓存数据加载单独使用只读 REPEATABLE_READ 事务，等待缓存的请求不持有加载事务。图片名称、阈值、候选判定和同名商品共享图片规则未改变。
+
+`ProductCatalogReader` 继续提供后台结构和缓存关闭/带服务端筛选参数时的原 SQL 路径；附属信息按 500 个商品一批读取。缓存命中时只读一条客户/绑定/目录版本上下文查询。冷加载等待后或缓存版本先于上下文推进时重新读取上下文，避免把新目录规则与旧客户权限混用。MySQL 的大小写/重音比较通过同库排序权重保留，不能仅用 Java 字符串相等代替。
 
 ## Excel 解析与预览
 

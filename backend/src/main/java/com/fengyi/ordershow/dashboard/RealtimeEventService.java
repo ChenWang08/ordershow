@@ -3,6 +3,11 @@ package com.fengyi.ordershow.dashboard;
 import com.fengyi.ordershow.common.UtcTime;
 import com.fengyi.ordershow.activity.ActivityInfoChanges;
 import com.fengyi.ordershow.activity.ActivityInfoRedisBridge;
+import com.fengyi.ordershow.catalog.H5CatalogDataService.Change;
+import com.fengyi.ordershow.catalog.H5CatalogCache;
+import com.fengyi.ordershow.catalog.ProductCatalogChanges;
+import com.fengyi.ordershow.catalog.ProductCatalogRedisBridge;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -26,10 +31,12 @@ public class RealtimeEventService {
   private final JdbcTemplate jdbc;
   private final Supplier<SseEmitter> emitterFactory;
   private final java.util.function.LongConsumer activityInfo;
+  private final java.util.function.Consumer<Change> catalog;
+  private final ObjectMapper json;
 
   @org.springframework.beans.factory.annotation.Autowired
-  public RealtimeEventService(JdbcTemplate jdbc, ActivityInfoRedisBridge activityInfo) {
-    this(jdbc, () -> new SseEmitter(30L * 60 * 1000), activityInfo::forward);
+  public RealtimeEventService(JdbcTemplate jdbc, ActivityInfoRedisBridge activityInfo, ProductCatalogRedisBridge catalog, ObjectMapper json) {
+    this(jdbc, () -> new SseEmitter(30L * 60 * 1000), activityInfo::forward, catalog::forward, json);
   }
 
   RealtimeEventService(JdbcTemplate jdbc) { this(jdbc, () -> new SseEmitter(30L * 60 * 1000)); }
@@ -39,9 +46,15 @@ public class RealtimeEventService {
   }
 
   RealtimeEventService(JdbcTemplate jdbc, Supplier<SseEmitter> emitterFactory, java.util.function.LongConsumer activityInfo) {
+    this(jdbc, emitterFactory, activityInfo, ignored -> {}, new ObjectMapper());
+  }
+
+  RealtimeEventService(JdbcTemplate jdbc, Supplier<SseEmitter> emitterFactory, java.util.function.LongConsumer activityInfo,
+      java.util.function.Consumer<Change> catalog, ObjectMapper json) {
     this.jdbc = jdbc;
     this.emitterFactory = emitterFactory;
     this.activityInfo = activityInfo;
+    this.catalog = catalog; this.json = json;
   }
 
   public SseEmitter subscribe(long activityId) {
@@ -86,9 +99,9 @@ public class RealtimeEventService {
     long cursor = 0;
     for (int batch = 0; batch < MAX_BATCHES_PER_TICK; batch++) {
       List<OutboxRow> page = jdbc.query("""
-          SELECT id, activity_id, event_type, aggregate_type, aggregate_id, created_at FROM domain_event_outbox
+          SELECT id, activity_id, event_type, aggregate_type, aggregate_id, created_at, payload_json FROM domain_event_outbox
           WHERE status = 'PENDING' AND available_at <= UTC_TIMESTAMP(3) AND id > ? ORDER BY id LIMIT 1000
-          """, (rs, rowNum) -> new OutboxRow(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getString(5), UtcTime.read(rs, 6)), cursor);
+          """, (rs, rowNum) -> new OutboxRow(rs.getLong(1), rs.getLong(2), rs.getString(3), rs.getString(4), rs.getString(5), UtcTime.read(rs, 6), rs.getString(7)), cursor);
       rows.addAll(page);
       if (page.size() < BATCH_SIZE) break;
       cursor = page.getLast().id();
@@ -99,6 +112,11 @@ public class RealtimeEventService {
     var retry = new java.util.HashSet<Long>();
     for (var entry : byActivity.entrySet()) {
       var changes = entry.getValue();
+      var catalogRows = changes.stream().filter(row -> ProductCatalogChanges.EVENT_TYPE.equals(row.eventType())).toList();
+      if (!catalogRows.isEmpty()) {
+        try { catalog.accept(catalogChange(entry.getKey(), catalogRows)); }
+        catch (RuntimeException error) { catalogRows.forEach(row -> retry.add(row.id())); }
+      }
       // Inspect every selected row, not just the batch's last eventType (which may be an order).
       if (changes.stream().anyMatch(row -> ActivityInfoChanges.EVENT_TYPE.equals(row.eventType()))) {
         try { activityInfo.accept(entry.getKey()); }
@@ -124,5 +142,32 @@ public class RealtimeEventService {
     }
   }
 
-  record OutboxRow(long id, long activityId, String eventType, String aggregateType, String aggregateId, Instant createdAt) {}
+  private Change catalogChange(long activityId, List<OutboxRow> rows) {
+    var parsed = new ArrayList<Change>();
+    try {
+      for (var row : rows) {
+        var payload = json.readTree(row.payload());
+        long revision = Long.parseLong(payload.path("version").asText());
+        if (revision <= 0 || !payload.path("productIds").isArray() || !payload.path("fullReload").isBoolean())
+          throw new IllegalArgumentException("Invalid catalog payload");
+        var ids = new java.util.HashSet<Long>();
+        for (var node : payload.path("productIds")) {
+          long id = node.longValue(); if (id <= 0) throw new IllegalArgumentException("Invalid product ID"); ids.add(id);
+        }
+        boolean full = payload.path("fullReload").booleanValue() || ids.isEmpty() || ids.size() > ProductCatalogChanges.MAX_PRODUCT_IDS;
+        parsed.add(new Change(activityId, revision, revision, full ? java.util.Set.of() : ids, full));
+      }
+    } catch (Exception error) {
+      // An old/malformed event has no safe incremental meaning. Read one revision and rebuild.
+      long revision = jdbc.queryForObject("SELECT product_catalog_version FROM activity WHERE id=?", Long.class, activityId);
+      return new Change(activityId, revision, revision, java.util.Set.of(), true);
+    }
+    return parsed.stream().sorted(java.util.Comparator.comparingLong(Change::fromVersion)).reduce(H5CatalogCache::merge).orElseThrow();
+  }
+
+  record OutboxRow(long id, long activityId, String eventType, String aggregateType, String aggregateId, Instant createdAt, String payload) {
+    OutboxRow(long id, long activityId, String eventType, String aggregateType, String aggregateId, Instant createdAt) {
+      this(id, activityId, eventType, aggregateType, aggregateId, createdAt, null);
+    }
+  }
 }

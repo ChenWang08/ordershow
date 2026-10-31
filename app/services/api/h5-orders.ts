@@ -1,7 +1,7 @@
 import { createIdempotencyKey } from "./idempotency-key";
 import { api, ApiError } from "./client";
 import { activeActivityPath } from "./context";
-import type { Envelope, OrderChangeRequest, RuntimeIdentity, RuntimeOrder, RuntimeOrderDraft, RuntimeProduct } from "./types";
+import type { Envelope, OrderChangeRequest, RuntimeIdentity, RuntimeOrder, RuntimeOrderDraft, H5Product } from "./types";
 
 export type H5CustomerType = "GENERAL" | "SPECIAL" | "ALL";
 export type H5VerificationResult =
@@ -15,7 +15,7 @@ export async function verifyPhone(phone: string, customerType?: H5CustomerType):
 }
 
 export async function loadH5Products() {
-  return (await api<Envelope<RuntimeProduct[]>>(`/h5/activities/${activeActivityPath()}/products`)).data;
+  return (await api<Envelope<H5Product[]>>(`/h5/activities/${activeActivityPath()}/products`)).data;
 }
 
 type H5ReadOptions = { activityCode?: string; signal?: AbortSignal };

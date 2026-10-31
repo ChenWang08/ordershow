@@ -34,6 +34,11 @@ export type RuntimeProduct = {
     sourceType: "ZIP_IMPORT" | "MANUAL"; matchStatus: "MATCHED" | "PENDING" | "UNMATCHED" | "CONFIRMED" }>;
 };
 
+export type H5Product = Omit<RuntimeProduct, "brandName" | "varietyName" | "bottlePrice" | "tonCaseFactor"
+  | "dealerScope" | "effectiveDealerCount" | "dealerScopeRestricted" | "images"> & {
+  images: Array<{ id: number; url: string; primary: boolean; sortNo: number }>;
+};
+
 export type DealerMember = { customerId: number; dealerFullName: string; customerType: string; active: boolean };
 export type DealerScope = { branchName: string; members: DealerMember[] };
 export type DealerScopeSummary = { scopes: DealerScope[]; effectiveCount: number; selectedCount: number; restricted: boolean };

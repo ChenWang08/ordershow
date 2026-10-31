@@ -374,6 +374,7 @@ paths:
       operationId: listH5OrderableProducts
       tags: [H5]
       summary: 查询当前客户可订商品
+      description: 每次核对当前客户与目录版本，共用活动商品缓存后按客户权限过滤；响应为 H5 精简结构。商品加载时机不变，不新增商品推送或轮询。
       security:
         - h5Cookie: []
       parameters:
@@ -389,7 +390,7 @@ paths:
             maxLength: 100
       responses:
         '200':
-          description: 商品列表
+          description: 当前客户可见的商品列表（Cache-Control 为 private, no-store）
           content:
             application/json:
               schema:
@@ -399,11 +400,17 @@ paths:
                   data:
                     type: array
                     items:
-                      $ref: '#/components/schemas/OrderableProduct'
+                      $ref: '#/components/schemas/H5Product'
                   traceId:
                     type: string
         '401':
           $ref: '#/components/responses/Problem'
+        '503':
+          description: 商品加载并发、等待人数超限或等待超时（CATALOG_BUSY），保留当前页面数据后重试
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /h5/activities/{activityCode}/order:
     get:
       operationId: getH5CurrentOrder
@@ -3233,6 +3240,68 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProductImage'
+    H5Product:
+      type: object
+      required: [id, materialName, customerType, rebateStatus, giftBox, visible, orderable, dataStatus, sortNo, version, images, branchScope]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        materialCode:
+          type: [string, 'null']
+        materialName:
+          type: string
+        description:
+          type: [string, 'null']
+        categoryName:
+          type: [string, 'null']
+        productLine:
+          type: [string, 'null']
+        specification:
+          type: [string, 'null']
+        casePack:
+          type: [string, 'null']
+        casePrice:
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
+        customerType:
+          $ref: '#/components/schemas/ProductCustomerType'
+        rebateStatus:
+          $ref: '#/components/schemas/ProductRebateStatus'
+        giftBox:
+          type: boolean
+        visible:
+          type: boolean
+        orderable:
+          type: boolean
+        dataStatus:
+          type: string
+        sortNo:
+          type: integer
+        version:
+          type: integer
+        branchScope:
+          type: array
+          items:
+            type: string
+        priceTier:
+          oneOf:
+            - $ref: '#/components/schemas/ProductPriceTier'
+            - type: 'null'
+        images:
+          type: array
+          items:
+            type: object
+            required: [id, url, primary, sortNo]
+            properties:
+              id:
+                $ref: '#/components/schemas/Id'
+              url:
+                type: string
+              primary:
+                type: boolean
+              sortNo:
+                type: integer
     ProductPriceTier:
       type: object
       description: 商品阶梯优惠。WHOLE_ORDER 达到门槛后全部箱数按优惠价；INCREMENTAL 从门槛箱开始仅对该箱及超出部分按优惠价。
