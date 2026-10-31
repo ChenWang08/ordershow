@@ -26,6 +26,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
@@ -846,13 +848,12 @@ class IsolatedApiE2ETest {
     String regionCode = data(saved).path("regionCode").asText();
     assertTrue(regionCode.startsWith("R_"));
 
-    HttpResponse<String> publicActivity = send(client(), "GET", "/public/activities/" + activityCode, null, null, null);
-    assertEquals(200, publicActivity.statusCode(), publicActivity.body());
+    JsonNode publicActivity = publicActivitySnapshot();
     boolean visible = false;
-    for (JsonNode region : data(publicActivity).path("regions")) {
+    for (JsonNode region : publicActivity.path("regions")) {
       if (regionCode.equals(region.path("code").asText()) && "华北新区".equals(region.path("name").asText())) visible = true;
     }
-    assertTrue(visible, publicActivity.body());
+    assertTrue(visible, publicActivity.toString());
 
     HttpClient newRegionCustomer = client();
     ObjectNode verify = JSON.createObjectNode().put("customerType", "GENERAL")
@@ -872,9 +873,9 @@ class IsolatedApiE2ETest {
     assertTrue(data(unassignedSaved).path("regionCode").isNull()
         || data(unassignedSaved).path("regionCode").isMissingNode());
 
-    HttpResponse<String> mixedActivity = send(client(), "GET", "/public/activities/" + activityCode, null, null, null);
-    assertTrue(data(mixedActivity).path("hasUnassignedGeneralCustomers").asBoolean());
-    assertFalse(data(mixedActivity).path("regions").toString().contains("华北新区"));
+    JsonNode mixedActivity = publicActivitySnapshot();
+    assertTrue(mixedActivity.path("hasUnassignedGeneralCustomers").asBoolean());
+    assertFalse(mixedActivity.path("regions").toString().contains("华北新区"));
 
     ObjectNode unassignedVerify = JSON.createObjectNode().put("customerType", "GENERAL")
         .put("regionCode", "UNASSIGNED").put("phone", "13900000002");
@@ -1275,6 +1276,35 @@ class IsolatedApiE2ETest {
   private HttpClient client() {
     CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
     return HttpClient.newBuilder().cookieHandler(cookies).connectTimeout(Duration.ofSeconds(5)).build();
+  }
+
+  private JsonNode publicActivitySnapshot() throws Exception {
+    try (var publicClient = client()) {
+      var response = publicClient.send(request("/public/activities/" + activityCode + "/events")
+          .header("Accept", "text/event-stream").GET().build(), HttpResponse.BodyHandlers.ofInputStream());
+      try (var body = response.body(); var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+        assertEquals(200, response.statusCode());
+        var snapshot = executor.submit(() -> {
+          var lines = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8));
+          for (String line; (line = lines.readLine()) != null;) {
+            if (line.startsWith("data:")) {
+              JsonNode frame = JSON.readTree(line.substring(5).trim());
+              if (frame.has("activity")) return frame.path("activity");
+              if (frame.has("code")) throw new AssertionError("Activity unavailable: " + frame);
+            }
+          }
+          throw new AssertionError("Activity SSE ended before its initial snapshot");
+        });
+        try {
+          JsonNode activity = snapshot.get(10, TimeUnit.SECONDS);
+          assertEquals(activityCode, activity.path("code").asText());
+          return activity;
+        } finally {
+          body.close();
+          snapshot.cancel(true);
+        }
+      }
+    }
   }
 
   private HttpRequest.Builder request(String path) {

@@ -297,22 +297,6 @@ paths:
           $ref: '#/components/responses/Problem'
         '409':
           $ref: '#/components/responses/Problem'
-  /public/activities/{activityCode}:
-    get:
-      operationId: getPublicActivity
-      tags: [Public]
-      summary: 查询活动公开信息
-      parameters:
-        - $ref: '#/components/parameters/ActivityCode'
-      responses:
-        '200':
-          description: 活动公开信息
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PublicActivityResponse'
-        '404':
-          $ref: '#/components/responses/Problem'
   /public/activities/{activityCode}/events:
     get:
       operationId: subscribePublicActivityInfo
@@ -322,6 +306,7 @@ paths:
       description: |
         手机验证前后及公开展示页面共用。建立连接后发送当前 activity 快照；活动资料变化后直接发送最新快照，
         不通知客户端重查接口。只包含现有公开活动资料，不包含订单、审核、商品目录、客户身份或统计数据。
+        原 GET /public/activities/{activityCode} 已删除，访问返回 404；初始加载和重连均使用本 SSE 快照。
         默认每 30 秒发送 heartbeat，心跳不查数据库。断线后退避重连，每次新连接重新同步当前资料，
         不提供 Last-Event-ID 历史续传。CLOSED/FINISHED 仍可订阅以感知重新开放；活动不存在时发送 unavailable 后结束。
         服务端返回 Cache-Control: no-cache, no-transform 与 X-Accel-Buffering: no；代理须关闭缓冲并允许长连接。
@@ -369,6 +354,32 @@ paths:
           $ref: '#/components/responses/Problem'
         '429':
           $ref: '#/components/responses/Problem'
+  /public/activities/{activityCode}/lottery:
+    get:
+      operationId: getPublicLottery
+      tags: [Public, Lottery]
+      summary: 读取公开抽奖规则与中奖结果
+      description: 抽奖页面按需读取；独立于活动资料 SSE，H5 订货初始化不调用本接口。删除旧活动 GET 不影响此路径。
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      responses:
+        '200':
+          description: 已发布规则及公开中奖结果；不计算候选名单
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, traceId]
+                properties:
+                  data:
+                    type: object
+                    required: [rules, winners]
+                    properties:
+                      rules: { type: array, items: { type: object } }
+                      winners: { type: array, items: { type: object } }
+                  traceId: { type: string }
+        '404': { $ref: '#/components/responses/Problem' }
   /h5/activities/{activityCode}/products:
     get:
       operationId: listH5OrderableProducts

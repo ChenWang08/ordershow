@@ -1,9 +1,6 @@
 import { beijingDateTimeToUtc } from "../../features/shared/time";
 import { api } from "./client";
-import { activeActivityPath } from "./context";
 import type { AdminActivitySummary, Envelope, RuntimeActivity } from "./types";
-
-export async function loadActivity() { return (await api<Envelope<RuntimeActivity>>(`/public/activities/${activeActivityPath()}`)).data; }
 
 export async function loadCurrentActivity() {
   return (await api<Envelope<RuntimeActivity>>("/public/activities/current")).data;

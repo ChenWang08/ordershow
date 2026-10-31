@@ -135,16 +135,16 @@ test("a malformed or cross-activity snapshot is rejected and retried, never disp
 });
 
 test("public activity/H5 initialization never loads lottery data and disconnection preserves the loaded activity", async () => {
-  let handlers, cleanups = 0, reads = 0, lotteryReads = 0;
+  let handlers, cleanups = 0, lotteryReads = 0;
   const h = hookHarness("app/features/workspace/useActivityRuntime.ts", "useActivityRuntime", [], {
     "../../api": { getActiveActivityCode: () => "A", subscribeActiveActivityCode: () => () => {},
-      loadActivity: () => { reads++; throw new Error("Must not read"); }, loadPublicLottery: async () => { lotteryReads++; return { rules: [] }; } },
+      loadPublicLottery: async () => { lotteryReads++; return { rules: [] }; } },
     "../../services/api/activity-info-stream": { subscribeActivityInfo: (_code, value) => { handlers = value; return () => cleanups++; } },
     "../lottery/Lottery": { initialLotteryRounds: [], mapLotteryRule: () => [] },
   });
   await h.flush(); handlers.onActivity(activity); handlers.onState("connected"); await h.flush();
   const current = h.model.runtimeActivity;
-  assert.equal(h.model.runtimeLoaded, true); assert.equal(h.model.runtimeConnected, true); assert.equal(reads, 0);
+  assert.equal(h.model.runtimeLoaded, true); assert.equal(h.model.runtimeConnected, true);
   handlers.onState("connecting"); await h.flush();
   assert.equal(h.model.runtimeActivity, current); assert.equal(h.model.runtimeLoaded, true);
   assert.match(h.model.runtimeMessage, /重新同步/); assert.equal(h.intervals.size, 0);
@@ -168,4 +168,14 @@ test("activity switching disposes the previous stream and ignores its late callb
   subscriptions[1].handlers.onActivity({ ...activity, id: 2, code: "B", name: "新活动" });
   subscriptions[0].handlers.onActivity(activity); await h.flush();
   assert.equal(h.model.runtimeActivity.code, "B"); assert.equal(lotteryReads, 0); h.unmount();
+});
+
+test("the legacy H5 entry still resolves /current while the unused activity GET helper is absent", async () => {
+  const calls = [];
+  const api = loadModule("app/services/api/activity.ts", {
+    "./client": { api: async path => { calls.push(path); return { data: activity }; } },
+  });
+  assert.equal(await api.loadCurrentActivity(), activity);
+  assert.deepEqual(calls, ["/public/activities/current"]);
+  assert.equal(Object.hasOwn(api, "loadActivity"), false);
 });

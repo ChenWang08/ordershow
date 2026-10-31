@@ -54,6 +54,15 @@ class ActivityInfoIntegrationTest {
   @Autowired RedisConnectionFactory redisConnections;
   @Autowired PlatformTransactionManager transactions;
 
+  @Test void retiredActivityGetUsesExisting404ResponseInTheFullHttpStack() throws Exception {
+    try (var client = HttpClient.newHttpClient()) {
+      var response = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port
+          + "/api/v1/public/activities/REMOVED-ENDPOINT")).GET().build(), HttpResponse.BodyHandlers.ofString());
+      assertThat(response.statusCode()).isEqualTo(404);
+      assertThat(json.readTree(response.body()).path("code").asText()).isEqualTo("RESOURCE_NOT_FOUND");
+    }
+  }
+
   @Test void realHttpRedisAndTransactionsSynchronizeTwoReplicasWithoutPollingOrOrderNoise() throws Exception {
     // Re-runnable in this fixed disposable DB; only our named synthetic fixture is replaced.
     for (Long previousId : jdbc.queryForList("SELECT id FROM activity WHERE activity_code='ACTIVITY-INFO-TEST'", Long.class)) {

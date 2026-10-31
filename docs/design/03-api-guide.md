@@ -110,7 +110,7 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 
 ### 4.2 H5
 
-1. `GET /public/activities/{activityCode}` 获取活动公开信息；
+1. 连接 `GET /public/activities/{activityCode}/events`，以首条 `activity` 消息中的完整 `activity` 对象加载活动公开信息；资料变化后接收最新快照，断线重连同样获取当前快照，不额外查询活动 GET；
 2. 用户只输入手机号，调用 `POST /public/activities/{activityCode}/verify-phone`，首次不传 `customerType`；不再预选通道或大区；
 3. 后端标准化手机号并计算 HMAC，查询当前活动、当前有效发布版本下的身份。唯一身份直接登录；综合与特渠同号时返回 `selectionRequired:true` 和 `customerTypes:["GENERAL","SPECIAL"]`，不返回客户详情、CSRF 或登录 Cookie，也不创建会话；
 4. 弹窗仅展示“综合”“特渠”。选择后向同一接口提交手机号与 `customerType`，后端重新校验当前身份，再在事务内创建会话。成功返回 `selectionRequired:false`、`customer`、`csrfToken`；只在事务提交成功后设置 H5 Cookie；
@@ -118,6 +118,8 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 6. 会话默认有效期 12 小时（可配置），服务端身份检查仍受活动状态、结束时间、客户启用状态及发布版本约束。只能访问该活动客户的商品和订单。所有验证响应 `Cache-Control:no-store`。
 
 H5 与 API 默认通过同站点托管入口提供。H5 的写请求必须携带 CSRF Header，并校验 `Origin`；Cookie 不放入 URL、`localStorage` 或 `sessionStorage`。若部署为跨站 API，才启用 Bearer 方案，并显式配置 CORS 和凭证撤销。
+
+原 `GET /public/activities/{activityCode}` 已删除，访问返回现有 `404 RESOURCE_NOT_FOUND`，不执行活动资料查询；没有兼容转发或轮询降级。旧客户端/外部脚本须更新为 SSE。`GET /public/activities/current` 仍用于 `/h5` 单活动兼容入口；`/events`、`/verify-phone`、`/lottery` 和后台活动路径是独立端点，继续保留。
 
 相同手机号可在综合和特渠分别匹配，不修改原 `(activity_id,data_version_id,customer_type,phone_lookup_hash)` 唯一约束。明确指定类型但未匹配时返回 `WHITELIST_IDENTITY_NOT_FOUND`，不自动切换到另一身份。唯一 `ALL` 身份直接登录。相同类型多重匹配或 `ALL` 与其他类型同时匹配时返回 `WHITELIST_IDENTITY_AMBIGUOUS`，不能取第一条。
 

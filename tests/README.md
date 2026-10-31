@@ -2,6 +2,8 @@
 
 ## 测试分工
 
+- 旧活动 GET 清理：`ActivityRoutesTest` 验证真实 MVC 路由、旧地址 404 且不调用活动服务、`/current`/SSE/手机号验证/抽奖/后台活动路径保留；`ActivityInfoIntegrationTest` 追加完整 HTTP 栈的 404 验证并保留真实 SSE 更新/恢复验证。公开资料脚本与隔离 API E2E 改读 SSE 首帧；`public-activity-snapshot.test.mjs` 验证有界等待和断开清理。旧 `scripts/test-h5-entry.mjs` 改为依次运行现有手机号入口、活动 SSE 合成浏览器测试，不再保留旧 JSON 活动夹具或通道选择流程。详情见[清理验证](../docs/testing/retired-public-activity-2026-10-31.md)。
+
 - 抽奖三种加权：`lottery-settings.test.mjs`验证指标与门槛联动、0门槛、名单复用和旧规则兼容；`LotteryWeightingTest`与`LotteryIntegrationTest`验证金额/箱数/吨数实际小计、零权重排除、真实开奖和审计对账。千人在线、200单/分钟的同流量对照见[加权验证记录](../docs/testing/lottery-weighting-2026-10-31.md)。测试不构建或部署业务镜像。
 
 - H5 本机草稿与抽奖按页面加载：`h5-local-draft.test.mjs` 验证浏览器持久化、隔离、损坏/过期和存储失败；`h5-manual-refresh.test.mjs` 验证完整草稿生命周期及后台更新后的失效、提交成功清理/失败保留。`activity-info-stream.test.mjs` 与 `lottery-board.test.mjs` 分别保证公共/H5 初始化不查询抽奖，以及抽奖页独立读取正常。`scripts/test-h5-manual-refresh-browser.mjs` / `scripts/test-activity-info-browser.mjs` 使用真实组件和合成 HTTP 验证本机恢复、无草稿/抽奖请求及活动 SSE 兼容；见[验证记录](../docs/testing/h5-local-draft-2026-10-31.md)。

@@ -33,11 +33,6 @@ public class ActivityController {
     this.auth = auth;
   }
 
-  @GetMapping("/public/activities/{activityCode}")
-  ApiResponse<ActivityService.ActivityView> publicActivity(@PathVariable String activityCode, HttpServletRequest request) {
-    return ApiResponse.of(service.byCode(activityCode), TraceFilter.id(request));
-  }
-
   @GetMapping("/public/activities/current")
   ApiResponse<ActivityService.ActivityView> currentPublicActivity(HttpServletRequest request) {
     return ApiResponse.of(service.currentOrderable(), TraceFilter.id(request));

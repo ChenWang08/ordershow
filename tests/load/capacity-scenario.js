@@ -9,7 +9,7 @@ const users = new SharedArray('capacity customers', () => JSON.parse(open(`/resu
 const mode = __ENV.CAPACITY_MODE;
 const vus = Number(__ENV.VUS), run = __ENV.RUN;
 if (!['consume', 'full', 'verify', 'sustain', 'journey', 'submit-only'].includes(mode) || !Number.isInteger(vus) || vus < 1 || vus > users.length || !/^[\w-]+$/.test(run || '')) throw Error('Invalid capacity arguments');
-const steps = mode === 'verify' ? ['verify'] : mode === 'full' ? ['activity', 'verify', 'products', 'draft', 'submit', 'confirm'] : mode === 'journey' ? ['activity', 'verify', 'products', 'current', 'draft', 'submit', 'confirm'] : mode === 'submit-only' ? ['current', 'submit', 'confirm'] : mode === 'sustain' ? ['current', 'draft', 'submit', 'confirm'] : ['draft', 'submit', 'confirm'];
+const steps = mode === 'verify' ? ['verify'] : mode === 'full' ? ['verify', 'products', 'draft', 'submit', 'confirm'] : mode === 'journey' ? ['verify', 'products', 'current', 'draft', 'submit', 'confirm'] : mode === 'submit-only' ? ['current', 'submit', 'confirm'] : mode === 'sustain' ? ['current', 'draft', 'submit', 'confirm'] : ['draft', 'submit', 'confirm'];
 const durations = Object.fromEntries(steps.map(step => [step, new Trend(`${step}_ms`, true)]));
 const attempts = new Counter('flow_attempts'), completed = new Counter('flow_completed'), commits = new Counter('order_commits');
 const verified = new Counter('verified_sessions'), audited = new Counter('write_attempts');
@@ -23,7 +23,7 @@ const thresholds = {
   server_failures: [{ threshold: 'rate==0', abortOnFail: false }],
 };
 for (const step of steps) {
-  const limit = step === 'submit' ? 1000 : step === 'activity' ? 300 : step === 'draft' ? 1000 : 500;
+  const limit = step === 'submit' || step === 'draft' ? 1000 : 500;
   thresholds[`${step}_ms`] = [`p(95)<${limit}`];
   for (const type of types) thresholds[`${step}_ms{customer_type:${type}}`] = [`p(95)<${limit}`];
 }
@@ -104,10 +104,7 @@ export default function capacityIteration() {
 // Keep early returns in a helper without finally: failed HTTP steps must still
 // produce metrics/summary, not trigger the bundled k6/Sobek return/finally panic.
 function runOrderFlow(user, path, tags) {
-    if (mode === 'full' || mode === 'journey') {
-      const activity = request('activity', 'GET', `/public/activities/${user.code}`, user);
-      if (!activity.ok || !valid(activity.data?.code === user.code, user)) return false;
-    }
+    // Activity metadata uses a persistent SSE connection, covered by the separate SSE scenarios.
     if (mode === 'full' || mode === 'journey') {
       const login = request('verify', 'POST', `/public/activities/${user.code}/verify-phone`, user, { phone: user.phone, customerType: user.type, regionCode: user.region });
       if (!login.ok || !valid(login.data?.customer?.customerId === user.id && login.data.customer.customerType === user.type && Boolean(login.data.csrfToken), user)) return false;

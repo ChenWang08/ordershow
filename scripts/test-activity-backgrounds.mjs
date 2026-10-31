@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import sharp from "sharp";
+import { readPublicActivity } from "../tests/helpers/public-activity-snapshot.mjs";
 
 // Only the disposable test stack; never point this at a business environment.
 const base = "http://localhost:8180/api/v1";
@@ -51,7 +52,7 @@ assert.ok(h5.h5BackgroundUrl);
 let desktop = await upload("desktop", jpg, "desktop.jpg");
 assert.equal(desktop.h5BackgroundUrl, h5.h5BackgroundUrl);
 assert.ok(desktop.desktopBackgroundUrl);
-const publicView = (await request(null, "GET", `/public/activities/${a.code}`)).data;
+const publicView = await readPublicActivity(base, a.code);
 assert.equal(publicView.desktopBackgroundUrl, desktop.desktopBackgroundUrl);
 const file = await fetch(new URL(desktop.desktopBackgroundUrl, base));
 assert.equal(file.status, 200);

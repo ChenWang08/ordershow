@@ -20,6 +20,10 @@ const server = await createServer({ root, configFile: false, plugins: [react(), 
   vite.middlewares.use((req, res, next) => {
     if (!req.url?.startsWith("/api/v1/")) return next();
     const path = req.url.split("?")[0]; calls.push({ path, method: req.method });
+    if (path === "/api/v1/public/activities/ACTIVITY-TEST") {
+      res.writeHead(404, { "Content-Type": "application/problem+json" });
+      return res.end(JSON.stringify({ code: "RESOURCE_NOT_FOUND", status: 404 }));
+    }
     if (path.endsWith("/events")) {
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
       peers.add(res); res.on("close", () => peers.delete(res));
@@ -122,6 +126,8 @@ try {
     await page.clock.fastForward(2500);
     await page.waitForFunction(() => !document.querySelector(".activity-sync-status"));
     assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
+    assert.equal(calls.filter(call => call.path === "/api/v1/public/activities/ACTIVITY-TEST").length, 0,
+      "Initial load, navigation and reconnect must all work without the removed activity GET");
     await page.screenshot({ path: fileURLToPath(new URL(`activity-stream-${width}.png`, output)) });
     await context.close();
   }
