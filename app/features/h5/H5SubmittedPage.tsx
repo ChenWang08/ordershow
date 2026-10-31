@@ -8,7 +8,6 @@ import type { H5OrderModel } from "./useH5OrderFlow";
 import { ProductArt } from "./ProductArt";
 import { money } from "../shared/utils";
 import { groupByProductLine, unitPriceText } from "./h5-domain";
-import { H5OrderRefresh } from "./H5OrderRefresh";
 
 export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
   const [formalRequestId, setFormalRequestId] = useState<number | null>(null);
@@ -35,7 +34,6 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
       <span className="submitted-status">{pending ? "待审核" : rejected ? "已驳回" : orderStatus === "withdrawn" ? "已撤回" : orderStatus === "voided" ? "已作废" : "已提交"}</span>
       <h2>{state}</h2><p>{note}</p>
     </div>
-    <H5OrderRefresh model={model} />
     {model.draftMessage && <div className="h5-draft-status" role="status">{model.draftMessage}</div>}
     {pending && request.requestType === "MODIFY" && <button className="ghost-btn" style={{marginBottom:16,width:"100%"}} onClick={() => setFormalRequestId(showingRequest ? request.id : null)}>
       {showingRequest ? `查看${orderStatus === "withdrawn" ? "已撤回" : "当前生效"}订单 V${order?.currentVersion}` : "查看待审核申请"}

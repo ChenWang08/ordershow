@@ -157,7 +157,7 @@ test("entry restores browser drafts after fresh order/review reads; legacy serve
     const storage = memoryStorage(); seedDraft(storage, order(), pending);
     const h = await harness(order(), pending, { storage });
     assert.equal(h.model.quantities[1], 13); assert.equal(h.model.step, "order");
-    assert.match(h.model.draftMessage, /本机草稿/);
+    assert.equal(h.model.draftMessage, "");
     assert.deepEqual(h.entryReads, ["products", "order", "request"]);
     h.unmount();
   }

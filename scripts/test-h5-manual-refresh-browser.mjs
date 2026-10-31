@@ -52,6 +52,8 @@ try {
     await page.getByLabel("手机号", { exact: true }).fill("13900000001");
     await page.getByRole("button", { name: "验证并进入订货" }).click();
     await page.getByRole("heading", { name: "修改申请待审核" }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /刷新/ }).count(), 0);
+    assert.doesNotMatch(await page.locator(".submitted-page").innerText(), /不会自动更新|最后同步|刷新状态（\d+秒）/);
     const count = () => calls.filter(c => /\/(order|order-change-requests\/current)$/.test(c.path)).length;
     const loaded = count(); await page.clock.fastForward(65_000);
     assert.equal(count(), loaded, "A pending application must not poll");
@@ -65,9 +67,9 @@ try {
     await page.locator(".order-header > button").click();
     await page.getByRole("heading", { name: "订货已成功提交" }).waitFor();
 
-    // A direct admin edit is also checked, bypassing the ordinary refresh cooldown.
+    // A direct admin edit is also checked, even within the ordinary refresh cooldown.
     formal = makeOrder(3, 8); application = null;
-    assert.equal(await page.locator(".h5-order-refresh button").isDisabled(), true);
+    assert.equal(await page.getByRole("button", { name: /刷新/ }).count(), 0);
     await page.getByRole("button", { name: "修改订单", exact: true }).click();
     await page.getByLabel("合成商品订货箱数").waitFor();
     assert.equal(await page.getByLabel("合成商品订货箱数").inputValue(), "8");
@@ -79,18 +81,20 @@ try {
     assert.equal(count(), editingCount, "Returning while editing must not replace the cart");
     assert.equal(await page.getByLabel("合成商品订货箱数").inputValue(), "9");
 
-    // Entering details reads once; failure preserves V3 and the previous success time.
+    // Entering details reads once; failure preserves V3 and the displayed order.
     failure = true; await page.locator(".order-header > button").click();
     await page.getByRole("alert").filter({ hasText: "刷新失败" }).waitFor();
     assert.match(await page.locator(".submitted-meta").innerText(), /V3/);
-    const lastSuccess = await page.locator(".h5-order-refresh small").innerText();
+    const confirmedOrder = await page.locator(".submitted-meta").innerText();
     await page.clock.fastForward(15_000); failure = false; holdRead = true;
-    const beforeShared = count(); await page.locator(".h5-order-refresh button").click();
-    await page.getByRole("button", { name: "刷新中…", exact: true }).waitFor();
+    const beforeShared = count();
+    const pendingRead = page.waitForRequest(request => new URL(request.url()).pathname.endsWith("/order"));
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await pendingRead;
     await page.getByRole("button", { name: "修改订单", exact: true }).click();
     await page.getByRole("button", { name: "正在核对最新订单…", exact: true }).waitFor();
     assert.equal(count(), beforeShared + 1, "The edit action must join the in-flight order read");
-    assert.equal(await page.locator(".h5-order-refresh small").innerText(), lastSuccess);
+    assert.equal(await page.locator(".submitted-meta").innerText(), confirmedOrder);
     holdRead = false; releaseRead();
     await page.getByLabel("合成商品订货箱数").waitFor();
     assert.equal(await page.getByLabel("合成商品订货箱数").inputValue(), "6");
@@ -106,7 +110,7 @@ try {
     await page.getByLabel("手机号", { exact: true }).fill("13900000001");
     await page.getByRole("button", { name: "验证并进入订货" }).click();
     await quantity.waitFor(); assert.equal(await quantity.inputValue(), "9");
-    assert.match(await page.locator(".h5-draft-status").innerText(), /本机草稿/);
+    assert.equal(await page.locator(".h5-draft-status").count(), 0);
 
     // Lock-only admin updates invalidate drafts, even when the business version is unchanged.
     formal = { ...formal, lockVersion: formal.lockVersion + 1 };
@@ -121,11 +125,13 @@ try {
     const beforePreview = calls.length;
     await quantity.fill("9"); await quantity.blur();
     await page.getByRole("button", { name: "确认订单", exact: true }).click();
+    assert.equal(await page.getByText("最终金额以提交成功后的订单为准。", { exact: true }).count(), 0);
     await page.getByRole("button", { name: "‹", exact: true }).click();
     assert.equal(calls.length, beforePreview);
     await page.getByRole("button", { name: "确认订单", exact: true }).click();
     await page.getByRole("button", { name: "确认提交", exact: true }).click();
     await page.getByRole("heading", { name: "订单已更新并生效" }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /刷新/ }).count(), 0);
     await page.clock.fastForward(1000);
     assert.equal(calls.length, beforePreview + 1);
     assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), null);

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OrderChangeRequest, RuntimeActivity, RuntimeIdentity, RuntimeOrder } from "../../api";
-import { formatBeijingTime } from "../shared/time";
 import { h5QuantitySignature, type Product } from "./h5-domain";
 import { createH5LocalDraftStore, h5DraftBaseline, h5DraftBaseItems, h5LocalDraftKey, type H5DraftContext, type H5DraftItems } from "./h5-local-draft";
 
@@ -37,7 +36,7 @@ export function useH5Draft({ activityClosed, editing, paused, catalog, quantitie
     if (!snapshot || snapshot.signature === savedSignature.current) return true;
     const saved = snapshot.signature === snapshot.baseSignature ? store.remove(snapshot.context) : store.save(snapshot.context, snapshot.items);
     if (saved) savedSignature.current = snapshot.signature;
-    if (showStatus) setDraftMessage(saved ? snapshot.signature === snapshot.baseSignature ? "未提交修改已清除" : "草稿已保存在本机浏览器" : STORAGE_WARNING);
+    if (showStatus) setDraftMessage(saved ? "" : STORAGE_WARNING);
     return saved;
   }, [cancelTimer, store]);
   const discardDraft = useCallback((nextContext = owner.current) => {
@@ -71,7 +70,7 @@ export function useH5Draft({ activityClosed, editing, paused, catalog, quantitie
     const items = draft.items.filter(item => available.has(item.productId));
     latest.current = { context, items, signature: h5QuantitySignature(items), baseSignature: savedSignature.current };
     savedSignature.current = persistent ? h5QuantitySignature(draft.items) : "";
-    setDraftMessage(!persistent ? STORAGE_WARNING : `已恢复 ${formatBeijingTime(new Date(draft.updatedAt).toISOString())} 保存的本机草稿${items.length < draft.items.length ? "；部分商品已不可订购，已移除，请核对。" : ""}`);
+    setDraftMessage(!persistent ? STORAGE_WARNING : items.length < draft.items.length ? "部分商品已不可订购，已移除，请核对。" : "");
     return Object.fromEntries(items.map(item => [String(item.productId), item.quantity]));
   }, [cancelTimer, store]);
 

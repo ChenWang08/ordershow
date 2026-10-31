@@ -35,7 +35,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const entryBusy = useRef(false);
   const orderActionBusy = useRef(false);
   const identityGeneration = useRef(0);
-  const { busy: orderSyncBusy, cooldownSeconds, lastSuccessAt, readLatest, markSynced, confirmSynced, reset: resetOrderSync } = useH5OrderSync();
+  const { busy: orderSyncBusy, lastSuccessAt, readLatest, markSynced, confirmSynced, reset: resetOrderSync } = useH5OrderSync();
   const changeAttempt = useRef({ signature: "", key: "" });
   const changeKey = (value: unknown) => {
     const signature = JSON.stringify(value);
@@ -440,7 +440,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
         if (snapshot.request?.status === "PENDING" && snapshot.request.requestType === "WITHDRAW") {
           applyLatestSnapshot(snapshot);
           setCancelConfirmOpen(false); setCartOpen(false); setStep("submitted");
-          setRuntimeMessage("已有撤回申请待审核，请刷新状态查看处理结果。");
+          setRuntimeMessage("已有撤回申请待审核，请稍后重新进入订单页查看处理结果。");
           return;
         }
         const current = snapshot.order;
@@ -494,7 +494,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
     }
     return true;
   };
-  return { orderSyncBusy, cooldownSeconds, lastSuccessAt, refreshOrderStatus, identityChoice, cancelIdentityChoice, resetEntry,
+  return { orderSyncBusy, lastSuccessAt, refreshOrderStatus, identityChoice, cancelIdentityChoice, resetEntry,
     directEntry, catalogSearch, prepareLiveRoomExit, catalog, requiresReview, pendingSubmission, pendingChangeRequest,
     recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted,
     unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel,

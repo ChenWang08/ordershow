@@ -31,7 +31,6 @@ export function H5ConfirmPage({ model }: { model: H5OrderModel }) {
                 {selectedLineSummaries.map((summary) => <p className="line-amount-row" key={summary.line}><span>项目组：{summary.line}</span><b>¥{money(summary.amount)}</b></p>)}
               </div>
               {requiresReview && <div className="submitted-note">本次包含商品减量或删除，整次变更需后台审核；审核通过前原订单仍有效。</div>}
-              <p className="submitted-note">最终金额以提交成功后的订单为准。</p>
               <label className="agreement"><input type="checkbox" defaultChecked /> 我已核对商品与订货数量</label>
               {orderNeedsRefresh && <button disabled={runtimeBusy} onClick={reloadLatestOrder}>加载最新订单并重新核对（放弃本次未提交修改）</button>}
               {runtimeMessage && <div className="verify-error" role="alert">{runtimeMessage}</div>}

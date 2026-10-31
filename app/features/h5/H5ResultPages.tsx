@@ -2,7 +2,6 @@
 
 import type { H5OrderModel } from "./useH5OrderFlow";
 import { money } from "../shared/utils";
-import { H5OrderRefresh } from "./H5OrderRefresh";
 
 export function H5ResultPages({ model }: { model: H5OrderModel }) {
   const { runtimeOrder, runtimeBusy, runtimeMessage, setStep, resetEntry, submitMode, cancelConfirmOpen, setCancelConfirmOpen, visibleStep, selected, totalBoxes, totalAmount, withdrawOrder } = model;
@@ -16,7 +15,6 @@ export function H5ResultPages({ model }: { model: H5OrderModel }) {
               <div className="success-amount"><span>订单总金额</span><b>¥{money(runtimeOrder?.totalAmount ?? totalAmount)}</b><small>{runtimeOrder?.totalQuantity ?? totalBoxes} 箱 · {runtimeOrder?.items.length ?? selected.length} 种商品</small></div>
               <div className="success-note">订单已生效。截止前增加数量或新增商品直接生效；减少、删除商品或取消订货需后台审核。</div>
               {runtimeMessage && <div className="verify-error" role="alert">{runtimeMessage}</div>}
-              <H5OrderRefresh model={model} />
               <button className="primary-btn" disabled={runtimeBusy} onClick={() => setStep("submitted")}>查看订单</button>
               <button className="ghost-btn" disabled={runtimeBusy} onClick={() => void resetEntry()}>返回活动首页</button>
             </section>

@@ -32,8 +32,6 @@ export function sameH5Order(left: RuntimeOrder | null, right: RuntimeOrder | nul
 
 export function useH5OrderSync() {
   const [busy, setBusy] = useState(false);
-  const [cooldownUntil, setCooldownUntil] = useState(0);
-  const [now, setNow] = useState(0);
   const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
   const deadline = useRef(0);
   const flight = useRef<{ key: string; controller: AbortController; promise: Promise<H5OrderSnapshot | null> } | null>(null);
@@ -43,23 +41,16 @@ export function useH5OrderSync() {
     flight.current?.controller.abort();
     flight.current = null;
     deadline.current = 0;
-    setBusy(false); setCooldownUntil(0); setLastSuccessAt(null);
+    setBusy(false); setLastSuccessAt(null);
   }, []);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; flight.current?.controller.abort(); flight.current = null; };
   }, []);
-  useEffect(() => {
-    if (cooldownUntil <= Date.now()) return;
-    // This timer only updates button text, never reads business data.
-    const timer = window.setTimeout(() => setNow(Date.now()), Math.min(1000, cooldownUntil - Date.now()));
-    return () => window.clearTimeout(timer);
-  }, [cooldownUntil, now]);
-
   const markSynced = useCallback(() => {
     const time = Date.now();
     deadline.current = time + COOLDOWN_MS;
-    setNow(time); setCooldownUntil(deadline.current); setLastSuccessAt(time);
+    setLastSuccessAt(time);
   }, []);
   const readLatest = useCallback((scope: Scope, force = false): Promise<H5OrderSnapshot | null> => {
     const key = `${scope.activityCode}:${scope.customerId}`;
@@ -68,7 +59,7 @@ export function useH5OrderSync() {
     if (!force && Date.now() < deadline.current) return Promise.resolve(null);
     const time = Date.now();
     deadline.current = time + COOLDOWN_MS;
-    setNow(time); setCooldownUntil(deadline.current); setBusy(true);
+    setBusy(true);
     const controller = new AbortController();
     const promise = readH5OrderSnapshot(scope.activityCode, controller.signal).then(snapshot => {
       if (!mounted.current || controller.signal.aborted) return null;
@@ -89,6 +80,5 @@ export function useH5OrderSync() {
     return promise;
   }, []);
   const confirmSynced = useCallback(() => setLastSuccessAt(Date.now()), []);
-  return { busy, cooldownSeconds: Math.max(0, Math.ceil((cooldownUntil - now) / 1000)), lastSuccessAt,
-    readLatest, markSynced, confirmSynced, reset };
+  return { busy, lastSuccessAt, readLatest, markSynced, confirmSynced, reset };
 }

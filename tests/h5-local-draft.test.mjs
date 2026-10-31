@@ -88,7 +88,8 @@ test("local persistence debounces edits, flushes on hide/unmount, never writes H
   for (const quantity of [1, 2, 4]) { options.quantities = { 1: quantity }; h.render([options]); }
   assert.equal(storage.values.size, 0); assert.equal(h.timers.size, 1);
   await h.runTimers(); assert.equal(storage.writes.length, 1);
-  assert.match(h.model.draftMessage, /本机浏览器/);
+  assert.equal(h.model.draftMessage, "");
+  assert.equal(JSON.parse(storage.getItem(h5LocalDraftKey(context))).items[0].quantity, 4);
   // Another tab's record does not change the in-memory snapshot.
   storage.setItem(h5LocalDraftKey(context), "another tab");
   for (const fn of listeners.get("storage") ?? []) fn({ key: h5LocalDraftKey(context) });
