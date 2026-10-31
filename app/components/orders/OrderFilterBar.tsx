@@ -5,7 +5,7 @@ import type { OrderManagementModel } from "./OrderManagement";
 export function OrderFilterBar({ model }: { model: OrderManagementModel }) {
   const { activityStarted, activityClosed, orderCounts, loadError, orderFilter, setOrderFilter, customerType, setCustomerType, search, setSearch, setPage, exportOrders, editorBusy, openCreateEditor } = model;
   return <>
-      <div className="panel-title"><div><h2>订单管理</h2><p>查看并维护订单商品、金额、版本和操作记录</p></div><div className="panel-actions"><button type="button" disabled={model.loading} onClick={model.refreshOrders}>{model.loading ? "正在读取…" : "刷新当前模块"}</button><button type="button" disabled={editorBusy || !activityStarted} onClick={() => void openCreateEditor()}>＋ 新增订单</button><button className="admin-primary" onClick={() => void exportOrders()}>导出订单</button></div></div>
+      <div className="panel-title"><div><h2>订单管理</h2><p>查看并维护订单商品、金额、版本和操作记录</p></div><div className="panel-actions"><button type="button" disabled={model.loading} onClick={model.refreshOrders}>{model.loading ? "正在读取…" : "刷新订单"}</button><button type="button" disabled={editorBusy || !activityStarted} onClick={() => void openCreateEditor()}>＋ 新增订单</button><button className="admin-primary" onClick={() => void exportOrders()}>导出订单</button></div></div>
       {!activityStarted && <div className="activity-closed-banner"><b>正式订单尚未开放</b><span>活动开始后，后台才可新增、调整或作废订单。</span></div>}
       {activityClosed && <div className="activity-closed-banner"><b>客户订货已截止</b><span>客户只能查看订单，后台管理员仍可新增、调整和作废订单。</span></div>}
       {loadError && <div className="warning-box"><b>订单数据加载失败</b><span>{loadError}</span></div>}

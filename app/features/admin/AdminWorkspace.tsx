@@ -1,8 +1,6 @@
 "use client";
 
 import { formatBeijingTime } from "../shared/time";
-
-
 import { adminNavigation, canUse, isManager } from "./permissions";
 import { MemberAdminPanel } from "./MemberAdminPanel";
 import { useModuleContext } from "./useModuleContext";
@@ -77,10 +75,6 @@ export function AdminWorkspace({ activities }: { activities?: AdminActivitySumma
   const [orderRevision, setOrderRevision] = useState(0);
   const [statisticsStale, setStatisticsStale] = useState(false);
   const [lotteryDirty, setLotteryDirty] = useState(false);
-  const [orderDirty, setOrderDirty] = useState(false);
-  const [membersDirty, setMembersDirty] = useState(false);
-  const [departmentsDirty, setDepartmentsDirty] = useState(false);
-  const [liveRoomDirty, setLiveRoomDirty] = useState(false);
   const [moduleRevision, setModuleRevision] = useState(0);
   const moduleScope = ["商品导入", "白名单", "现场到场", "抽奖规则"].includes(tab) ? tab : null;
   const moduleQuery = useModuleContext(activityId, moduleScope, moduleRevision);
@@ -196,47 +190,35 @@ export function AdminWorkspace({ activities }: { activities?: AdminActivitySumma
     setServerImportBlocking, setActionNotice,
   });
   const activitySettings = useActivitySettings({
+    tab, initialActivity: activityRuntime.runtimeActivity,
     onActivityLoaded: activityRuntime.setRuntimeActivity,
     activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, productImportCompleted, whitelistImportCompleted, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation,
   });
-  const activityOverview = useActivityOverview(activityId, canUse(adminIdentity, "OVERVIEW"));
+  const activityOverview = useActivityOverview(activityId, tab === "活动概览" && canUse(adminIdentity, "OVERVIEW"));
   const moduleLoad = tab === "商品导入" ? moduleLoads.product : tab === "白名单" ? moduleLoads.whitelist
     : tab === "现场到场" ? moduleLoads.attendance : tab === "抽奖规则" ? moduleLoads.lottery : null;
-  const hasPendingPreview = Boolean((productImport.productFileName && !productImportCompleted)
-    || (whitelistImport.whitelistFileName && !whitelistImportCompleted) || pendingAttendanceImport);
-  const unsaved = activitySettings.dirty || Boolean(activitySettings.reopenDraft) || adminActivities.newActivityOpen || hasPendingPreview || lotteryDirty || orderDirty || membersDirty || departmentsDirty || liveRoomDirty || productFormOpen || Boolean(editingProductRow)
-    || whitelistFormOpen || Boolean(editingWhitelistRow) || attendanceFormOpen || Boolean(editingAttendanceRow);
-  const unsavedRef = useRef(unsaved);
-  useEffect(() => { unsavedRef.current = unsaved; }, [unsaved]);
-  useEffect(() => {
-    const warn = (event: BeforeUnloadEvent) => { if (unsavedRef.current) { event.preventDefault(); event.returnValue = ""; } };
-    window.addEventListener("beforeunload", warn);
-    return () => window.removeEventListener("beforeunload", warn);
-  }, []);
-  const refreshModule = async () => {
-    if (unsaved && !window.confirm("有未保存的编辑或导入预览，重新读取可能替换这些内容，是否继续？")) return;
+  const retryModule = async () => {
     await Promise.all([moduleLoad?.refresh(), moduleQuery.refresh()]);
   };
+  useEffect(() => {
+    let active = true;
+    if (activityOverview.updatedAt) void Promise.resolve().then(() => { if (active) setStatisticsStale(false); });
+    return () => { active = false; };
+  }, [activityOverview.updatedAt]);
   return (
     <>
       <AdminLayout tab={tab} onTabChange={selectTab} header={
         <AdminHeader activityCode={activityCode} activityName={activityName} activityStatus={activityStatus}
           tab={tab} activities={adminActivities} operationLogs={operationLogs}
           operationLogOpen={operationLogOpen} setOperationLogOpen={setOperationLogOpen}
-          logQuery={moduleLoads.logs} confirmActivitySwitch={() => {
-            if (unsaved && !window.confirm("当前活动有未保存的编辑或导入预览，切换活动将离开当前页面，是否继续？")) return false;
-            unsavedRef.current = false; return true;
-          }}
+          logQuery={moduleLoads.logs}
         />}>
-        <div className="admin-refresh-bar">
-          <span>活动状态与配置按需更新，不自动刷新统计</span>
-          <button type="button" disabled={activitySettings.activityRefreshing} onClick={() => void activitySettings.refreshActivity()}>{activitySettings.activityRefreshing ? "更新活动信息中…" : "刷新活动信息"}</button>
-          {activitySettings.activityRefreshError && <span role="alert">活动信息刷新失败：{activitySettings.activityRefreshError}；保留当前信息，请重试。</span>}
-        </div>
-        {moduleScope && <div className="admin-refresh-bar"><span>{moduleLoad?.loading || moduleQuery.loading ? "正在加载当前模块…" : moduleLoad?.updatedAt ? `最近读取：${formatBeijingTime(moduleLoad.updatedAt)}${moduleLoad.stale ? " · 相关数据有变化" : ""}` : "打开当前模块后读取"}</span><button type="button" disabled={moduleLoad?.loading || moduleQuery.loading} onClick={() => void refreshModule()}>刷新当前模块</button><button type="button" disabled={moduleQuery.loading} onClick={() => void moduleQuery.refresh()}>刷新基础信息</button>{(moduleLoad?.error || moduleQuery.error) && <span role="alert">加载失败：{moduleLoad?.error || moduleQuery.error}；请点击刷新重试。</span>}</div>}
+        {activitySettings.activityRefreshError && <div className="warning-box" role="alert">活动信息加载失败：{activitySettings.activityRefreshError}；保留当前信息。<button type="button" disabled={activitySettings.activityRefreshing} onClick={() => void activitySettings.refreshActivity()}>重试</button></div>}
+        {moduleScope && (moduleLoad?.error || moduleQuery.error) && <div className="warning-box" role="alert">当前页面加载失败：{moduleLoad?.error || moduleQuery.error}；保留已有内容。<button type="button" disabled={moduleLoad?.loading || moduleQuery.loading} onClick={() => void retryModule()}>重试</button></div>}
+        {moduleScope && moduleLoad?.loaded && (moduleLoad.loading || moduleQuery.loading) && <p role="status">正在加载最新数据…</p>}
         {!tab && <section className="admin-panel"><div className="empty-state">暂无功能权限，请联系部门管理员。</div></section>}
-        {visitedTabs.includes("成员管理") && isManager(adminIdentity) && <div hidden={tab !== "成员管理"}><MemberAdminPanel active={tab === "成员管理"} onDirtyChange={setMembersDirty} /></div>}
-        {visitedTabs.includes("部门与账号") && adminIdentity?.roleCode === "SUPER_ADMIN" && <div hidden={tab !== "部门与账号"}><DepartmentAdminPanel active={tab === "部门与账号"} onDirtyChange={setDepartmentsDirty} /></div>}
+        {visitedTabs.includes("成员管理") && isManager(adminIdentity) && <div hidden={tab !== "成员管理"}><MemberAdminPanel active={tab === "成员管理"} /></div>}
+        {visitedTabs.includes("部门与账号") && adminIdentity?.roleCode === "SUPER_ADMIN" && <div hidden={tab !== "部门与账号"}><DepartmentAdminPanel active={tab === "部门与账号"} /></div>}
         {moduleLoad && !moduleLoad.loaded && <section className="admin-panel" aria-busy={moduleLoad.loading}><p>{moduleLoad.error ? "当前模块尚未加载，请重试。" : "正在读取当前模块资料…"}</p></section>}
         {visitedTabs.includes("活动概览") && <div hidden={tab !== "活动概览"}><ActivityOverview
           activityId={Number(activityId)}
@@ -244,7 +226,7 @@ export function AdminWorkspace({ activities }: { activities?: AdminActivitySumma
           activityEndAt={activityEndAt} activityEventEndAt={activityEventEndAt}
           minimumFutureAt={minimumFutureAt}
           departmentName={currentActivity?.departmentName || adminIdentity?.departmentName || ""}
-          settings={activitySettings} activity={activityRuntime.runtimeActivity} onLiveRoomDirtyChange={setLiveRoomDirty}
+          settings={activitySettings} activity={activityRuntime.runtimeActivity}
           overview={{ ...activityOverview, refresh: async () => { const result = await activityOverview.refresh(); if (result) setStatisticsStale(false); return result; } }}
           statisticsStale={statisticsStale} onViewOrders={() => selectTab("订单管理")}
         /></div>}
@@ -257,8 +239,8 @@ export function AdminWorkspace({ activities }: { activities?: AdminActivitySumma
           serverImportBlocking={serverImportBlocking} whitelistImport={whitelistImport} whitelistEditor={whitelistEditor}
         /></div>}
         {visitedTabs.includes("现场到场") && moduleLoads.attendance.loaded && <div hidden={tab !== "现场到场"}><AttendancePage rows={pendingAttendanceImport?.rows ?? attendanceRows} fileName={attendanceFileName} warnings={attendanceWarnings} sheetCounts={attendanceSheetCounts} error={attendanceImportError} activityStarted={activityStarted} activityClosed={activityClosed} pendingImport={pendingAttendanceImport} importAttemptName={attendanceImportAttemptName} blockingCount={serverImportBlocking.ATTENDANCE ?? 0} previewLoading={attendancePreviewLoading} previewReady={attendancePreviewReady} onRetryPreview={retryAttendancePreview} publishing={attendancePublishing} onFile={handleAttendanceFile} onAdd={() => { setEditingAttendanceRow(null); setAttendanceFormOpen(true); }} onEdit={setEditingAttendanceRow} onDelete={deleteAttendanceRows} onConfirmImport={confirmAttendanceImport} onCancelImport={cancelAttendanceImport} customerTypeMode={whitelistMode} /></div>}
-        {visitedTabs.includes("订单管理") && <div hidden={tab !== "订单管理"}><OrderManagement active={tab === "订单管理"} onDirtyChange={setOrderDirty} revision={orderRevision} onChanged={() => { setStatisticsStale(true); moduleLoads.lottery.invalidate(); moduleLoads.logs.invalidate(); }} activityClosed={activityClosed} activityStarted={activityStarted} activityId={Number(activityId)} activityName={activityName} /></div>}
-        {visitedTabs.includes("抽奖规则") && moduleLoads.lottery.loaded && <div hidden={tab !== "抽奖规则"}><LotterySettings revision={moduleLoads.lottery.updatedAt ?? ""} active={tab === "抽奖规则"} rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} attendeeCount={moduleContext?.attendeeCount ?? 0} customerCount={moduleContext?.customerCount ?? 0} customerTypeMode={whitelistMode} readOnly={activityFinished} onChange={rounds => { onLotteryChange(rounds); setLotteryDirty(true); }} onSaved={() => { setLotteryDirty(false); moduleLoads.logs.invalidate(); }} /></div>}
+        {visitedTabs.includes("订单管理") && <div hidden={tab !== "订单管理"}><OrderManagement active={tab === "订单管理"} revision={orderRevision} onChanged={() => { setStatisticsStale(true); moduleLoads.lottery.invalidate(); moduleLoads.logs.invalidate(); }} activityClosed={activityClosed} activityStarted={activityStarted} activityId={Number(activityId)} activityName={activityName} /></div>}
+        {visitedTabs.includes("抽奖规则") && moduleLoads.lottery.loaded && <div hidden={tab !== "抽奖规则"}><LotterySettings revision={moduleLoads.lottery.updatedAt ?? ""} active={tab === "抽奖规则" && !moduleLoads.lottery.loading} rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} attendeeCount={moduleContext?.attendeeCount ?? 0} customerCount={moduleContext?.customerCount ?? 0} customerTypeMode={whitelistMode} readOnly={activityFinished} onChange={rounds => { onLotteryChange(rounds); setLotteryDirty(true); }} onSaved={() => { setLotteryDirty(false); moduleLoads.logs.invalidate(); }} /></div>}
       </AdminLayout>
       {(productFormOpen || editingProductRow) && <ProductFormDrawer key={editingProductRow?.id ?? "new-product"} rows={productRows} initialRow={editingProductRow ?? undefined} activityStarted={activityStarted} activityId={Number(activityId)} tiersEditable={productImportCompleted} scopeEnabled={productImportCompleted && (whitelistImportCompleted || Boolean(moduleContext?.whitelistPublished))} onClose={() => { setProductFormOpen(false); setEditingProductRow(null); }} onSave={saveProductRow} />}
       {(whitelistFormOpen || editingWhitelistRow) && <WhitelistFormDrawer key={editingWhitelistRow?.id ?? "new-whitelist"} rows={whitelistRows} initialRow={editingWhitelistRow ?? undefined} customerTypeMode={whitelistMode} activityStarted={activityStarted} onClose={() => { setWhitelistFormOpen(false); setEditingWhitelistRow(null); }} onSave={saveWhitelistRow} />}

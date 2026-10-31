@@ -10,7 +10,7 @@ const dashboard = { totals: { order_count: 10, total_amount: 100, total_quantity
 const overview = { ...dashboard, ...context, submittedByType: { GENERAL: 8, SPECIAL: 2 } };
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
-test("overview is never auto-loaded, shares repeated clicks, and commits all statistics and counts together", async () => {
+test("overview loads on entry, shares repeated refresh clicks and publishes a complete snapshot", async () => {
   const calls = [], counts = deferred();
   const h = hookHarness("app/features/admin/useActivityOverview.ts", "useActivityOverview", ["1", true], {
     "../../api": {
@@ -18,7 +18,7 @@ test("overview is never auto-loaded, shares repeated clicks, and commits all sta
     },
   });
   await h.flush();
-  assert.equal(calls.length, 0);
+  assert.equal(calls.length, 1);
   assert.equal(h.intervals.size, 0);
   assert.equal(h.model.loaded, false);
   assert.ok(h.model.adminStats.every(row => row[1] === "—"));
@@ -38,8 +38,10 @@ test("overview is never auto-loaded, shares repeated clicks, and commits all sta
   const time = h.model.updatedAt;
   for (let i = 0; i < 10; i++) h.render();
   await h.flush();
-  assert.equal(calls.length, 1, "tab switches/rerenders must not reload the snapshot");
+  assert.equal(calls.length, 1, "rerenders must not trigger more reads");
   assert.equal(h.model.updatedAt, time);
+  h.render(["1", false]); await h.flush(); assert.equal(calls.length, 1);
+  h.render(["1", true]); await h.flush(); assert.equal(calls.length, 2);
   h.unmount();
 });
 
@@ -101,10 +103,10 @@ test("module counts load only in a relevant module, on mutation or on explicit r
   h.render(["1", "白名单", 0]); await h.flush(); assert.equal(reads, 1);
   h.render(); await h.flush(); assert.equal(reads, 1);
   h.render(["1", "白名单", 1]); await h.flush(); assert.equal(reads, 2);
-  h.render(["1", "现场到场", 1]); await h.flush(); assert.equal(reads, 2);
-  h.render(["1", null, 2]); await h.flush(); assert.equal(reads, 2);
-  h.render(["1", "商品导入", 2]); await h.flush(); assert.equal(reads, 3);
-  await h.model.refresh(); await h.flush(); assert.equal(reads, 4);
+  h.render(["1", "现场到场", 1]); await h.flush(); assert.equal(reads, 3);
+  h.render(["1", null, 2]); await h.flush(); assert.equal(reads, 3);
+  h.render(["1", "商品导入", 2]); await h.flush(); assert.equal(reads, 4);
+  await h.model.refresh(); await h.flush(); assert.equal(reads, 5);
   assert.equal(h.intervals.size, 0); h.unmount();
 });
 
@@ -155,33 +157,37 @@ test("the four admin-only hooks contain no interval polling", () => {
   assert.doesNotMatch(readFileSync(new URL("../app/components/orders/useOrderChangeRequests.ts", import.meta.url), "utf8"), /setInterval/);
 });
 
-test("manual activity refresh confirms dirty fields, never reads statistics, and preserves drafts on failure", async () => {
-  let allow = false, fail = false, reads = 0;
-  const confirmations = [], applied = [], notices = [];
-  const options = { activityId: "1", activityCode: "A", activityName: "旧活动", activityStatus: "draft",
+test("activity details reuse entry data, reload on navigation and preserve drafts without confirmations", async () => {
+  let fail = false, reads = 0;
+  const activity = { id: 1, name: "旧活动", status: "DRAFT", startsAt: "2099-01-01T00:00:00Z",
+    endsAt: "2099-01-02T00:00:00Z", eventEndsAt: "2099-01-03T00:00:00Z" };
+  const options = { tab: "活动概览", initialActivity: activity, activityId: "1", activityCode: "A", activityName: "旧活动", activityStatus: "draft",
     activityStartAt: "2099-01-01T08:00", activityEndAt: "2099-01-02T08:00", activityEventEndAt: "2099-01-03T08:00",
-    onActivityNameChange: () => {}, onActivityStartAtChange: () => {}, onActivityEndAtChange: () => {},
-    onActivityEventEndAtChange: () => {}, onActivityStatusChange: () => {},
-    setActionNotice: value => notices.push(value), onActivityLoaded: value => applied.push(value),
+    onActivityNameChange: value => { options.activityName = value; },
+    onActivityStartAtChange: value => { options.activityStartAt = value; },
+    onActivityEndAtChange: value => { options.activityEndAt = value; },
+    onActivityEventEndAtChange: value => { options.activityEventEndAt = value; },
+    onActivityStatusChange: value => { options.activityStatus = value; },
+    setActionNotice: () => {}, onActivityLoaded: () => {},
   };
   const h = hookHarness("app/features/admin/useActivitySettings.ts", "useActivitySettings", [options], {
     "../../api": { ApiError, loadAdminActivity: async () => {
-      reads++; if(fail) throw new ApiError(503, "BUSY", "服务繁忙");
-      return { id: 1, name: "新活动", status: "CLOSED", startsAt: "2099-01-01T00:00:00Z", endsAt: "2099-01-02T00:00:00Z", eventEndsAt: "2099-01-03T00:00:00Z" };
+      reads++; if (fail) throw new ApiError(503, "BUSY", "服务繁忙");
+      return { ...activity, name: "最新活动" };
     } },
-  }, { window: { confirm: message => { confirmations.push(message); return allow; } } });
-  await h.flush(); assert.equal(reads, 0);
+  }, { window: { confirm: () => { throw Error("automatic reads must not prompt"); } } });
+  await h.flush(); assert.equal(reads, 0, "reuse the initial activity detail");
+  options.tab = "白名单"; h.render(); await h.flush();
+  assert.equal(reads, 1); assert.equal(h.model.activityNameDraft, "最新活动");
   h.model.setActivityNameDraft("未保存修改"); await h.flush();
-  await h.model.refreshActivity(); await h.flush();
-  assert.equal(reads, 0); assert.equal(h.model.activityNameDraft, "未保存修改");
-  allow = true; fail = true;
-  await h.model.refreshActivity(); await h.flush();
-  assert.equal(reads, 1); assert.equal(h.model.activityNameDraft, "未保存修改");
-  assert.ok(h.model.activityRefreshError);
-  fail = false;
-  await Promise.all([h.model.refreshActivity(), h.model.refreshActivity()]); await h.flush();
-  assert.equal(reads, 2); assert.equal(h.model.activityNameDraft, "新活动");
-  assert.equal(applied.length, 1); assert.ok(confirmations.length >= 2);
+  options.tab = "商品导入"; h.render(); await h.flush();
+  assert.equal(reads, 2); assert.equal(h.model.activityNameDraft, "未保存修改");
+  fail = true; options.tab = "活动概览"; h.render(); await h.flush();
+  assert.equal(reads, 3); assert.ok(h.model.activityRefreshError);
+  assert.equal(h.model.activityNameDraft, "未保存修改");
+  fail = false; await Promise.all([h.model.refreshActivity(), h.model.refreshActivity()]); await h.flush();
+  assert.equal(reads, 4); assert.equal(h.model.activityRefreshError, "");
+  assert.equal(h.model.activityNameDraft, "未保存修改");
   assert.equal(h.intervals.size, 0); h.unmount();
 });
 

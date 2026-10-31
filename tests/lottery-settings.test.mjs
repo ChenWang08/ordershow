@@ -38,19 +38,19 @@ function harness(options={}) {
     async patch(patch){props.rounds=props.rounds.map(r=>r.id===1?{...r,...patch}:r);h.render([props]);await h.flush();},
   };
 }
-test("entry, idle, editing, round switching and reentry never start candidate or statistics reads",async()=>{
-  const h=harness();await h.flush();assert.equal(h.calls.length,0);assert.match(h.text(),/待试算/);
-  await h.patch({winnerCount:4,scope:"ordered",minAmount:100});assert.deepEqual(h.calls.map(c=>c[0]),["options"]);
+test("entry and reentry read saved statistics; editing and switching rounds never calculate candidates",async()=>{
+  const h=harness();await h.flush();assert.deepEqual(h.calls.map(c=>c[0]),["statistics"]);assert.match(h.text(),/待试算/);
+  await h.patch({winnerCount:4,scope:"ordered",minAmount:100});assert.deepEqual(h.calls.map(c=>c[0]),["statistics","options"]);
   await h.click("02第二轮奖品草稿10 人");
   await h.runTimers();assert.equal(h.calls.filter(c=>c[0]==="preview").length,0);
   assert.equal(h.intervals.size,0);h.props.active=false;h.render([h.props]);h.props.active=true;h.render([h.props]);await h.flush();
-  assert.equal(h.calls.filter(c=>c[0]==="preview"||c[0]==="statistics").length,0);h.unmount();
+  assert.equal(h.calls.filter(c=>c[0]==="preview").length,0);assert.equal(h.calls.filter(c=>c[0]==="statistics").length,2);h.unmount();
 });
 test("manual calculation queries only the selected round, deduplicates clicks, and viewing names reuses the response",async()=>{
   const h=harness();await h.flush();const click=h.button("手动试算").props.onClick;click();click();await h.flush();
-  assert.equal(h.calls.length,1);assert.equal(h.calls[0][2].roundNo,1);assert.match(h.text(),/候选不足/);
-  await h.click("查看候选名单");assert.match(h.text(),/候选甲/);assert.equal(h.calls.length,1);
-  await h.click("刷新中奖统计");assert.equal(h.calls.filter(c=>c[0]==="statistics").length,1);h.unmount();
+  assert.equal(h.calls.filter(c=>c[0]==="preview").length,1);assert.equal(h.calls.find(c=>c[0]==="preview")[2].roundNo,1);assert.match(h.text(),/候选不足/);
+  await h.click("查看候选名单");assert.match(h.text(),/候选甲/);assert.equal(h.calls.filter(c=>c[0]==="preview").length,1);
+  assert.equal(h.button("刷新中奖统计"),undefined);assert.equal(h.calls.filter(c=>c[0]==="statistics").length,1);h.unmount();
 });
 test("project changes reset varieties, restrict available choices and submit tons and exact names",async()=>{
   const h=harness();await h.patch({scope:"ordered"});
@@ -62,6 +62,17 @@ test("project changes reset varieties, restrict available choices and submit ton
   h.field("抽奖项目组").props.onChange({target:{value:"value:项目B"}});await h.flush();
   assert.equal(h.props.rounds[0].varieties,null);assert.match(h.text(),/待试算/);assert.equal(h.button("查看候选名单").props.disabled,true);
   h.unmount();
+});
+
+test("choosing another round does not calculate it until explicitly requested",async()=>{
+  const h=harness(); await h.flush(); await h.click("手动试算");
+  assert.equal(h.calls.filter(c=>c[0]==="preview").length,1);
+  await h.click("02第二轮奖品草稿10 人");
+  assert.equal(h.calls.filter(c=>c[0]==="preview").length,1);
+  assert.match(h.text(),/待试算/);
+  await h.click("手动试算");
+  assert.deepEqual(h.calls.filter(c=>c[0]==="preview").map(c=>c[2].roundNo),[1,2]);
+  assert.equal(h.calls.filter(c=>c[0]==="statistics").length,1); h.unmount();
 });
 test("obsolete requests are cancelled on edits and navigation, and late names cannot replace the current result",async()=>{
   const pending=[];const h=harness({preview:(_id,_input,signal)=>new Promise(resolve=>pending.push({resolve,signal}))});
@@ -87,7 +98,7 @@ test("saving preserves linked filters and tonnage and keeps the selected round w
   assert.equal(body.rounds[1].minimumOrderTons,0.000001);assert.equal(body.rounds[1].productLine,"项目A");assert.deepEqual(body.rounds[1].varieties,["品种,B"]);
   assert.equal(h.props.rounds[1].id,101);assert.equal(h.props.rounds[1].minTons,0.000001);assert.deepEqual(h.props.rounds[1].varieties,["品种,B"]);
   assert(h.find(n=>n.type==="button"&&n.props.className==="active"&&text(n).includes("第二轮")));
-  assert.equal(h.calls.filter(c=>c[0]==="preview"||c[0]==="statistics").length,0);h.unmount();
+  assert.equal(h.calls.filter(c=>c[0]==="preview").length,0);h.unmount();
 });
 
 test("weighting selection binds the matching threshold without automatic calculation",async()=>{

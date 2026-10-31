@@ -23,7 +23,7 @@ export function MemberAdminPanel({ active = true, onDirtyChange }: { active?: bo
   const [resetPassword, setResetPassword] = useState("");
   const query = useLazyAdminQuery(JSON.stringify([filter,reload,identity?.roleCode]), active, signal => Promise.all([
     loadMembers(filter ? Number(filter) : undefined, signal), identity?.roleCode === "SUPER_ADMIN" ? loadAdminDepartments(signal) : Promise.resolve([]),
-  ]), ([rows,depts]) => { setMembers(rows); setDepartments(depts); setError(""); });
+  ]), ([rows,depts]) => { setMembers(rows); setDepartments(depts); setError(""); }, Boolean(editor || resetTarget || busy));
   const loading = query.loading || (!query.loaded && !query.error);
   useEffect(() => { onDirtyChange?.(editor !== null || resetTarget !== null); }, [editor, resetTarget, onDirtyChange]);
   const run = async (action: () => Promise<unknown>, message: string) => {
@@ -40,10 +40,10 @@ export function MemberAdminPanel({ active = true, onDirtyChange }: { active?: bo
   };
   return <section className="admin-panel member-panel">
     <div className="panel-title"><div><h2>成员管理</h2><p>功能权限适用于所属部门的全部活动；成员不能创建活动或管理账号。</p></div>
-      <div><button type="button" disabled={query.loading || busy} onClick={() => void query.refresh()}>{query.loading ? "正在读取…" : "刷新当前模块"}</button>
+      <div>
       <button className="admin-primary" disabled={busy} onClick={() => { setError(""); setEditor({ username: "", displayName: "", departmentId: filter || String(identity?.departmentId || ""), password: "", permissions: [] }); }}>新增成员</button></div></div>
     {identity?.roleCode === "SUPER_ADMIN" && <label>按部门筛选 <select value={filter} onChange={e => { setFilter(e.target.value); }}><option value="">全部部门</option>{departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}</select></label>}
-    {(error || query.error) && <p className="warning-box" role="alert">{error || query.error}</p>}{notice && <p role="status">{notice}</p>}
+    {(error || query.error) && <p className="warning-box" role="alert">{error || query.error}{query.error && <button type="button" disabled={query.loading || busy} onClick={() => void query.refresh()}>重试</button>}</p>}{notice && <p role="status">{notice}</p>}
     {loading ? <p role="status">正在加载成员…</p> : <div className="member-table-scroll"><table className="member-table"><thead><tr><th>成员 / 账号</th><th>部门</th><th>功能权限</th><th>状态</th><th>最后登录</th><th>操作</th></tr></thead><tbody>
       {members.map(member => <tr key={member.id}><td><b>{member.displayName}</b><br />{member.username}</td><td>{member.departmentName}</td>
         <td>{memberModules.filter(m => member.permissions.includes(m.code)).map(m => m.label).join("、") || "暂无权限"}</td><td>{member.status === "ACTIVE" ? "启用" : "停用"}</td><td>{member.lastLoginAt ? formatBeijingTime(member.lastLoginAt) : "未登录"}</td>

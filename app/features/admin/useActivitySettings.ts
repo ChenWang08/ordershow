@@ -8,13 +8,11 @@ import {
 import { beijingDateTimeMillis } from "../shared/time";
 import type { ActivityStatus } from "../shared/types";
 import { runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
-import { useAdminQuery } from "./useAdminQuery";
-
-function readActivity(id: string, signal: AbortSignal) {
-  return loadAdminActivity(Number(id), signal);
-}
+import { useLazyAdminQuery } from "./useLazyAdminQuery";
 
 type ActivitySettingsOptions = {
+  tab?: string;
+  initialActivity?: RuntimeActivity | null;
   activityId: string;
   activityCode: string;
   activityName: string;
@@ -35,7 +33,7 @@ type ActivitySettingsOptions = {
 };
 
 export function useActivitySettings({
-  activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation, onActivityLoaded,
+  tab = "活动概览", initialActivity, activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation, onActivityLoaded,
 }: ActivitySettingsOptions) {
   const [activityStartDraft, setActivityStartDraft] = useState(activityStartAt);
   const [activityEndDraft, setActivityEndDraft] = useState(activityEndAt);
@@ -44,11 +42,10 @@ export function useActivitySettings({
   const [reopenDraft, setReopenDraft] = useState<{ activity: RuntimeActivity; endsAt: string; eventEndsAt: string; reason: string; error: string } | null>(null);
   const [reopenBusy, setReopenBusy] = useState(false);
   const reopenPending = useRef(false);
-  const activityQuery = useAdminQuery(activityId, readActivity);
-  const refreshPending = useRef(false);
+  const initialSnapshot = useRef(initialActivity);
   const actionPending = useRef(false);
   const [activityActionBusy, setActivityActionBusy] = useState(false);
-  const applyActivity = (activity: RuntimeActivity) => {
+  const applyActivity = (activity: RuntimeActivity, preserveDrafts = false) => {
     onActivityLoaded?.(activity);
     const nextStatus = runtimeActivityStatus(activity.status);
     onActivityStatusChange(nextStatus);
@@ -56,25 +53,21 @@ export function useActivitySettings({
     onActivityStartAtChange(toDateTimeLocal(activity.startsAt));
     onActivityEndAtChange(toDateTimeLocal(activity.endsAt));
     onActivityEventEndAtChange(toDateTimeLocal(activity.eventEndsAt || new Date(new Date(activity.endsAt).getTime() + 4 * 60 * 60 * 1000).toISOString()));
+    if (preserveDrafts) return;
     setActivityNameDraft(activity.name);
     setActivityStartDraft(toDateTimeLocal(activity.startsAt));
     setActivityEndDraft(toDateTimeLocal(activity.endsAt));
     setActivityEventEndDraft(toDateTimeLocal(activity.eventEndsAt || new Date(new Date(activity.endsAt).getTime() + 4 * 60 * 60 * 1000).toISOString()));
   };
-  const refreshActivity = async () => {
-    if (refreshPending.current || reopenPending.current || actionPending.current) return;
-    const dirty = activityNameDraft !== activityName || activityStartDraft !== activityStartAt
-      || activityEndDraft !== activityEndAt || activityEventEndDraft !== activityEventEndAt;
-    if (dirty && !window.confirm("活动设置有未保存的修改。刷新将丢弃这些修改，是否继续？")) return;
-    refreshPending.current = true;
-    try {
-      const activity = await activityQuery.refresh();
-      if (activity) {
-        applyActivity(activity);
-        setActionNotice("活动信息已更新；概览统计仍需点击“刷新统计”。");
-      }
-    } finally { refreshPending.current = false; }
-  };
+  const dirty = activityNameDraft !== activityName || activityStartDraft !== activityStartAt
+    || activityEndDraft !== activityEndAt || activityEventEndDraft !== activityEventEndAt;
+  const activityQuery = useLazyAdminQuery(activityId, Boolean(tab), async signal => {
+    // AdminEntry already read this activity. Reuse that first response only.
+    const snapshot = initialSnapshot.current;
+    initialSnapshot.current = null;
+    return snapshot?.id === Number(activityId) ? snapshot : loadAdminActivity(Number(activityId), signal);
+  }, activity => applyActivity(activity, dirty), Boolean(reopenDraft) || activityActionBusy || reopenBusy, tab);
+  const refreshActivity = activityQuery.refresh;
   const saveActivityConfig = async (): Promise<boolean> => {
     if (!activityNameDraft.trim()) {
       setActionNotice("请填写活动名称。" );
@@ -221,13 +214,12 @@ export function useActivitySettings({
     } finally { reopenPending.current = false; setReopenBusy(false); }
   };
   const runAction = async <T,>(action: () => Promise<T>): Promise<T | undefined> => {
-    if (actionPending.current || refreshPending.current || reopenPending.current) return undefined;
+    if (actionPending.current || activityQuery.loading || reopenPending.current) return undefined;
     actionPending.current = true; setActivityActionBusy(true);
     try { return await action(); }
     finally { actionPending.current = false; setActivityActionBusy(false); }
   };
-  return { dirty: activityNameDraft !== activityName || activityStartDraft !== activityStartAt
-      || activityEndDraft !== activityEndAt || activityEventEndDraft !== activityEventEndAt,
+  return { dirty,
     refreshActivity, activityRefreshing: activityQuery.loading || activityActionBusy || reopenBusy, activityRefreshError: activityQuery.error,
     activityNameDraft, setActivityNameDraft, activityStartDraft, setActivityStartDraft, activityEndDraft, setActivityEndDraft, activityEventEndDraft, setActivityEventEndDraft,
     saveActivityConfig: async () => (await runAction(saveActivityConfig)) ?? false,

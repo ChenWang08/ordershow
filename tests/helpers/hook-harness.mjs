@@ -23,6 +23,10 @@ export function hookHarness(path, name, args, mocks = {}, globals = {}) {
     useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
     useCallback: (callback, deps) => memo(() => callback, deps),
     useMemo: memo,
+    useSyncExternalStore(subscribe, getSnapshot) {
+      react.useEffect(() => subscribe(() => { dirty = true; }), [subscribe]);
+      return getSnapshot();
+    },
     useEffect(effect, deps) {
       const index = cursor++;
       const old = slots[index];
@@ -32,11 +36,10 @@ export function hookHarness(path, name, args, mocks = {}, globals = {}) {
       }
     },
   };
-  const window = {
+  const window = Object.defineProperties({
     setTimeout(fn) { timers.set(++timerId, fn); return timerId; }, clearTimeout: id => timers.delete(id),
     setInterval(fn) { intervals.set(++timerId, fn); return timerId; }, clearInterval: id => intervals.delete(id),
-    ...globals.window,
-  };
+  }, Object.getOwnPropertyDescriptors(globals.window ?? {}));
   const hook = loadModule(path, { ...mocks, react }, { ...globals, window })[name];
   function render(nextArgs = args) {
     args = nextArgs; cursor = 0; dirty = false;

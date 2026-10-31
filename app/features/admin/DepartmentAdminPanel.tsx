@@ -36,11 +36,11 @@ export function DepartmentAdminPanel({ active = true, onDirtyChange }: { active?
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
+  const dirty = Boolean(departmentName || username || password);
   const query = useLazyAdminQuery("departments", active, signal => Promise.all([loadAdminDepartments(signal), loadAdminUsers(signal)]), ([nextDepartments, nextUsers]) => {
     setDepartments(nextDepartments); setUsers(nextUsers.filter(user => user.roleCode !== "DEPARTMENT_MEMBER"));
-  });
+  }, dirty || busy);
   const refresh = query.refresh;
-  const dirty = Boolean(departmentName || username || password);
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   const departmentCodePreview = useMemo(
@@ -155,9 +155,8 @@ export function DepartmentAdminPanel({ active = true, onDirtyChange }: { active?
           <h2>部门与账号管理</h2>
           <p>每个部门绑定一个部门管理员账号，可在“成员管理”中新增成员。部门管理员密码由超级管理员统一设置和重置。</p>
         </div>
-        <button type="button" disabled={query.loading || busy} onClick={() => void refresh()}>{query.loading ? "正在读取…" : "刷新当前模块"}</button>
       </div>
-      {query.error && <p role="alert">加载失败：{query.error}；请点击刷新重试。</p>}
+      {query.error && <p role="alert">加载失败：{query.error}<button type="button" disabled={query.loading || busy} onClick={() => void refresh()}>重试</button></p>}
       {error && <div className="warning-box"><b>操作失败</b><span>{error}</span></div>}
       {notice && <div className="import-completed-banner"><span className="success-icon">✓</span><p><b>{notice}</b><small>数据权限由后端按部门强制校验。</small></p></div>}
 

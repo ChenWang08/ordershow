@@ -2,15 +2,11 @@
 
 import { loadActivityOverview } from "../../api";
 import { money } from "../shared/utils";
-import { useAdminQuery } from "./useAdminQuery";
+import { useLazyAdminQuery } from "./useLazyAdminQuery";
 
-async function readOverview(activityId: string, signal: AbortSignal) {
-  return loadActivityOverview(Number(activityId), signal);
-}
-
-// Keep the snapshot mounted with the shell; returning to the tab never starts a read.
+// Keep the snapshot between visits, but read current statistics on every entry.
 export function useActivityOverview(activityId: string, enabled = true) {
-  const query = useAdminQuery(enabled ? activityId : null, readOverview);
+  const query = useLazyAdminQuery(activityId, enabled, signal => loadActivityOverview(Number(activityId), signal));
   const { data } = query;
   const context = data;
   const overviewTotals = data?.totals;

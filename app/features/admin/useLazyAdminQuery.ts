@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** One retained module per mounted activity. Hidden modules neither start nor finish reads. */
+/** Read on each entry, retain the last snapshot, and protect edits from late responses. */
 export function useLazyAdminQuery<T>(key: string, enabled: boolean,
-  loader: (signal: AbortSignal) => Promise<T>, onLoaded?: (value: T) => void, preserveEdits = false) {
+  loader: (signal: AbortSignal) => Promise<T>, onLoaded?: (value: T) => void, preserveEdits = false, entryKey = key) {
   const callbacks = useRef({ loader, onLoaded, preserveEdits });
   const session = useRef<{ key: string; enabled: boolean; loaded: boolean; dirty: boolean;
     controller?: AbortController; running?: Promise<T | undefined> } | null>(null);
@@ -13,7 +13,7 @@ export function useLazyAdminQuery<T>(key: string, enabled: boolean,
   useEffect(() => { callbacks.current = { loader, onLoaded, preserveEdits }; }, [loader, onLoaded, preserveEdits]);
   const refresh = useCallback((): Promise<T | undefined> => {
     const current = session.current;
-    if (!current || current.key !== key || !current.enabled) return Promise.resolve(undefined);
+    if (!current || current.key !== key || !current.enabled || callbacks.current.preserveEdits) return Promise.resolve(undefined);
     if (current.running) return current.running;
     const controller = new AbortController();
     current.controller = controller;
@@ -23,7 +23,7 @@ export function useLazyAdminQuery<T>(key: string, enabled: boolean,
     current.running = Promise.resolve().then(() => {
       if (!controller.signal.aborted) return callbacks.current.loader(controller.signal);
     }).then(data => {
-      if (controller.signal.aborted || session.current !== current || data === undefined) return undefined;
+      if (controller.signal.aborted || session.current !== current || callbacks.current.preserveEdits || data === undefined) return undefined;
       callbacks.current.onLoaded?.(data);
       current.loaded = true; current.dirty = false;
       setState({ key, data, loaded: true, loading: false, stale: false, error: "", updatedAt: new Date().toISOString() });
@@ -47,7 +47,7 @@ export function useLazyAdminQuery<T>(key: string, enabled: boolean,
     }
     session.current.enabled = enabled;
     const current = session.current;
-    if (enabled && (!current.loaded || (current.dirty && !callbacks.current.preserveEdits))) void refresh();
+    if (enabled && !preserveEdits) void refresh();
     return () => {
       current.enabled = false;
       if (current.running) {
@@ -57,7 +57,7 @@ export function useLazyAdminQuery<T>(key: string, enabled: boolean,
       }
       current.controller?.abort(); current.controller = undefined; current.running = undefined;
     };
-  }, [key, enabled, refresh]);
+  }, [key, enabled, preserveEdits, entryKey, refresh]);
   const invalidate = useCallback(() => {
     const current = session.current;
     if (!current || current.key !== key) return;
