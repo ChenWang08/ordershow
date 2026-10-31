@@ -73,7 +73,7 @@ class RankingMigrationIntegrationTest {
         """,customer,region);
     jdbc.update("INSERT INTO order_item(order_id,activity_product_id,line_no,material_name,product_line,variety_name,rebate_status,is_gift_box,quantity,case_price,line_amount,ton_case_factor,line_tons) VALUES(1,1,1,'测试商品','项目A','品种A','ALL',FALSE,2,100,200,100,0.02)");
     var before=jdbc.queryForMap("SELECT * FROM customer_order WHERE id=1"); var items=jdbc.queryForList("SELECT * FROM order_item");
-    var flyway=Flyway.configure().dataSource(source).load(); flyway.migrate(); flyway.validate();
+    var flyway=Flyway.configure().dataSource(source).target("44").load(); flyway.migrate(); flyway.validate();
     assertThat(flyway.info().current().getVersion()).isEqualTo(org.flywaydb.core.api.MigrationVersion.fromVersion("44"));
     assertThat(jdbc.queryForMap("SELECT * FROM customer_order WHERE id=1")).isEqualTo(before);
     assertThat(jdbc.queryForList("SELECT * FROM order_item")).isEqualTo(items);

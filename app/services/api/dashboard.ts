@@ -8,12 +8,17 @@ export type RankingFilters = {
   varieties?: string[]; includeUnspecifiedVariety?: boolean; metric?: RankingMetric;
 };
 export type RankingOptions = {
-  customers: Array<{ customerType: string; regionCode: string | null; regionName: string }>;
-  products: Array<{ productLine: string | null; varietyName: string | null }>;
+  customers: Array<{ customerType: string; regionCode?: string | null; regionName: string }>;
+  products: Array<{ productLine?: string | null; varietyName?: string | null }>;
 };
 
-export async function loadRankingOptions(signal?: AbortSignal) {
-  return (await api<Envelope<RankingOptions>>(`/screen/activities/${activeActivityPath()}/ranking/options`, { signal })).data;
+export async function loadRankingOptions(signal?: AbortSignal, filters: Pick<RankingFilters, "customerType" | "regionCode" | "regionUnassigned"> = {}) {
+  const query = new URLSearchParams();
+  if (filters.customerType && filters.customerType !== "ALL") query.set("customerType", filters.customerType);
+  if (filters.regionCode) query.set("regionCode", filters.regionCode);
+  if (filters.regionUnassigned) query.set("regionUnassigned", "true");
+  const search = query.toString();
+  return (await api<Envelope<RankingOptions>>(`/screen/activities/${activeActivityPath()}/ranking/options${search ? `?${search}` : ""}`, { signal })).data;
 }
 
 export async function loadActivityOverview(activityId: number, signal?: AbortSignal) {

@@ -5,21 +5,25 @@ import { loadDashboard, loadRankingOptions, type RuntimeActivity } from "../../a
 import { FestivalDecor } from "../shared/components/FestivalDecor";
 import { useManualScreenData } from "./useManualScreenData";
 import { ScreenRefreshControls } from "./ScreenRefreshControls";
-import { initialRankingSelection, rankingChoices, rankingFilters, rankingOptionText, rankingSelectionKey, type RankingSelection } from "./ranking-filters";
+import { initialRankingSelection, changeRankingSelection, rankingChoices, rankingFilters, rankingOptionText, rankingOptionValue, rankingSelectionKey, type RankingSelection } from "./ranking-filters";
 
 const branchPageSize = 30;
 function readRanking(selection: RankingSelection, signal: AbortSignal) {
   return loadDashboard(rankingFilters(selection), signal);
 }
-function readOptions(_parameters: null, signal: AbortSignal) { return loadRankingOptions(signal); }
+type OptionScope = Pick<RankingSelection, "customerType" | "region">;
+function readOptions(scope: OptionScope, signal: AbortSignal) {
+  return loadRankingOptions(signal, rankingFilters({ ...initialRankingSelection, ...scope }));
+}
 
 export function RankingBoard({ activity }: { activity: RuntimeActivity | null }) {
   const [draft, setDraft] = useState<{ activityId: number | null; selection: RankingSelection }>({ activityId: activity?.id ?? null, selection: initialRankingSelection });
   if (draft.activityId !== (activity?.id ?? null)) setDraft({ activityId: activity?.id ?? null, selection: initialRankingSelection });
   const selection = draft.activityId === (activity?.id ?? null) ? draft.selection : initialRankingSelection;
-  const updateSelection = (patch: Partial<RankingSelection>) => setDraft({ activityId: activity?.id ?? null, selection: { ...selection, ...patch } });
-  const { data: options, error: optionsError, refreshing: optionsLoading, refresh: refreshOptions } = useManualScreenData(
-    activity?.id ?? null, readOptions, null, "筛选选项加载失败",
+  const updateSelection = (patch: Partial<RankingSelection>) => setDraft({ activityId: activity?.id ?? null, selection: changeRankingSelection(selection, patch) });
+  const optionScope = useMemo(() => ({ customerType: selection.customerType, region: selection.region }), [selection.customerType, selection.region]);
+  const { data: options, parameters: optionParameters, error: optionsError, refreshing: optionsLoading, refresh: refreshOptions } = useManualScreenData(
+    activity?.id ?? null, readOptions, optionScope, "筛选选项加载失败",
   );
   const { data: dashboard, parameters, error, refreshing, refreshedAt, refresh } = useManualScreenData(
     activity?.id ?? null, readRanking, initialRankingSelection, "排行数据加载失败", true, false,
@@ -27,14 +31,19 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
   const appliedSelection = parameters ?? initialRankingSelection;
   const status = dashboard?.status ?? activity?.status;
   const historical = status === "FINISHED" || status === "ARCHIVED";
-  const choices = useMemo(() => rankingChoices(options), [options]);
+  const optionsReady = !!options && optionParameters?.customerType === selection.customerType && optionParameters.region === selection.region;
+  const choices = useMemo(() => rankingChoices(options, selection, optionsReady), [options, selection, optionsReady]);
   const pendingSelection = parameters !== null && rankingSelectionKey(selection) !== rankingSelectionKey(appliedSelection);
   const metric = selection.metric;
-  const validSelection = selection.varieties === null || selection.varieties.length > 0;
+  const varietiesSelected = selection.varieties === null || selection.varieties.length > 0;
+  const validSelection = varietiesSelected && (selection.customerType === "ALL" || choices.customerTypes.some(type => type === selection.customerType))
+    && (selection.region === "all" || choices.regions.some(([value]) => value === selection.region))
+    && (selection.productLine === "all" || choices.lines.some(([value]) => value === selection.productLine))
+    && (selection.varieties === null || selection.varieties.every(variety => choices.varieties.some(([value]) => value === variety)));
   const labels: Record<string, string> = { ALL: "全部客户", GENERAL: "综合客户", SPECIAL: "特渠专业客户" };
-  const regionLabel = choices.regions.find(([value]) => value === appliedSelection.region)?.[1] ?? rankingOptionText(appliedSelection.region);
+  const regionLabel = options?.customers.find(customer => rankingOptionValue(customer.regionCode) === appliedSelection.region)?.regionName ?? rankingOptionText(appliedSelection.region);
   const appliedSummary = `${labels[appliedSelection.customerType]} · 大区：${regionLabel} · 项目组：${rankingOptionText(appliedSelection.productLine)} · 品种：${appliedSelection.varieties === null ? "全部" : appliedSelection.varieties.map(rankingOptionText).join("、")}`;
-  const confirm = () => { if (validSelection) { void refresh(selection); void refreshOptions(); } };
+  const confirm = () => { if (validSelection && optionsReady && !optionsLoading && !refreshing) { void refresh(selection); void refreshOptions(); } };
   const ranking = dashboard?.companies ?? [];
   const branchRanking = dashboard?.branches ?? [];
   const chunkSize = Math.max(1, Math.ceil(ranking.length / 3));
@@ -67,21 +76,22 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
             <label>大区<select aria-label="大区" value={selection.region} disabled={refreshing || !options} onChange={e => updateSelection({ region: e.target.value })}>
               <option value="all">全部</option>{choices.regions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select></label>
-            <label>项目组<select aria-label="项目组" value={selection.productLine} disabled={refreshing || !options} onChange={e => updateSelection({ productLine: e.target.value })}>
+            <label>项目组<select aria-label="项目组" value={selection.productLine} disabled={refreshing || !optionsReady || optionsLoading} onChange={e => updateSelection({ productLine: e.target.value })}>
               <option value="all">全部</option>{choices.lines.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select></label>
-            <details className="ranking-varieties"><summary aria-label="品种多选" aria-disabled={refreshing || !options}>品种：{selection.varieties === null ? "全部" : `已选 ${selection.varieties.length} 项`}</summary>
-              <fieldset disabled={refreshing || !options}><legend>选择品种</legend>
+            <details className="ranking-varieties"><summary aria-label="品种多选" aria-disabled={refreshing || !optionsReady || optionsLoading}>品种：{selection.varieties === null ? "全部" : `已选 ${selection.varieties.length} 项`}</summary>
+              <fieldset disabled={refreshing || !optionsReady || optionsLoading}><legend>{selection.productLine === "all" ? "当前范围内的品种" : `${rankingOptionText(selection.productLine)} · 品种`}</legend>
                 <label><input type="checkbox" checked={selection.varieties === null} onChange={e => updateSelection({ varieties: e.target.checked ? null : [] })} />全部品种</label>
                 {choices.varieties.map(([value, label]) => <label key={value}><input type="checkbox" checked={selection.varieties?.includes(value) ?? false} onChange={e => updateSelection({ varieties: e.target.checked ? [...(selection.varieties ?? []), value] : (selection.varieties ?? []).filter(v => v !== value) })} />{label}</label>)}
               </fieldset>
             </details>
-            <button type="button" className="ranking-confirm" disabled={!activity || !options || refreshing || !validSelection} onClick={confirm}>{refreshing ? "查询中…" : "确认查询"}</button>
+            <button type="button" className="ranking-confirm" disabled={!activity || !optionsReady || optionsLoading || refreshing || !validSelection} onClick={confirm}>{refreshing ? "查询中…" : "确认查询"}</button>
             <button type="button" disabled={refreshing} onClick={() => updateSelection(initialRankingSelection)}>重置</button>
           </div>
-          {optionsLoading && !options && <p className="screen-filter-pending">正在加载筛选选项…</p>}
+          {(optionsLoading || (!optionsReady && !optionsError)) && <p className="screen-filter-pending">正在加载筛选选项…</p>}
           {optionsError && <p role="alert" className="screen-filter-pending">{optionsError}<button type="button" onClick={() => void refreshOptions()}>重试选项</button></p>}
-          {!validSelection && <p role="status" className="screen-filter-pending">请至少选择一个品种，或选择全部品种</p>}
+          {!varietiesSelected && <p role="status" className="screen-filter-pending">请至少选择一个品种，或选择全部品种</p>}
+          {optionsReady && varietiesSelected && !validSelection && <p role="status" className="screen-filter-pending">部分筛选选项已变化，请重新选择筛选条件后确认</p>}
           <p className="ranking-applied" aria-live="polite">{dashboard ? `当前结果：${appliedSummary} · ${tonnageRanking ? "吨数排行" : "金额排行"}` : "设置筛选条件后，点击确认查询"}</p>
           <ScreenRefreshControls refreshing={refreshing} refreshedAt={refreshedAt} historical={historical} disabled={!activity || !dashboard} onRefresh={() => { if (parameters) { void refresh(parameters); void refreshOptions(); } }} />
           {pendingSelection && <p className="screen-filter-pending" role="status">条件待确认；点击确认查询应用新条件，手动刷新仍使用当前结果条件</p>}

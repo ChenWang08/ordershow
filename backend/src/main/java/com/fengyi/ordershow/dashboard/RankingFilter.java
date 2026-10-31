@@ -26,6 +26,17 @@ public record RankingFilter(String customerType, String regionCode, boolean regi
     return productLine != null || productLineUnassigned || !varieties.isEmpty() || includeUnspecifiedVariety;
   }
 
+  /** Same normalization as option extraction and newly captured history. */
+  static String textValue(String column) { return "NULLIF(TRIM(" + column + "),'')"; }
+
+  String customerScope(String alias, java.util.List<Object> args) {
+    String sql = "";
+    if (customerType != null) { sql += " AND " + alias + ".customer_type=?"; args.add(customerType); }
+    if (regionUnassigned) sql += " AND " + textValue(alias + ".region_code") + " IS NULL";
+    else if (regionCode != null) { sql += " AND " + textValue(alias + ".region_code") + "=?"; args.add(regionCode); }
+    return sql;
+  }
+
   private static String clean(String value, int max) {
     if (value == null || value.isBlank()) return null;
     value = value.trim();

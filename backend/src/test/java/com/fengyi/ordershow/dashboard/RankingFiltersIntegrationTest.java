@@ -63,8 +63,11 @@ class RankingFiltersIntegrationTest {
           line_tons DECIMAL(18,6),ton_case_factor DECIMAL(18,8),is_gift_box BOOLEAN NOT NULL DEFAULT FALSE,
           UNIQUE KEY idx_product(order_id,activity_product_id))
         """);
-    jdbc.execute("CREATE TABLE activity_customer(id BIGINT PRIMARY KEY,activity_id BIGINT,data_version_id BIGINT,customer_type VARCHAR(16),region_code VARCHAR(64),is_active BOOLEAN)");
-    jdbc.execute("CREATE TABLE activity_product(id BIGINT PRIMARY KEY,activity_id BIGINT,data_version_id BIGINT,product_line VARCHAR(200),variety_name VARCHAR(100))");
+    jdbc.execute("CREATE TABLE activity_customer(id BIGINT PRIMARY KEY,activity_id BIGINT,data_version_id BIGINT,customer_type VARCHAR(16),region_code VARCHAR(64),is_active BOOLEAN,customer_id BIGINT DEFAULT 0,normalized_branch_name VARCHAR(200) DEFAULT '',normalized_dealer_full_name VARCHAR(255) DEFAULT '')");
+    jdbc.execute("CREATE TABLE activity_product(id BIGINT PRIMARY KEY,activity_id BIGINT,data_version_id BIGINT,product_line VARCHAR(200),variety_name VARCHAR(100),customer_type VARCHAR(16) DEFAULT 'ALL')");
+    jdbc.execute("CREATE TABLE activity_product_branch_scope(activity_product_id BIGINT,normalized_branch_name VARCHAR(200))");
+    jdbc.execute("CREATE TABLE activity_product_dealer_scope(activity_product_id BIGINT,normalized_branch_name VARCHAR(200))");
+    jdbc.execute("CREATE TABLE activity_product_dealer_member(activity_product_id BIGINT,normalized_branch_name VARCHAR(200),customer_id BIGINT,customer_type VARCHAR(16),normalized_dealer_full_name VARCHAR(255))");
     jdbc.execute("CREATE TABLE activity_data_binding(activity_id BIGINT,data_type VARCHAR(20),current_version_id BIGINT)");
     jdbc.execute("CREATE TABLE activity_region(id BIGINT PRIMARY KEY,activity_id BIGINT,region_code VARCHAR(64),region_name VARCHAR(100))");
     jdbc.execute("CREATE TABLE domain_event_outbox(id BIGINT PRIMARY KEY,activity_id BIGINT)");
@@ -77,14 +80,14 @@ class RankingFiltersIntegrationTest {
   }
 
   @BeforeEach void seed() throws Exception {
-    for (String table : List.of("activity_ranking_snapshot",
+    for (String table : List.of("activity_product_branch_scope","activity_product_dealer_scope","activity_product_dealer_member","activity_ranking_snapshot",
         "order_dashboard_product_line_stat","order_dashboard_stat","order_item","customer_order","activity_customer",
         "activity_product","activity_data_binding","activity_region","domain_event_outbox","activity_dashboard_snapshot","activity")) jdbc.update("DELETE FROM "+table);
     jdbc.update("INSERT INTO activity VALUES(1,'ACTIVE'),(2,'ACTIVE')");
     jdbc.update("INSERT INTO activity_region VALUES(1,1,'EAST','华东'),(2,1,'WEST','华西')");
     jdbc.update("INSERT INTO activity_data_binding VALUES(1,'WHITELIST',1),(1,'PRODUCT',1)");
-    jdbc.update("INSERT INTO activity_customer VALUES(1,1,1,'SPECIAL','EAST',TRUE),(2,1,1,'ALL','WEST',TRUE),(3,1,1,'GENERAL',NULL,TRUE),(4,1,0,'GENERAL','OLD',TRUE)");
-    jdbc.update("INSERT INTO activity_product VALUES(1,1,1,'未订项目','未订品种'),(2,1,0,'旧目录','旧目录')");
+    jdbc.update("INSERT INTO activity_customer(id,activity_id,data_version_id,customer_type,region_code,is_active) VALUES(1,1,1,'SPECIAL','EAST',TRUE),(2,1,1,'ALL','WEST',TRUE),(3,1,1,'GENERAL',NULL,TRUE),(4,1,0,'GENERAL','OLD',TRUE)");
+    jdbc.update("INSERT INTO activity_product(id,activity_id,data_version_id,product_line,variety_name) VALUES(1,1,1,'未订项目','未订品种'),(2,1,0,'旧目录','旧目录')");
     order(1,1,"SPECIAL","EAST",1000); order(2,1,"GENERAL","EAST",700); order(3,1,"ALL","WEST",50);
     order(4,1,"GENERAL",null,40); order(5,1,"GENERAL",null,30); order(6,2,"SPECIAL","EAST",9999);
     order(7,1,"SPECIAL","EAST",600); jdbc.update("UPDATE customer_order SET status='VOIDED' WHERE id=7");
@@ -165,6 +168,56 @@ class RankingFiltersIntegrationTest {
     assertThat(options.products()).noneMatch(p -> "旧目录".equals(p.productLine()));
     assertThat(store.hasSnapshot(1)).isFalse();
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM order_dashboard_stat",Integer.class)).isZero();
+  }
+
+  @Test void optionsCascadeByActualCustomerAndRegionWhileKeepingUnorderedApplicableCatalog() throws Exception {
+    jdbc.update("INSERT INTO activity_product VALUES(10,1,1,'综合项目','未订综合','GENERAL'),(11,1,1,'特渠项目','未订特渠','SPECIAL'),(12,1,1,'范围项目','限定客户','SPECIAL')");
+    jdbc.update("UPDATE activity_customer SET customer_id=101,normalized_branch_name='eastbranch',normalized_dealer_full_name='eastdealer' WHERE id=1");
+    jdbc.update("INSERT INTO activity_product_branch_scope VALUES(12,'eastbranch')");
+    jdbc.update("INSERT INTO activity_product_dealer_scope VALUES(12,'eastbranch')");
+    var special = filter("SPECIAL","EAST",null,null,RankingMetric.AMOUNT);
+    var general = new RankingFilter("GENERAL",null,true,null,false,null,false,null);
+    assertThat(service.options("filter",general).products()).contains(new RankingStore.ProductOption("综合项目","未订综合"))
+        .doesNotContain(new RankingStore.ProductOption("特渠项目","未订特渠"));
+    assertThat(service.options("filter",special).products()).contains(new RankingStore.ProductOption("未订项目","未订品种"),
+        new RankingStore.ProductOption("特渠项目","未订特渠"),new RankingStore.ProductOption("项目B","品种B"))
+        .doesNotContain(new RankingStore.ProductOption("综合项目","未订综合"),new RankingStore.ProductOption("范围项目","限定客户"),new RankingStore.ProductOption("项目A","品种,B"));
+    jdbc.update("INSERT INTO activity_product_dealer_member VALUES(12,'eastbranch',101,'SPECIAL','eastdealer')");
+    assertThat(service.options("filter",special).products()).contains(new RankingStore.ProductOption("范围项目","限定客户"));
+    assertThat(service.options("filter",filter("SPECIAL","WEST",null,null,null)).products()).isEmpty();
+    assertThat(store.hasSnapshot(1)).isFalse();
+    var expected = service.options("filter",special);
+    status("FINISHED"); tx.executeWithoutResult(s -> store.capture(1)); status("ARCHIVED");
+    jdbc.update("UPDATE activity_product SET variety_name='今天的新名称' WHERE id=11");
+    jdbc.update("DELETE FROM activity_product_dealer_member");
+    assertThat(service.options("filter",special)).isEqualTo(expected);
+    assertThat(service.options("filter",general).products()).contains(new RankingStore.ProductOption("综合项目","未订综合"))
+        .doesNotContain(new RankingStore.ProductOption("特渠项目","未订特渠"));
+  }
+
+  @Test void blankRegionAndProductFiltersAgreeAcrossLiveAndNewHistory() throws Exception {
+    order(8,1,"SPECIAL","   ",20); item(8,1,"   ","",20,2,"1","2");
+    order(9,1,"SPECIAL","",10); item(9,1,"项目A","品种A",10,1,"1","1");
+    order(10,1,"SPECIAL",null,5); item(10,1,null,null,5,1,"1","1");
+    var blank = new RankingFilter("SPECIAL",null,true,null,false,null,false,null);
+    var products = new RankingFilter("SPECIAL",null,true,null,true,null,true,null);
+    total(read(blank),"total_amount","35"); total(read(products),"total_amount","25");
+    var live = read(blank);
+    assertThat(service.options("filter",blank).products()).contains(new RankingStore.ProductOption(null,null));
+    status("FINISHED"); total(read(blank),"total_amount","35"); total(read(products),"total_amount","25");
+    assertThat(read(blank).companies()).isEqualTo(live.companies());
+    status("ARCHIVED"); total(read(blank),"total_amount","35");
+  }
+
+  @Test void oldFrozenOptionsRemainReadableWithoutInventingOrRewritingScopedHistory() throws Exception {
+    var expected = service.options("filter");
+    status("FINISHED"); tx.executeWithoutResult(s -> store.capture(1)); status("ARCHIVED");
+    jdbc.update("UPDATE activity_ranking_snapshot SET options_json=JSON_REMOVE(options_json,'$.scopes') WHERE activity_id=1");
+    var saved = jdbc.queryForObject("SELECT CAST(options_json AS CHAR) FROM activity_ranking_snapshot WHERE activity_id=1",String.class);
+    assertThat(service.options("filter")).isEqualTo(expected);
+    assertThatThrownBy(() -> service.options("filter",filter("SPECIAL","EAST",null,null,null)))
+        .isInstanceOfSatisfying(DomainException.class,e -> assertThat(e.code()).isEqualTo("RANKING_OPTIONS_SCOPE_UNAVAILABLE"));
+    assertThat(jdbc.queryForObject("SELECT CAST(options_json AS CHAR) FROM activity_ranking_snapshot WHERE activity_id=1",String.class)).isEqualTo(saved);
   }
 
   @Test void finishedRefreshesAndArchivedRemainsFrozenIncludingOptions() throws Exception {

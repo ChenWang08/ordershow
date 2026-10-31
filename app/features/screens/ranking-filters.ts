@@ -7,7 +7,7 @@ export const initialRankingSelection: RankingSelection = {
   customerType: "ALL", region: "all", productLine: "all", varieties: null, metric: "AMOUNT",
 };
 // Prefix values only in the UI; the API uses explicit empty flags to preserve literal names.
-export const rankingOptionValue = (value: string | null) => value === null ? "empty" : `value:${value}`;
+export const rankingOptionValue = (value: string | null | undefined) => value == null || value.trim() === "" ? "empty" : `value:${value.trim()}`;
 export const rankingOptionText = (value: string) => value === "all" ? "全部" : value === "empty" ? "未填写" : value.slice(6);
 export function rankingFilters(selection: RankingSelection): RankingFilters {
   return {
@@ -20,14 +20,29 @@ export function rankingFilters(selection: RankingSelection): RankingFilters {
     }),
   };
 }
-export function rankingChoices(options: RankingOptions | null) {
+export function changeRankingSelection(selection: RankingSelection, patch: Partial<RankingSelection>): RankingSelection {
+  const next = { ...selection, ...patch };
+  if (next.customerType !== selection.customerType) return { ...next, region: "all", productLine: "all", varieties: null };
+  if (next.region !== selection.region) return { ...next, productLine: "all", varieties: null };
+  if (next.productLine !== selection.productLine) return { ...next, varieties: null };
+  return next;
+}
+export function rankingChoices(options: RankingOptions | null, selection = initialRankingSelection, productsReady = true) {
   const regions = new Map<string, string>();
   const lines = new Map<string, string>();
   const varieties = new Map<string, string>();
-  for (const customer of options?.customers ?? []) regions.set(rankingOptionValue(customer.regionCode), customer.regionName);
-  for (const product of options?.products ?? []) {
-    lines.set(rankingOptionValue(product.productLine), product.productLine ?? "未填写");
-    varieties.set(rankingOptionValue(product.varietyName), product.varietyName ?? "未填写");
+  const label = (value: string, text: string, dimension: string) => value === "empty" ? "未填写"
+    : ["全部", "未填写", "全部品种"].includes(text) ? `${text}（${dimension}名称）` : text;
+  for (const customer of options?.customers ?? []) {
+    if (selection.customerType !== "ALL" && customer.customerType !== selection.customerType) continue;
+    const value = rankingOptionValue(customer.regionCode);
+    regions.set(value, label(value, customer.regionName, "大区"));
+  }
+  for (const product of productsReady ? options?.products ?? [] : []) {
+    const line = rankingOptionValue(product.productLine), variety = rankingOptionValue(product.varietyName);
+    lines.set(line, label(line, rankingOptionText(line), "项目组"));
+    if (selection.productLine === "all" || selection.productLine === line)
+      varieties.set(variety, label(variety, rankingOptionText(variety), "品种"));
   }
   const sorted = (values: Map<string, string>) => [...values].sort((a, b) => a[1].localeCompare(b[1], "zh-CN"));
   return { regions: sorted(regions), lines: sorted(lines), varieties: sorted(varieties),

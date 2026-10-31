@@ -2796,11 +2796,23 @@ paths:
       operationId: getRankingFilterOptions
       tags: [Dashboard]
       summary: 排行筛选实际选项
-      description: 当前发布的有效白名单、商品目录及有效订单快照字段去重。返回字段原值及 null 空值；不统计金额、吨数或排行。已建立历史筛选快照时返回冻结选项；旧历史首次确认并核对前暂读保留资料。三个单选字段独立选择，品种多选。
+      description: 按客户类型和大区筛选适用商品维度。customers 保留完整客户类型/大区组合，前端按类型收窄大区；products 返回所选客户/大区范围的项目组/品种对，前端再按项目组联动品种。包含当前发布、适用但未订购的商品配置（遵守客户类型、分公司及经销商范围），以及有效订单实际维度。上游变化重置下游；默认全部，不自动统计金额、吨数或排行。空串、纯空格和 null 统一输出显式 null；实际名称“未填写”仍是普通值。新历史快照从冻结关联资料读取；旧历史首次确认并核对前暂读保留资料，已冻结但缺少关联资料时不可限定客户/大区。本轮不重写旧归档或修复旧历史核对错误。
       security:
         - screenToken: []
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
+        - in: query
+          name: customerType
+          schema: {type: string, enum: [ALL, GENERAL, SPECIAL]}
+          description: 不传或 ALL 为全部客户，包含数据库中类型为 ALL 的不区分类型客户。
+        - in: query
+          name: regionCode
+          schema: {type: string, maxLength: 64}
+          description: 大区实际编号；与 regionUnassigned=true 互斥。
+        - in: query
+          name: regionUnassigned
+          schema: {type: boolean, default: false}
+          description: 只取大区未填写的客户，包含 null、空字符串及纯空格。
       responses:
         '200':
           description: 实际客户类型、大区和商品项目组/品种组合；不返回客户姓名、手机号。
@@ -2816,6 +2828,7 @@ paths:
                         type: array
                         items:
                           type: object
+                          required: [customerType, regionCode, regionName]
                           properties:
                             customerType: {type: string, enum: [GENERAL, SPECIAL, ALL]}
                             regionCode: {type: [string, 'null']}
@@ -2824,10 +2837,15 @@ paths:
                         type: array
                         items:
                           type: object
+                          required: [productLine, varietyName]
                           properties:
                             productLine: {type: [string, 'null']}
                             varietyName: {type: [string, 'null']}
                   traceId: {type: string}
+        '400':
+          description: 筛选值不合法，或大区编号与未填写标记同时传入。
+        '409':
+          description: RANKING_OPTIONS_SCOPE_UNAVAILABLE；旧冻结快照没有联动资料，请使用全部客户、全部大区查看。不会改写归档。
   /screen/activities/{activityCode}/dashboard:
     get:
       operationId: getOrderDashboard

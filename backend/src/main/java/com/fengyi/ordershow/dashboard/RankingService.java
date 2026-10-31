@@ -28,9 +28,13 @@ public class RankingService {
   }
 
   public RankingStore.Options options(String code) {
+    return options(code, new RankingFilter(null, null, false, null, false, null, false, null));
+  }
+
+  public RankingStore.Options options(String code, RankingFilter filter) {
     var activity = activities.byCode(code);
     // Opening a screen reads option names only: no totals, ranking or snapshot rebuild.
-    return store.options(activity.id(), isHistorical(activity.status()));
+    return store.options(activity.id(), isHistorical(activity.status()), filter);
   }
 
   // Numeric results and their version come from one SQL statement. READ_COMMITTED also
@@ -43,11 +47,8 @@ public class RankingService {
     if (history) store.ensureSnapshot(activity.id());
     List<Object> args = new ArrayList<>();
     args.add(activity.id());
-    String scope = "activity_id=?" + (history ? "" : " AND status='SUBMITTED'");
-    if (filter.customerType() != null) { scope += " AND customer_type=?"; args.add(filter.customerType()); }
-    if (filter.regionUnassigned()) scope += " AND (region_code IS NULL OR region_code='')";
-    else if (filter.regionCode() != null) { scope += " AND region_code=?"; args.add(filter.regionCode()); }
-    String scoped = "SELECT * FROM " + (history ? "activity_ranking_order_snapshot" : "customer_order") + " WHERE " + scope;
+    String scope = "o.activity_id=?" + (history ? "" : " AND o.status='SUBMITTED'") + filter.customerScope("o", args);
+    String scoped = "SELECT o.* FROM " + (history ? "activity_ranking_order_snapshot" : "customer_order") + " o WHERE " + scope;
     String ctes;
     if (filter.filtersProducts()) {
       String source;

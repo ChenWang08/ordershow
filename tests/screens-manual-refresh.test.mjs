@@ -22,12 +22,13 @@ function findElement(node, predicate) {
 }
 
 // Keep hook state and dependency tracking across renders, while controlling real API promises.
-function screenHarness(screen) {
+function screenHarness(screen, optionLoader) {
   const slots = [];
   const effects = [];
   const requests = [];
   const timers = [];
   const subscriptions = [];
+  const optionRequests = [];
   let cursor = 0;
   let currentActivity = activity;
   let tree;
@@ -72,12 +73,16 @@ function screenHarness(screen) {
     requests.push({ args, signal, resolve, reject });
     signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
   });
-  const api = { loadRankingOptions: async () => ({ customers: [
+  const defaultOptions = { customers: [
     { customerType: "GENERAL", regionCode: "EAST", regionName: "华东" },
     { customerType: "SPECIAL", regionCode: "WEST", regionName: "西区" },
-    { customerType: "ALL", regionCode: null, regionName: "未填写" },
+    { customerType: "ALL", regionName: "未填写" },
   ], products: [{ productLine: "项目A", varietyName: "品种A" }, { productLine: "项目A", varietyName: "品种,B" },
-    { productLine: null, varietyName: null }] }),
+    {}] };
+  const api = { loadRankingOptions: (signal, filters) => {
+    optionRequests.push({ signal, filters });
+    return optionLoader ? optionLoader(signal, filters) : Promise.resolve(defaultOptions);
+  },
     ApiError: class extends Error {}, loadOrderDashboard: request, loadDashboard: request, loadDashboardReport: request,
     apiBase: () => "http://test/api", getActiveActivityCode: () => "fixture" };
   const globals = {
@@ -97,7 +102,7 @@ function screenHarness(screen) {
   function refresh() {
     return screen === "dashboard" ? tree.refresh() : findElement(tree, node => node.type.name === "ScreenRefreshControls").props.onRefresh();
   }
-  return { requests, timers, subscriptions, render, refresh,
+  return { requests, optionRequests, timers, subscriptions, render, refresh,
     response: screen === "ranking" ? rankingData : reportData,
     get model() { return tree; },
     get html() { return renderToStaticMarkup(tree); },
@@ -228,10 +233,11 @@ for (const screen of ["dashboard", "report"]) {
 }
 
 const rankingConfirm = harness => harness.find(node => node.type === "button" && node.props.children === "确认查询").props.onClick();
-const selectRanking = (harness, index, value) => {
+const selectRanking = async (harness, index, value) => {
   let seen = 0;
   harness.find(node => node.type === "select" && seen++ === index).props.onChange({ target: { value } });
   harness.render();
+  await settle(); harness.render();
 };
 async function openRanking(status = "ACTIVE") {
   const harness = screenHarness("ranking");
@@ -263,9 +269,9 @@ test("ranking: pending edits never affect refresh and failed confirmation retain
   const harness = await openRanking();
   rankingConfirm(harness); await settle();
   harness.requests[0].resolve(rankingData()); await settle(); harness.render();
-  selectRanking(harness, 0, "SPECIAL");
-  selectRanking(harness, 1, "value:WEST");
-  selectRanking(harness, 2, "value:项目A");
+  await selectRanking(harness, 0, "SPECIAL");
+  await selectRanking(harness, 1, "value:WEST");
+  await selectRanking(harness, 2, "value:项目A");
   harness.find(node => node.props.role === "tab" && node.props.children === "吨数排行").props.onClick(); harness.render();
   assert.equal(harness.requests.length, 1);
   assert.match(harness.html, /条件待确认/);
@@ -283,6 +289,47 @@ test("ranking: pending edits never affect refresh and failed confirmation retain
   assert.match(harness.html, /公司订货吨数排行/);
   assert.match(harness.html, /当前结果：特渠专业客户/);
   assert.doesNotMatch(harness.html, /条件待确认/);
+  harness.cleanup();
+});
+test("ranking: option scope changes cancel stale reads, block confirmation on failure and never query statistics", async () => {
+  const pending=[];
+  const harness=screenHarness("ranking",(signal,filters)=>new Promise((resolve,reject)=>pending.push({signal,filters,resolve,reject})));
+  const customers=[{customerType:"GENERAL",regionCode:"EAST",regionName:"华东"},
+    {customerType:"SPECIAL",regionCode:"WEST",regionName:"西区"},{customerType:"SPECIAL",regionName:"未填写"}];
+  harness.render(); await settle();
+  pending[0].resolve({customers,products:[{productLine:"初始项目",varietyName:"初始品种"}]});
+  await settle(); harness.render();
+  rankingConfirm(harness); await settle();
+  harness.requests[0].resolve(rankingData(100)); await settle(); harness.render();
+  await selectRanking(harness,0,"GENERAL");
+  const general=pending.at(-1);
+  assert.equal(harness.find(node=>node.type==="button" && node.props.children==="确认查询").props.disabled,true);
+  await selectRanking(harness,0,"SPECIAL");
+  assert.equal(general.signal.aborted,true);
+  assert.equal(pending.at(-1).filters.customerType,"SPECIAL");
+  pending.at(-1).resolve({customers,products:[{productLine:"特渠项目",varietyName:"特渠品种"}]});
+  await settle(); harness.render();
+  general.resolve({customers,products:[{productLine:"过期综合项目",varietyName:"过期综合品种"}]});
+  await settle(); harness.render();
+  assert.match(harness.html,/特渠品种/); assert.doesNotMatch(harness.html,/过期综合品种/);
+  const requestCount=pending.length;
+  await selectRanking(harness,2,"value:特渠项目");
+  assert.equal(pending.length,requestCount);
+  await selectRanking(harness,1,"empty");
+  assert.equal(pending.at(-1).filters.regionUnassigned,true);
+  pending.at(-1).reject(new Error("failed options")); await settle(); harness.render();
+  assert.equal(harness.find(node=>node.type==="button" && node.props.children==="确认查询").props.disabled,true);
+  assert.match(harness.html,/筛选选项加载失败/); assert.match(harness.html,/当前结果：全部客户/);
+  assert.equal(harness.requests.length,1);
+  harness.find(node=>node.type==="button" && node.props.children==="重试选项").props.onClick(); await settle();
+  pending.at(-1).resolve({customers:customers.filter(customer=>customer.regionCode),products:[{}]}); await settle(); harness.render();
+  assert.equal(harness.find(node=>node.type==="button" && node.props.children==="确认查询").props.disabled,true);
+  assert.match(harness.html,/部分筛选选项已变化/);
+  assert.equal(harness.optionRequests.at(-1).filters.regionUnassigned,true);
+  await selectRanking(harness,1,"all");
+  pending.at(-1).resolve({customers,products:[{}]}); await settle(); harness.render();
+  assert.equal(harness.find(node=>node.type==="button" && node.props.children==="确认查询").props.disabled,false);
+  assert.equal(harness.requests.length,1);
   harness.cleanup();
 });
 test("ranking: multi-variety is one request, empty selection is invalid, reset waits for confirmation", async () => {
@@ -305,7 +352,7 @@ test("ranking: multi-variety is one request, empty selection is invalid, reset w
 });
 test("ranking: changing activity aborts statistics and resets filters without auto-loading", async () => {
   const harness = await openRanking();
-  selectRanking(harness, 0, "GENERAL"); rankingConfirm(harness); await settle();
+  await selectRanking(harness, 0, "GENERAL"); rankingConfirm(harness); await settle();
   harness.render({ ...activity, id: 2 }); await settle(); harness.render();
   assert.equal(harness.requests[0].signal.aborted, true);
   assert.equal(harness.requests.length, 1);
@@ -316,7 +363,7 @@ test("ranking: changing activity aborts statistics and resets filters without au
 
 test("ranking: revisiting an activity still waits for confirmation and does not restore old filters or results", async () => {
   const harness = await openRanking();
-  selectRanking(harness, 0, "GENERAL"); rankingConfirm(harness); await settle();
+  await selectRanking(harness, 0, "GENERAL"); rankingConfirm(harness); await settle();
   harness.requests[0].resolve(rankingData(987)); await settle(); harness.render();
   harness.render({ ...activity, id: 2 }); await settle(); harness.render();
   harness.render(activity); await settle(); harness.render();

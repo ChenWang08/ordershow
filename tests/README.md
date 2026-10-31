@@ -2,6 +2,8 @@
 
 ## 测试分工
 
+- 排行联动与空值：`ranking-filters.test.mjs`、`screens-manual-refresh.test.mjs` 覆盖上游重置、项目组收窄品种、缺失字段/空值、取消迟到请求、失败重试及最后成功条件刷新；`scripts/test-ranking-filters-browser.mjs` 用真实 React 和合成 HTTP 验证交互及 1920/1440/768/440 布局。`RankingFiltersIntegrationTest` 用隔离 MySQL 验证实际条件、适用且未下单的配置、分公司/经销商范围、新历史冻结与空格空值一致；`PageStatisticsControllerTest` 验证真实 MVC 参数和全局 NON_NULL 下仍输出 null 选项字段。运行与结果见[联动与空值验证](../docs/testing/ranking-cascade-2026-11-01.md)。
+
 - 旧活动 GET 清理：`ActivityRoutesTest` 验证真实 MVC 路由、旧地址 404 且不调用活动服务、`/current`/SSE/手机号验证/抽奖/后台活动路径保留；`ActivityInfoIntegrationTest` 追加完整 HTTP 栈的 404 验证并保留真实 SSE 更新/恢复验证。公开资料脚本与隔离 API E2E 改读 SSE 首帧；`public-activity-snapshot.test.mjs` 验证有界等待和断开清理。旧 `scripts/test-h5-entry.mjs` 改为依次运行现有手机号入口、活动 SSE 合成浏览器测试，不再保留旧 JSON 活动夹具或通道选择流程。详情见[清理验证](../docs/testing/retired-public-activity-2026-10-31.md)。
 
 - 抽奖三种加权：`lottery-settings.test.mjs`验证指标与门槛联动、0门槛、名单复用和旧规则兼容；`LotteryWeightingTest`与`LotteryIntegrationTest`验证金额/箱数/吨数实际小计、零权重排除、真实开奖和审计对账。千人在线、200单/分钟的同流量对照见[加权验证记录](../docs/testing/lottery-weighting-2026-10-31.md)。测试不构建或部署业务镜像。

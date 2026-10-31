@@ -3,9 +3,11 @@ package com.fengyi.ordershow.dashboard;
 import static com.fengyi.ordershow.dashboard.DashboardService.*;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fengyi.ordershow.common.DomainException;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.ArrayList;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -18,19 +20,35 @@ public class RankingStore {
   public RankingStore(JdbcTemplate jdbc, ObjectMapper json) { this.jdbc = jdbc; this.json = json; }
 
   public Options options(long activityId, boolean historical) {
+    return options(activityId, historical, new RankingFilter(null, null, false, null, false, null, false, null));
+  }
+
+  public Options options(long activityId, boolean historical, RankingFilter filter) {
     if (historical) {
       var frozen = jdbc.queryForList("SELECT CAST(options_json AS CHAR) FROM activity_ranking_snapshot WHERE activity_id=?",
           String.class, activityId);
       if (!frozen.isEmpty()) {
-        try { return json.readValue(frozen.getFirst(), Options.class); }
+        try {
+          var saved = json.readValue(frozen.getFirst(), FrozenOptions.class);
+          if (saved.scopes() == null) {
+            if (filter.customerType() != null || filter.regionCode() != null || filter.regionUnassigned())
+              throw DomainException.conflict("RANKING_OPTIONS_SCOPE_UNAVAILABLE", "旧历史活动缺少联动资料，请使用全部客户、全部大区查看");
+            return new Options(saved.customers(), saved.products());
+          }
+          return new Options(saved.customers(), productChoices(saved.scopes().stream().filter(scope ->
+              (filter.customerType() == null || filter.customerType().equals(scope.customerType()))
+              && (!filter.regionUnassigned() || scope.regionCode() == null)
+              && (filter.regionCode() == null || filter.regionCode().equals(scope.regionCode()))).toList()));
+        }
+        catch (DomainException e) { throw e; }
         catch (Exception e) { throw new IllegalStateException("历史筛选选项读取失败", e); }
       }
     }
-    return liveOptions(activityId);
+    return new Options(customerOptions(activityId), productChoices(productScopes(activityId, filter)));
   }
 
-  private Options liveOptions(long activityId) {
-    var customers = jdbc.query("""
+  private List<CustomerOption> customerOptions(long activityId) {
+    return jdbc.query("""
         WITH customer_values AS (
           SELECT c.customer_type,NULLIF(TRIM(c.region_code),'') region_code FROM activity_customer c
           JOIN activity_data_binding b ON b.activity_id=c.activity_id AND b.data_type='WHITELIST'
@@ -42,18 +60,53 @@ public class RankingStore {
         FROM customer_values v LEFT JOIN activity_region r ON r.activity_id=? AND r.region_code=v.region_code
         ORDER BY v.customer_type,region_name
         """, (rs, n) -> new CustomerOption(rs.getString(1), rs.getString(2), rs.getString(3)), activityId, activityId, activityId);
-    var products = jdbc.query("""
-        SELECT DISTINCT STRAIGHT_JOIN NULLIF(TRIM(i.product_line),''),NULLIF(TRIM(i.variety_name),'')
-        FROM customer_order o STRAIGHT_JOIN order_item i ON i.order_id=o.id
-        WHERE o.activity_id=? AND o.status='SUBMITTED'
+  }
+
+  private List<ProductScope> productScopes(long activityId, RankingFilter filter) {
+    var args = new ArrayList<Object>();
+    args.add(activityId);
+    String customers = filter.customerScope("c", args);
+    args.add(activityId);
+    String orders = filter.customerScope("o", args);
+    args.add(activityId);
+    // Catalog-only names require at least one applicable, published customer in the selected scope.
+    // Existing effective orders remain selectable even after whitelist/catalog edits.
+    String sql = """
+        WITH scoped_customers AS (
+          SELECT c.* FROM activity_customer c
+          JOIN activity_data_binding b ON b.activity_id=c.activity_id AND b.data_type='WHITELIST'
+            AND b.current_version_id=c.data_version_id WHERE c.activity_id=? AND c.is_active=TRUE
+        """ + customers + """
+        ), scoped_orders AS (
+          SELECT o.id,o.customer_type,NULLIF(TRIM(o.region_code),'') region_code FROM customer_order o
+          WHERE o.activity_id=? AND o.status='SUBMITTED'
+        """ + orders + """
+        )
+        SELECT DISTINCT o.customer_type,o.region_code,NULLIF(TRIM(i.product_line),'') product_line,
+          NULLIF(TRIM(i.variety_name),'') variety_name
+        FROM scoped_orders o STRAIGHT_JOIN order_item i ON i.order_id=o.id
         UNION
-        SELECT NULLIF(TRIM(p.product_line),''),NULLIF(TRIM(p.variety_name),'') FROM activity_product p
+        SELECT DISTINCT c.customer_type,NULLIF(TRIM(c.region_code),''),NULLIF(TRIM(p.product_line),''),NULLIF(TRIM(p.variety_name),'')
+        FROM activity_product p
         JOIN activity_data_binding b ON b.activity_id=p.activity_id AND b.data_type='PRODUCT'
-          AND b.current_version_id=p.data_version_id WHERE p.activity_id=?
-        ORDER BY 1,2
-        """,
-        (rs, n) -> new ProductOption(rs.getString(1), rs.getString(2)), activityId, activityId);
-    return new Options(customers, products);
+          AND b.current_version_id=p.data_version_id
+        JOIN scoped_customers c ON p.customer_type='ALL' OR p.customer_type=c.customer_type
+        WHERE p.activity_id=?
+          AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id=p.id)
+            OR EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id=p.id
+              AND s.normalized_branch_name=COALESCE(c.normalized_branch_name,'')))
+          AND (NOT EXISTS (SELECT 1 FROM activity_product_dealer_scope s WHERE s.activity_product_id=p.id
+              AND s.normalized_branch_name=c.normalized_branch_name)
+            OR EXISTS (SELECT 1 FROM activity_product_dealer_member m WHERE m.activity_product_id=p.id
+              AND m.normalized_branch_name=c.normalized_branch_name AND m.customer_id=c.customer_id
+              AND m.customer_type=c.customer_type AND m.normalized_dealer_full_name=c.normalized_dealer_full_name))
+        ORDER BY 1,2,3,4
+        """;
+    return jdbc.query(sql, (rs, n) -> new ProductScope(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)), args.toArray());
+  }
+
+  private List<ProductOption> productChoices(List<ProductScope> scopes) {
+    return scopes.stream().map(scope -> new ProductOption(scope.productLine(), scope.varietyName())).distinct().toList();
   }
 
   /** Only requested live product rankings visit details; no extra read model is written on submission. */
@@ -74,7 +127,8 @@ public class RankingStore {
   public void capture(long activityId) {
     String status = jdbc.queryForObject("SELECT status FROM activity WHERE id=? FOR UPDATE", String.class, activityId);
     if ("ARCHIVED".equals(status) && hasSnapshot(activityId)) return;
-    var options = liveOptions(activityId);
+    var scopes = productScopes(activityId, new RankingFilter(null, null, false, null, false, null, false, null));
+    var options = new FrozenOptions(customerOptions(activityId), productChoices(scopes), scopes);
     jdbc.update("DELETE FROM activity_ranking_snapshot WHERE activity_id=?", activityId);
     try {
       jdbc.update("""
@@ -166,7 +220,11 @@ public class RankingStore {
     throw DomainException.conflict("RANKING_HISTORY_MISMATCH", "历史排行与原冻结结果不一致，需核对后启用组合筛选");
   }
 
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   public record CustomerOption(String customerType, String regionCode, String regionName) {}
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   public record ProductOption(String productLine, String varietyName) {}
   public record Options(List<CustomerOption> customers, List<ProductOption> products) {}
+  public record ProductScope(String customerType, String regionCode, String productLine, String varietyName) {}
+  public record FrozenOptions(List<CustomerOption> customers, List<ProductOption> products, List<ProductScope> scopes) {}
 }

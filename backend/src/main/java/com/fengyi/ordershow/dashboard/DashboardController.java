@@ -43,8 +43,11 @@ public class DashboardController {
   }
 
   @GetMapping("/ranking/options")
-  ApiResponse<RankingStore.Options> rankingOptions(@PathVariable String activityCode, HttpServletRequest request) {
-    return ApiResponse.of(rankings.options(activityCode), TraceFilter.id(request));
+  ApiResponse<RankingStore.Options> rankingOptions(@PathVariable String activityCode,
+      @RequestParam(required = false) String customerType, @RequestParam(required = false) String regionCode,
+      @RequestParam(defaultValue = "false") boolean regionUnassigned, HttpServletRequest request) {
+    return ApiResponse.of(rankings.options(activityCode,
+        new RankingFilter(customerType, regionCode, regionUnassigned, null, false, null, false, null)), TraceFilter.id(request));
   }
 
   /** Read-only equivalent for selections too long for a URL. */

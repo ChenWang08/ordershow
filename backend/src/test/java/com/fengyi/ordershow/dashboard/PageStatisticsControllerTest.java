@@ -16,6 +16,23 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class PageStatisticsControllerTest {
+  @Test void optionsKeepExplicitNullFieldsEvenWithApplicationNonNullSerialization() throws Exception {
+    var rankings=mock(RankingService.class);
+    when(rankings.options(eq("example"),any(RankingFilter.class))).thenReturn(new RankingStore.Options(
+        java.util.List.of(new RankingStore.CustomerOption("SPECIAL",null,"未填写")),
+        java.util.List.of(new RankingStore.ProductOption(null,null))));
+    var mapper=new com.fasterxml.jackson.databind.ObjectMapper()
+        .setSerializationInclusion(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL);
+    var mvc=MockMvcBuilders.standaloneSetup(new DashboardController(mock(PageStatisticsService.class),mock(ActivityService.class),mock(RealtimeEventService.class),rankings))
+        .setMessageConverters(new org.springframework.http.converter.json.MappingJackson2HttpMessageConverter(mapper)).build();
+    var result=mvc.perform(get("/screen/activities/example/ranking/options")).andExpect(status().isOk()).andReturn();
+    var data=mapper.readTree(result.getResponse().getContentAsString()).path("data");
+    assertThat(data.path("customers").get(0).has("regionCode")).isTrue();
+    assertThat(data.path("customers").get(0).path("regionCode").isNull()).isTrue();
+    assertThat(data.path("products").get(0).has("productLine")).isTrue();
+    assertThat(data.path("products").get(0).has("varietyName")).isTrue();
+  }
+
   @Test void publicRoutesDispatchOnlyToTheirDedicatedReader() throws Exception {
     var pages = mock(PageStatisticsService.class);
     var activities = mock(ActivityService.class);
@@ -28,7 +45,9 @@ class PageStatisticsControllerTest {
     mvc.perform(get("/screen/activities/example/reports/OVERALL")).andExpect(status().isOk());
     verify(rankings).ranking("example", new RankingFilter("GENERAL", "NORTH", false, null, false, null, false, DashboardService.RankingMetric.TONS));
     mvc.perform(get("/screen/activities/example/ranking/options")).andExpect(status().isOk());
-    verify(rankings).options("example");
+    verify(rankings).options("example",new RankingFilter(null,null,false,null,false,null,false,null));
+    mvc.perform(get("/screen/activities/example/ranking/options").param("customerType","SPECIAL").param("regionUnassigned","true")).andExpect(status().isOk());
+    verify(rankings).options("example",new RankingFilter("SPECIAL",null,true,null,false,null,false,null));
     mvc.perform(get("/screen/activities/example/ranking").param("varieties", "品种,A", "品种B"))
         .andExpect(status().isOk());
     verify(rankings).ranking("example", new RankingFilter(null, null, false, null, false, java.util.List.of("品种,A", "品种B"), false, DashboardService.RankingMetric.AMOUNT));
