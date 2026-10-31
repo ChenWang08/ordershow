@@ -352,6 +352,7 @@ CREATE TABLE activity_customer (
   UNIQUE KEY uk_activity_customer_phone (activity_id, data_version_id, customer_type, phone_lookup_hash),
   KEY idx_activity_customer_filter (activity_id, customer_type, is_active, region_code, branch_name),
   KEY idx_activity_customer_dealer_name (activity_id, dealer_full_name),
+  KEY idx_ac_activity_phone (activity_id, phone_lookup_hash, is_active),
   CONSTRAINT fk_activity_customer_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_activity_customer_customer FOREIGN KEY (customer_id) REFERENCES customer (id),
   CONSTRAINT fk_activity_customer_import FOREIGN KEY (source_import_task_id) REFERENCES import_task (id),
