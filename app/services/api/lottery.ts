@@ -1,6 +1,10 @@
 import { api } from "./client";
 import { activeActivityPath } from "./context";
-import type { Envelope, LotteryCandidatePreview, LotteryDrawResult, LotteryPrizeImageUpload, LotteryRoundApi, LotteryRuleApi, LotteryWinnerApi, LotteryWinnerStatistics } from "./types";
+import type { Envelope, LotteryCandidatePreview, LotteryDrawResult, LotteryPrizeImageUpload, LotteryProductOption, LotteryRoundApi, LotteryRuleApi, LotteryWinnerApi, LotteryWinnerStatistics } from "./types";
+
+export async function loadLotteryProductOptions(activityId: number, signal?: AbortSignal) {
+  return (await api<Envelope<LotteryProductOption[]>>(`/admin/activities/${activityId}/lottery/product-options`, { signal }, "admin")).data;
+}
 
 export async function loadLotteryRules(activityId: number, signal?: AbortSignal) { return (await api<Envelope<LotteryRuleApi[]>>(`/admin/activities/${activityId}/lottery/rules`, { signal })).data; }
 export async function loadPublicLottery() { return (await api<Envelope<{ rules: LotteryRuleApi[]; winners: LotteryWinnerApi[] }>>(`/public/activities/${activeActivityPath()}/lottery`)).data; }

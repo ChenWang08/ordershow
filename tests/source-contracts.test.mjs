@@ -488,7 +488,6 @@ test("uses server-calculated lottery candidates and ordered, shortage-safe draws
   assert.match(prototype, /toFixed\(2\)/);
   assert.match(service, /weightedOrder/);
   assert.match(service, /probabilityMode/);
-  assert.match(service, /o\.total_amount > 0/);
   assert.match(service, /totalCandidateOrderAmount/);
   assert.match(migration, /probability_mode/);
 });

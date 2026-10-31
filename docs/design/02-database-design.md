@@ -136,7 +136,7 @@ H5 ORDER_SUBMIT 的 response_json 使用 format=2，保存 orderId、orderVersio
 
 业务状态只有：
 
-- `SUBMITTED`：参加统计和抽奖；金额加权抽奖使用当前 `customer_order.total_amount`；
+- `SUBMITTED`：参加统计和抽奖；加权使用当前有效订单中匹配商品的金额、箱数或吨数小计，无商品筛选的金额/箱数可复用订单合计；
 - `WITHDRAWN`：保留最近一次非空明细，但不参加统计和抽奖；
 - `VOIDED`：管理员逻辑作废，保留订单号、明细、版本和操作记录，不参加统计和抽奖。
 
@@ -161,7 +161,11 @@ H5 ORDER_SUBMIT 的 response_json 使用 format=2，保存 orderId、orderVersio
 
 `activity_attendee.match_method` 新关联仅记录名称精确关联依据：`FULL_NAME_BRANCH`（客户类型 + 分公司 + 经销商全称）、`FULL_NAME`（无分公司范围时的历史/兼容全称匹配）、`SHORT_NAME` 或 `MANUAL`；`PHONE` 仅为兼容历史记录保留，新计算不再产生。现场手机号只作联系信息，不参与客户身份关联。Excel 发布不更新上一版本行，而是创建新版本并重新计算全部关联。白名单版本切换后，当前到场版本也必须在同一发布事务中重新计算，不能保留旧白名单关联。
 
-金额加权抽奖不创建实体奖券。`lottery_round.probability_mode = EQUAL` 时候选客户等概率；`ORDER_AMOUNT_WEIGHTED` 时只保留当前 `SUBMITTED` 且 `customer_order.total_amount > 0` 的候选，使用客户金额占候选金额总和的比例计算权重。开奖快照的规则 JSON 保存概率模式和候选订单金额总和，候选快照保存开奖时使用的订单金额。V032 为历史轮次写入等概率默认值。
+抽奖不创建实体奖券。`lottery_round.probability_mode` 支持 `EQUAL`、`ORDER_AMOUNT_WEIGHTED`、`ORDER_BOX_COUNT_WEIGHTED`、`ORDER_TONS_WEIGHTED`。加权模式使用有效SUBMITTED订单匹配商品的实际金额/箱数/吨数，先按最低门槛排除，再对剩余候选求总权重；对应权重0或缺失时排除，最低门槛0不取消该要求。吨数缺失部分按0计，有部分已知时按实际合计参与。
+
+V045新增最低吨数、项目组、品种数组和未填写筛选标记，候选快照增加吨数和缺失换算明细数；项目组与品种必须命中同一条明细。V046扩展概率模式约束并约束新增箱数/吨数模式与门槛一致。V032原有等概率默认值和历史金额组合保留，不重算已开奖数据。V045/V046在本轮仅应用于隔离测试库，未迁移业务库。
+
+开奖规则JSON保存概率模式、`weightMetric`、`totalCandidateWeight`和三种门槛/商品条件；`totalCandidateOrderAmount`始终为金额总计。候选快照保存三项匹配小计，结果摘要v2包含箱数。手动试算返回汇总与名单，不持久化可增量更新的候选池；读取规则不计算候选。查询复用已有订单及明细索引，本轮未增加订单明细索引或H5写入汇总维护。详见[ADR-010](adr/ADR-010-lottery-manual-preview-and-weighting.md)。
 
 ### 4.7 审计
 
@@ -257,10 +261,10 @@ api_idempotency(activity_id, actor_type, actor_id, endpoint_code, idempotency_ke
 
 ### 9.4 抽奖
 
-1. 获取活动/轮次 Redis 锁；
-2. 数据库条件更新轮次 `READY → DRAWING`；
-3. 在事务内生成候选快照和安全随机结果；
-4. 写中奖记录并把轮次变为 `DRAWN`；
+1. 在事务外先取得本实例开奖名额，超额立即返回503；
+2. 获取轮次Redis辅助锁，数据库`SELECT ... FOR UPDATE`锁定轮次，校验READY/RESET及前序已完成；
+3. 在事务内查询当前匹配小计，按门槛和正权重筛选，生成安全随机结果；
+4. 每批250条写完整候选快照，批量写中奖记录并把轮次变为`DRAWN`；
 5. 写审计和 outbox 后提交；
 6. 提交成功后现场页面才允许揭晓。
 

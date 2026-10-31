@@ -16,7 +16,7 @@ let browser;
 try {
   await server.listen();
   const { chromium } = await import(process.env.ORDER_SHOW_PLAYWRIGHT_MODULE || "playwright");
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, ...(process.env.ORDER_SHOW_BROWSER_EXECUTABLE ? { executablePath: process.env.ORDER_SHOW_BROWSER_EXECUTABLE } : {}) });
   for (const width of [1440, 440]) {
     const context = await browser.newContext({ viewport: { width, height: 1000 } });
     const requests = [], requestUrls = [], finishedRequests = [], errors = [], unexpected = [];
@@ -33,7 +33,12 @@ try {
       requests.push(path);
       requestUrls.push(path + url.search);
       const reply = (data, status = 200) => route.fulfill({ status, json: { data } });
-      if (path.endsWith("/lottery/candidates/preview") && request.method() === "POST") return reply({ qualifiedCustomers: 20, candidateCount: 20, candidates: [] });
+      if (path.endsWith("/lottery/candidates/preview") && request.method() === "POST") {
+        const input=request.postDataJSON();assert.equal(input.probabilityMode,"ORDER_TONS_WEIGHTED");assert.equal(input.qualificationMetric,"TONS");assert.equal(input.minimumOrderTons,0.5);
+        return reply({ candidateCount: 20, configuredWinnerCount: 10, actualWinnerCount: 10, unawardedCount: 0, totalCandidateOrderAmount: 2000, weightMetric:"TONS",totalCandidateWeight:2,
+          candidates: [{ activityCustomerId: 1, dealerFullName: "抽奖合成客户", customerType: "GENERAL",qualifyingOrderTons:0.000001,probabilityPercent:0.00005 }] });
+      }
+      if (path.endsWith("/lottery/product-options")) return reply([{ productLine: "食用油", varietyName: "花生油" }, { productLine: "食用油", varietyName: "玉米油" }, { productLine: "大米", varietyName: "长粒米" }]);
       if (request.method() !== "GET") { unexpected.push(`${request.method()} ${path}`); return route.fulfill({ status: 500, json: { message: "Unexpected write" } }); }
       if (path === "/admin/me") return identityFailure ? route.fulfill({ status: 503, json: { message: "服务繁忙" } }) : reply(identity);
       if (path === "/admin/activities") return reply([activity]);
@@ -111,11 +116,37 @@ try {
     const attendanceLoaded = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/attendees"));
     await nav.getByRole("button", { name: /现场到场/ }).click(); await attendanceLoaded; await page.waitForLoadState("networkidle");
     assert.equal(count("/attendees"), 1); assert.ok(requestUrls.includes("/admin/activities/987/imports?importType=ATTENDANCE"));
-    const lotteryStatisticsLoaded = page.waitForResponse(response => response.url().endsWith("/lottery/statistics"));
-    const lotteryCandidatesLoaded = page.waitForResponse(response => response.url().endsWith("/lottery/candidates/preview"));
     await nav.getByRole("button", { name: /抽奖规则/ }).click();
     await page.getByRole("heading", { name: "抽奖规则工作台", exact: true }).waitFor(); await page.waitForLoadState("networkidle");
-    await page.clock.fastForward(500); await Promise.all([lotteryStatisticsLoaded, lotteryCandidatesLoaded]); await page.waitForLoadState("networkidle");
+    await page.clock.fastForward(65_000); await page.waitForLoadState("networkidle");
+    assert.equal(count("/lottery/statistics"), 0); assert.equal(count("/lottery/candidates/preview"), 0);
+    await page.getByRole("button", { name: "有效下单客户", exact: false }).click();
+    await page.getByLabel("抽奖项目组").selectOption("value:食用油");
+    await page.locator(".lottery-varieties summary").click();
+    assert.equal(await page.locator(".lottery-varieties").getByText("长粒米", { exact: true }).count(), 0);
+    await page.locator(".lottery-varieties").getByLabel("花生油", { exact: true }).check();
+    await page.locator(".lottery-varieties summary").click();
+    for(const [mode,metric] of [["ORDER_BOX_COUNT_WEIGHTED","BOX_COUNT"],["ORDER_AMOUNT_WEIGHTED","AMOUNT"],["ORDER_TONS_WEIGHTED","TONS"]]) {
+      await page.getByLabel("抽取方式",{exact:true}).selectOption(mode);
+      assert.equal(await page.getByLabel("门槛依据",{exact:true}).inputValue(),metric);
+      assert.equal(await page.getByLabel("门槛依据",{exact:true}).isDisabled(),true);
+      assert.equal(count("/lottery/candidates/preview"),0);
+    }
+    await page.getByLabel("最低订货吨数", { exact: true }).fill("0.5");
+    assert.equal(count("/lottery/candidates/preview"), 0);
+    await page.getByRole("button", { name: "手动试算", exact: true }).click();
+    await page.getByRole("button", { name: "查看候选名单", exact: true }).waitFor({ state: "visible" });
+    await page.waitForLoadState("networkidle");
+    assert.equal(count("/lottery/candidates/preview"), 1);
+    await page.getByRole("button", { name: "查看候选名单", exact: true }).click();
+    await page.getByText("抽奖合成客户", { exact: true }).waitFor();
+    assert.ok((await page.locator(".candidate-drawer").innerText()).includes("0.000001 吨"));
+    assert.ok((await page.locator(".candidate-drawer").innerText()).includes("抽取权重占比"));
+    await page.screenshot({ path: fileURLToPath(new URL(`lottery-candidates-${width}.png`, output)), fullPage: true });
+    assert.equal(count("/lottery/candidates/preview"), 1);
+    await page.locator(".candidate-drawer").getByRole("button", { name: "关闭", exact: true }).click();
+    await page.screenshot({ path: fileURLToPath(new URL(`lottery-${width}.png`, output)), fullPage: true });
+    await page.getByRole("button", { name: "刷新中奖统计", exact: true }).click(); await page.waitForLoadState("networkidle");
     assert.equal(count("/lottery/rules"), 1); assert.equal(count("/lottery/statistics"), 1);
     const candidateReads = count("/lottery/candidates/preview"); assert.ok(candidateReads >= 1);
     await nav.getByRole("button", { name: /活动概览/ }).click();

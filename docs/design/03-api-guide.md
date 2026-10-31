@@ -300,17 +300,24 @@ data: {"scope":"ACTIVITY","activityId":12,"version":938201,"eventCount":1200,"ev
 
 - 候选主体是 `activity_customer`，即经销商活动身份；
 - 同一轮通过数据库唯一约束去重；
-- `VALID_ORDERS` 读取正式开奖时当前状态为 `SUBMITTED` 且满足最低金额的订单；
-- 每轮的 `probabilityMode` 可为 `EQUAL` 或 `ORDER_AMOUNT_WEIGHTED`；不勾选时当前候选客户等概率，勾选时按开奖前当前 `SUBMITTED` 订单的 `customer_order.total_amount` 占候选有效订单金额总和的比例计算；金额为 0 或没有当前有效订单的客户不进入加权池；
+- `VALID_ORDERS` 读取正式开奖时当前状态为 `SUBMITTED` 的有效订单；门槛 `qualificationMetric` 支持 `AMOUNT`、`BOX_COUNT`、`TONS`，分别使用 `minimumOrderAmount`、`minimumOrderBoxCount`、`minimumOrderTons`，0 表示不限，吨数最多六位小数；
+- 每轮的 `probabilityMode` 为 `EQUAL`、`ORDER_AMOUNT_WEIGHTED`、`ORDER_BOX_COUNT_WEIGHTED`、`ORDER_TONS_WEIGHTED` 四选一；分别等概率或按有效订单匹配商品的实际金额、箱数、吨数小计加权。先判断所选最低门槛，再计算剩余候选的总权重；不扣除门槛、不按门槛倍数折算权重。对应权重为0或缺失的客户不进入加权池，即使最低值为0也不例外；
+- 新选择的加权方式自动绑定对应门槛；后端拒绝箱数/吨数加权与门槛不一致的预览和写入，以及新建的不一致金额加权规则。历史金额加权与其他门槛的组合仍按原含义读取、试算、开奖和原位保存，用户切换加权方式后再联动；
 - 新建轮次默认使用 `ORDER_AMOUNT_WEIGHTED`，历史迁移数据使用 `EQUAL` 保持原行为；已开始轮次的概率模式与其他轮次配置一起锁定；
 - 三种候选范围统一按 `activity_customer.id` 去重，名称只用于展示；
-- 管理端候选预览与正式开奖复用同一套后端查询，预览结果标注试算时间，正式结果以开奖时固定快照为准；
-- 管理端候选预览返回当前候选人的理论概率，页面保留两位小数；现场抽奖大屏不展示概率；
+- 管理端只在点击手动试算时计算当前选中轮次。进入、编辑、切换轮次、保存和读取规则均不计算候选，未开奖的 `candidateCount` 为 null；正式结果以开奖时固定快照为准；
+- `VALID_ORDERS` 支持项目组 `productLine` 单选、品种 `varieties` 数组多选，默认不限。先选项目组才能限定品种；项目组和品种必须命中同一条明细。`productLineUnassigned`、`includeUnspecifiedVariety` 分别筛选未填写项，实际名称中的逗号及 ALL 均按字面值处理，品种最多500项；
+- 存在商品条件时，金额、箱数、可计算吨数及三种加权全部按匹配商品小计。待审核申请不替换当前有效订单明细，撤回、作废不参与；无商品条件时金额、箱数尽量复用订单头总计，吨数加权会读取明细以核对缺失换算；
+- `GET /admin/activities/{activityId}/lottery/product-options` 返回当前发布有效商品及当前有效订单快照中的 `{productLine,varietyName}` 组合。前端保留选项，支持手动更新；
+- `POST .../lottery/candidates/preview` 返回一次完整候选名单及人数，前端弹窗复用该结果；修改资格条件后原结果失效。响应含 `missingTonnageCustomers`，候选含 `qualifyingOrderTons`、`missingTonnageItems`；匹配明细缺换算信息时只累计可计算吨数；
+- 试算与商品选项查询共享每进程2个并发名额，正式开奖独立1个名额，可分别以 `LOTTERY_PREVIEW_CONCURRENCY`、`LOTTERY_DRAW_CONCURRENCY` 调整。超额立即返回503 `LOTTERY_BUSY` 和 `Retry-After: 2`，不排队占用数据库连接；候选和选项查询超时 `LOTTERY_QUERY_TIMEOUT_SECONDS` 默认8秒，不修改共用连接池配置；
+- 正式开奖重新计算候选，以每批250条保存完整候选快照，中奖记录批量保存，仍在同一事务中全部成功或回滚。试算不保存可增量更新的候选池；
+- 管理端候选预览 `probabilityPercent` 表示首位抽中的概率（抽取权重占比），不是多奖项整轮至少中奖一次的概率。页面保留两位小数；现场抽奖大屏不展示概率。新增 `weightMetric` 和 `totalCandidateWeight` 表示权重单位及总权重；`totalCandidateOrderAmount` 始终表示候选金额总计，不随加权指标改变单位；
 - 抽奖严格按轮次执行；候选少于配置中奖人数时全部中奖并记录空缺名额，候选为零时拒绝开奖；
 - `ATTENDEES` 至少存在一条有效到场记录，并按活动客户 ID 去重；
 - 第一轮不排除已中奖客户；第二轮起仅在该轮启用排除规则时，按 `activity_customer.id` 排除本活动已有 `VALID` 中奖记录；
 - 后端使用密码学安全随机数，不接受前端提供随机结果；
-- 金额加权的多奖项抽取不重复选择，每抽出一名后按剩余候选人的订单金额重新计算；管理员在截止后、开奖前将订单调整为 `SUBMITTED` 的最新金额计入本次抽奖；
+- 三种加权均使用密码学随机数和指数竞赛算法，得到按剩余权重依次抽取且不重复的顺序，不在SQL中随机排序、不反复查询订单。开奖快照记录加权方式、权重单位、总权重和各客户三项小计；结果摘要v2增加箱数。吨数缺失部分按0计，只要实际合计为正仍可按该小计参与；合计0排除，不阻止整轮开奖、不回退等概率；
 - 候选快照和中奖记录持久化成功后，现场页才能揭晓；
 - 重置不删除旧结果，而是标记失效并保存原因。
 

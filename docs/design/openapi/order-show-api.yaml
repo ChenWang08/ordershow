@@ -2396,8 +2396,8 @@ paths:
     post:
       operationId: previewLotteryCandidates
       tags: [Lottery]
-      summary: 按正式抽奖口径实时试算候选客户
-      description: 候选统一按白名单客户 ID 去重；结果仅为当前时刻预览，正式开奖时会再次校验并固定快照。
+      summary: 手动试算当前选中轮次候选客户
+      description: 进入、编辑、切换和读取规则不试算。候选按白名单客户 ID 去重，返回完整名单供弹窗复用；正式开奖重新校验。资格字段与 LotteryRoundWriteRequest 相同，另需 roundNo。响应 weightMetric/totalCandidateWeight 为权重单位和总权重，totalCandidateOrderAmount 始终为金额总计；候选 probabilityPercent 为首位抽中概率（权重占比），不是多奖项整轮中奖率。
       security:
         - adminCookie: []
       parameters:
@@ -2405,7 +2405,24 @@ paths:
         - $ref: '#/components/parameters/CsrfToken'
       responses:
         '200':
-          description: 实时候选人数、实际可中奖人数、空缺名额和完整候选名单
+          description: 当前候选人数、实际可中奖人数、空缺名额、完整候选名单及 missingTonnageCustomers；名单含 qualifyingOrderTons、missingTonnageItems
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/lottery/product-options:
+    get:
+      operationId: getLotteryProductOptions
+      tags: [Lottery]
+      summary: 读取抽奖项目组及联动品种选项
+      description: 当前发布有效商品和有效订单快照的去重组合。默认全部；前端保留选项，支持手动更新。超额并发返回503 LOTTERY_BUSY。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: data 数组，每项包含可为空的 productLine 和 varietyName
           content:
             application/json:
               schema:
@@ -3987,11 +4004,41 @@ components:
           enum: [ALL, GENERAL, SPECIAL]
         probabilityMode:
           type: string
-          enum: [EQUAL, ORDER_AMOUNT_WEIGHTED]
+          enum: [EQUAL, ORDER_AMOUNT_WEIGHTED, ORDER_BOX_COUNT_WEIGHTED, ORDER_TONS_WEIGHTED]
           default: ORDER_AMOUNT_WEIGHTED
-          description: 不勾选时等概率；按订单金额加权时使用开奖前当前有效 SUBMITTED 订单金额占候选有效订单金额总和的比例。
+          description: 等概率或按有效SUBMITTED订单匹配商品的实际金额、箱数、吨数小计加权。新选择加权方式绑定对应qualificationMetric，先按门槛排除再求总权重；门槛0不限，但对应权重0仍排除。吨数缺失部分按0计，部分已知可参与，不阻止整轮开奖。历史金额加权与其他门槛组合保留原义。
         minimumOrderAmount:
           $ref: '#/components/schemas/Decimal'
+        qualificationMetric:
+          type: string
+          enum: [AMOUNT, BOX_COUNT, TONS]
+          default: AMOUNT
+        minimumOrderBoxCount:
+          type: integer
+          minimum: 0
+          default: 0
+        minimumOrderTons:
+          type: number
+          minimum: 0
+          multipleOf: 0.000001
+          default: 0
+        productLine:
+          type: [string, 'null']
+          maxLength: 200
+          description: 单选项目组，null 表示不限，VALID_ORDERS 生效
+        productLineUnassigned:
+          type: boolean
+          default: false
+        varieties:
+          type: array
+          maxItems: 500
+          items:
+            type: string
+            maxLength: 100
+          description: 先选择项目组，再按字面名称多选品种；空数组且不包含未填写时表示全部
+        includeUnspecifiedVariety:
+          type: boolean
+          default: false
         excludePreviousWinners:
           type: boolean
         displayNameType:
@@ -4270,7 +4317,8 @@ components:
             winnerCount:
               type: integer
             candidateCount:
-              type: integer
+              type: [integer, 'null']
+              description: 未开奖时不计算，仅已开奖时为持久化人数
             resultHash:
               type: [string, 'null']
             winners:

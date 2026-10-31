@@ -69,6 +69,12 @@ public class LotteryController {
     return ApiResponse.of(service.preview(activityId, body), TraceFilter.id(request));
   }
 
+  @GetMapping("/admin/activities/{activityId}/lottery/product-options")
+  ApiResponse<List<LotteryService.ProductOption>> productOptions(@PathVariable long activityId, HttpServletRequest request) {
+    auth.requireAdmin(request);
+    return ApiResponse.of(service.productOptions(activityId),TraceFilter.id(request));
+  }
+
   @GetMapping("/admin/activities/{activityId}/lottery/statistics")
   ApiResponse<LotteryService.WinnerStatistics> statistics(@PathVariable long activityId, HttpServletRequest request) {
     auth.requireAdmin(request);
@@ -97,7 +103,7 @@ public class LotteryController {
   @GetMapping("/public/activities/{activityCode}/lottery")
   ApiResponse<PublicLottery> publicLottery(@PathVariable String activityCode, HttpServletRequest request) {
     long activityId = activities.byCode(activityCode).id();
-    List<LotteryService.RuleView> rules = service.rules(activityId).stream().filter(rule -> "PUBLISHED".equals(rule.status())).toList();
+    List<LotteryService.RuleView> rules = service.publishedRules(activityId);
     return ApiResponse.of(new PublicLottery(rules, service.publicWinners(activityId)), TraceFilter.id(request));
   }
 

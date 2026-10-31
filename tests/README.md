@@ -2,6 +2,8 @@
 
 ## 测试分工
 
+- 抽奖三种加权：`lottery-settings.test.mjs`验证指标与门槛联动、0门槛、名单复用和旧规则兼容；`LotteryWeightingTest`与`LotteryIntegrationTest`验证金额/箱数/吨数实际小计、零权重排除、真实开奖和审计对账。千人在线、200单/分钟的同流量对照见[加权验证记录](../docs/testing/lottery-weighting-2026-10-31.md)。测试不构建或部署业务镜像。
+
 - H5 本机草稿与抽奖按页面加载：`h5-local-draft.test.mjs` 验证浏览器持久化、隔离、损坏/过期和存储失败；`h5-manual-refresh.test.mjs` 验证完整草稿生命周期及后台更新后的失效、提交成功清理/失败保留。`activity-info-stream.test.mjs` 与 `lottery-board.test.mjs` 分别保证公共/H5 初始化不查询抽奖，以及抽奖页独立读取正常。`scripts/test-h5-manual-refresh-browser.mjs` / `scripts/test-activity-info-browser.mjs` 使用真实组件和合成 HTTP 验证本机恢复、无草稿/抽奖请求及活动 SSE 兼容；见[验证记录](../docs/testing/h5-local-draft-2026-10-31.md)。
 
 - 手机端订单按需刷新：`h5-manual-refresh.test.mjs` 覆盖无轮询、15 秒冷却、共享查询、修改/撤回检查、审核及后台直接修改、草稿版本和迟到响应隔离；`scripts/test-h5-manual-refresh-browser.mjs` 使用真实 H5 组件及合成 HTTP，在手机/桌面验证静置无订单请求、最新购物车和失败恢复，见[验证记录](../docs/testing/h5-manual-refresh-2026-10-30.md)。
@@ -41,6 +43,10 @@ docker run --rm -e ORDER_SHOW_RANKING_TEST=order-show-e2e `
 完整隔离检查脚本 `scripts/run-automated-tests.ps1` 也已开启排行数据库专项。完成后使用 `scripts/test-env.ps1 reset` 清理独立测试环境。排行修复实测与部署边界见 [排行修复记录](../docs/deployment/2026-10-27-ranking-limits.md)。
 
 ## 性能测试
+
+抽奖手动试算、项目组/品种联动和吨数专项见 [抽奖验证记录](../docs/testing/lottery-manual-preview-2026-10-31.md)。`lottery-settings.test.mjs` 验证进入/修改/切轮不计算、手动仅当前轮、名单复用及过期请求取消。`LotteryIntegrationTest` 在固定端口33316的专用临时库验证真实SQL、旧规则升级、匹配小计、吨数、批量快照和失败回滚；只在 `ORDER_SHOW_LOTTERY_TEST=order-show-lottery-test` 时运行。`LotteryAdmissionFilterTest` 和 `LotteryQueryTimeoutTest` 验证并发隔离、许可释放和单查询超时。
+
+`tests/load/lottery-event-runner.mjs` 使用现有运行镜像挂载优化前后临时JAR，固定 `order-show-load-lottery` 项目、8680端口和合成库，对比每分钟100/200单时只下单、原抽奖和优化后抽奖。它会重建并最终清理该专用测试库及卷；不接受业务环境变量或业务数据库地址，不由常规测试自动执行。
 
 手机号优先登录专项见 [本地验证记录](../docs/testing/h5-phone-first-2026-10-30.md)：`tests/phone-verification.compose.yml` 使用专用无宿主端口 MySQL 合成库，`ORDER_SHOW_PHONE_BENCHMARK=true` 才开启服务级性能对照；`scripts/test-h5-phone-entry-browser.mjs` 用实际组件和模拟 HTTP 验证手机/桌面弹窗，不连接业务 API。本轮不部署业务服务。
 
