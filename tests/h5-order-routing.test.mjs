@@ -39,6 +39,7 @@ async function harness(status = "SUBMITTED", pending = null, activity = { code: 
     "./h5-submission": { createH5SubmissionManager: options => createH5SubmissionManager({ ...options, uuid: randomUUID, sleep: async () => {} }) },
     react: {
       useEffect() {}, useMemo: fn => fn(), useCallback: fn => fn,
+      useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
       useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
       useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
         return [slots[i], value => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; },
@@ -117,19 +118,18 @@ test("editing during a pending withdrawal starts from the effective items", asyn
 
 const mixedActivity = { code: "A", availableCustomerTypes: ["GENERAL", "SPECIAL"], regions: [{ code: "NORTH", name: "北区" }] };
 
-test("returning home clears the old identity and type confirmation selects the new scope", async () => {
+test("returning home remembers the phone, clears the old identity and requires a new type confirmation", async () => {
   const h = await harness("SUBMITTED", null, mixedActivity);
   const login = h.api.verifyPhone;
   h.api.verifyPhone = async (phone, type) => type ? login(phone, type) : { selectionRequired: true, customerTypes: ["GENERAL", "SPECIAL"] };
   for (const type of ["GENERAL", "SPECIAL", "GENERAL"]) {
     await h.render().resetEntry();
-    assert.equal(h.render().phone, "");
+    assert.equal(h.render().phone, "13800000001");
     assert.equal(h.render().runtimeOrder, null);
     assert.equal(h.render().orderStatus, "none");
     assert.equal(Object.keys(h.render().quantities).length, 0);
     assert.equal(h.render().visibleStep, "verify");
     assert.equal(h.render().identityLabel, "手机号验证");
-    h.render().setPhone("13800000001");
     await h.render().verifyIdentity();
     await h.render().verifyIdentity(type);
     assert.deepEqual(h.calls.at(-1), ["verify", "13800000001", type]);

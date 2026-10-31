@@ -19,6 +19,7 @@ try {
   browser = await chromium.launch({ headless: true, ...(process.env.ORDER_SHOW_BROWSER_PATH ? { executablePath: process.env.ORDER_SHOW_BROWSER_PATH } : {}) });
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   const calls = [], errors = [];
+  const phoneCacheKey = "order-show:h5-phone:v1:PHONE-TEST";
   let rejectConfirmation = false;
   page.on("pageerror", error => errors.push(error.message));
   await page.route("**/*", async route => {
@@ -43,6 +44,7 @@ try {
     await page.getByRole("heading", { name: "输入白名单手机号" }).waitFor();
   };
   await go();
+  assert.equal(await page.getByLabel("手机号", { exact: true }).inputValue(), "");
   assert.equal(await page.getByText("选择您的订货通道").count(), 0);
   await page.screenshot({ path: fileURLToPath(new URL("phone.png", output)) });
   await page.getByLabel("手机号", { exact: true }).fill("13900000001");
@@ -51,14 +53,17 @@ try {
   assert.equal(calls.filter(c => c.path.endsWith("/verify-phone")).length, 1);
   assert.deepEqual(calls[0].body, { phone: "13900000001" });
   assert.match(await page.locator(".dealer-card").innerText(), /综合客户.*东区.*测试分公司/s);
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), phoneCacheKey), "13900000001");
   await page.screenshot({ path: fileURLToPath(new URL("customer.png", output)) });
 
   await go(); calls.length = 0;
+  assert.equal(await page.getByLabel("手机号", { exact: true }).inputValue(), "13900000001");
   await page.getByLabel("手机号", { exact: true }).fill("13900000009");
   await page.getByRole("button", { name: "验证并进入订货" }).click();
   const dialog = page.getByRole("dialog"); await dialog.waitFor();
   assert.deepEqual(await dialog.getByRole("button").allTextContents(), ["综合", "特渠", "取消"]);
   assert.equal(calls.length, 1, "No product/order read before choosing a type");
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), phoneCacheKey), "13900000001");
   assert.equal(await page.evaluate(() => document.activeElement?.textContent), "综合");
   await page.screenshot({ path: fileURLToPath(new URL("choice-mobile.png", output)) });
   await page.keyboard.press("Escape"); await dialog.waitFor({ state: "hidden" });
@@ -68,6 +73,7 @@ try {
   await dialog.getByRole("button", { name: "特渠", exact: true }).click();
   await dialog.getByRole("alert").waitFor();
   assert.equal(calls.filter(c => c.path.endsWith("/products")).length, 0);
+  assert.equal(await page.evaluate(key => localStorage.getItem(key), phoneCacheKey), "13900000001");
   rejectConfirmation = false;
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.screenshot({ path: fileURLToPath(new URL("choice-desktop.png", output)) });
@@ -75,6 +81,17 @@ try {
   await page.getByText("合成经销商", { exact: true }).waitFor();
   assert.match(await page.locator(".dealer-card").innerText(), /特渠专业客户.*东区.*测试分公司/s);
   assert.deepEqual(calls.filter(c => c.path.endsWith("/verify-phone")).at(-1).body, { phone: "13900000009", customerType: "SPECIAL" });
+  await page.locator(".order-header > button").click();
+  await page.getByRole("heading", { name: "输入白名单手机号" }).waitFor();
+  assert.equal(await page.getByLabel("手机号", { exact: true }).inputValue(), "13900000009");
+  const verified = calls.filter(c => c.path.endsWith("/verify-phone")).length;
+  await page.reload();
+  await page.getByRole("heading", { name: "输入白名单手机号" }).waitFor();
+  assert.equal(await page.getByLabel("手机号", { exact: true }).inputValue(), "13900000009");
+  assert.equal(calls.filter(c => c.path.endsWith("/verify-phone")).length, verified, "Refilling a cached phone must not verify automatically");
+  await page.evaluate(key => localStorage.removeItem(key), phoneCacheKey);
+  await go();
+  assert.equal(await page.getByLabel("手机号", { exact: true }).inputValue(), "");
   assert.deepEqual(errors, []);
-  console.log("PASS: real React phone-first entry, native dialog focus/Escape, choice-only payload, rejection/retry, customer display, mobile/desktop. All HTTP mocked.");
+  console.log("PASS: real React phone-first entry, phone cache/refill/replacement/clearing, no automatic verification, native dialog focus/Escape, rejection/retry, customer display, mobile/desktop. All HTTP mocked.");
 } finally { if (browser) await browser.close(); await server.close(); }

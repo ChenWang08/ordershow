@@ -5,7 +5,7 @@ import { formatBeijingTime } from "../shared/time";
 import { createIdempotencyKey } from "../../services/api/idempotency-key";
 
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { ApiError, createH5OrderChangeRequest, loadH5Products, saveH5Order, verifyPhone, type H5CustomerType, type OrderChangeRequest, type RuntimeIdentity, type RuntimeOrder, type H5Product } from "../../api";
 import type { WhitelistRow } from "../../domain/import-domain";
 import { maskPhone, normalizePhone } from "../shared/utils";
@@ -15,6 +15,7 @@ import { h5DraftBaseline, h5DraftBaseItems } from "./h5-local-draft";
 import { readH5OrderSnapshot, sameH5Order, useH5OrderSync, type H5OrderSnapshot } from "./useH5OrderSync";
 import { h5EntryPolicy } from "./h5-entry-policy";
 import { createH5SubmissionManager } from "./h5-submission";
+import { createH5PhoneCache } from "./h5-phone-cache";
 import { productRowToProduct, runtimeProductToProduct, priceBreakdown, groupByProductLine, summarizeOrderLineAmounts, h5QuantitySignature, h5OrderItems, h5RequiresReview, type H5Props, type H5Step, type H5Channel, type H5OrderStatus, type Product, type SubmittedOrderItem } from "./h5-domain";
 
 export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelistRows, runtimeActivity }: H5Props) {
@@ -55,11 +56,16 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const [verifiedBranch, setVerifiedBranch] = useState("");
   const [verifiedIdentity, setVerifiedIdentity] = useState<WhitelistRow | null>(null);
   const [submittedIdentity, setSubmittedIdentity] = useState<WhitelistRow | null>(null);
-  const [phone, updatePhone] = useState("");
+  const activityCode = runtimeActivity?.code ?? "";
+  const [phoneCache] = useState(() => createH5PhoneCache(() => typeof window === "undefined" ? undefined : window.localStorage));
+  const cachedPhone = useSyncExternalStore(phoneCache.subscribe,
+    useCallback(() => phoneCache.read(activityCode), [activityCode, phoneCache]), () => "");
+  const [phoneInput, updatePhone] = useState<{ activityCode: string; value: string } | null>(null);
+  const phone = phoneInput?.activityCode === activityCode ? phoneInput.value : cachedPhone;
   const [identityChoice, setIdentityChoice] = useState<{ phone: string; types: Array<"GENERAL" | "SPECIAL"> } | null>(null);
   const setPhone = (value: string) => {
     if (entryBusy.current) return;
-    updatePhone(value); setIdentityChoice(null); setVerifyError("");
+    updatePhone({ activityCode, value }); setIdentityChoice(null); setVerifyError("");
   };
   const cancelIdentityChoice = () => {
     if (entryBusy.current) return;
@@ -203,7 +209,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
       setRuntimeIdentity(null); setRuntimeProducts(null);
       applyRuntimeOrder(null, []);
       setVerifiedIdentity(null); setSubmittedIdentity(null); setVerifiedBranch("");
-      updatePhone(""); setIdentityChoice(null); setVerifyError(""); setDraftMessage("");
+      updatePhone(null); setIdentityChoice(null); setVerifyError(""); setDraftMessage("");
       setRuntimeMessage(saved ? "" : "当前浏览器无法保存草稿，未提交修改暂存于本页；刷新或关闭页面后可能丢失。");
       setPendingChangeRequest(null); setPendingSubmission(false); setSubmitMode("first");
       changeAttempt.current = { signature: "", key: "" };
@@ -299,6 +305,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
           setIdentityChoice({ phone: normalizedPhone, types: result.customerTypes });
           return;
         }
+        phoneCache.save(runtimeActivity.code, normalizedPhone);
         setIdentityChoice(null);
         const identity = result.customer;
         let recoveryNeedsRefresh = false;

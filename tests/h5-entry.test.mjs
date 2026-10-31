@@ -10,6 +10,7 @@ function harness(initial, resolve = async () => login("GENERAL")) {
   const { useH5OrderFlow } = loadModule("app/features/h5/useH5OrderFlow.ts", {
     react: {
       useEffect() {}, useMemo: fn => fn(), useCallback: fn => fn,
+      useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
       useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
       useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
         return [slots[i], value => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; },
