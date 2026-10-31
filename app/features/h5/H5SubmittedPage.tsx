@@ -7,7 +7,7 @@ import { useState } from "react";
 import type { H5OrderModel } from "./useH5OrderFlow";
 import { ProductArt } from "./ProductArt";
 import { money } from "../shared/utils";
-import { groupByProductLine } from "./h5-domain";
+import { groupByProductLine, unitPriceText } from "./h5-domain";
 import { H5OrderRefresh } from "./H5OrderRefresh";
 
 export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
@@ -17,6 +17,7 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
   const rejected = request?.status === "REJECTED";
   const showingRequest = pending && request.requestType === "MODIFY" && formalRequestId !== request.id;
   const items = showingRequest ? request.items : order?.items ?? [];
+  const pricingByProduct = new Map(order?.items.map(item => [item.productId, item.pricingDetails] as const));
   const groups = groupByProductLine(items, item => item.productLine?.trim() || "未分类");
   const amount = showingRequest ? request.requestedTotalAmount : order?.totalAmount;
   const boxes = showingRequest ? request.requestedTotalQuantity : order?.totalQuantity;
@@ -51,10 +52,12 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
       <header className="order-line-group-heading"><b>{group.line}</b><span>{group.items.length} 种 · {group.items.reduce((sum,i)=>sum+i.quantity,0)} 箱</span></header>
       {group.items.map(item => {
         const product = model.catalog.find(p=>p.id===String(item.productId));
+        const pricing = showingRequest ? undefined : pricingByProduct.get(item.productId);
         return <div key={item.productId}>
           <ProductArt atlas={product?.atlas ?? 0} imageUrl={product?.imageUrl} alt={item.materialName}/>
           <p>{product ? <button type="button" className="order-product-name-button" onClick={()=>model.setPreviewProduct(product)}>{item.materialName}</button> : <span>{item.materialName}</span>}<small className="product-line-label">项目组：{group.line}</small>
-            <span>{item.casePrice == null ? "—" : `¥${money(Number(item.casePrice))}/箱`} · 小计 {item.lineAmount == null ? "—" : `¥${money(Number(item.lineAmount))}`}</span>
+            {pricing?.segments.map((part, index) => <span key={index}>{part.quantity} 箱 × ¥{unitPriceText(part.casePrice)} ＝ ¥{money(part.amount)}</span>)}
+            <span>{pricing?.segments.length ? "" : item.casePrice == null ? "— · " : `¥${unitPriceText(Number(item.casePrice))}/箱 · `}小计 {item.lineAmount == null ? "—" : `¥${money(Number(item.lineAmount))}`}</span>
           </p><strong>× {item.quantity}</strong>
         </div>;
       })}

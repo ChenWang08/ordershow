@@ -46,7 +46,7 @@ public class OrderQueryService {
           o.dealer_full_name_snapshot, c.phone, c.phone_masked, o.current_version_no, i.line_no, i.material_code,
           i.material_name, i.product_line, i.specification, i.case_pack, i.quantity, i.case_price, i.applied_tier_min_quantity,
           i.base_case_price, i.base_price_quantity, i.tier_case_price, i.tier_min_quantity, i.tier_price_quantity, i.pricing_mode,
-          i.line_amount, i.line_tons, o.last_submitted_at
+          i.line_amount, i.line_tons, i.pricing_details, o.last_submitted_at
         FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
         JOIN order_item i ON i.order_id = o.id
         """ + where + " ORDER BY o.last_modified_at DESC, o.id DESC, i.line_no", args);

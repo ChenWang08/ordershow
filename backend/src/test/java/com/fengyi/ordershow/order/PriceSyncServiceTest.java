@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -20,7 +19,6 @@ import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.dashboard.DashboardService;
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class PriceSyncServiceTest {
@@ -37,8 +35,8 @@ class PriceSyncServiceTest {
     var sequence = inOrder(orders, prices);
     sequence.verify(orders).lockPricing(7);
     sequence.verify(prices).submittedItems(7, 21);
-    verify(prices, never()).updateItem(anyLong(), any());
-    verify(orders, never()).snapshotCurrentVersion(anyLong());
+    verify(prices, never()).applyChanges(anyLong(), any());
+    verify(orders, never()).snapshotCurrentProductVersions(any(), anyLong());
     verifyNoInteractions(dashboards);
   }
 
@@ -48,10 +46,8 @@ class PriceSyncServiceTest {
     assertThatThrownBy(() -> service.sync(7, 21, BigDecimal.ZERO, null, null, null))
         .isInstanceOf(DomainException.class)
         .satisfies(error -> assertThat(((DomainException) error).code()).isEqualTo("PRODUCT_PRICE_REQUIRED"));
-    verify(prices, never()).updateItem(anyLong(), any());
-    verify(prices, never()).updateOrderTotal(anyLong());
-    verify(orders, never()).snapshotCurrentVersion(anyLong());
-    verify(orders, never()).writeOutbox(anyLong(), anyLong(), anyString(), any());
+    verify(prices, never()).applyChanges(anyLong(), any());
+    verify(orders, never()).snapshotCurrentProductVersions(any(), anyLong());
     verifyNoInteractions(dashboards);
   }
 
@@ -59,44 +55,46 @@ class PriceSyncServiceTest {
   void numericallyUnchangedPricesDoNotWriteOrEmitEvents() {
     when(prices.submittedItems(7, 21)).thenReturn(List.of(item(10, 101, 2, "100")));
     assertThat(service.sync(7, 21, new BigDecimal("100.00"), null, null, null)).isZero();
-    verify(prices, never()).updateItem(anyLong(), any());
-    verify(prices, never()).updateOrderTotal(anyLong());
-    verify(orders, never()).snapshotCurrentVersion(anyLong());
-    verify(orders, never()).writeOutbox(anyLong(), anyLong(), anyString(), any());
+    verify(prices, never()).applyChanges(anyLong(), any());
+    verify(orders, never()).snapshotCurrentProductVersions(any(), anyLong());
     verifyNoInteractions(dashboards);
   }
 
   @Test
-  void updatesEachItemThenItsOrderAndEventBeforeRefreshingSnapshotsOnce() {
+  void snapshotsBeforeBatchWritesAndRefreshesStatisticsAfterTheWrites() {
     when(prices.submittedItems(7, 21)).thenReturn(List.of(item(10, 101, 2, "100"), item(11, 102, 3, "100")));
     assertThat(service.sync(7, 21, new BigDecimal("110"), null, null, null)).isEqualTo(2);
     var sequence = inOrder(orders, prices, dashboards);
     sequence.verify(orders).lockPricing(7);
     sequence.verify(prices).submittedItems(7, 21);
-    sequence.verify(orders).snapshotCurrentVersion(101);
-    sequence.verify(prices).updateItem(eq(10L), any());
-    sequence.verify(prices).updateOrderTotal(101);
-    sequence.verify(orders).refreshDashboardSummary(101);
-    sequence.verify(orders).writeOutbox(7, 101, "ORDER_PRICE_UPDATED", Map.of("orderId", 101L));
-    sequence.verify(orders).snapshotCurrentVersion(102);
-    sequence.verify(prices).updateItem(eq(11L), any());
-    sequence.verify(prices).updateOrderTotal(102);
-    sequence.verify(orders).refreshDashboardSummary(102);
-    sequence.verify(orders).writeOutbox(7, 102, "ORDER_PRICE_UPDATED", Map.of("orderId", 102L));
+    sequence.verify(orders).snapshotCurrentProductVersions(List.of(101L, 102L), 21L);
+    sequence.verify(prices).applyChanges(eq(7L), org.mockito.ArgumentMatchers.argThat(changes ->
+        changes.size() == 2 && changes.getFirst().price().lineAmount().compareTo(new BigDecimal("220")) == 0));
+    sequence.verify(orders).refreshPriceSummaries(org.mockito.ArgumentMatchers.argThat(changes -> changes.size() == 2));
     sequence.verify(dashboards).refreshFinalSnapshots(7);
     sequence.verifyNoMoreInteractions();
   }
 
   @Test
-  void persistenceFailurePropagatesToTheTransactionWithoutPublishingAnEvent() {
+  void persistenceFailurePropagatesAndPreventsStatisticsRefresh() {
     when(prices.submittedItems(7, 21)).thenReturn(List.of(item(10, 101, 2, "100")));
     var failure = new IllegalStateException("database unavailable");
-    doThrow(failure).when(prices).updateOrderTotal(101);
+    doThrow(failure).when(prices).applyChanges(eq(7L), any());
     assertThatThrownBy(() -> service.sync(7, 21, new BigDecimal("110"), null, null, null)).isSameAs(failure);
-    verify(orders).snapshotCurrentVersion(101);
-    verify(prices).updateItem(eq(10L), any());
-    verify(orders, never()).writeOutbox(anyLong(), anyLong(), anyString(), any());
+    verify(orders).snapshotCurrentProductVersions(List.of(101L), 21L);
+    verify(orders, never()).refreshPriceSummaries(any());
     verifyNoInteractions(dashboards);
+  }
+
+  @Test
+  void largeSynchronizationUsesBoundedBatchesWithinTheSameCall() {
+    when(prices.submittedItems(7, 21)).thenReturn(java.util.stream.LongStream.rangeClosed(1, 450)
+        .mapToObj(id -> item(id, id, 2, "100")).toList());
+    assertThat(service.sync(7, 21, new BigDecimal("90"), null, null, null)).isEqualTo(450);
+    var batches = org.mockito.ArgumentCaptor.forClass(List.class);
+    verify(prices, times(3)).applyChanges(eq(7L), batches.capture());
+    assertThat(batches.getAllValues()).extracting(List::size).containsExactly(200, 200, 50);
+    verify(dashboards).refreshFinalSnapshots(7);
   }
 
   @Test
@@ -119,7 +117,7 @@ class PriceSyncServiceTest {
     when(prices.submittedItems(7, 21)).thenReturn(List.of(item(10, 101, 2, "100")));
     assertThat(service.backfill(7)).isEqualTo(1);
     verify(orders, times(2)).lockPricing(7);
-    verify(prices).updateOrderTotal(101);
+    verify(prices).applyChanges(eq(7L), any());
     verify(dashboards).refreshFinalSnapshots(7);
   }
 

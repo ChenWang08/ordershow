@@ -466,9 +466,9 @@ CREATE TABLE activity_product_price_tier (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
-  UNIQUE KEY uk_product_price_tier (activity_product_id),
+  UNIQUE KEY uk_product_price_tier (activity_product_id, min_quantity),
   CONSTRAINT fk_product_price_tier_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
-  CONSTRAINT ck_product_price_tier_values CHECK (min_quantity >= 2 AND case_price > 0),
+  CONSTRAINT ck_product_price_tier_values CHECK (min_quantity >= 1 AND case_price > 0),
   CONSTRAINT ck_product_price_tier_mode CHECK (pricing_mode IN ('WHOLE_ORDER', 'INCREMENTAL'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -636,11 +636,13 @@ CREATE TABLE order_item (
   tier_price_quantity BIGINT UNSIGNED NULL,
   pricing_mode VARCHAR(20) NULL,
   line_amount DECIMAL(18,2) NOT NULL,
+  pricing_details JSON NULL,
   ton_case_factor DECIMAL(18,8) NULL,
   line_tons DECIMAL(18,6) NULL,
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   UNIQUE KEY uk_order_item_product (order_id, activity_product_id),
+  KEY idx_order_item_product_order (activity_product_id, order_id),
   UNIQUE KEY uk_order_item_line (order_id, line_no),
   CONSTRAINT fk_order_item_order FOREIGN KEY (order_id) REFERENCES customer_order (id),
   CONSTRAINT fk_order_item_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
@@ -709,6 +711,7 @@ CREATE TABLE order_version_item (
   tier_price_quantity BIGINT UNSIGNED NULL,
   pricing_mode VARCHAR(20) NULL,
   line_amount DECIMAL(18,2) NOT NULL,
+  pricing_details JSON NULL,
   ton_case_factor DECIMAL(18,8) NULL,
   line_tons DECIMAL(18,6) NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),

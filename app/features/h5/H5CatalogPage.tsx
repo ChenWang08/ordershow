@@ -5,7 +5,7 @@ import type { H5OrderModel } from "./useH5OrderFlow";
 import { ProductArt } from "./ProductArt";
 import { QuantityInput } from "./QuantityInput";
 import { money } from "../shared/utils";
-import { priceBreakdown, tierPriceLabel } from "./h5-domain";
+import { priceBreakdown, tierPriceLabel, unitPriceText } from "./h5-domain";
 
 export function H5CatalogPage({ model }: { model: H5OrderModel }) {
   const { activityClosed, setStep, setRebateFilter, line, setLine, search, setSearch, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, setCancelConfirmOpen, quantities, setQuantities, visibleStep, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selectedLineGroups, selected, totalBoxes, totalAmount, importedIdentity, identityLabel, dealerName, displayBranch, displayPhone, changeQty, draftMessage } = model;
@@ -94,7 +94,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                       {catalogSearch.searching && <small className="catalog-product-location">{product.rebate === true ? "返利产品" : product.rebate === false ? "非返利产品" : "不区分返利"} · {product.line || "未分类"}</small>}
                       {product.description && <p className="product-description" title={product.description}>{product.description}</p>}
                       <div className="product-action">
-                        <div className="product-price-block"><strong>{product.isOrderable ? <>¥{money(priceBreakdown(product, quantities[product.id] || 0).displayPrice)}<small>/箱</small></> : "价格待完善"}</strong>{product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small>{tierPriceLabel(product, quantities[product.id] || 0)}</small>}</div>
+                        <div className="product-price-block"><strong>{product.isOrderable ? <>¥{unitPriceText(priceBreakdown(product, quantities[product.id] || 0).displayPrice)}<small>/箱</small></> : "价格待完善"}</strong>{product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small>{tierPriceLabel(product, quantities[product.id] || 0)}</small>}</div>
                         <div className="stepper">
                           <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={editingDisabled || !product.isOrderable || !quantities[product.id]}>−</button>
                           <QuantityInput label={`${product.name}订货箱数`} disabled={editingDisabled || !product.isOrderable} value={quantities[product.id] || 0} onChange={(value) => setQuantities((old) => ({ ...old, [product.id]: value }))} />
@@ -135,7 +135,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                       <div className="cart-item-info">
                         <button type="button" className="cart-item-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button>
                         <small className="product-line-label">项目组：{group.line}</small>
-                        <span>¥{money(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span>
+                        <span>¥{unitPriceText(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span>
                         <strong>小计 ¥{money(priceBreakdown(product, quantities[product.id]).amount)}</strong>
                       </div>
                       <div className="cart-item-actions">

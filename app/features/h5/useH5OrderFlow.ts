@@ -112,7 +112,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const orderViewLineGroups = groupByProductLine(submittedItems, (item) => item.product.line);
   const orderViewLineSummaries = summarizeOrderLineAmounts(submittedItems);
   const orderViewBoxes = orderViewSelected.reduce((sum, p) => sum + orderViewQuantities[p.id], 0);
-  const orderViewAmount = orderViewSelected.reduce((sum, p) => sum + priceBreakdown(p, orderViewQuantities[p.id]).amount, 0);
+  const orderViewAmount = runtimeOrder?.totalAmount ?? submittedItems.reduce((sum, item) => sum + (item.lineAmount ?? priceBreakdown(item.product, item.quantity).amount), 0);
   const importedIdentity = verifiedIdentity ?? submittedIdentity;
   const identityRegionCode = runtimeIdentity ? runtimeIdentity.regionCode || "" : importedIdentity ? importedIdentity.region || "" : directEntry ? "" : region;
   const identityRegion = regionOptions.find((item) => item.value === identityRegionCode)?.name || identityRegionCode;
@@ -146,7 +146,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
       itemQuantities[id] = item.quantity;
       const catalogProduct = liveCatalog.find((product) => product.id === id);
       const orderLine = item.productLine?.trim() || catalogProduct?.line || "未分类";
-      const snapshot = { price: Number(item.baseCasePrice ?? item.casePrice), tierMinQuantity: item.tierMinQuantity,
+      const snapshot = { price: Number(item.baseCasePrice ?? item.casePrice), priceTiers: item.pricingDetails?.tiers, tierMinQuantity: item.tierMinQuantity,
         tierCasePrice: item.tierCasePrice == null ? undefined : Number(item.tierCasePrice), tierPricingMode: item.pricingMode };
       const found = catalogProduct ? { ...catalogProduct, line: orderLine, ...snapshot } : {
         id, name: item.materialName, line: orderLine, spec: item.specification || "", ...snapshot,

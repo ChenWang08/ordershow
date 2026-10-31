@@ -1,3 +1,4 @@
+import type { PriceStep, PricingDetails } from "../../domain/tier-pricing";
 export type Envelope<T> = { data: T; traceId: string };
 export type PageEnvelope<T> = { data: T[]; page: { number: number; size: number; totalElements: number; totalPages: number }; traceId: string };
 export type RankingMetric = "AMOUNT" | "TONS";
@@ -32,7 +33,7 @@ export type RuntimeProduct = {
   varietyName?: string; specification?: string; casePack?: string; bottlePrice?: number; casePrice?: number;
   tonCaseFactor?: number; customerType: "GENERAL" | "SPECIAL" | "ALL"; rebateStatus: "PARTICIPATING" | "NOT_PARTICIPATING" | "ALL";
   giftBox: boolean; visible: boolean; orderable: boolean; dataStatus: string; sortNo: number; version: number; branchScope: string[];
-  priceTier?: { minQuantity: number; casePrice: number; pricingMode: "WHOLE_ORDER" | "INCREMENTAL" };
+  priceTier?: { minQuantity: number; casePrice: number; pricingMode: "WHOLE_ORDER" | "INCREMENTAL"; tiers?: PriceStep[] };
   images: Array<{ id: number; fileId: number; url: string; primary: boolean; sortNo: number;
     sourceType: "ZIP_IMPORT" | "MANUAL"; matchStatus: "MATCHED" | "PENDING" | "UNMATCHED" | "CONFIRMED" }>;
 };
@@ -61,13 +62,13 @@ export type RuntimeOrder = {
   items: Array<{ id: number; productId: number; lineNo: number; materialCode?: string; materialName: string; productLine?: string;
     specification?: string; casePack?: string; quantity: number; casePrice: number; appliedTierMinQuantity?: number;
     baseCasePrice?: number; basePriceQuantity?: number; tierCasePrice?: number; tierMinQuantity?: number; tierPriceQuantity?: number;
-    pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; tonCaseFactor?: number; lineTons?: number }>;
+    pricingDetails?: PricingDetails; pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; tonCaseFactor?: number; lineTons?: number }>;
   versions: Array<{ id: number; version: number; totalQuantity: number; totalTons?: number; totalAmount: number; submittedAt: string; submittedSource: string;
     submittedByAdminName?: string; reason?: string;
     items?: Array<{ id: number; productId?: number; lineNo: number; materialCode?: string; materialName: string; productLine?: string;
       specification?: string; casePack?: string; quantity: number; casePrice: number; appliedTierMinQuantity?: number;
       baseCasePrice?: number; basePriceQuantity?: number; tierCasePrice?: number; tierMinQuantity?: number; tierPriceQuantity?: number;
-      pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; tonCaseFactor?: number; lineTons?: number }> }>;
+      pricingDetails?: PricingDetails; pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; tonCaseFactor?: number; lineTons?: number }> }>;
   operations: Array<{ type: string; source: string; adminName?: string; orderVersion?: number; reason?: string; occurredAt: string }>;
 };
 
@@ -92,7 +93,7 @@ export type AdminOrderPreview = {
   items: Array<{ productId: number; materialCode?: string; materialName: string; productLine?: string;
     specification?: string; casePack?: string; quantity: number; casePrice: number; appliedTierMinQuantity?: number;
     baseCasePrice?: number; basePriceQuantity: number; tierCasePrice?: number; tierMinQuantity?: number;
-    tierPriceQuantity: number; pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; lineTons?: number }>;
+    tierPriceQuantity: number; pricingDetails?: PricingDetails; pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; lineTons?: number }>;
 };
 
 export type RuntimeOrderDraft = {

@@ -4,9 +4,10 @@ import static com.fengyi.ordershow.order.OrderPricingCalculator.samePriceValue;
 
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.DomainException;
+import com.fengyi.ordershow.catalog.ProductService.PriceTierView;
+import java.util.ArrayList;
 import com.fengyi.ordershow.dashboard.DashboardService;
 import java.math.BigDecimal;
-import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,31 +30,40 @@ public class PriceSyncService {
 
   @Transactional
   public int sync(long activityId, long productId, BigDecimal base, Long threshold, BigDecimal tier, String mode) {
+    return sync(activityId, productId, base, threshold == null || tier == null ? null : new PriceTierView(threshold, tier, mode == null ? "WHOLE_ORDER" : mode));
+  }
+
+  @Transactional
+  public int sync(long activityId, long productId, BigDecimal base, PriceTierView rule) {
     orders.lockPricing(activityId);
     var rows = prices.submittedItems(activityId, productId);
     if (rows.isEmpty()) return 0;
-    if (base == null || base.signum() <= 0) {
+    var effectiveBase = com.fengyi.ordershow.common.TierPricing.basePrice(base, rule == null ? java.util.List.of() : rule.tiers());
+    if (effectiveBase == null || effectiveBase.signum() <= 0) {
       throw DomainException.unprocessable("PRODUCT_PRICE_REQUIRED", "已有订单的商品价格必须大于零");
     }
-    int count = 0;
+    var changes = new ArrayList<PriceSyncRepository.Change>();
     for (var row : rows) {
-      var price = OrderPricingCalculator.calculatePrice(base, threshold, tier, mode, row.quantity());
+      var price = OrderPricingCalculator.calculatePrice(base, rule == null ? java.util.List.of() : rule.tiers(), rule == null ? null : rule.pricingMode(), row.quantity());
       if (samePriceValue(price.baseCasePrice(), row.baseCasePrice() == null ? row.casePrice() : row.baseCasePrice())
           && samePriceValue(price.casePriceSnapshot(), row.casePrice())
           && samePriceValue(price.tierCasePrice(), row.tierCasePrice())
           && samePriceValue(price.tierMinQuantity(), row.tierMinQuantity())
           && Objects.equals(price.pricingMode(), row.pricingMode())
-          && samePriceValue(price.lineAmount(), row.lineAmount())) continue;
-
-      orders.snapshotCurrentVersion(row.orderId());
-      prices.updateItem(row.id(), price);
-      prices.updateOrderTotal(row.orderId());
-      orders.refreshDashboardSummary(row.orderId());
-      orders.writeOutbox(activityId, row.orderId(), "ORDER_PRICE_UPDATED", Map.of("orderId", row.orderId()));
-      count++;
+          && samePriceValue(price.lineAmount(), row.lineAmount())
+          && Objects.equals(price.pricingDetails(), row.pricingDetails())) continue;
+      changes.add(new PriceSyncRepository.Change(row, price));
     }
-    if (count > 0) dashboards.refreshFinalSnapshots(activityId);
-    return count;
+    // Chunk network traffic only: every chunk stays in the product save transaction and activity lock.
+    for (int start = 0; start < changes.size(); start += 200) {
+      var batch = changes.subList(start, Math.min(start + 200, changes.size()));
+      var orderIds = batch.stream().map(change -> change.row().orderId()).toList();
+      orders.snapshotCurrentProductVersions(orderIds, productId);
+      prices.applyChanges(activityId, batch);
+      orders.refreshPriceSummaries(batch);
+    }
+    if (!changes.isEmpty()) dashboards.refreshFinalSnapshots(activityId);
+    return changes.size();
   }
 
   @Transactional
@@ -65,7 +75,7 @@ public class PriceSyncService {
     var products = prices.currentProducts(activityId);
     int count = 0;
     for (var product : products) {
-      count += sync(activityId, product.id(), product.casePrice(), product.minQuantity(), product.tierPrice(), product.pricingMode());
+      count += sync(activityId, product.id(), product.casePrice(), product.rule());
     }
     return count;
   }

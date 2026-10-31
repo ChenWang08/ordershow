@@ -1,0 +1,28 @@
+name: order-show-price-tier-test
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: price_tier_test_only
+      MYSQL_DATABASE: order_show_price_tier_test
+    command: ["--innodb-buffer-pool-size=512M", "--innodb-redo-log-capacity=128M"]
+    tmpfs:
+      - /var/lib/mysql
+    cpus: 1.5
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pprice_tier_test_only"]
+      interval: 2s
+      timeout: 2s
+      retries: 40
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+networks:
+  default:
+    name: order-show-price-tier-test

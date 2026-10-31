@@ -1,7 +1,7 @@
+import { calculateTierPrice, legacyTiers, type PriceStep } from "../../domain/tier-pricing";
 import { apiAssetUrl, type H5Product, type RuntimeOrder, type RuntimeActivity } from "../../api";
 import type { ProductImportRow, WhitelistRow } from "../../domain/import-domain";
 import type { ActivityStatus } from "../shared/types";
-import { money } from "../shared/utils";
 
 export type H5Step = "channel" | "region" | "verify" | "order" | "confirm" | "success" | "submitted";
 export type H5OrderStatus = "none" | "submitted" | "withdrawn" | "voided";
@@ -13,6 +13,7 @@ export type Product = {
   line: string;
   spec: string;
   price: number;
+  priceTiers?: PriceStep[];
   tierMinQuantity?: number;
   tierCasePrice?: number;
   tierPricingMode?: "WHOLE_ORDER" | "INCREMENTAL";
@@ -45,6 +46,7 @@ export function productRowToProduct(row: ProductImportRow): Product {
     line: row.line,
     spec: row.spec,
     price: Number(row.casePrice) || 0,
+    priceTiers: row.priceTiers?.map(tier => ({ minQuantity: Number(tier.minQuantity), casePrice: Number(tier.casePrice) })),
     tierMinQuantity: row.priceTierMinQuantity ? Number(row.priceTierMinQuantity) : undefined,
     tierCasePrice: row.priceTierCasePrice ? Number(row.priceTierCasePrice) : undefined,
     tierPricingMode: row.priceTierPricingMode,
@@ -73,6 +75,7 @@ export function runtimeProductToProduct(row: H5Product): Product {
     line: row.productLine || row.categoryName || "未分类",
     spec: row.specification || row.casePack || "",
     price: Number(row.casePrice || 0),
+    priceTiers: row.priceTier?.tiers,
     tierMinQuantity: row.priceTier?.minQuantity,
     tierCasePrice: row.priceTier?.casePrice,
     tierPricingMode: row.priceTier?.pricingMode,
@@ -109,18 +112,11 @@ export function groupByProductLine<T>(items: readonly T[], getLine: (item: T) =>
 }
 
 export function priceBreakdown(product: Product, quantity: number) {
-  if (product.tierMinQuantity == null || product.tierCasePrice == null) {
-    return { amount: quantity * product.price, displayPrice: product.price, baseQuantity: quantity, tierQuantity: 0 };
-  }
-  if (product.tierPricingMode === "INCREMENTAL") {
-    const baseQuantity = Math.min(quantity, product.tierMinQuantity - 1);
-    const tierQuantity = Math.max(0, quantity - baseQuantity);
-    return { amount: baseQuantity * product.price + tierQuantity * product.tierCasePrice,
-      displayPrice: product.price, baseQuantity, tierQuantity };
-  }
-  const applied = quantity >= product.tierMinQuantity;
-  return { amount: quantity * (applied ? product.tierCasePrice : product.price),
-    displayPrice: applied ? product.tierCasePrice : product.price, baseQuantity: applied ? 0 : quantity, tierQuantity: applied ? quantity : 0 };
+  return calculateTierPrice(product.price, product.priceTiers ?? legacyTiers(product.tierMinQuantity, product.tierCasePrice), product.tierPricingMode, quantity);
+}
+
+export function unitPriceText(price: number) {
+  return price.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 }
 
 export function summarizeOrderLineAmounts(items: readonly SubmittedOrderItem[]) {
@@ -138,15 +134,19 @@ export function summarizeOrderLineAmounts(items: readonly SubmittedOrderItem[]) 
 }
 
 export function tierPriceLabel(product: Product, quantity: number) {
+  if (product.priceTiers?.length && (product.priceTiers.length > 1 || product.priceTiers[0].minQuantity === 1)) {
+    if (product.tierPricingMode === "INCREMENTAL" && quantity > 0) return priceBreakdown(product, quantity).segments.map(part => part.quantity + "箱×¥" + unitPriceText(part.casePrice)).join("；");
+    return (product.tierPricingMode === "INCREMENTAL" ? "分段计价：" : "整批价：") + product.priceTiers.map(tier => tier.minQuantity + "箱起¥" + unitPriceText(tier.casePrice)).join("；");
+  }
   if (product.tierMinQuantity == null || product.tierCasePrice == null) return "";
   if (product.tierPricingMode === "INCREMENTAL") {
     return quantity >= product.tierMinQuantity
-      ? `前${product.tierMinQuantity - 1}箱¥${money(product.price)}，超出${quantity - product.tierMinQuantity + 1}箱¥${money(product.tierCasePrice)}`
-      : `第${product.tierMinQuantity}箱起，超出部分¥${money(product.tierCasePrice)}/箱`;
+      ? `前${product.tierMinQuantity - 1}箱¥${unitPriceText(product.price)}，超出${quantity - product.tierMinQuantity + 1}箱¥${unitPriceText(product.tierCasePrice)}`
+      : `第${product.tierMinQuantity}箱起，超出部分¥${unitPriceText(product.tierCasePrice)}/箱`;
   }
   return quantity >= product.tierMinQuantity
     ? `已享满${product.tierMinQuantity}箱整批优惠`
-    : `满${product.tierMinQuantity}箱，整批¥${money(product.tierCasePrice)}/箱`;
+    : `满${product.tierMinQuantity}箱，整批¥${unitPriceText(product.tierCasePrice)}/箱`;
 }
 
 export function h5QuantitySignature(items: Array<{ productId: number; quantity: number }>) {

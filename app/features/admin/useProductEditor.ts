@@ -58,6 +58,7 @@ export function useProductEditor({
       casePrice: positiveProductNumber(nextRow.casePrice), tonCaseFactor: positiveProductNumber(nextRow.conversion), giftBox: nextRow.gift === "是",
       priceTierMinQuantity: numeric(nextRow.priceTierMinQuantity), priceTierCasePrice: numeric(nextRow.priceTierCasePrice),
       priceTierPricingMode: nextRow.priceTierPricingMode,
+      ...(productImportCompleted && nextRow.priceTiers ? { priceTiers: nextRow.priceTiers.map(tier => ({ minQuantity: Number(tier.minQuantity), casePrice: Number(tier.casePrice) })) } : {}),
       visible: true, orderable: positiveProductNumber(nextRow.casePrice) !== null, branchScope: nextRow.branchScope, reason,
       ...(nextRow.dealerScopeEdited ? { dealerScope: (nextRow.dealerScope ?? []).map(s => ({ branchName: s.branchName, customerIds: s.members.map(m => m.customerId) })) } : {}),
     };

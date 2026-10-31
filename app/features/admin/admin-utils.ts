@@ -20,6 +20,7 @@ export function runtimeProductToImportRow(product: RuntimeProduct): ProductImpor
     spec: product.specification || "", casePack: product.casePack || "",
     unitPrice: product.bottlePrice == null ? "" : String(product.bottlePrice),
     casePrice: product.casePrice == null ? "" : String(product.casePrice),
+    priceTiers: product.priceTier?.tiers?.map(tier => ({ minQuantity: String(tier.minQuantity), casePrice: String(tier.casePrice) })),
     priceTierMinQuantity: product.priceTier == null ? "" : String(product.priceTier.minQuantity),
     priceTierCasePrice: product.priceTier == null ? "" : String(product.priceTier.casePrice),
     priceTierPricingMode: product.priceTier?.pricingMode ?? "WHOLE_ORDER",

@@ -64,4 +64,23 @@ class OrderExportServiceTest {
       for (var sheet : workbook) assertThat(sheet.getPhysicalNumberOfRows()).isEqualTo(1);
     }
   }
+
+  @Test
+  void multiTierExportKeepsEverySegmentAndDoesNotSuggestOneDiscountPrice() throws Exception {
+    var pricing = OrderPricingCalculator.calculatePrice(new BigDecimal("300"), List.of(
+        new com.fengyi.ordershow.common.TierPricing.Step(500, new BigDecimal("290")),
+        new com.fengyi.ordershow.common.TierPricing.Step(1000, new BigDecimal("280"))), "INCREMENTAL", 1200);
+    var detail = Map.<String, Object>of("pricing_mode", "INCREMENTAL", "tier_case_price", pricing.tierCasePrice(),
+        "tier_min_quantity", pricing.tierMinQuantity(), "tier_price_quantity", pricing.tierQuantity(),
+        "line_amount", pricing.lineAmount(), "pricing_details", com.fengyi.ordershow.common.TierPricing.encode(pricing.pricingDetails()));
+    when(queries.exportData(7, null, null, null)).thenReturn(new OrderQueryService.ExportData(List.of(), List.of(detail), List.of(), List.of()));
+    try (var workbook = new XSSFWorkbook(new ByteArrayInputStream(exporter.export(7, null, null, null)))) {
+      var item = workbook.getSheetAt(1).getRow(1);
+      assertThat(item.getCell(19).getStringCellValue()).isEqualTo("多档，见计费明细");
+      assertThat(item.getCell(20).getStringCellValue()).isEqualTo("701");
+      assertThat(item.getCell(21).getStringCellValue()).isEqualTo("多档，见计费明细");
+      assertThat(item.getCell(23).getStringCellValue()).isEqualTo("350980.00");
+      assertThat(item.getCell(26).getStringCellValue()).isEqualTo("499箱×300元=149700.00元；500箱×290元=145000.00元；201箱×280元=56280.00元");
+    }
+  }
 }

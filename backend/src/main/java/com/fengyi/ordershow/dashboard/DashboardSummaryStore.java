@@ -2,7 +2,9 @@ package com.fengyi.ordershow.dashboard;
 
 import java.util.Arrays;
 import java.util.Set;
+import java.util.List;
 import java.util.stream.Collectors;
+import java.math.BigDecimal;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -55,6 +57,39 @@ public class DashboardSummaryStore {
           s.dirty=FALSE,s.rebuilt_at=UTC_TIMESTAMP(3) WHERE s.order_id = ?
         """, orderId, orderId);
   }
+
+  /** A price save already holds the activity write lock. Rebuild an entire bounded batch in four statements. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void refreshAll(List<Long> orderIds) {
+    if (!enabled || orderIds.isEmpty()) return;
+    String ids = orderIds.stream().map(id -> "?").collect(Collectors.joining(","));
+    Object[] args = orderIds.toArray();
+    jdbc.update("INSERT INTO order_dashboard_stat(order_id,dirty) SELECT id,TRUE FROM customer_order WHERE id IN (" + ids + ") ON DUPLICATE KEY UPDATE dirty=TRUE", args);
+    jdbc.update("DELETE FROM order_dashboard_product_line_stat WHERE order_id IN (" + ids + ")", args);
+    jdbc.update("INSERT INTO order_dashboard_product_line_stat(order_id,product_line,is_gift_box,line_amount,quantity) SELECT order_id,product_line,is_gift_box,SUM(line_amount),SUM(quantity) FROM order_item WHERE order_id IN (" + ids + ") GROUP BY order_id,product_line,is_gift_box", args);
+    jdbc.update("UPDATE order_dashboard_stat s JOIN (SELECT order_id,COUNT(*) item_count,SUM(line_tons) all_tons,SUM(CASE WHEN ton_case_factor IS NOT NULL OR line_tons>0 THEN line_tons END) eligible_tons FROM order_item WHERE order_id IN (" + ids + ") GROUP BY order_id) v ON v.order_id=s.order_id SET s.item_count=v.item_count,s.all_tons=v.all_tons,s.eligible_tons=v.eligible_tons,s.dirty=FALSE,s.rebuilt_at=UTC_TIMESTAMP(3)", args);
+  }
+
+  /** Price-only writes keep quantities/tons unchanged. Rebuild only missing or dirty summaries. */
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void applyPriceChanges(List<PriceDelta> changes) {
+    if (!enabled) return;
+    var nonzero = changes.stream().filter(change -> change.amount().signum() != 0).toList();
+    if (nonzero.isEmpty()) return;
+    var orderIds = nonzero.stream().map(PriceDelta::orderId).distinct().toList();
+    String ids = orderIds.stream().map(id -> "?").collect(Collectors.joining(","));
+    var rebuild = jdbc.queryForList("SELECT o.id FROM customer_order o LEFT JOIN order_dashboard_stat s ON s.order_id=o.id WHERE o.id IN ("
+        + ids + ") AND (s.order_id IS NULL OR s.dirty=TRUE)", Long.class, orderIds.toArray());
+    jdbc.batchUpdate("""
+        UPDATE order_dashboard_product_line_stat s
+        JOIN order_dashboard_stat state ON state.order_id=s.order_id AND state.dirty=FALSE
+        JOIN order_item i ON i.order_id=s.order_id AND i.product_line <=> s.product_line AND i.is_gift_box=s.is_gift_box
+        SET s.line_amount=s.line_amount+? WHERE i.id=?
+        """, nonzero.stream().map(change -> new Object[]{change.amount(), change.itemId()}).toList());
+    refreshAll(rebuild);
+  }
+
+  public record PriceDelta(long itemId, long orderId, BigDecimal amount) {}
 
   /** scoped_orders is supplied by each query: never aggregate unrelated activities. */
   static String tonsSource(boolean summary, boolean tons) {

@@ -1464,6 +1464,25 @@ paths:
                 branchScope:
                   type: string
                   description: 分公司限制，多个分公司用顿号或逗号分隔；留空表示全部分公司可订
+                casePrice:
+                  $ref: '#/components/schemas/Decimal'
+                priceTiers:
+                  type: array
+                  maxItems: 101
+                  description: 导入成功后手动设置的完整阶梯。第一档minQuantity=1、价格独立于普通casePrice，后续最多100档、起点递增且价格递减。旧数组不含第一档时以普通箱价补足。空数组表示不启用阶梯，Excel格式不增加字段。
+                  items:
+                    $ref: '#/components/schemas/ProductPriceStep'
+                priceTierPricingMode:
+                  type: string
+                  enum: [WHOLE_ORDER, INCREMENTAL]
+                  default: WHOLE_ORDER
+                priceTierMinQuantity:
+                  type: [integer, 'null']
+                  description: 兼容旧单档请求；有 priceTiers 时以数组为准。
+                priceTierCasePrice:
+                  oneOf:
+                    - $ref: '#/components/schemas/Decimal'
+                    - type: 'null'
                 reason:
                   type: string
                   maxLength: 500
@@ -1481,6 +1500,7 @@ paths:
       operationId: updateActivityProduct
       tags: [Catalog]
       summary: 紧急修改单条商品
+      description: 请求字段直接放在顶层。价格变化时同步更新本活动该商品的有效订单及统计，完成后才返回成功；任一步失败整体回滚。同活动下单可能等待该保存事务结束。H5 不轮询商品价格，提交时使用服务器最新规则。
       security:
         - adminCookie: []
       parameters:
@@ -1498,21 +1518,48 @@ paths:
           application/json:
             schema:
               type: object
-              required: [reason, changes]
               properties:
                 reason:
                   type: string
                   maxLength: 500
-                changes:
-                  type: object
-                  properties:
-                    description:
-                      type: [string, 'null']
-                      description: 商品说明，H5 商品详情展示；可为空
-                    branchScope:
-                      type: string
-                      description: 分公司限制，多个分公司用顿号或逗号分隔；留空表示全部分公司可订
-                  additionalProperties: true
+                  description: 活动开始后商品编辑器必填；下单范围等修改由服务端校验。
+                description:
+                  type: [string, 'null']
+                  description: 商品说明，H5 商品详情展示；传空字符串清除，省略保持原值。
+                branchScope:
+                  type: string
+                  description: 分公司限制，多个分公司用顿号或逗号分隔；留空表示全部分公司可订
+                casePrice:
+                  oneOf:
+                    - $ref: '#/components/schemas/Decimal'
+                    - type: 'null'
+                casePriceSet:
+                  type: boolean
+                  description: true时更新普通箱价；false或省略时保留。已开启独立阶梯时不修改第一档，也不触发订单重算。
+                priceTiers:
+                  type: array
+                  maxItems: 101
+                  description: 完整替换包含独立第一档的阶梯，省略时保留现有规则，空数组清除并恢复普通箱价。第一档minQuantity=1，后续起点递增且价格递减，所有档位共用一种模式。兼容不含第一档的旧数组。
+                  items:
+                    $ref: '#/components/schemas/ProductPriceStep'
+                priceTierPricingMode:
+                  type: string
+                  enum: [WHOLE_ORDER, INCREMENTAL]
+                  default: WHOLE_ORDER
+                  description: 替换档位时使用；更改模式需同时提交完整 priceTiers。
+                priceTierSet:
+                  type: boolean
+                  description: 兼容旧单档更新标识；true 且未传数组时使用旧门槛/价格，两项均空时清除。传入 priceTiers 时无需该标识。
+                priceTierMinQuantity:
+                  type: [integer, 'null']
+                  minimum: 2
+                  maximum: 999999
+                  description: 旧单档起始箱数；有 priceTiers 时以数组为准。
+                priceTierCasePrice:
+                  oneOf:
+                    - $ref: '#/components/schemas/Decimal'
+                    - type: 'null'
+              additionalProperties: true
       responses:
         '200':
           description: 修改后的商品
@@ -3453,19 +3500,67 @@ components:
                 type: integer
     ProductPriceTier:
       type: object
-      description: 商品阶梯优惠。WHOLE_ORDER 达到门槛后全部箱数按优惠价；INCREMENTAL 从门槛箱开始仅对该箱及超出部分按优惠价。
-      required: [minQuantity, casePrice, pricingMode]
+      description: 商品多级阶梯价格。tiers包含从1箱起的独立第一档，开启后不使用普通casePrice。WHOLE_ORDER全部箱数使用最高已达档位；INCREMENTAL各段分别计费。旧minQuantity/casePrice返回第一优惠档，仅有第一档时返回该档。
+      required: [minQuantity, casePrice, pricingMode, tiers]
       properties:
         minQuantity:
           type: integer
           format: int64
-          minimum: 2
+          minimum: 1
           maximum: 999999
         casePrice:
           $ref: '#/components/schemas/Decimal'
         pricingMode:
           type: string
           enum: [WHOLE_ORDER, INCREMENTAL]
+        tiers:
+          type: array
+          minItems: 1
+          maxItems: 101
+          items:
+            $ref: '#/components/schemas/ProductPriceStep'
+    ProductPriceStep:
+      type: object
+      required: [minQuantity, casePrice]
+      properties:
+        minQuantity:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 999999
+          description: 起始箱数，包含该箱；第一档固定为1，下一档起始前一箱为本档结束。兼容旧规则从优惠门槛起的数组。
+        casePrice:
+          $ref: '#/components/schemas/Decimal'
+          description: 大于零且最多四位小数；第一档价格独立于普通箱价，后续档位低于上一档。
+    OrderPricingDetails:
+      type: object
+      description: 当前订单或提交版本自己的完整阶梯快照及实际计费段，不依赖当前商品目录。无阶梯或旧记录可以为空；各段金额按累计舍入分配，合计等于 lineAmount。
+      required: [tiers, segments]
+      properties:
+        tiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductPriceStep'
+        segments:
+          type: array
+          items:
+            type: object
+            required: [minQuantity, quantity, casePrice, amount]
+            properties:
+              minQuantity:
+                type: integer
+                format: int64
+              maxQuantity:
+                type: [integer, 'null']
+                format: int64
+                description: 分段计价时为该档上界；最后一档及整批计价为空。
+              quantity:
+                type: integer
+                format: int64
+              casePrice:
+                $ref: '#/components/schemas/Decimal'
+              amount:
+                $ref: '#/components/schemas/Decimal'
     SubmitOrderItem:
       type: object
       required: [productId, quantity]
@@ -3639,7 +3734,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Decimal'
             - type: 'null'
-          description: 下单时的阶梯优惠箱价快照。
+          description: 兼容单档的阶梯箱价字段；多档明细以 pricingDetails.segments 为准，不可将此价乘以所有优惠箱数推导总额。
         tierMinQuantity:
           type: [integer, 'null']
           format: int64
@@ -3647,11 +3742,15 @@ components:
         tierPriceQuantity:
           type: [integer, 'null']
           format: int64
-          description: 按阶梯优惠箱价计费的箱数。
+          description: 所有优惠档箱数合计；各档实际箱价和金额读取 pricingDetails.segments。
         pricingMode:
           type: [string, 'null']
           enum: [WHOLE_ORDER, INCREMENTAL, null]
           description: 下单时的计价模式快照。
+        pricingDetails:
+          oneOf:
+            - $ref: '#/components/schemas/OrderPricingDetails'
+            - type: 'null'
         lineAmount:
           $ref: '#/components/schemas/Decimal'
         tonCaseFactor:
