@@ -3,6 +3,7 @@ package com.fengyi.ordershow.dashboard;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.fengyi.ordershow.activity.ActivityService;
@@ -19,12 +20,22 @@ class PageStatisticsControllerTest {
     var pages = mock(PageStatisticsService.class);
     var activities = mock(ActivityService.class);
     var events = mock(RealtimeEventService.class);
-    var mvc = MockMvcBuilders.standaloneSetup(new DashboardController(pages, activities, events)).build();
+    var rankings = mock(RankingService.class);
+    var mvc = MockMvcBuilders.standaloneSetup(new DashboardController(pages, activities, events, rankings)).build();
     mvc.perform(get("/screen/activities/example/ranking").param("customerType", "GENERAL")
         .param("regionCode", "NORTH").param("metric", "TONS")).andExpect(status().isOk());
     mvc.perform(get("/screen/activities/example/dashboard")).andExpect(status().isOk());
     mvc.perform(get("/screen/activities/example/reports/OVERALL")).andExpect(status().isOk());
-    verify(pages).ranking("example", "GENERAL", "NORTH", "TONS");
+    verify(rankings).ranking("example", new RankingFilter("GENERAL", "NORTH", false, null, false, null, false, DashboardService.RankingMetric.TONS));
+    mvc.perform(get("/screen/activities/example/ranking/options")).andExpect(status().isOk());
+    verify(rankings).options("example");
+    mvc.perform(get("/screen/activities/example/ranking").param("varieties", "品种,A", "品种B"))
+        .andExpect(status().isOk());
+    verify(rankings).ranking("example", new RankingFilter(null, null, false, null, false, java.util.List.of("品种,A", "品种B"), false, DashboardService.RankingMetric.AMOUNT));
+    mvc.perform(post("/screen/activities/example/ranking").contentType("application/json")
+        .content("{\"productLine\":\"项目A\",\"varieties\":[\"品种,A\",\"品种B\"],\"includeUnspecifiedVariety\":true,\"metric\":\"TONS\"}"))
+        .andExpect(status().isOk());
+    verify(rankings).ranking("example", new RankingFilter(null, null, false, "项目A", false, java.util.List.of("品种,A", "品种B"), true, DashboardService.RankingMetric.TONS));
     verify(pages).dashboard("example");
     verify(pages).reports("example", "OVERALL");
     verifyNoMoreInteractions(pages);

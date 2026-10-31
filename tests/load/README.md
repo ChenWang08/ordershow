@@ -135,3 +135,15 @@ docker compose -p order-show-load -f docker-compose.load.yml down --volumes
 
 参考：[k6阈值](https://grafana.com/docs/k6/latest/using-k6/thresholds/)、
 [优雅停止](https://grafana.com/docs/k6/latest/using-k6/scenarios/concepts/graceful-stop/)。
+
+## 直播订货排行对照（2026-10-31）
+
+`ranking-event-runner.mjs` 使用固定隔离项目 `order-show-load-ranking`、端口 8580、输出 `outputs/load-ranking`，不接受业务地址。先将调整前源码的临时 JAR 保存在 `work/ranking-before/backend/target/order-show-backend-0.1.0.jar`，当前源码构建到 `backend/target/order-show-backend-0.1.0.jar`，然后在仓库根目录运行：
+
+```powershell
+node tests/load/ranking-event-runner.mjs
+```
+
+脚本只重建该项目的专属测试数据库；每轮相同 3000 客户、初始 2500 单 × 200 商品及历史版本。100 个浏览会话保留活动信息 SSE，带浏览与草稿间隔；每分钟 100/200 次新单持续两分钟，再叠加 20 个客户同时开始下单流程和间隔排行查询。集中下单时每人先保存草稿，再正式提交，正式提交请求有短暂先后。顺序旧100、新100、新200、旧200，两版本均保留原汇总。每轮核对头/明细/版本/原汇总，停止写入后分别采样排行；结束或失败时删除本项目临时容器和专属卷，保留报告。
+
+此套件记录数据正确性、HTTP 错误、提交与排行延迟，不套用上方其他历史套件的延迟门槛。会话和历史订单通过合成 SQL 准备，不包括电话登录、真实浏览器渲染、直播媒体或生产网络；不能把结果当成生产容量承诺。详见[本轮验证记录](../../docs/testing/ranking-on-demand-2026-10-31.md)。

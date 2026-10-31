@@ -475,6 +475,7 @@ public class ActivityService {
         """, UtcTime.database(endsAt), UtcTime.database(eventEndsAt), admin.id(), id, expectedVersion);
     requireChanged(changed);
     jdbc.update("DELETE FROM activity_dashboard_snapshot WHERE activity_id = ?", id);
+    jdbc.update("DELETE FROM activity_ranking_snapshot WHERE activity_id = ?", id);
     jdbc.update("""
         INSERT INTO audit_log(activity_id, actor_type, admin_user_id, action_code, object_type, object_id,
           reason, before_json, after_json, result, trace_id, occurred_at, actor_identity_snapshot, actor_role_snapshot)

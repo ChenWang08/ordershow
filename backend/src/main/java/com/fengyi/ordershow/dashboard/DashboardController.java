@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
@@ -19,17 +21,37 @@ public class DashboardController {
   private final PageStatisticsService dashboards;
   private final ActivityService activities;
   private final RealtimeEventService events;
+  private final RankingService rankings;
 
-  public DashboardController(PageStatisticsService dashboards, ActivityService activities, RealtimeEventService events) {
+  public DashboardController(PageStatisticsService dashboards, ActivityService activities, RealtimeEventService events, RankingService rankings) {
     this.dashboards = dashboards; this.activities = activities; this.events = events;
+    this.rankings = rankings;
   }
 
   @GetMapping("/ranking")
   ApiResponse<DashboardService.Dashboard> ranking(@PathVariable String activityCode,
       @RequestParam(required = false) String customerType, @RequestParam(required = false) String regionCode,
       @RequestParam(required = false) String metric,
+      @RequestParam(defaultValue = "false") boolean regionUnassigned,
+      @RequestParam(required = false) String productLine,
+      @RequestParam(defaultValue = "false") boolean productLineUnassigned,
+      @RequestParam org.springframework.util.MultiValueMap<String, String> parameters,
+      @RequestParam(defaultValue = "false") boolean includeUnspecifiedVariety,
       HttpServletRequest request) {
-    return ApiResponse.of(dashboards.ranking(activityCode, customerType, regionCode, metric), TraceFilter.id(request));
+    return ApiResponse.of(rankings.ranking(activityCode, new RankingFilter(customerType, regionCode, regionUnassigned,
+        productLine, productLineUnassigned, parameters.get("varieties"), includeUnspecifiedVariety, DashboardService.RankingMetric.from(metric))), TraceFilter.id(request));
+  }
+
+  @GetMapping("/ranking/options")
+  ApiResponse<RankingStore.Options> rankingOptions(@PathVariable String activityCode, HttpServletRequest request) {
+    return ApiResponse.of(rankings.options(activityCode), TraceFilter.id(request));
+  }
+
+  /** Read-only equivalent for selections too long for a URL. */
+  @PostMapping("/ranking")
+  ApiResponse<DashboardService.Dashboard> rankingQuery(@PathVariable String activityCode,
+      @RequestBody RankingFilter filter, HttpServletRequest request) {
+    return ApiResponse.of(rankings.ranking(activityCode, filter), TraceFilter.id(request));
   }
 
   @GetMapping("/dashboard")

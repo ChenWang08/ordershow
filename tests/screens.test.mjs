@@ -161,7 +161,7 @@ for (const metric of ["AMOUNT", "TONS"]) {
         companies: Array.from({ length: count }, (_, index) => ({ rank: index + 1, name: `排行客户${index + 1}`, amount: 1000 - index, tons: count - index })),
       };
       const { RankingBoard } = loadModule("app/features/screens/RankingBoard.tsx", {
-        "./useManualScreenData": { useManualScreenData: () => ({ data: dashboard, parameters: { channel: "ALL", metric }, error: "", refreshing: false, refreshedAt: null, refresh: () => {} }) },
+        "./useManualScreenData": { useManualScreenData: (_id, loader) => ({ data: loader.name === "readOptions" ? { customers: [], products: [] } : dashboard, parameters: { customerType: "ALL", region: "all", productLine: "all", varieties: null, metric }, error: "", refreshing: false, refreshedAt: null, refresh: () => {} }) },
         "../../api": {},
       });
       const html = renderToStaticMarkup(React.createElement(RankingBoard, { activity: { ...activity, status: "FINISHED" } }));
@@ -212,4 +212,19 @@ test("all public statistics requests forward cancellation without changing URLs 
   assert.equal(await api.loadActivityOverview(123, controller.signal), data);
   assert.equal(calls[3].path, "/admin/activities/123/overview");
   assert.ok(calls.every(call => call.init.signal === controller.signal));
+});
+
+test("ranking sends large multi-variety selections as a read-only JSON query to avoid URL limits", async () => {
+  const calls = [];
+  const api = loadModule("app/services/api/dashboard.ts", {
+    "./client": { api: async (path, init) => { calls.push({ path, init }); return { data: {} }; } },
+    "./context": { activeActivityPath: () => "fixture" },
+  }, { URLSearchParams });
+  const filters = { varieties: Array.from({ length: 200 }, (_,i) => `品种,${i}长名称`), includeUnspecifiedVariety: true, metric: "TONS" };
+  const controller = new AbortController();
+  await api.loadDashboard(filters, controller.signal);
+  assert.equal(calls[0].path, "/screen/activities/fixture/ranking");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].init.body), filters);
+  assert.equal(calls[0].init.signal, controller.signal);
 });

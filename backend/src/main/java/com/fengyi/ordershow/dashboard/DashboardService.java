@@ -25,6 +25,10 @@ public class DashboardService {
   private final ActivityService activities;
   private final ObjectMapper json;
   private DashboardSummaryStore summaries;
+  private RankingStore ranking;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void setRankingStore(RankingStore ranking) { this.ranking = ranking; }
 
   public enum RankingMetric {
     AMOUNT, TONS;
@@ -363,6 +367,7 @@ public class DashboardService {
       }
     }
     replaceSnapshot(activity.id(), "REPORT", liveReport(activity, "FINAL"));
+    if (ranking != null) ranking.capture(activity.id());
   }
 
   private String rankingKey(RankingMetric metric, String customerType, String regionCode) {

@@ -189,9 +189,6 @@ final class ImportWorkbookReader {
     }
     if (parsed.isEmpty()) throw DomainException.unprocessable("WHITELIST_EMPTY", "Excel 中没有找到白名单数据行");
     boolean mixedCustomerType = hasTypedRows && hasUnspecifiedRows;
-    if (!mixedCustomerType && !hasTypedRows && parsed.stream().anyMatch(row -> !text(row.data().get("regionName")).isBlank())) {
-      throw DomainException.unprocessable("WHITELIST_REGION_MODE_INVALID", "客户类型全部为空时，大区也必须全部为空");
-    }
     int warnings = 0, blocking = 0;
     for (ParsedSensitiveRow row : parsed) {
       String phone = text(row.sensitive().get("dealerPhone"));

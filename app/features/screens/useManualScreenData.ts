@@ -12,13 +12,14 @@ type ScreenState<T, P> = {
   refreshedAt: string | null;
 };
 
-/** Load once per activity; subsequent reads are explicit and share any in-flight request. */
+/** Optional first load; subsequent reads are explicit and share any in-flight request. */
 export function useManualScreenData<T, P>(
   activityId: number | null,
   loader: (parameters: P, signal: AbortSignal) => Promise<T>,
   initialParameters: P,
   failureMessage: string,
   enabled = true,
+  autoLoad = true,
 ) {
   const [state, setState] = useState<ScreenState<T, P>>({
     activityId: null, data: null, parameters: null, error: "", refreshing: false, refreshedAt: null,
@@ -59,13 +60,16 @@ export function useManualScreenData<T, P>(
     };
     sessionRef.current = session;
     // Defer the initial read so a discarded mount cannot start a redundant request.
-    void Promise.resolve().then(() => session.read(initialParameters));
+    if (autoLoad) void Promise.resolve().then(() => session.read(initialParameters));
+    else void Promise.resolve().then(() => {
+      if (active && !running) setState({ activityId, data: null, parameters: null, error: "", refreshing: false, refreshedAt: null });
+    });
     return () => {
       active = false;
       controller.abort();
       if (sessionRef.current === session) sessionRef.current = null;
     };
-  }, [activityId, enabled, loader, initialParameters, failureMessage]);
+  }, [activityId, enabled, loader, initialParameters, failureMessage, autoLoad]);
 
   const refresh = useCallback((parameters: P = initialParameters) => {
     const session = sessionRef.current;
@@ -76,7 +80,7 @@ export function useManualScreenData<T, P>(
     data: current ? state.data : null,
     parameters: current ? state.parameters : null,
     error: current ? state.error : "",
-    refreshing: enabled && activityId !== null && (!current || state.refreshing),
+    refreshing: enabled && activityId !== null && (current ? state.refreshing : autoLoad),
     refreshedAt: current ? state.refreshedAt : null,
     refresh,
   };

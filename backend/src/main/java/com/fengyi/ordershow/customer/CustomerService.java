@@ -130,7 +130,7 @@ public class CustomerService {
     if (replaceConfirmerPhone && !confirmerPhone.isEmpty() && confirmerPhone.length() != 11) {
       throw DomainException.badRequest("CONFIRMER_PHONE_INVALID", "分公司确认人手机号必须为 11 位");
     }
-    String regionCode = "GENERAL".equals(current.customerType()) ? regions.resolveCode(activityId, request.regionCode()) : null;
+    String regionCode = regions.resolveCode(activityId, request.regionCode());
     try {
       int changed = jdbc.update("""
           UPDATE activity_customer SET region_code = ?, branch_name = ?, normalized_branch_name = ?, dealer_short_name = ?,
@@ -174,7 +174,7 @@ public class CustomerService {
     if (!confirmerPhone.isEmpty() && confirmerPhone.length() != 11) {
       throw DomainException.badRequest("CONFIRMER_PHONE_INVALID", "分公司确认人手机号必须为 11 位");
     }
-    String regionCode = "GENERAL".equals(customerType) ? regions.resolveCode(activityId, request.regionCode()) : null;
+    String regionCode = regions.resolveCode(activityId, request.regionCode());
     VersionSource source = currentSource(activityId, "WHITELIST");
     try {
       String branchName = request.branchName() == null ? "" : request.branchName().trim();
