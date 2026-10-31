@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { getActiveActivityCode, subscribeActiveActivityCode, loadPublicLottery, type RuntimeActivity } from "../../api";
+import { getActiveActivityCode, subscribeActiveActivityCode, type RuntimeActivity } from "../../api";
 import { subscribeActivityInfo, type ActivityInfoConnectionState } from "../../services/api/activity-info-stream";
-import { initialLotteryRounds, mapLotteryRule, type LotteryRound } from "../lottery/Lottery";
+import { initialLotteryRounds, type LotteryRound } from "../lottery/Lottery";
 import type { ActivityStatus } from "../shared/types";
 import { runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
 
@@ -57,17 +57,6 @@ export function useActivityRuntime(adminActivity?: RuntimeActivity) {
     });
     return () => { active = false; unsubscribe?.(); };
   }, [adminActivityId, publicActivityCode, applyActivity]);
-  useEffect(() => {
-    if (adminActivityId != null) return;
-    let active = true;
-    // Lottery failure must not prevent the independent activity snapshot from displaying.
-    void Promise.resolve().then(() => active ? loadPublicLottery() : undefined).then(lottery => {
-      if (!active || !lottery) return;
-      const rule = lottery.rules.find(item => item.status === "PUBLISHED") ?? lottery.rules[0];
-      if (rule) setLotteryRounds(mapLotteryRule(rule));
-    }).catch(() => undefined);
-    return () => { active = false; };
-  }, [adminActivityId, publicActivityCode]);
   const runtimeMessage = runtimeConnectionState === "unavailable" ? "活动不存在或已不可用，请检查活动链接。"
     : runtimeConnectionState === "unsupported" ? "当前浏览器无法同步活动信息，请使用新版浏览器打开。"
     : runtimeConnectionState === "connecting" ? runtimeActivity ? "活动信息正在重新同步，当前显示上次资料。" : "正在加载活动信息…" : "";

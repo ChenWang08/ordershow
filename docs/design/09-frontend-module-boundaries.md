@@ -6,13 +6,26 @@
 
 | 模块 | 职责 |
 | --- | --- |
-| `features/workspace/useActivityRuntime` | 活动元数据、活动状态轮询、公共抽奖信息 |
+| `features/workspace/useActivityRuntime` | 活动元数据与独立公共活动 SSE；后台按需更新，不加载抽奖资料 |
 | `features/workspace/useImportWorkspaceState` | 商品、白名单、到场三类导入工作区，分别保存行、状态与元信息 |
 | `features/workspace/ActivityWorkspace` | 活动与导入上下文及其生命周期 |
 | `features/workspace/SurfaceConnections` | 后台、H5、抽奖页面与共享状态的连接 |
 | `features/workspace/useAdminWorkspaceProps` | 将共享工作区映射到后台模块所需字段；根页面不再传递大批参数 |
 
 综合预览页需要保留 H5 挂载，切换页签时只隐藏它。后台导入结果仍按原规则供 H5 和抽奖读取，不能因组件拆分把共享数据改成互不关联的副本。独立路由只挂载对应页面。活动切换仍使用既有路由流程，进入新工作区时重新初始化；后台工作区 key 包含账号 ID、活动 ID 和排序后的权限集合；权限变化时重建工作区，避免继续显示已失去权限的旧模块数据。
+
+## H5 草稿与抽奖读取
+
+| 模块 | 职责 |
+| --- | --- |
+| `features/h5/h5-local-draft` | 本机存储、格式/过期校验、活动/客户隔离、订单/申请基准；不发送 HTTP |
+| `features/h5/useH5Draft` | 内存快照、800ms 本机保存、隐藏/卸载补存、恢复与失效提示；存储失败保留本页内存 |
+| `features/h5/useH5OrderFlow` | 身份与购物车流程，先取得最新订单/申请再恢复本机草稿，确认成功后清理；不调用旧 `order-draft` |
+| `features/h5/useH5OrderSync` | 订单/申请按需读取、15 秒普通刷新冷却、在途合并及操作前强制核对 |
+| `features/h5/h5-submission` | 正式提交幂等与结果恢复，仍使用独立的 `sessionStorage` 命令记录，与本机购物车分开 |
+| `features/lottery/Lottery` | 抽奖页面自己加载轮次和已保存结果，公共活动/H5 不预加载 |
+
+本机存储实例属于当前 H5 组件，不用全局客户单例。恢复只发生在验证身份并核对当前订单/申请后，编辑中不响应其他标签页存储变化去替换购物车。待审核申请可继续编辑并保存本机草稿。关闭/隐藏不再补发草稿 HTTP，最终确认直接调用正式订单或变更申请接口。旧后台接口仅兼容旧客户端，不迁移旧草稿。
 
 ## 后台组件
 
@@ -24,7 +37,7 @@
 
 ## 成员账号与模块授权
 
-- `AdminGateway` 处理统一登录和身份同步，识别三类角色；每 15 秒、重新聚焦及收到模块权限拒绝时刷新身份。
+- `AdminGateway` 处理统一登录和身份同步，识别三类角色；进入、重新聚焦及收到模块权限拒绝时按需检查身份，不进行 15 秒轮询。
 - `permissions.ts` 定义六项权限、导航和管理员判断；`AdminLayout` 只显示允许的模块，管理员始终可进入成员管理，即使本部门尚无活动。
 - `MemberAdminPanel` 提供成员列表、新增、编辑权限、密码重置和启停。超级管理员可选择部门，部门管理员固定在本部门。
 - `useAdminInitialization` 只加载已授权模块明细；`useModuleContext` 获取不含个人明细的客户/到场计数、类型模式和发布状态，支持模块独立使用。

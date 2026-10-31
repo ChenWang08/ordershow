@@ -18,12 +18,11 @@ function harness(initial, resolve = async () => login("GENERAL")) {
       ApiError: class extends Error {}, apiAssetUrl: x => x,
       verifyPhone: async (...args) => { requests.push(args); return resolve(...args); },
       loadH5Products: async () => { reads.push("products"); return []; },
-      loadH5Order: async () => null, loadH5OrderDraft: async () => null,
+      loadH5Order: async () => null,
     },
     "./h5-submission": { createH5SubmissionManager: () => ({ recover: async () => null }) },
-    "./useH5Draft": { useH5Draft: () => ({ setDraftReady() {}, draftMessage: "", setDraftMessage() {}, draftOwnerIdRef: { current: null },
-      lastSavedDraftSignatureRef: { current: "" }, latestDraftSnapshotRef: { current: null }, draftSaveTimerRef: { current: null },
-      draftSaveChainRef: { current: Promise.resolve() }, queueDraftSync: async () => {} }) },
+    "./useH5Draft": { useH5Draft: () => ({ draftMessage: "", setDraftMessage() {}, restoreDraft: () => null,
+      flushDraft: () => true, discardDraft: () => true, resetDraft: () => true, hasDraftChanges: () => false }) },
   });
   const render = function useTestRender() { cursor = 0; return useH5OrderFlow({ activityStatus: "running", runtimeActivity: activity }); };
   return { render, requests, reads, update: value => { activity = value; } };

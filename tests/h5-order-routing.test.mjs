@@ -8,7 +8,7 @@ const { createH5SubmissionManager } = loadModule("app/features/h5/h5-submission.
 }, { setTimeout, clearTimeout, AbortController });
 const item = (productId, quantity) => ({ productId, quantity, materialName: "商品" + productId, casePrice: 10, lineAmount: quantity * 10 });
 async function harness(status = "SUBMITTED", pending = null, activity = { code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] }) {
-  let cursor = 0, fail = false;
+  let cursor = 0, fail = false, customerId = 2;
   const slots = [], calls = [], storage = new Map();
   const order = { id: 1, activityCustomerId: 2, orderNo: "ORDER1", status, currentVersion: 2, lockVersion: 4,
     items: [item(1, 10)], operations: [], lastModifiedAt: "2026-10-10T01:00:00Z" };
@@ -17,13 +17,13 @@ async function harness(status = "SUBMITTED", pending = null, activity = { code: 
     verifyPhone: async (phone, selectedType) => {
       calls.push(["verify", phone, selectedType]);
       const type = selectedType || activity.availableCustomerTypes?.[0] || "ALL";
-      return { selectionRequired: false, csrfToken: "test", customer: { activityId: 1, customerId: type === "SPECIAL" ? 3 : 2,
+      customerId = type === "SPECIAL" ? 3 : 2;
+      return { selectionRequired: false, csrfToken: "test", customer: { activityId: 1, customerId,
         customerType: type, regionCode: type === "GENERAL" ? "NORTH" : null, dealerFullName: "测试客户" } };
     },
     loadH5Products: async () => [1, 2].map(id => ({ id, materialName: "商品" + id, images: [], casePrice: 10, customerType: "ALL", rebateStatus: "ALL", orderable: true })),
-    loadH5Order: async () => order,
+    loadH5Order: async () => ({ ...order, activityCustomerId: customerId }),
     loadH5OrderChangeRequest: async () => pending ? { orderId: 1, baseVersion: 2, currentVersion: 2, ...pending } : null,
-    loadH5OrderDraft: async () => null,
     createH5OrderChangeRequest: async (...args) => { calls.push(["review", ...args]); return { id: 8, status: "PENDING", requestType: args[3], items: args[4] }; },
     saveH5Order: async (...args) => {
       calls.push(["direct", ...args]);
@@ -31,9 +31,8 @@ async function harness(status = "SUBMITTED", pending = null, activity = { code: 
       return { ...order, status: "SUBMITTED", currentVersion: 3, lockVersion: 5, items: args[1].map(i => item(i.productId, i.quantity)) };
     },
   };
-  const draft = { setDraftReady() {}, draftMessage: "", setDraftMessage() {}, draftOwnerIdRef: { current: null },
-    lastSavedDraftSignatureRef: { current: "" }, latestDraftSnapshotRef: { current: null }, draftSaveTimerRef: { current: null },
-    draftSaveChainRef: { current: Promise.resolve() }, queueDraftSync: async () => {} };
+  const draft = { draftMessage: "", setDraftMessage() {}, restoreDraft: () => null,
+    flushDraft: () => true, discardDraft: () => true, resetDraft: () => true, hasDraftChanges: () => false };
   const { useH5OrderFlow } = loadModule("app/features/h5/useH5OrderFlow.ts", {
     "../../api": api,
     "./useH5Draft": { useH5Draft: () => draft },
@@ -136,29 +135,6 @@ test("returning home clears the old identity and type confirmation selects the n
     assert.deepEqual(h.calls.at(-1), ["verify", "13800000001", type]);
     assert.equal(h.render().step, "submitted");
   }
-});
-
-test("switching waits for draft completion and blocks overlapping verification", async () => {
-  const h = await harness("SUBMITTED", null, mixedActivity);
-  let release;
-  h.draft.draftSaveChainRef.current = new Promise(resolve => { release = resolve; });
-  const switching = h.render().resetEntry("特渠专业客户");
-  await h.render().verifyIdentity();
-  assert.equal(h.calls.length, 0);
-  assert.notEqual(h.render().runtimeOrder, null);
-  release(); await switching;
-  assert.equal(h.render().runtimeOrder, null);
-  assert.equal(h.render().channel, "特渠专业客户");
-  assert.equal(h.draft.latestDraftSnapshotRef.current, null);
-  assert.equal(h.draft.draftOwnerIdRef.current, null);
-});
-
-test("a failed draft flush keeps the original customer and order", async () => {
-  const h = await harness();
-  h.draft.latestDraftSnapshotRef.current = { customerId: 2, signature: "unsaved" };
-  await h.render().resetEntry("特渠专业客户");
-  assert.notEqual(h.render().runtimeOrder, null);
-  assert.match(h.render().runtimeMessage, /草稿尚未保存/);
 });
 
 test("single-type and unspecified activities retain their direct entry policy after reset", async () => {

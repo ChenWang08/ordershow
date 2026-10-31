@@ -32,7 +32,9 @@ const server = await createServer({ root, configFile: false, plugins: [react(), 
       activityId: 1, activityCode: "ACTIVITY-TEST", customerId: 1, customerType: "GENERAL", dealerFullName: "合成经销商", phoneMasked: "139****0001" } };
     else if (path.endsWith("/products")) data = [{ id: 1, materialName: "合成商品", casePrice: 10, images: [],
       customerType: "ALL", rebateStatus: "ALL", orderable: true, dataStatus: "VALID" }];
-    else if (path.endsWith("/order") || path.endsWith("/order-draft")) data = null;
+    else if (path.endsWith("/order")) data = null;
+    else if (path.endsWith("/ranking/options")) data = { customers: [{ customerType: "GENERAL", regionCode: null, regionName: "未填写" }],
+      products: [{ productLine: "调味品", varietyName: "合成品种" }] };
     else if (path.endsWith("/ranking")) data = { activityId: 1, status: "ACTIVE", totals: { total_amount: 0, total_quantity: 0, total_tons: 0, order_count: 0 },
       companies: [], branches: [], productLines: [], generatedAt: new Date().toISOString() };
     else { res.statusCode = 500; return res.end(JSON.stringify({ message: `Unexpected synthetic request: ${path}` })); }
@@ -70,9 +72,10 @@ try {
     await page.getByText("更新后的活动名称", { exact: true }).first().waitFor({ state: "attached" });
     assert.equal(await quantity.inputValue(), "7"); assert.equal(dataReads(), initial);
 
-    // The ranking's first load remains normal; subsequent activity messages cannot refresh statistics.
+    // Ranking statistics load on confirmation; later activity messages cannot refresh them.
     await page.locator(".surface-tabs button").filter({ hasText: "订货排行" }).click();
     await page.getByRole("button", { name: /手动刷新/ }).waitFor();
+    await page.getByRole("button", { name: "确认查询", exact: true }).click();
     await page.waitForFunction(() => document.querySelector(".screen-refresh-controls")?.textContent?.includes("最近")
       || document.querySelector(".ranking-board")?.textContent?.includes("上次"));
     const rankingReads = count("/ranking");
@@ -93,6 +96,7 @@ try {
     const reconnect = count("/events");
     await page.clock.fastForward(2500);
     await page.waitForFunction(() => !document.querySelector(".activity-sync-status"));
+    assert.equal(count("/lottery"), 0); assert.equal(count("/order-draft"), 0);
     assert.equal(count("/events"), reconnect + 1);
     assert.equal(count("/ranking"), rankingReads); assert.equal(await quantity.inputValue(), "7");
 
@@ -104,6 +108,8 @@ try {
     await page.getByText("隐藏期间更新的活动", { exact: true }).first().waitFor({ state: "attached" });
     assert.equal(count("/events"), hidden + 1); assert.equal(await quantity.inputValue(), "7");
     assert.equal(calls.filter(call => call.path === "/api/v1/public/activities/ACTIVITY-TEST").length, 0);
+    assert.equal(count("/lottery"), 0, "H5 and public activity initialization must not load lottery data");
+    assert.equal(count("/order-draft"), 0, "Cart persistence must stay in the browser");
     // The standalone phone shell is fixed to the viewport: the notice must be inside it, not behind it.
     await page.goto("http://127.0.0.1:4189/tests/fixtures/activity-info/index.html?standalone=1");
     await page.getByLabel("手机号", { exact: true }).fill("13900000001");

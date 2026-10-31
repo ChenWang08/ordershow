@@ -24,7 +24,7 @@ try {
     const makeOrder = (version, quantity) => ({ id: 101, activityId: 1, activityCustomerId: 1, orderNo: "SYNTHETIC-1",
       currentVersion: version, lockVersion: version, status: "SUBMITTED", items: [item(quantity)], totalAmount: quantity * 10,
       totalQuantity: quantity, operations: [], lastModifiedAt: "2026-10-30T01:00:00Z" });
-    let formal = makeOrder(1, 10), failure = false, releaseRead, holdRead = false, draft = null;
+    let formal = makeOrder(1, 10), failure = false, releaseRead, holdRead = false;
     let application = { id: 501, orderId: 101, requestType: "MODIFY", status: "PENDING", baseVersion: 1, currentVersion: 1,
       originalOrder: formal, items: [item(5)], requestedTotalAmount: 50, requestedTotalQuantity: 5, requestedAt: "2026-10-30T01:00:00Z" };
     page.on("pageerror", error => errors.push(error.message));
@@ -43,11 +43,8 @@ try {
         if (failure) return route.fulfill({ status: 503, json: { code: "SERVICE_UNAVAILABLE", message: "合成服务繁忙" } });
         data = formal;
       } else if (path.endsWith("/order-change-requests/current")) data = application;
-      else if (path.endsWith("/order-draft")) {
-        if (method === "PUT") draft = { ...body, updatedAt: "2026-10-30T02:00:00Z" };
-        if (method === "DELETE") draft = null;
-        data = draft;
-      } else { unexpected.push(`${method} ${path}`); return route.fulfill({ status: 500, json: { message: "Unexpected fixture request" } }); }
+      else if (path.endsWith("/order") && method === "PUT") { formal = makeOrder((formal?.currentVersion ?? 0) + 1, body.items[0].quantity); data = formal; }
+      else { unexpected.push(`${method} ${path}`); return route.fulfill({ status: 500, json: { message: "Unexpected fixture request" } }); }
       return route.fulfill({ json: { data, traceId: "synthetic-h5-refresh" } });
     });
     await page.clock.install();
@@ -99,8 +96,57 @@ try {
     assert.equal(await page.getByLabel("合成商品订货箱数").inputValue(), "6");
     assert.equal(count(), beforeShared + 2); assert.match(await page.locator(".h5-draft-status").innerText(), /旧草稿未恢复/);
     await page.screenshot({ path: fileURLToPath(new URL(`latest-cart-${width}.png`, output)) });
+
+    // The local cart survives a full document reload only after current order/review reads.
+    const quantity = page.getByLabel("合成商品订货箱数", { exact: true });
+    await quantity.fill("9"); await quantity.blur(); await page.clock.fastForward(800);
+    const draftKey = "order-show:h5-cart:v1:1:PHONE-TEST:1";
+    assert.equal(await page.evaluate(key => JSON.parse(localStorage.getItem(key)).items[0].quantity, draftKey), 9);
+    await page.reload();
+    await page.getByLabel("手机号", { exact: true }).fill("13900000001");
+    await page.getByRole("button", { name: "验证并进入订货" }).click();
+    await quantity.waitFor(); assert.equal(await quantity.inputValue(), "9");
+    assert.match(await page.locator(".h5-draft-status").innerText(), /本机草稿/);
+
+    // Lock-only admin updates invalidate drafts, even when the business version is unchanged.
+    formal = { ...formal, lockVersion: formal.lockVersion + 1 };
+    await page.reload(); await page.getByLabel("手机号", { exact: true }).fill("13900000001");
+    await page.getByRole("button", { name: "验证并进入订货" }).click();
+    await page.getByRole("heading", { name: "订货已成功提交" }).waitFor();
+    assert.match(await page.locator(".h5-draft-status").innerText(), /旧草稿未恢复/);
+    await page.getByRole("button", { name: "修改订单", exact: true }).click();
+    await quantity.waitFor(); assert.equal(await quantity.inputValue(), "6");
+
+    // Cart preview/back and quantity changes issue no HTTP. Final confirmation uses the order API directly.
+    const beforePreview = calls.length;
+    await quantity.fill("9"); await quantity.blur();
+    await page.getByRole("button", { name: "确认订单", exact: true }).click();
+    await page.getByRole("button", { name: "‹", exact: true }).click();
+    assert.equal(calls.length, beforePreview);
+    await page.getByRole("button", { name: "确认订单", exact: true }).click();
+    await page.getByRole("button", { name: "确认提交", exact: true }).click();
+    await page.getByRole("heading", { name: "订单已更新并生效" }).waitFor();
+    await page.clock.fastForward(1000);
+    assert.equal(calls.length, beforePreview + 1);
+    assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), null);
+    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
+    assert.equal(await page.evaluate(key => localStorage.getItem(key), draftKey), null);
+
+    // Storage restrictions must not prevent editing, preview or final submission.
+    await page.addInitScript(() => { Object.defineProperty(window, "localStorage", { configurable: true, get() { throw new DOMException("Blocked", "SecurityError"); } }); });
+    formal = null; application = null;
+    await page.reload(); await page.getByLabel("手机号", { exact: true }).fill("13900000001");
+    await page.getByRole("button", { name: "验证并进入订货" }).click();
+    await quantity.waitFor(); await quantity.fill("3"); await quantity.blur(); await page.clock.fastForward(800);
+    assert.match(await page.locator(".h5-draft-status").innerText(), /刷新或关闭页面/);
+    await page.getByRole("button", { name: "确认订单", exact: true }).click();
+    await page.getByRole("button", { name: "确认提交订单", exact: true }).click();
+    await page.getByRole("heading", { name: "您的订货已成功提交" }).waitFor();
+    assert.equal(formal.totalQuantity, 3);
+    assert.equal(calls.filter(call => call.path.endsWith("/order-draft")).length, 0);
+    assert.equal(calls.filter(call => call.path.endsWith("/lottery")).length, 0);
     assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
     await context.close();
   }
-  console.log("PASS: 390px/1440px StrictMode H5; 65s idle, approval/direct edit preflight, cooldown bypass, shared reads, 503 preservation and stale draft handling. Synthetic HTTP only.");
+  console.log("PASS: 390px/1440px StrictMode H5; 65s idle, fresh edit checks, shared reads, 503 preservation, local reload, lock-only invalidation, preview without HTTP, direct submit/cleanup and blocked storage. Zero draft/lottery HTTP. Synthetic data only.");
 } finally { if (browser) await browser.close(); await server.close(); }

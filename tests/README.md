@@ -2,6 +2,8 @@
 
 ## 测试分工
 
+- H5 本机草稿与抽奖按页面加载：`h5-local-draft.test.mjs` 验证浏览器持久化、隔离、损坏/过期和存储失败；`h5-manual-refresh.test.mjs` 验证完整草稿生命周期及后台更新后的失效、提交成功清理/失败保留。`activity-info-stream.test.mjs` 与 `lottery-board.test.mjs` 分别保证公共/H5 初始化不查询抽奖，以及抽奖页独立读取正常。`scripts/test-h5-manual-refresh-browser.mjs` / `scripts/test-activity-info-browser.mjs` 使用真实组件和合成 HTTP 验证本机恢复、无草稿/抽奖请求及活动 SSE 兼容；见[验证记录](../docs/testing/h5-local-draft-2026-10-31.md)。
+
 - 手机端订单按需刷新：`h5-manual-refresh.test.mjs` 覆盖无轮询、15 秒冷却、共享查询、修改/撤回检查、审核及后台直接修改、草稿版本和迟到响应隔离；`scripts/test-h5-manual-refresh-browser.mjs` 使用真实 H5 组件及合成 HTTP，在手机/桌面验证静置无订单请求、最新购物车和失败恢复，见[验证记录](../docs/testing/h5-manual-refresh-2026-10-30.md)。
 
 - 后台手动刷新：`admin-manual-refresh.test.mjs` / `admin-session.test.mjs` 覆盖按需读取、请求合并、过期响应隔离和身份异常；`scripts/test-admin-refresh-browser.mjs` 用真实后台组件与合成 HTTP 在桌面/窄屏验证静置无轮询、手动刷新及失败恢复，详见 [后台取消轮询验证](../docs/testing/admin-manual-refresh-2026-10-30.md)。
@@ -23,7 +25,7 @@
 
 完整隔离检查使用 `scripts/run-automated-tests.ps1 -KeepEnvironment`，它创建专用测试栈并执行前后端测试。随后设置 `ORDER_SHOW_E2E=order-show-e2e`，运行 `node scripts/browser-regression.mjs`。Playwright 可安装在本机，或通过 `ORDER_SHOW_PLAYWRIGHT_MODULE` 指定已有的 `playwright/index.mjs` 文件 URL。
 
-浏览器脚本只使用固定的 3100/8180 测试端口，并依赖 API E2E 生成的夹具。测试会创建和修改订单、截止测试活动，因此整套复跑前必须重新生成隔离数据。验证后使用 `scripts/test-env.ps1 reset` 清理测试环境。
+`browser-regression.mjs` 使用固定的 3100/8180 测试端口，依赖 API E2E 生成的夹具，会创建/修改订单及截止测试活动，整套复跑前须重新生成隔离数据，完成后用 `scripts/test-env.ps1 reset` 清理。H5 手动刷新和活动 SSE 两个前端浏览器脚本分别使用 4188/4189，全部 HTTP 为合成夹具，不连接业务 API 或数据库，结束后自行关闭浏览器及测试服务。
 
 当前结果和未覆盖范围见 `docs/testing/refactor-regression-2026-09-07.md`。通过测试不代表此前记录的客户名称标准化缺陷已被修复，也不代表压测、灾备和全部浏览器兼容性已验收。
 

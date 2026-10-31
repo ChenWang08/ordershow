@@ -134,11 +134,11 @@ test("a malformed or cross-activity snapshot is rejected and retried, never disp
   f.advance(2000); f.sources[1].emit("activity", snapshot()); assert.equal(f.updates.length, 1); f.stop();
 });
 
-test("activity loading is independent of lottery failure and disconnection preserves the loaded activity", async () => {
-  let handlers, cleanups = 0, reads = 0;
+test("public activity/H5 initialization never loads lottery data and disconnection preserves the loaded activity", async () => {
+  let handlers, cleanups = 0, reads = 0, lotteryReads = 0;
   const h = hookHarness("app/features/workspace/useActivityRuntime.ts", "useActivityRuntime", [], {
     "../../api": { getActiveActivityCode: () => "A", subscribeActiveActivityCode: () => () => {},
-      loadActivity: () => { reads++; throw new Error("Must not read"); }, loadPublicLottery: async () => { throw new Error("503"); } },
+      loadActivity: () => { reads++; throw new Error("Must not read"); }, loadPublicLottery: async () => { lotteryReads++; return { rules: [] }; } },
     "../../services/api/activity-info-stream": { subscribeActivityInfo: (_code, value) => { handlers = value; return () => cleanups++; } },
     "../lottery/Lottery": { initialLotteryRounds: [], mapLotteryRule: () => [] },
   });
@@ -148,15 +148,16 @@ test("activity loading is independent of lottery failure and disconnection prese
   handlers.onState("connecting"); await h.flush();
   assert.equal(h.model.runtimeActivity, current); assert.equal(h.model.runtimeLoaded, true);
   assert.match(h.model.runtimeMessage, /重新同步/); assert.equal(h.intervals.size, 0);
+  assert.equal(lotteryReads, 0);
   h.unmount(); assert.equal(cleanups, 1);
 });
 
 test("activity switching disposes the previous stream and ignores its late callbacks", async () => {
-  let code = "A", changed;
+  let code = "A", changed, lotteryReads = 0;
   const subscriptions = [];
   const h = hookHarness("app/features/workspace/useActivityRuntime.ts", "useActivityRuntime", [], {
     "../../api": { getActiveActivityCode: () => code, subscribeActiveActivityCode: fn => { changed = fn; return () => {}; },
-      loadPublicLottery: async () => ({ rules: [] }) },
+      loadPublicLottery: async () => { lotteryReads++; return { rules: [] }; } },
     "../../services/api/activity-info-stream": { subscribeActivityInfo: (key, handlers) => {
       const subscription = { key, handlers, closed: false }; subscriptions.push(subscription); return () => { subscription.closed = true; };
     } }, "../lottery/Lottery": { initialLotteryRounds: [], mapLotteryRule: () => [] },
@@ -166,5 +167,5 @@ test("activity switching disposes the previous stream and ignores its late callb
   assert.equal(subscriptions[0].closed, true); assert.equal(h.model.runtimeActivity, null);
   subscriptions[1].handlers.onActivity({ ...activity, id: 2, code: "B", name: "新活动" });
   subscriptions[0].handlers.onActivity(activity); await h.flush();
-  assert.equal(h.model.runtimeActivity.code, "B"); h.unmount();
+  assert.equal(h.model.runtimeActivity.code, "B"); assert.equal(lotteryReads, 0); h.unmount();
 });

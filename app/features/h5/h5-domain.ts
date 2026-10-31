@@ -149,14 +149,6 @@ export function tierPriceLabel(product: Product, quantity: number) {
     : `满${product.tierMinQuantity}箱，整批¥${money(product.tierCasePrice)}/箱`;
 }
 
-export type H5DraftSnapshot = {
-  customerId: number;
-  baseOrderVersion: number;
-  baseSignature: string;
-  signature: string;
-  items: Array<{ productId: number; quantity: number }>;
-};
-
 export function h5QuantitySignature(items: Array<{ productId: number; quantity: number }>) {
   return JSON.stringify(items.filter((item) => item.quantity > 0).sort((a, b) => a.productId - b.productId));
 }

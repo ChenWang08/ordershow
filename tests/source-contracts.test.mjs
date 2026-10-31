@@ -322,7 +322,7 @@ test("keeps the hourly order trend inside the activity window and timezone-safe"
   assert.match(prototype, /existing \?\? \{ bucket: new Date\(time\)\.toISOString\(\), amount: 0, orders: 0 \}/);
 });
 
-test("keeps H5 draft persistence scoped to its customer and base order version", async () => {
+test("keeps legacy draft endpoints compatible while the H5 cart uses browser storage only", async () => {
   const [prototype, api, controller, service, migration] = await Promise.all([
     readFrontendSource(),
     readApiSource(),
@@ -334,9 +334,7 @@ test("keeps H5 draft persistence scoped to its customer and base order version",
   // Actual restoration, version changes and customer switching are covered by
   // h5-manual-refresh.test.mjs and h5-order-routing.test.mjs.
   assert.match(prototype, /setOrderUpdatedAt\(""\).*setOrderWithdrawnAt\(""\).*setCartOpen\(false\).*setCancelConfirmOpen\(false\)/s);
-  assert.match(prototype, /loadH5OrderDraft\(\)/);
-  assert.match(prototype, /window\.addEventListener\("pagehide", flushOnPageHide\)/);
-  assert.match(prototype, /setTimeout\(\(\) => void queueDraftSync\(snapshot\), 800\)/);
+  assert.doesNotMatch(prototype, /(?:load|save|delete)H5OrderDraft\(/);
   assert.match(api, /saveH5OrderDraft/);
   assert.match(api, /deleteH5OrderDraft/);
   assert.match(controller, /\/order-draft/);
