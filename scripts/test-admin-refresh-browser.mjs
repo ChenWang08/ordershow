@@ -44,6 +44,9 @@ try {
           candidates: [{ activityCustomerId: 1, dealerFullName: "抽奖合成客户", customerType: "GENERAL",qualifyingOrderTons:0.000001,probabilityPercent:0.00005 }] });
       }
       if (path.endsWith("/lottery/product-options")) return reply([{ productLine: "食用油", varietyName: "花生油" }, { productLine: "食用油", varietyName: "玉米油" }, { productLine: "大米", varietyName: "长粒米" }]);
+      if (path === "/admin/activities/987" && request.method() === "PUT") {
+        return reply({ ...activity, ...request.postDataJSON(), version: activity.version + 1 });
+      }
       if (request.method() !== "GET") { unexpected.push(`${request.method()} ${path}`); return route.fulfill({ status: 500, json: { message: "Unexpected write" } }); }
       if (path === "/admin/me") return identityFailure ? route.fulfill({ status: 503, json: { message: "服务繁忙" } }) : reply(identity);
       if (path === "/admin/activities") return reply([activity, { ...activity, id: 988, code: "SECOND", name: "另一个活动" }]);
@@ -84,7 +87,7 @@ try {
       assert.equal(count(suffix), expected, message);
     };
     await assertRequestCount("/ranking", 0);
-    await assertRequestCount("/overview", 1);
+    await assertRequestCount("/overview", 0);
     await assertRequestCount("/module-context", 0);
     for (const suffix of ["/products", "/product-image-reviews", "/customers", "/attendees", "/imports", "/orders", "/lottery/rules", "/audit-logs", "/members", "/departments", "/users"]) {
       assert.equal(count(suffix), 0, `unopened module must not read ${suffix}`);
@@ -93,14 +96,21 @@ try {
       "activity summaries are shared with the switcher; StrictMode aborts the discarded initial read");
     assert.ok(requestUrls.includes("/admin/activities?summary=true"));
     await assertRequestCount("/987", 1, "overview cards reuse the selected activity detail");
-    assert.ok((await page.locator(".admin-stats").innerText()).includes("¥12,345.00"));
+    assert.ok((await page.locator(".admin-stats").innerText()).includes("尚未加载"));
+    await page.getByText("尚未加载统计，请点击刷新统计", { exact: true }).waitFor();
     let before = requests.length;
     await page.clock.fastForward(65_000); await page.waitForTimeout(100);
     assert.equal(requests.length, before, "idle admin must not send periodic requests");
     await page.screenshot({ path: fileURLToPath(new URL(`empty-${width}.png`, output)), fullPage: true });
+    const settingsSaved = page.waitForResponse(response => new URL(response.url()).pathname === "/api/v1/admin/activities/987" && response.request().method() === "PUT");
+    await page.getByRole("button", { name: "保存活动设置", exact: true }).click();
+    await settingsSaved;
+    await page.getByRole("status").filter({ hasText: "活动名称和时间配置已保存" }).waitFor();
+    await page.waitForLoadState("networkidle");
+    await assertRequestCount("/overview", 0, "saving activity settings does not load statistics");
     await page.getByRole("button", { name: "刷新统计", exact: true }).click();
     await page.getByText("¥12,345.00", { exact: true }).waitFor();
-    await assertRequestCount("/overview", 2); await assertRequestCount("/ranking", 0); await assertRequestCount("/module-context", 0);
+    await assertRequestCount("/overview", 1); await assertRequestCount("/ranking", 0); await assertRequestCount("/module-context", 0);
     const nav = page.getByRole("navigation", { name: "后台导航" });
     await nav.getByRole("button", { name: /白名单/ }).click();
     await page.getByRole("heading", { name: "客户白名单导入", exact: true }).waitFor();
@@ -186,7 +196,7 @@ try {
     await assertRequestCount("/users", 1); const departmentReads = count("/departments");
     await nav.getByRole("button", { name: /成员管理/ }).click(); await page.waitForLoadState("networkidle");
     await assertRequestCount("/members", 2); await assertRequestCount("/departments", departmentReads + 1);
-    const logsButton = page.getByRole("button", { name: "操作日志", exact: true });
+    const logsButton = page.getByRole("button", { name: /^操作日志/ });
     const logsLoaded = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/audit-logs"));
     await logsButton.click(); await logsLoaded; await page.waitForLoadState("networkidle"); await assertRequestCount("/audit-logs", 1);
     await logsButton.click(); await logsButton.click(); await page.waitForLoadState("networkidle");
@@ -194,7 +204,7 @@ try {
     const overviewReads = count("/overview");
     await nav.getByRole("button", { name: /活动概览/ }).click();
     await page.getByText("¥12,345.00", { exact: true }).waitFor(); await page.waitForLoadState("networkidle");
-    await assertRequestCount("/overview", overviewReads + 1, "returning to overview must read again");
+    await assertRequestCount("/overview", overviewReads, "returning to overview retains the manual snapshot without a read");
     await assertRequestCount("/ranking", 0);
     rankingFailure = true;
     await page.getByRole("button", { name: "刷新统计", exact: true }).click();
@@ -210,6 +220,7 @@ try {
     await detailError.getByRole("button", { name: "重试", exact: true }).click(); await page.waitForLoadState("networkidle");
     await nav.getByRole("button", { name: /活动概览/ }).click(); await page.waitForLoadState("networkidle");
     assert.equal(await name.inputValue(), "尚未保存的名称");
+    await assertRequestCount("/overview", overviewReads + 1, "activity information retry must not refresh statistics");
     assert.deepEqual(dialogs, [], "automatic reads preserve drafts without prompts");
     await page.clock.resume();
     const waitForOrders = async expected => {
@@ -257,17 +268,25 @@ try {
     }
     await page.reload();
     await page.getByRole("button", { name: "刷新统计", exact: true }).waitFor();
-    await page.getByText("¥12,345.00", { exact: true }).waitFor(); await page.waitForLoadState("networkidle");
+    await page.getByText("尚未加载统计，请点击刷新统计", { exact: true }).waitFor(); await page.waitForLoadState("networkidle");
+    await assertRequestCount("/overview", overviewReads + 1, "reload clears the snapshot without reading statistics");
+    assert.equal(await page.getByText("¥12,345.00", { exact: true }).count(), 0);
     assert.equal(await name.inputValue(), "手动刷新测试活动", "reload discards unsaved settings");
     await name.fill("切换活动时放弃的内容");
     await page.locator(".activity-switcher > button").click();
     await page.locator(".activity-switcher-menu button").filter({ hasText: "另一个活动" }).click();
     await page.waitForLoadState("networkidle");
     assert.equal(await name.inputValue(), "另一个活动");
+    await page.getByText("尚未加载统计，请点击刷新统计", { exact: true }).waitFor();
+    await assertRequestCount("/overview", overviewReads + 1, "switching activities does not read statistics");
+    await page.getByRole("button", { name: "刷新统计", exact: true }).click();
+    await page.getByText("¥12,345.00", { exact: true }).waitFor();
+    assert.equal(requests.at(-1), "/admin/activities/988/overview", "manual statistics use only the selected activity");
+    await assertRequestCount("/overview", overviewReads + 2);
     assert.deepEqual(dialogs, [], "reload and activity switch must not prompt");
 
     assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
-    console.log(`PASS ${width}px: module reentry reads, latest prices, three refresh controls, current-round manual preview, draft preservation, no exit prompt, idle 65s, 503 retry`);
+    console.log(`PASS ${width}px: manual-only overview, no statistics on entry/return/reload/activity switch, module reentry reads, latest prices, three refresh controls, current-round manual preview, draft preservation, no exit prompt, idle 65s, 503 retry`);
     await context.close();
   }
 } finally { await browser?.close(); await server.close(); }

@@ -1,12 +1,14 @@
 "use client";
 
+import { useCallback } from "react";
 import { loadActivityOverview } from "../../api";
 import { money } from "../shared/utils";
-import { useLazyAdminQuery } from "./useLazyAdminQuery";
+import { useAdminQuery } from "./useAdminQuery";
 
-// Keep the snapshot between visits, but read current statistics on every entry.
+// Statistics are read only on request; keep the snapshot between module visits.
 export function useActivityOverview(activityId: string, enabled = true) {
-  const query = useLazyAdminQuery(activityId, enabled, signal => loadActivityOverview(Number(activityId), signal));
+  const loader = useCallback((key: string, signal: AbortSignal) => loadActivityOverview(Number(key), signal), []);
+  const query = useAdminQuery(enabled ? activityId : null, loader);
   const { data } = query;
   const context = data;
   const overviewTotals = data?.totals;

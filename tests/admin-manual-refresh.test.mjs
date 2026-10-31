@@ -10,7 +10,7 @@ const dashboard = { totals: { order_count: 10, total_amount: 100, total_quantity
 const overview = { ...dashboard, ...context, submittedByType: { GENERAL: 8, SPECIAL: 2 } };
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
-test("overview loads on entry, shares repeated refresh clicks and publishes a complete snapshot", async () => {
+test("overview reads only on manual refresh, shares clicks and retains its snapshot on return", async () => {
   const calls = [], counts = deferred();
   const h = hookHarness("app/features/admin/useActivityOverview.ts", "useActivityOverview", ["1", true], {
     "../../api": {
@@ -18,7 +18,7 @@ test("overview loads on entry, shares repeated refresh clicks and publishes a co
     },
   });
   await h.flush();
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 0);
   assert.equal(h.intervals.size, 0);
   assert.equal(h.model.loaded, false);
   assert.ok(h.model.adminStats.every(row => row[1] === "—"));
@@ -41,14 +41,17 @@ test("overview loads on entry, shares repeated refresh clicks and publishes a co
   assert.equal(calls.length, 1, "rerenders must not trigger more reads");
   assert.equal(h.model.updatedAt, time);
   h.render(["1", false]); await h.flush(); assert.equal(calls.length, 1);
-  h.render(["1", true]); await h.flush(); assert.equal(calls.length, 2);
+  h.render(["1", true]); await h.flush(); assert.equal(calls.length, 1);
+  assert.equal(h.model.loaded, true);
+  assert.equal(h.model.updatedAt, time);
+  await h.model.refresh(); await h.flush(); assert.equal(calls.length, 2);
   h.unmount();
 });
 
 test("overview failure preserves the last complete snapshot and timestamp; activity switch hides old data", async () => {
-  let fail = false;
+  let fail = false, reads = 0;
   const h = hookHarness("app/features/admin/useActivityOverview.ts", "useActivityOverview", ["1", true], {
-    "../../api": { loadActivityOverview: async () => { if(fail) throw new Error("503"); return overview; } },
+    "../../api": { loadActivityOverview: async () => { reads++; if(fail) throw new Error("503"); return overview; } },
   });
   await h.model.refresh(); await h.flush();
   const time = h.model.updatedAt;
@@ -59,6 +62,8 @@ test("overview failure preserves the last complete snapshot and timestamp; activ
   h.render(["2", true]);
   assert.equal(h.model.loaded, false);
   assert.equal(h.model.updatedAt, null);
+  await h.flush();
+  assert.equal(reads, 2, "switching activity must wait for a manual refresh");
   h.unmount();
 });
 

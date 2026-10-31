@@ -194,7 +194,7 @@ export function AdminWorkspace({ activities }: { activities?: AdminActivitySumma
     onActivityLoaded: activityRuntime.setRuntimeActivity,
     activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, productImportCompleted, whitelistImportCompleted, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation,
   });
-  const activityOverview = useActivityOverview(activityId, tab === "活动概览" && canUse(adminIdentity, "OVERVIEW"));
+  const activityOverview = useActivityOverview(activityId, canUse(adminIdentity, "OVERVIEW"));
   const moduleLoad = tab === "商品导入" ? moduleLoads.product : tab === "白名单" ? moduleLoads.whitelist
     : tab === "现场到场" ? moduleLoads.attendance : tab === "抽奖规则" ? moduleLoads.lottery : null;
   const retryModule = async () => {
