@@ -1,3 +1,4 @@
+# Keep /api/v1 on the page origin. Preserve If-None-Match, ETag, empty 304 and image Cache-Control.
 # Standard Ingress. Operations supplies controller-specific annotations.
 # Public /api/v1/public/activities/{code}/events requires streaming: buffering/cache off,
 # idle/read timeout >= 90 seconds for the default 30-second heartbeat; preserve /api/v1.

@@ -8,4 +8,6 @@ public interface ObjectStorage {
   void initialize() throws Exception;
   void put(String bucket, String key, byte[] content, String contentType) throws Exception;
   InputStream read(String bucket, String key) throws Exception;
+  /** Null only for a missing object; authorization, bucket and network errors still propagate. */
+  InputStream readIfPresent(String bucket, String key) throws Exception;
 }

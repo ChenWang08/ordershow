@@ -107,6 +107,34 @@ test("manual refresh and immediate edit share the same pending HTTP reads; edit 
   h.unmount();
 });
 
+test("focus and visible-only events do not read; a genuine return observes approval and preserves the cooldown", async () => {
+  const h = await harness(order(), request());
+  await h.advance(20_000);
+  await h.event("focus"); await h.event("pageshow"); await h.event("visibilitychange");
+  assert.deepEqual(h.reads, []);
+  h.state.order = order(2, 5);
+  h.state.request = { ...request("APPROVED"), currentVersion: 2 };
+  await h.event("visibilitychange", true); await h.event("visibilitychange"); await h.event("pageshow");
+  assert.deepEqual(h.reads, ["order", "request"]);
+  assert.equal(h.model.runtimeOrder.currentVersion, 2); assert.equal(h.model.pendingChangeRequest, null);
+  await h.advance(14_999); await h.event("pagehide"); await h.event("pageshow");
+  assert.equal(h.reads.length, 2);
+  await h.advance(1); await h.event("pagehide"); await h.event("pageshow");
+  assert.equal(h.reads.length, 4);
+  h.unmount();
+});
+
+test("the success page never reads on return; entering details still reads when due", async () => {
+  const h = await harness(null);
+  h.model.setQuantities({ 1: 3 }); await h.flush(); await h.model.submitOrder(); await h.flush();
+  assert.equal(h.model.step, "success"); h.reads.length = 0;
+  await h.advance(300_000);
+  await h.event("focus"); await h.event("visibilitychange", true); await h.event("visibilitychange");
+  await h.event("pagehide"); await h.event("pageshow"); assert.deepEqual(h.reads, []);
+  h.model.setStep("submitted"); await h.flush(); assert.deepEqual(h.reads, ["order", "request"]);
+  h.unmount();
+});
+
 test("admin direct changes and approval are loaded before entering the cart without manual refresh", async () => {
   for (const initialRequest of [null, request()]) {
     const h = await harness(order(), initialRequest);

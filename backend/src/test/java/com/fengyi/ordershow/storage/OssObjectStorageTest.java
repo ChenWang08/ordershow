@@ -32,4 +32,19 @@ class OssObjectStorageTest {
     storage.close();
     verify(client).shutdown();
   }
+  @Test void onlyMissingKeysAllowLazyDerivativeGeneration() {
+    OSS client = mock(OSS.class);
+    var storage = new OssObjectStorage(client);
+    var missing = new com.aliyun.oss.OSSException("missing");
+    missing.setErrorCode("NoSuchKey");
+    when(client.getObject("bucket", "missing")).thenThrow(missing);
+    assertThat(storage.readIfPresent("bucket", "missing")).isNull();
+    for (String code : new String[]{"AccessDenied", "NoSuchBucket"}) {
+      var denied = new com.aliyun.oss.OSSException(code);
+      denied.setErrorCode(code);
+      when(client.getObject("bucket", code)).thenThrow(denied);
+      assertThatThrownBy(() -> storage.readIfPresent("bucket", code)).isSameAs(denied);
+    }
+    verify(client, never()).createBucket(anyString());
+  }
 }

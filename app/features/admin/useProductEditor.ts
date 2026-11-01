@@ -10,7 +10,7 @@ import {
   excludeProductImageReview, loadAdminProducts, loadProductImageReviews,
 } from "../../api";
 import { productMaterialNameKey, type ProductImportRow } from "../../domain/import-domain";
-import { productImageRelationStatus, productImageStatusForAssets, synchronizeProductImageAssetStatuses } from "../../domain/product-images";
+import { productImageRelationStatus, productImageStatusForAssets, synchronizeProductImageAssetStatuses, revokeProductImageAssets } from "../../domain/product-images";
 import { mergeProductImageReviews, runtimeProductToImportRow } from "./admin-utils";
 import type { ProductModuleOptions } from "./product-module-types";
 import type { useProductImport } from "./useProductImport";
@@ -154,6 +154,7 @@ export function useProductEditor({
       };
       if (refreshedCatalogRows) {
         setProductRows(refreshedCatalogRows);
+        revokeProductImageAssets(nextRow.images ?? []);
       } else {
         setProductRows((current) => current.map(applySavedPreviewImage));
         const previewRowsAfterSave = productRows.map(applySavedPreviewImage);
@@ -204,6 +205,7 @@ export function useProductEditor({
       }
     }
     setProductRows((current) => [...current, manualRow]);
+    if (productImportCompleted) revokeProductImageAssets(nextRow.images ?? []);
     if (!productImportCompleted && productFileName) {
       setProductImportInputCount((current) => current + 1);
     }

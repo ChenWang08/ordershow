@@ -31,4 +31,11 @@ final class MinioObjectStorage implements ObjectStorage {
   public InputStream read(String bucket, String key) throws Exception {
     return client.getObject(GetObjectArgs.builder().bucket(bucket).object(key).build());
   }
+  public InputStream readIfPresent(String bucket, String key) throws Exception {
+    try { return read(bucket, key); }
+    catch (io.minio.errors.ErrorResponseException error) {
+      if (java.util.List.of("NoSuchKey", "NoSuchObject").contains(error.errorResponse().code())) return null;
+      throw error;
+    }
+  }
 }

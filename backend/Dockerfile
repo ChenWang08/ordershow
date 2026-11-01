@@ -6,7 +6,11 @@ COPY db/migrations db/migrations
 COPY docs/design/openapi/order-show-api.yaml docs/design/openapi/order-show-api.yaml
 COPY backend/src backend/src
 ARG SKIP_TESTS=true
-RUN --mount=type=cache,target=/root/.m2 mvn -f backend/pom.xml -DskipTests=${SKIP_TESTS} package
+# Optional related test classes for a focused release verification.
+ARG TESTS
+RUN --mount=type=cache,target=/root/.m2 \
+    if [ -n "$TESTS" ]; then mvn -f backend/pom.xml -DskipTests=false "-Dtest=$TESTS" package; \
+    else mvn -f backend/pom.xml -DskipTests=${SKIP_TESTS} package; fi
 
 FROM eclipse-temurin:21-jre
 WORKDIR /app

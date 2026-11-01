@@ -1,12 +1,12 @@
 "use client";
 
-/* eslint-disable @next/next/no-img-element -- prize images come from the runtime file API. */
 import { useAdminQuery } from "../admin/useAdminQuery";
 import { useLazyAdminQuery } from "../admin/useLazyAdminQuery";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiAssetUrl, ApiError, completeLotteryRound, createLotteryRule, deleteLotteryPrizeImage, drawLotteryRound, loadLotteryStatistics, loadLotteryProductOptions, loadPublicLottery, previewLotteryCandidates, publishLotteryRule, updateLotteryRule, uploadLotteryPrizeImage, type LotteryCandidatePreview, type LotteryProductOption, type LotteryRuleApi, type LotteryWinnerApi, type LotteryWinnerStatistics } from "../../api";
 import type { AttendanceCustomerType, AttendanceRow } from "../../domain/import-domain";
 import { FestivalDecor } from "../shared/components/FestivalDecor";
+import { Thumbnail } from "../shared/components/Thumbnail";
 import { normalizeSearchText } from "../shared/utils";
 
 export type CandidateScope = "all" | "attended" | "ordered";
@@ -247,7 +247,7 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
         <b>{currentRound.name} 幸运抽奖</b>
         <span>本轮奖品：{currentRound.prize}</span>
         {currentRound.prizeImageUrl && <div className="lottery-prize-display">
-          <div className="lottery-prize-image"><img src={currentRound.prizeImageUrl} alt={currentRound.prize} /></div>
+          <div className="lottery-prize-image"><Thumbnail src={currentRound.prizeImageUrl} variant="display" alt={currentRound.prize} /></div>
         </div>}
       </div>
       {historyLoading ? (
@@ -460,7 +460,7 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
           <div className="lottery-prize-image-setting">
             <span className="lottery-prize-image-label">奖品图片</span>
             <div className={selected.prizeImageUrl ? "lottery-prize-image-preview has-image" : "lottery-prize-image-preview empty"}>
-              {selected.prizeImageUrl ? <img src={selected.prizeImageUrl} alt={selected.prize} /> : <span>暂未上传图片</span>}
+              {selected.prizeImageUrl ? <Thumbnail src={selected.prizeImageUrl} alt={selected.prize} /> : <span>暂未上传图片</span>}
             </div>
             <div className="lottery-prize-image-actions">
               <label className={selectedLocked ? "lottery-prize-image-upload disabled" : "lottery-prize-image-upload"}>

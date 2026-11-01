@@ -16,7 +16,7 @@ class PrivateFilePermissionTest {
   final JdbcTemplate jdbc = mock(JdbcTemplate.class);
   final AuthService auth = mock(AuthService.class);
   final DepartmentAccessService departments = mock(DepartmentAccessService.class);
-  final FileController controller = new FileController(storage, jdbc, auth, departments);
+  final FileController controller = new FileController(storage, jdbc, auth, departments, mock(ImageVariantService.class));
   final MockHttpServletRequest request = new MockHttpServletRequest();
   void file(String purpose) {
     when(jdbc.queryForList("SELECT activity_id,file_purpose FROM stored_file WHERE id=? AND deleted_at IS NULL", 3L))

@@ -89,7 +89,7 @@ try {
     await page.clock.fastForward(15_000); failure = false; holdRead = true;
     const beforeShared = count();
     const pendingRead = page.waitForRequest(request => new URL(request.url()).pathname.endsWith("/order"));
-    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await page.evaluate(() => { window.dispatchEvent(new Event("pagehide")); window.dispatchEvent(new Event("pageshow")); });
     await pendingRead;
     await page.getByRole("button", { name: "修改订单", exact: true }).click();
     await page.getByRole("button", { name: "正在核对最新订单…", exact: true }).waitFor();

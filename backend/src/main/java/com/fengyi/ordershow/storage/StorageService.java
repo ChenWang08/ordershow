@@ -5,6 +5,7 @@ import com.fengyi.ordershow.config.OrderShowProperties;
 import jakarta.annotation.PostConstruct;
 import java.io.InputStream;
 import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -72,16 +73,56 @@ public class StorageService {
       return statement;
     }, keys);
     long id = keys.getKey().longValue();
+    if (List.of("PRODUCT_IMAGE", "LOTTERY_PRIZE_IMAGE", "ACTIVITY_BACKGROUND").contains(purpose)) {
+      var meta = new FileMeta(id, bucket, key, originalFilename, contentType, content.length);
+      try {
+        writeVariant(meta, ImageVariants.Kind.THUMBNAIL, ImageVariants.render(content, ImageVariants.Kind.THUMBNAIL));
+        if ("LOTTERY_PRIZE_IMAGE".equals(purpose)) writeVariant(meta, ImageVariants.Kind.DISPLAY, ImageVariants.render(content, ImageVariants.Kind.DISPLAY));
+      } catch (DomainException error) {
+        // Keep the original upload usable; a derivative failure must not corrupt an import.
+        log.warn("Image derivative preparation failed for file {}: {}", id, error.code());
+      }
+    }
     return new StoredFile(id, activityId, key, originalFilename, contentType, content.length, sha);
   }
 
-  public byte[] read(long fileId) {
-    FileMeta meta = meta(fileId);
+  public byte[] read(long fileId) { return read(meta(fileId)); }
+
+  public byte[] read(FileMeta meta) {
     try (InputStream input = storage.read(meta.bucket(), meta.objectKey())) {
       return input.readAllBytes();
     } catch (Exception exception) {
       throw DomainException.notFound("FILE_NOT_AVAILABLE", "文件不存在或暂不可读取");
     }
+  }
+
+  public ImageVariants.Encoded readVariant(FileMeta meta, ImageVariants.Kind kind) {
+    try (var input = storage.readIfPresent(meta.bucket(), variantObjectKey(meta, kind))) {
+      if (input == null) return null;
+      byte[] bytes = input.readAllBytes();
+      // Derivatives are JPEG or PNG; inspect bytes without an extra object metadata request.
+      String type = java.net.URLConnection.guessContentTypeFromStream(new java.io.ByteArrayInputStream(bytes));
+      if (!"image/png".equals(type) && !"image/jpeg".equals(type)) throw ImageVariants.busy();
+      return new ImageVariants.Encoded(bytes, type);
+    } catch (Exception error) { throw ImageVariants.busy(); }
+  }
+
+  public void writeVariant(FileMeta meta, ImageVariants.Kind kind, ImageVariants.Encoded image) {
+    try {
+      storage.put(meta.bucket(), variantObjectKey(meta, kind), image.bytes(), image.contentType());
+    } catch (Exception error) { throw ImageVariants.busy(); }
+  }
+
+  // MinIO can reject path segments over 255 bytes; long source filenames need a short derivative name.
+  static String variantObjectKey(FileMeta meta, ImageVariants.Kind kind) {
+    String key = meta.objectKey() + kind.key();
+    int slash = key.lastIndexOf('/');
+    if (key.substring(slash + 1).getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 255) return key;
+    try {
+      String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+          .digest(meta.objectKey().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+      return key.substring(0, slash + 1) + digest + kind.key();
+    } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
   }
 
   public FileMeta meta(long fileId) {

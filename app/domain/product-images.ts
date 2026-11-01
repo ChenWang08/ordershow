@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { registerLocalImage, releaseLocalImage } from "./local-image-preview";
 import {
   createImportRowId,
   type ProductImageAsset,
@@ -216,16 +217,18 @@ export async function parseProductImageZip(file: File) {
   const zip = await JSZip.loadAsync(await file.arrayBuffer());
   const entries = Object.values(zip.files).filter((entry) => !entry.dir && productImageExtensions.test(entry.name));
   if (entries.length === 0) throw new Error("ZIP 中没有找到 JPG、PNG、WEBP、GIF 或 BMP 图片。");
-  const assets = await Promise.all(entries.map(async (entry, index) => {
-    const blob = await entry.async("blob");
+  const assets = entries.map((entry, index) => {
     const matchingNames = productImagePathCandidates(entry.name);
-    return { id: `product-image-${Date.now()}-${index}`, fileName: productImageBaseName(entry.name), archivePath: entry.name.replace(/\\/g, "/"), url: URL.createObjectURL(blob), normalizedName: normalizeProductImageName(matchingNames[0] ?? productImageBaseName(entry.name)), matchingNames, source: "zip" } satisfies ProductImageAsset;
-  }));
+    return { id: `product-image-${Date.now()}-${index}`, fileName: productImageBaseName(entry.name), archivePath: entry.name.replace(/\\/g, "/"), url: registerLocalImage(() => entry.async("blob")), normalizedName: normalizeProductImageName(matchingNames[0] ?? productImageBaseName(entry.name)), matchingNames, source: "zip" } satisfies ProductImageAsset;
+  });
   return assets;
 }
 
 export function revokeProductImageAssets(assets: ProductImageAsset[]) {
-  assets.filter((asset) => asset.source !== "manual").forEach((asset) => URL.revokeObjectURL(asset.url));
+  assets.forEach((asset) => {
+    if (asset.url.startsWith("local-image:")) releaseLocalImage(asset.url);
+    else if (asset.source !== "manual" && asset.url.startsWith("blob:")) URL.revokeObjectURL(asset.url);
+  });
 }
 
 export const maxManualProductImageSize = 10 * 1024 * 1024;
@@ -240,29 +243,27 @@ export function readManualProductImage(file: File) {
       reject(new Error(`${file.name} 超过 10MB，请压缩图片后再上传。`));
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result !== "string") {
-        reject(new Error(`${file.name} 读取失败，请重新选择。`));
-        return;
-      }
       resolve({
         id: createImportRowId("product-image-manual"),
         fileName: file.name,
         file,
-        url: reader.result,
+        url: registerLocalImage(() => Promise.resolve(file)),
         normalizedName: normalizeProductImageName(file.name),
         relationStatus: "CONFIRMED",
         source: "manual",
       });
-    };
-    reader.onerror = () => reject(new Error(`${file.name} 读取失败，请重新选择。`));
-    reader.readAsDataURL(file);
   });
 }
 
 export async function createManualProductImageAssets(files: File[]) {
-  return Promise.all(files.map((file) => readManualProductImage(file)));
+  const results = await Promise.allSettled(files.map((file) => readManualProductImage(file)));
+  const assets = results.flatMap(result => result.status === "fulfilled" ? [result.value] : []);
+  const failed = results.find(result => result.status === "rejected");
+  if (failed?.status === "rejected") {
+    revokeProductImageAssets(assets);
+    throw failed.reason;
+  }
+  return assets;
 }
 
 export function productImageRelationStatus(image: ProductImageAsset): ProductImageRelationStatus {

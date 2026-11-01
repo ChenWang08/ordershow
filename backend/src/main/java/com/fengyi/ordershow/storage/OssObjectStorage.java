@@ -20,5 +20,12 @@ final class OssObjectStorage implements ObjectStorage, AutoCloseable {
   public InputStream read(String bucket, String key) {
     return client.getObject(bucket, key).getObjectContent();
   }
+  public InputStream readIfPresent(String bucket, String key) {
+    try { return read(bucket, key); }
+    catch (com.aliyun.oss.OSSException error) {
+      if ("NoSuchKey".equals(error.getErrorCode())) return null;
+      throw error;
+    }
+  }
   public void close() { client.shutdown(); }
 }

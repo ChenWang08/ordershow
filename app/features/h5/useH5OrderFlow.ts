@@ -251,17 +251,26 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
     previousStep.current = step;
     if (entered) void refreshOrderStatus();
   }, [step, refreshOrderStatus]);
+  const returnRefresh = useRef(refreshOrderStatus);
+  useEffect(() => { returnRefresh.current = refreshOrderStatus; }, [refreshOrderStatus]);
   useEffect(() => {
-    const refreshOnReturn = () => { if (!document.hidden) void refreshOrderStatus(); };
-    window.addEventListener("focus", refreshOnReturn);
+    let leftPage = document.hidden;
+    const leave = () => { leftPage = true; };
+    const refreshOnReturn = () => {
+      if (document.hidden) { leftPage = true; return; }
+      if (!leftPage) return;
+      leftPage = false;
+      if (syncView.current.step === "submitted") void returnRefresh.current();
+    };
+    window.addEventListener("pagehide", leave);
     document.addEventListener("visibilitychange", refreshOnReturn);
     window.addEventListener("pageshow", refreshOnReturn);
     return () => {
-      window.removeEventListener("focus", refreshOnReturn);
+      window.removeEventListener("pagehide", leave);
       document.removeEventListener("visibilitychange", refreshOnReturn);
       window.removeEventListener("pageshow", refreshOnReturn);
     };
-  }, [refreshOrderStatus]);
+  }, []);
 
   const startEditingOrder = async () => {
     if (customerOrderReadOnly || pendingSubmission || orderNeedsRefresh || runtimeBusy || entryBusy.current
