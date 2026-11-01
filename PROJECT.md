@@ -1,6 +1,6 @@
 # 订购会系统项目说明
 
-ACK 工作树已合入 main `e3cacc3`（业务源码基线 `080493a`），目标镜像 `20261101.1`、结构 V049；当前正在构建和隔离验收，未推送 CODING、未部署云端。云端交付状态以 [deploy/README.md](deploy/README.md) 和 [验证记录](deploy/verification.md) 为准。保留 OSS、共享会话、多副本及 DBA 管理迁移；以下 main 本地 3000/8080 的部署记录属于另一个长期保留的环境。
+ACK 工作树已完整合入 main `e3cacc3`（业务基线 `080493a`），ACK 本地镜像 `20261101.1`（源码 `1e71552`、结构 V049）已构建及隔离验收。未推送 CODING、未部署云端；保留 OSS、共享会话、多副本及 DBA 管理迁移。镜像身份和测试边界见 [本轮记录](deploy/local-images-20261101.1.md)。以下 main 本地 3000/8080 的部署记录属于另一个长期保留的环境。
 
 > 实施状态（2026-11-01）：本地前后端为 `080493a`、固定镜像标签 `local-080493a-20261101`，`latest` 已同步，数据库 V049，汇总继续开启；详情见[本次部署记录](docs/deployment/2026-11-01-main-local.md)。下文“待部署源码/尚未部署”保留开发当时的记录，已纳入本次提交的功能现已在本机部署；10 月 30 日 `d36cbca`/V041 为历史状态。本文项目说明对应 React 正式前端、Spring Boot 后端、MySQL、Redis、MinIO 和 Docker Compose 实现。此前标注“仅前端内存/正式系统待接入”的段落属于原型阶段历史说明；当前运行与验收方式以根目录 `README.md`、Flyway 迁移、OpenAPI 契约和 `docs/design/07-department-account-and-activity-isolation-plan.md` 为准。商品价格保存后自动同步当前活动有效订单，订单当前明细和看板使用最新金额；订单历史版本保留原提交数据。订单综合看板的完整模块、统计口径、交互和验收规则见 `docs/design/06-order-dashboard-plan.md`。
 
