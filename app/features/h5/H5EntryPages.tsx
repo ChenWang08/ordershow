@@ -26,15 +26,15 @@ function IdentityChoice({ model }: { model: H5OrderModel }) {
   </dialog>;
 }
 
-export function H5EntryPages({ model }: { model: H5OrderModel }) {
+export function H5EntryPages({ model, activityLoadFailed = false }: { model: H5OrderModel; activityLoadFailed?: boolean }) {
   const { activityStatus, runtimeActivity, activityClosed, activityNotStarted, runtimeBusy, runtimeMessage,
     phone, setPhone, verifyError, orderStatus, visibleStep, verifyIdentity, identityChoice } = model;
   return <>
     {(visibleStep === "loading" || visibleStep === "empty") && <section className="h5-page verify-page entry-page">
       <div className="mini-brand"><b>金龙鱼</b></div>
       <div className="h5-hero-copy entry-hero"><span className="eyebrow">订货会</span></div>
-      <div className="verify-card entry-card" role="status"><h2>{visibleStep === "loading" ? "正在加载活动入口…" : "暂无可验证客户"}</h2>
-        <p>{visibleStep === "loading" ? "请稍候；若长时间未显示，请检查网络后刷新页面。" : "当前活动暂无已发布的有效白名单，请联系活动工作人员。"}</p></div>
+      <div className="verify-card entry-card" role="status"><h2>{visibleStep === "loading" ? activityLoadFailed ? "活动入口加载失败" : "正在加载活动入口…" : "暂无可验证客户"}</h2>
+        <p>{visibleStep === "loading" ? activityLoadFailed ? "请检查网络后点击重试活动资料。" : "请稍候，正在获取活动资料。" : "当前活动暂无已发布的有效白名单，请联系活动工作人员。"}</p></div>
     </section>}
     {visibleStep === "verify" && <section className="h5-page verify-page">
       <div className="entry-nav"><span>手机号验证</span></div>

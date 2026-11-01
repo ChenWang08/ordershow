@@ -46,7 +46,8 @@ export function H5Ordering(props: H5Props) {
       <div className="phone-shell" ref={shellRef}>
         <div className="phone-screen">
           <FestivalDecor />
-          {props.activitySyncMessage && <p className="activity-sync-status" role="status">{props.activitySyncMessage}</p>}
+          {props.activitySyncMessage && <div className="activity-sync-status" role="status">{props.activitySyncMessage}
+            {props.activityLoadFailed && <button type="button" onClick={props.retryActivity}>重试活动资料</button>}</div>}
           <H5LiveRoomExit url={props.runtimeActivity?.liveRoomUrl} disabled={model.runtimeBusy}
             prepare={model.prepareLiveRoomExit} />
           {(model.pendingSubmission || model.orderNeedsRefresh) && <div className="h5-submit-recovery" role="alert">
@@ -56,7 +57,7 @@ export function H5Ordering(props: H5Props) {
             </button>}
             {model.orderNeedsRefresh && <button disabled={model.runtimeBusy} onClick={() => void model.reloadLatestOrder()}>加载最新订单并核对</button>}
           </div>}
-          <H5EntryPages model={model} />
+          <H5EntryPages model={model} activityLoadFailed={props.activityLoadFailed} />
           <H5CatalogPage model={model} />
           <H5ConfirmPage model={model} />
           <H5SubmittedPage model={model} />

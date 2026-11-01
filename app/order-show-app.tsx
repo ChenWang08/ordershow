@@ -24,7 +24,7 @@ function OrderShowContent({ initialSurface = "h5", showSurfaceTabs = true }: Ord
   const standaloneH5 = surface === "h5" && !showSurfaceTabs;
   const collapsibleScreen = ["dashboard", "ranking", "report", "lottery"].includes(surface);
   const manualScreen = ["dashboard", "ranking", "report"].includes(surface);
-  const { activityName, runtimeConnected, runtimeActivity, runtimeMessage } = useActivityWorkspace();
+  const { activityName, runtimeConnected, runtimeActivity, runtimeMessage, runtimeConnectionState, retryActivity } = useActivityWorkspace();
   const h5Background = useBackgroundImage(surface === "h5" ? runtimeActivity?.h5BackgroundUrl : null);
   const desktopBackground = useBackgroundImage(["ranking", "report", "lottery"].includes(surface) ? runtimeActivity?.desktopBackgroundUrl : null);
   const backgroundStyle: BackgroundStyle = {
@@ -47,7 +47,8 @@ function OrderShowContent({ initialSurface = "h5", showSurfaceTabs = true }: Ord
   return (
     <main className={`prototype-root surface-${surface}${collapsibleScreen ? " collapsible-screen" : ""}${standaloneH5 ? " standalone-h5" : ""}${desktopBackground ? " has-desktop-background" : ""}`} style={backgroundStyle}>
       {!standaloneH5 && (collapsibleScreen ? <CollapsibleScreenHeader key={surface}>{navigation}</CollapsibleScreenHeader> : navigation)}
-      {runtimeMessage && surface !== "admin" && surface !== "h5" && <p className="activity-sync-status" role="status">{runtimeMessage}</p>}
+      {runtimeMessage && surface !== "admin" && surface !== "h5" && <div className="activity-sync-status" role="status">{runtimeMessage}
+        {(runtimeConnectionState === "error" || runtimeConnectionState === "unavailable") && <button type="button" onClick={retryActivity}>重试活动资料</button>}</div>}
       <div className="prototype-canvas">
         {showSurfaceTabs
           ? <div className={surface === "h5" ? "surface-slot" : "surface-slot surface-hidden"}><H5Surface /></div>

@@ -110,7 +110,7 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 
 ### 4.2 H5
 
-1. 连接 `GET /public/activities/{activityCode}/events`，以首条 `activity` 消息中的完整 `activity` 对象加载活动公开信息；资料变化后接收最新快照，断线重连同样获取当前快照，不额外查询活动 GET；
+1. 普通 `GET /public/activities/{activityCode}` 首次加载活动公开 JSON；页面可见时每约 30 秒（27～33 秒随机错开）携带 `If-None-Match` 检查，未变化返回无正文 304，变化返回完整资料。隐藏暂停，恢复可见立即检查；10 秒超时后显示重试，已有资料及购物车保留；新前端不建立活动 SSE；
 2. 用户只输入手机号，调用 `POST /public/activities/{activityCode}/verify-phone`，首次不传 `customerType`；不再预选通道或大区；
 3. 后端标准化手机号并计算 HMAC，查询当前活动、当前有效发布版本下的身份。唯一身份直接登录；综合与特渠同号时返回 `selectionRequired:true` 和 `customerTypes:["GENERAL","SPECIAL"]`，不返回客户详情、CSRF 或登录 Cookie，也不创建会话；
 4. 弹窗仅展示“综合”“特渠”。选择后向同一接口提交手机号与 `customerType`，后端重新校验当前身份，再在事务内创建会话。成功返回 `selectionRequired:false`、`customer`、`csrfToken`；只在事务提交成功后设置 H5 Cookie；
@@ -119,7 +119,9 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 
 H5 与 API 默认通过同站点托管入口提供。H5 的写请求必须携带 CSRF Header，并校验 `Origin`；Cookie 不放入 URL、`localStorage` 或 `sessionStorage`。若部署为跨站 API，才启用 Bearer 方案，并显式配置 CORS 和凭证撤销。
 
-原 `GET /public/activities/{activityCode}` 已删除，访问返回现有 `404 RESOURCE_NOT_FOUND`，不执行活动资料查询；没有兼容转发或轮询降级。旧客户端/外部脚本须更新为 SSE。`GET /public/activities/current` 仍用于 `/h5` 单活动兼容入口；`/events`、`/verify-phone`、`/lottery` 和后台活动路径是独立端点，继续保留。
+`GET /public/activities/{activityCode}` 返回原 `PublicActivityResponse` 包装（`data`、`traceId`），弱 ETag 包含共享数据库的 `public_info_version` 和当前时间派生状态。版本检查默认每副本短缓存 2 秒，不查询白名单；同活动完整资料读取串行合并、按版本/状态缓存。每副本最多 64 个活动、2 个数据库加载、128 个读取者，等待最多 3 秒；等待不持有数据库事务或连接，超限返回 503 `ACTIVITY_INFO_BUSY`。版本和资料始终以数据库为准，不依赖 Redis 通知；同步时效需计入短缓存、检查周期及网络耗时。
+
+`GET /public/activities/current` 仍用于 `/h5` 单活动兼容入口。旧 `/events` 暂保留给尚未更新的客户端，新前端不使用，也不以它作为 HTTP 失败后的回退。手机号验证、下单和开奖仍按服务器最新权限、版本和时间校验。活动资料同步不触发商品、订单、抽奖或统计重查；看板/战报打开后首次统计，排行先读选项、确认后统计，之后均手动刷新；抽奖仅打开且活动资料就绪后加载。
 
 相同手机号可在综合和特渠分别匹配，不修改原 `(activity_id,data_version_id,customer_type,phone_lookup_hash)` 唯一约束。明确指定类型但未匹配时返回 `WHITELIST_IDENTITY_NOT_FOUND`，不自动切换到另一身份。唯一 `ALL` 身份直接登录。相同类型多重匹配或 `ALL` 与其他类型同时匹配时返回 `WHITELIST_IDENTITY_AMBIGUOUS`，不能取第一条。
 
@@ -279,6 +281,8 @@ H5 只提交商品 ID 和箱数：
 撤回不会删除当前明细或创建空版本。重新提交沿用原订单号，并生成下一个版本号。
 
 ## 9. 看板和 SSE
+
+当前页面规则：看板、战报打开后首次统计；排行打开先读筛选选项、确认后统计；随后仅手动刷新。未打开页面不加载统计。共用活动资料使用第 4.2 节的普通 HTTP 检查，资料更新、恢复可见和网络恢复均不触发统计重查。以下 SSE 协议为服务端保留的旧客户端兼容能力，不代表新前端会订阅或恢复 15 秒统计轮询。
 
 看板查询只读取：当前活动、`SUBMITTED` 订单、当前明细。已撤回订单完全排除。
 

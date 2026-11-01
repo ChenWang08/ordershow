@@ -48,3 +48,12 @@
   font-size: 13px;
   text-align: center;
 }
+.activity-sync-status button {
+  margin-left: 12px;
+  padding: 3px 10px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+}

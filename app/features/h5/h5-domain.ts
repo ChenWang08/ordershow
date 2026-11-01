@@ -157,7 +157,7 @@ export function h5OrderItems(order: RuntimeOrder | null) {
   return order?.items.map((item) => ({ productId: item.productId, quantity: item.quantity })) ?? [];
 }
 
-export type H5Props = { activityStatus: ActivityStatus; importedRows: ProductImportRow[] | null; importedWhitelistRows: WhitelistRow[] | null; runtimeActivity: RuntimeActivity | null; activitySyncMessage?: string };
+export type H5Props = { activityStatus: ActivityStatus; importedRows: ProductImportRow[] | null; importedWhitelistRows: WhitelistRow[] | null; runtimeActivity: RuntimeActivity | null; activitySyncMessage?: string; activityLoadFailed?: boolean; retryActivity?: () => void };
 
 /** Compare each original product; totals and pending applications are not the baseline. */
 export function h5RequiresReview(order: Pick<RuntimeOrder, "status" | "items"> | null, items: Array<{ productId: number; quantity: number }>): boolean {

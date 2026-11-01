@@ -4,11 +4,11 @@
 
 - 排行联动与空值：`ranking-filters.test.mjs`、`screens-manual-refresh.test.mjs` 覆盖上游重置、项目组收窄品种、缺失字段/空值、取消迟到请求、失败重试及最后成功条件刷新；`scripts/test-ranking-filters-browser.mjs` 用真实 React 和合成 HTTP 验证交互及 1920/1440/768/440 布局。`RankingFiltersIntegrationTest` 用隔离 MySQL 验证实际条件、适用且未下单的配置、分公司/经销商范围、新历史冻结与空格空值一致；`PageStatisticsControllerTest` 验证真实 MVC 参数和全局 NON_NULL 下仍输出 null 选项字段。运行与结果见[联动与空值验证](../docs/testing/ranking-cascade-2026-11-01.md)。
 
-- 旧活动 GET 清理：`ActivityRoutesTest` 验证真实 MVC 路由、旧地址 404 且不调用活动服务、`/current`/SSE/手机号验证/抽奖/后台活动路径保留；`ActivityInfoIntegrationTest` 追加完整 HTTP 栈的 404 验证并保留真实 SSE 更新/恢复验证。公开资料脚本与隔离 API E2E 改读 SSE 首帧；`public-activity-snapshot.test.mjs` 验证有界等待和断开清理。旧 `scripts/test-h5-entry.mjs` 改为依次运行现有手机号入口、活动 SSE 合成浏览器测试，不再保留旧 JSON 活动夹具或通道选择流程。详情见[清理验证](../docs/testing/retired-public-activity-2026-10-31.md)。
+- 活动 HTTP 恢复（2026-11-01）：`ActivityInfoHttpServiceTest` 验证 304 跳过完整读取、短缓存、并发合并、时间派生状态、资源上限和独立副本缓存；`ActivityRoutesTest`/`ActivityInfoIntegrationTest` 验证真实 JSON/304/404 和共享数据库版本。`activity-info-http.test.mjs` 与合成浏览器验证检查周期、10 秒超时、隐藏/恢复、重试、活动隔离和无活动 SSE；公开资料脚本改读普通 HTTP。旧 SSE 保留兼容测试；旧 GET 删除记录为历史状态。详情见[本轮验证](../docs/testing/activity-info-http-2026-11-01.md)。
 
 - 抽奖三种加权：`lottery-settings.test.mjs`验证指标与门槛联动、0门槛、名单复用和旧规则兼容；`LotteryWeightingTest`与`LotteryIntegrationTest`验证金额/箱数/吨数实际小计、零权重排除、真实开奖和审计对账。千人在线、200单/分钟的同流量对照见[加权验证记录](../docs/testing/lottery-weighting-2026-10-31.md)。测试不构建或部署业务镜像。
 
-- H5 本机草稿与抽奖按页面加载：`h5-local-draft.test.mjs` 验证浏览器持久化、隔离、损坏/过期和存储失败；`h5-manual-refresh.test.mjs` 验证完整草稿生命周期及后台更新后的失效、提交成功清理/失败保留。`activity-info-stream.test.mjs` 与 `lottery-board.test.mjs` 分别保证公共/H5 初始化不查询抽奖，以及抽奖页独立读取正常。`scripts/test-h5-manual-refresh-browser.mjs` / `scripts/test-activity-info-browser.mjs` 使用真实组件和合成 HTTP 验证本机恢复、无草稿/抽奖请求及活动 SSE 兼容；见[验证记录](../docs/testing/h5-local-draft-2026-10-31.md)。
+- H5 本机草稿与抽奖按页面加载：`h5-local-draft.test.mjs` 验证浏览器持久化、隔离、损坏/过期和存储失败；`h5-manual-refresh.test.mjs` 验证完整草稿生命周期及后台更新后的失效、提交成功清理/失败保留。`activity-info-http.test.mjs` 与 `lottery-board.test.mjs` 分别保证公共/H5 初始化不查询抽奖，以及抽奖页独立读取正常。浏览器验证无后台草稿请求、购物车保留和 HTTP 活动同步；本轮补充抽奖仅在页面打开且活动资料就绪后挂载。历史草稿验证见[记录](../docs/testing/h5-local-draft-2026-10-31.md)。
 
 - 手机端订单按需刷新：`h5-manual-refresh.test.mjs` 覆盖无轮询、15 秒冷却、共享查询、修改/撤回检查、审核及后台直接修改、草稿版本和迟到响应隔离；`scripts/test-h5-manual-refresh-browser.mjs` 使用真实 H5 组件及合成 HTTP，在手机/桌面验证静置无订单请求、最新购物车和失败恢复，见[验证记录](../docs/testing/h5-manual-refresh-2026-10-30.md)。
 

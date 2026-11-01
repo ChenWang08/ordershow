@@ -1,13 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getActiveActivityCode, subscribeActiveActivityCode, type RuntimeActivity } from "../../api";
-import { subscribeActivityInfo, type ActivityInfoConnectionState } from "../../services/api/activity-info-stream";
+import { subscribeActivityInfo, type ActivityInfoConnectionState } from "../../services/api/activity-info-http";
 import { initialLotteryRounds, type LotteryRound } from "../lottery/Lottery";
 import type { ActivityStatus } from "../shared/types";
 import { runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
 
 export function useActivityRuntime(adminActivity?: RuntimeActivity) {
+  const retry = useRef<(() => void) | undefined>(undefined);
+  const retryActivity = useCallback(() => retry.current?.(), []);
   const adminActivityId = adminActivity?.id;
   const [publicActivityCode, setPublicActivityCode] = useState(getActiveActivityCode);
   const [lotteryRounds, setLotteryRounds] = useState<LotteryRound[]>(initialLotteryRounds);
@@ -47,18 +49,20 @@ export function useActivityRuntime(adminActivity?: RuntimeActivity) {
     if (adminActivityId != null) return;
     let active = true;
     let unsubscribe: (() => void) | undefined;
-    // StrictMode's discarded mount must not open a second HTTP stream.
+    // StrictMode's discarded mount must not send a second initial request.
     void Promise.resolve().then(() => {
       if (!active) return;
-      unsubscribe = subscribeActivityInfo(publicActivityCode, {
+      const subscription = subscribeActivityInfo(publicActivityCode, {
         onActivity: activity => { if (active) applyActivity(activity); },
         onState: state => { if (active) { setRuntimeConnectionState(state); setRuntimeConnected(state === "connected"); } },
       });
+      unsubscribe = subscription;
+      retry.current = subscription.retry;
     });
-    return () => { active = false; unsubscribe?.(); };
+    return () => { active = false; unsubscribe?.(); retry.current = undefined; };
   }, [adminActivityId, publicActivityCode, applyActivity]);
   const runtimeMessage = runtimeConnectionState === "unavailable" ? "活动不存在或已不可用，请检查活动链接。"
-    : runtimeConnectionState === "unsupported" ? "当前浏览器无法同步活动信息，请使用新版浏览器打开。"
+    : runtimeConnectionState === "error" ? runtimeActivity ? "活动资料同步失败，当前显示上次资料，可点击重试。" : "活动资料加载失败，请检查网络后重试。"
     : runtimeConnectionState === "connecting" ? runtimeActivity ? "活动信息正在重新同步，当前显示上次资料。" : "正在加载活动信息…" : "";
-  return { lotteryRounds, setLotteryRounds, activityName, setActivityName, activityId, setActivityId, activityStatus, setActivityStatus, activityStartAt, setActivityStartAt, activityEndAt, setActivityEndAt, activityEventEndAt, setActivityEventEndAt, runtimeActivity, setRuntimeActivity, runtimeConnected, runtimeLoaded: Boolean(runtimeActivity), runtimeConnectionState, runtimeMessage };
+  return { lotteryRounds, setLotteryRounds, activityName, setActivityName, activityId, setActivityId, activityStatus, setActivityStatus, activityStartAt, setActivityStartAt, activityEndAt, setActivityEndAt, activityEventEndAt, setActivityEventEndAt, runtimeActivity, setRuntimeActivity, runtimeConnected, runtimeLoaded: Boolean(runtimeActivity), runtimeConnectionState, runtimeMessage, retryActivity };
 }

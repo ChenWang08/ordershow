@@ -69,6 +69,6 @@ class OpenApiContractTest {
     assertThat(orderCollection).containsKeys("get", "post");
     assertThat(orderResource).containsKeys("get", "put");
     assertThat(paths).doesNotContainKey("/admin/activities/{activityId}/customers/{customerId}/status");
-    assertThat(paths).doesNotContainKey("/public/activities/{activityCode}");
+    assertThat(paths).containsKey("/public/activities/{activityCode}");
   }
 }

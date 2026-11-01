@@ -36,21 +36,26 @@ class ActivityRoutesTest {
   @Autowired ActivityService activities;
   @Autowired AuthService auth;
   @Autowired ActivityInfoStreamService streams;
+  @Autowired ActivityInfoHttpService http;
   @Autowired H5PhoneVerificationService phone;
   @Autowired LotteryService lottery;
   MockMvc mvc;
 
   @BeforeEach void setup() {
-    reset(activities, auth, streams, phone, lottery);
+    reset(activities, auth, streams, http, phone, lottery);
     mvc = MockMvcBuilders.webAppContextSetup(context).build();
   }
 
-  @Test void removedGetReturns404WithoutReadingActivityOrOtherServices() throws Exception {
-    for (String code : List.of("EXAMPLE", "MISSING", "current-extra")) {
-      mvc.perform(get("/public/activities/" + code).param("_", "123"))
-          .andExpect(status().isNotFound())
-          .andExpect(jsonPath("code").value("RESOURCE_NOT_FOUND"));
-    }
+  @Test void httpGetReturnsJsonAndBodyless304WithoutOtherBusinessReads() throws Exception {
+    String tag = "W/\"activity-42-1-ACTIVE\"";
+    when(http.read("EXAMPLE", null)).thenReturn(new ActivityInfoHttpService.Read(tag, activity()));
+    when(http.read("EXAMPLE", tag)).thenReturn(new ActivityInfoHttpService.Read(tag, null));
+    mvc.perform(get("/public/activities/EXAMPLE")).andExpect(status().isOk())
+        .andExpect(header().string("ETag", tag)).andExpect(header().string("Cache-Control", "private, no-cache"))
+        .andExpect(jsonPath("data.code").value("EXAMPLE")).andExpect(request().asyncNotStarted());
+    mvc.perform(get("/public/activities/EXAMPLE").header("If-None-Match", tag))
+        .andExpect(status().isNotModified()).andExpect(header().string("ETag", tag))
+        .andExpect(content().string("")).andExpect(request().asyncNotStarted());
     verifyNoInteractions(activities, auth, streams, phone, lottery);
   }
 
@@ -125,6 +130,7 @@ class ActivityRoutesTest {
     @Bean ActivityService activities() { return mock(ActivityService.class); }
     @Bean AuthService auth() { return mock(AuthService.class); }
     @Bean ActivityInfoStreamService streams() { return mock(ActivityInfoStreamService.class); }
+    @Bean ActivityInfoHttpService http() { return mock(ActivityInfoHttpService.class); }
     @Bean H5PhoneVerificationService phone() { return mock(H5PhoneVerificationService.class); }
     @Bean LotteryService lottery() { return mock(LotteryService.class); }
     @Override public void addResourceHandlers(ResourceHandlerRegistry registry) {
