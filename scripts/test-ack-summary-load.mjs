@@ -6,7 +6,7 @@ import {randomUUID} from 'node:crypto';
 assert(process.argv.includes('--ack-smoke'));
 const seconds=Number(process.argv.find(x=>/^--seconds=/.test(x))?.split('=')[1]??90);
 assert([90,300].includes(seconds));
-const releaseTag=process.env.ACK_IMAGE_TAG??'20261030.1';assert.match(releaseTag,/^\d{8}\.\d+$/);
+const releaseTag=process.env.ACK_IMAGE_TAG??'20261101.1';assert.match(releaseTag,/^\d{8}\.\d+$/);
 const out=`outputs/ack-release-${releaseTag}`;mkdirSync(out,{recursive:true});
 const docker=args=>execFileSync('docker',args,{encoding:'utf8',maxBuffer:32*1024*1024,timeout:30000});
 const resources={};

@@ -21,7 +21,7 @@ export function useAttendanceManagement({
   activityId, activityStatus, setAttendanceRows, attendanceImportError,
   onAttendanceFileNameChange, onAttendanceWarningsChange, onAttendanceSheetCountsChange, onAttendanceImportErrorChange,
   serverImportTasks, serverImportBlocking, setServerImportTasks, setServerImportBlocking,
-  setActionNotice, recordOperation, refreshServerImportPreview,
+  setActionNotice, recordOperation, refreshServerImportPreview, importWaitOptions,
 }: AttendanceManagementOptions) {
   const activityStarted = activityStatus === "running" || activityStatus === "closed" || activityStatus === "finished";
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
@@ -132,7 +132,7 @@ export function useAttendanceManagement({
     try {
       if (taskId) {
         await confirmImport(Number(activityId), taskId, undefined, undefined, attendanceMatchPreview.whitelistVersionId ?? null);
-        await waitForImport(Number(activityId), taskId);
+        await waitForImport(Number(activityId), taskId, importWaitOptions?.());
       }
       const imported = pendingAttendanceImport;
       const publishedRows = taskId ? mapAdminAttendanceRows(await loadAdminAttendees(Number(activityId))) : cloneAttendanceRows(imported.rows);

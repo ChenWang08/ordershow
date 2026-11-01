@@ -1,0 +1,25 @@
+name: order-show-product-catalog-test
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: product_catalog_test_only
+      MYSQL_DATABASE: order_show_product_catalog_test
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pproduct_catalog_test_only"]
+      interval: 2s
+      timeout: 2s
+      retries: 40
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+networks:
+  default:
+    name: order-show-product-catalog-test

@@ -1,16 +1,17 @@
 "use client";
-import { useEffect, useState } from "react";
-import { loadModuleContext, type ModuleContext } from "../../api";
+import { useEffect, useRef } from "react";
+import { loadModuleContext } from "../../api";
+import { useLazyAdminQuery } from "./useLazyAdminQuery";
 
-export function useModuleContext(activityId: string, enabled: boolean) {
-  const [context, setContext] = useState<ModuleContext | null>(null);
+export function useModuleContext(activityId: string, scope: string | null, revision: number) {
+  const query = useLazyAdminQuery(activityId, scope !== null, signal => loadModuleContext(Number(activityId), signal), undefined, false, scope ?? "");
+  const previous = useRef(revision);
+  const { invalidate, refresh } = query;
   useEffect(() => {
-    if (!enabled) return;
-    let active = true;
-    const refresh = () => { void loadModuleContext(Number(activityId)).then(value => { if (active) setContext(value); }).catch(() => undefined); };
-    refresh();
-    const timer = window.setInterval(refresh, 15000);
-    return () => { active = false; window.clearInterval(timer); };
-  }, [activityId, enabled]);
-  return context;
+    if (previous.current === revision) return;
+    previous.current = revision;
+    invalidate();
+    if (scope !== null) void refresh();
+  }, [revision, scope, invalidate, refresh]);
+  return query;
 }

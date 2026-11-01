@@ -5,11 +5,12 @@ import type { H5OrderModel } from "./useH5OrderFlow";
 import { ProductArt } from "./ProductArt";
 import { QuantityInput } from "./QuantityInput";
 import { money } from "../shared/utils";
-import { priceBreakdown, tierPriceLabel } from "./h5-domain";
+import { priceBreakdown, tierPriceLabel, unitPriceText } from "./h5-domain";
 
 export function H5CatalogPage({ model }: { model: H5OrderModel }) {
   const { activityClosed, setStep, setRebateFilter, line, setLine, search, setSearch, setPreviewProduct, cartOpen, setCartOpen, orderStatus, customerOrderReadOnly, setCancelConfirmOpen, quantities, setQuantities, visibleStep, lineOptions, hasRebateSplit, effectiveRebateFilter, visibleProducts, visibleProductGroups, selectedLineGroups, selected, totalBoxes, totalAmount, importedIdentity, identityLabel, dealerName, displayBranch, displayPhone, changeQty, draftMessage } = model;
   const { catalogSearch } = model;
+  const editingDisabled = customerOrderReadOnly || model.pendingSubmission || model.orderNeedsRefresh || model.runtimeBusy;
   const scrollArea = useRef<HTMLDivElement>(null);
   const toolbar = useRef<HTMLDivElement>(null);
   const savedScroll = useRef<number | null>(null);
@@ -57,6 +58,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
               </div>
               <div className="policy-note"><b>订货提示</b><span>{activityClosed ? "活动已截止，当前订单仅可查看。" : orderStatus === "none" ? "所有商品按箱订购。增加数量或新增商品直接生效，减少、删除商品或取消订货需要审核。" : "增加数量或新增商品直接生效；减少、删除商品或取消订货需审核。已撤回或已作废订单可重新提交恢复。"}</span></div>
               {draftMessage && <div className="h5-draft-status" role="status">{draftMessage}</div>}
+              {model.runtimeMessage && <div className="verify-error" role="alert">{model.runtimeMessage}</div>}
               <div ref={toolbar} className="product-toolbar">
                 <div className={`segment${hasRebateSplit ? catalogSearch.searching ? " search-segment" : "" : " single"}`} role="tablist" aria-label="商品返利类型">
                   {hasRebateSplit ? <>
@@ -92,11 +94,11 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                       {catalogSearch.searching && <small className="catalog-product-location">{product.rebate === true ? "返利产品" : product.rebate === false ? "非返利产品" : "不区分返利"} · {product.line || "未分类"}</small>}
                       {product.description && <p className="product-description" title={product.description}>{product.description}</p>}
                       <div className="product-action">
-                        <div className="product-price-block"><strong>{product.isOrderable ? <>¥{money(priceBreakdown(product, quantities[product.id] || 0).displayPrice)}<small>/箱</small></> : "价格待完善"}</strong>{product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small>{tierPriceLabel(product, quantities[product.id] || 0)}</small>}</div>
+                        <div className="product-price-block"><strong>{product.isOrderable ? <>¥{unitPriceText(priceBreakdown(product, quantities[product.id] || 0).displayPrice)}<small>/箱</small></> : "价格待完善"}</strong>{product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small>{tierPriceLabel(product, quantities[product.id] || 0)}</small>}</div>
                         <div className="stepper">
-                          <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={activityClosed || !product.isOrderable || !quantities[product.id]}>−</button>
-                          <QuantityInput label={`${product.name}订货箱数`} disabled={activityClosed} value={quantities[product.id] || 0} onChange={(value) => setQuantities((old) => ({ ...old, [product.id]: value }))} />
-                          <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)} disabled={activityClosed || !product.isOrderable}>＋</button>
+                          <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={editingDisabled || !product.isOrderable || !quantities[product.id]}>−</button>
+                          <QuantityInput label={`${product.name}订货箱数`} disabled={editingDisabled || !product.isOrderable} value={quantities[product.id] || 0} onChange={(value) => setQuantities((old) => ({ ...old, [product.id]: value }))} />
+                          <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)} disabled={editingDisabled || !product.isOrderable}>＋</button>
                         </div>
                       </div>
                     </div>
@@ -113,7 +115,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                 <button className="cart-summary" aria-label="查看已选商品明细" disabled={activityClosed || !totalBoxes} onClick={() => setCartOpen(true)}>
                   <span>已选 {selected.length} 种 · {totalBoxes} 箱 <em>查看明细⌃</em></span><b>¥{money(totalAmount)}</b>
                 </button>
-                <button className="confirm-cart-btn" disabled={customerOrderReadOnly || (!totalBoxes && orderStatus === "none")} onClick={() => totalBoxes ? setStep("confirm") : setCancelConfirmOpen(true)}>{totalBoxes || orderStatus === "none" ? "确认订单" : "取消本次订货"}</button>
+                <button className="confirm-cart-btn" disabled={editingDisabled || (!totalBoxes && orderStatus === "none")} onClick={() => totalBoxes ? setStep("confirm") : setCancelConfirmOpen(true)}>{totalBoxes || orderStatus === "none" ? "确认订单" : "取消本次订货"}</button>
               </div>
             </section>
           )}
@@ -122,7 +124,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
             <div className="cart-sheet-layer">
               <button className="cart-sheet-backdrop" aria-label="关闭购物明细" onClick={() => setCartOpen(false)} />
               <section className="cart-sheet" aria-label="已选商品明细">
-                <header><div><b>已选商品</b><span>{selected.length} 种 · {totalBoxes} 箱</span></div><button disabled={!selected.length} onClick={() => setQuantities({})}>清空</button></header>
+                <header><div><b>已选商品</b><span>{selected.length} 种 · {totalBoxes} 箱</span></div><button disabled={editingDisabled || !selected.length} onClick={() => setQuantities({})}>清空</button></header>
                 <div className="cart-sheet-list">
                   {selectedLineGroups.map((group) => (
                     <section className="cart-line-group" key={group.line}>
@@ -133,15 +135,15 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                       <div className="cart-item-info">
                         <button type="button" className="cart-item-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button>
                         <small className="product-line-label">项目组：{group.line}</small>
-                        <span>¥{money(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span>
+                        <span>¥{unitPriceText(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span>
                         <strong>小计 ¥{money(priceBreakdown(product, quantities[product.id]).amount)}</strong>
                       </div>
                       <div className="cart-item-actions">
-                        <button className="remove-item" disabled={activityClosed} onClick={() => setQuantities((old) => ({ ...old, [product.id]: 0 }))}>删除</button>
+                        <button className="remove-item" disabled={editingDisabled} onClick={() => setQuantities((old) => ({ ...old, [product.id]: 0 }))}>删除</button>
                         <div className="stepper">
-                          <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={activityClosed}>−</button>
-                          <QuantityInput label={`${product.name}订货箱数`} disabled={activityClosed} value={quantities[product.id] || 0} onChange={(value) => setQuantities((old) => ({ ...old, [product.id]: value }))} />
-                          <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)} disabled={activityClosed}>＋</button>
+                          <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={editingDisabled}>−</button>
+                          <QuantityInput label={`${product.name}订货箱数`} disabled={editingDisabled} value={quantities[product.id] || 0} onChange={(value) => setQuantities((old) => ({ ...old, [product.id]: value }))} />
+                          <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)} disabled={editingDisabled}>＋</button>
                         </div>
                       </div>
                     </article>
@@ -150,7 +152,7 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                   ))}
                   {!selected.length && <div className="cart-empty">还没有选择商品</div>}
                 </div>
-                <footer><div><span>合计</span><b>¥{money(totalAmount)}</b><small>共 {totalBoxes} 箱</small></div><button disabled={customerOrderReadOnly || (!totalBoxes && orderStatus === "none")} onClick={() => { setCartOpen(false); if (totalBoxes) setStep("confirm"); else setCancelConfirmOpen(true); }}>{totalBoxes || orderStatus === "none" ? "去确认订单" : "取消本次订货"}</button></footer>
+                <footer><div><span>合计</span><b>¥{money(totalAmount)}</b><small>共 {totalBoxes} 箱</small></div><button disabled={editingDisabled || (!totalBoxes && orderStatus === "none")} onClick={() => { setCartOpen(false); if (totalBoxes) setStep("confirm"); else setCancelConfirmOpen(true); }}>{totalBoxes || orderStatus === "none" ? "去确认订单" : "取消本次订货"}</button></footer>
               </section>
             </div>
           )}

@@ -27,7 +27,7 @@ export function OrderChangeRequestPanel({model,detailOnly=false}:{model:OrderMan
         <select aria-label="申请类型" value={r.filters.type} onChange={e=>r.setFilters({...r.filters,type:e.target.value,page:1})}><option value="ALL">全部类型</option><option value="MODIFY">修改订单</option><option value="WITHDRAW">撤回订单</option></select>
         <input aria-label="搜索申请" placeholder="搜索订单号、经销商或电话" value={r.filters.keyword} onChange={e=>r.setFilters({...r.filters,keyword:e.target.value,page:1})}/>
         <select aria-label="申请时间排序" value={String(r.filters.newest)} onChange={e=>r.setFilters({...r.filters,newest:e.target.value==="true",page:1})}><option value="false">最早申请优先</option><option value="true">最新申请优先</option></select>
-        <button onClick={()=>void r.reload()} disabled={r.loading}>刷新</button>
+        <button onClick={()=>void r.reload()} disabled={r.loading}>刷新审核</button>
       </div>
       {r.error&&<p role="alert" className="verify-error">{r.error}</p>}
       <div className="review-table-scroll"><table className="review-table"><thead><tr>{["申请时间","订单 / 经销商","类型 / 版本","当前金额","申请金额","种类 / 箱数 / 吨数","状态","操作"].map(t=><th key={t}>{t}</th>)}</tr></thead><tbody>

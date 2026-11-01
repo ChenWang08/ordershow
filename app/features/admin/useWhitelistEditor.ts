@@ -87,6 +87,7 @@ export function useWhitelistEditor({
         catch (error) { return saveFailure(error instanceof ApiError ? `修改已保存，但预览刷新失败：${error.message}。请先刷新列表核对。` : "修改已保存，但预览刷新失败，请先刷新列表核对。", true); }
       }
       if (activityStarted) recordOperation("活动开始后改单条白名单", nextRow.dealerShort || nextRow.dealerFull, `修改前：客户类型 ${editingWhitelistRow.customerType}、全称 ${editingWhitelistRow.dealerFull || "—"}、姓名 ${editingWhitelistRow.dealerName || "—"}、电话 ${editingWhitelistRow.dealerPhone || "—"}、分公司 ${editingWhitelistRow.branch || "—"}、状态 ${editingWhitelistRow.status}；修改后：客户类型 ${nextRow.customerType}、全称 ${nextRow.dealerFull || "—"}、姓名 ${nextRow.dealerName || "—"}、电话 ${nextRow.dealerPhone || "—"}、分公司 ${nextRow.branch || "—"}、状态 ${nextRow.status}；原因：${reason || "—"}。`);
+      if (!activityStarted) recordOperation("修改白名单", nextRow.dealerShort || nextRow.dealerFull, "已保存当前白名单资料。");
       setActionNotice(`${activityStarted ? "已记录并保存" : "已保存"}白名单修改：${nextRow.dealerShort}`);
       return { ok: true };
     }

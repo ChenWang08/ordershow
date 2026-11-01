@@ -8,8 +8,11 @@ import {
 import { beijingDateTimeMillis } from "../shared/time";
 import type { ActivityStatus } from "../shared/types";
 import { runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
+import { useLazyAdminQuery } from "./useLazyAdminQuery";
 
 type ActivitySettingsOptions = {
+  tab?: string;
+  initialActivity?: RuntimeActivity | null;
   activityId: string;
   activityCode: string;
   activityName: string;
@@ -26,10 +29,11 @@ type ActivitySettingsOptions = {
   onActivityEventEndAtChange: (value: string) => void;
   setActionNotice: (value: string) => void;
   recordOperation: (action: string, target: string, detail: string) => void;
+  onActivityLoaded?: (activity: RuntimeActivity) => void;
 };
 
 export function useActivitySettings({
-  activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, productImportCompleted, whitelistImportCompleted, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation,
+  tab = "活动概览", initialActivity, activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation, onActivityLoaded,
 }: ActivitySettingsOptions) {
   const [activityStartDraft, setActivityStartDraft] = useState(activityStartAt);
   const [activityEndDraft, setActivityEndDraft] = useState(activityEndAt);
@@ -38,18 +42,32 @@ export function useActivitySettings({
   const [reopenDraft, setReopenDraft] = useState<{ activity: RuntimeActivity; endsAt: string; eventEndsAt: string; reason: string; error: string } | null>(null);
   const [reopenBusy, setReopenBusy] = useState(false);
   const reopenPending = useRef(false);
-  const applyActivity = (activity: RuntimeActivity) => {
+  const initialSnapshot = useRef(initialActivity);
+  const actionPending = useRef(false);
+  const [activityActionBusy, setActivityActionBusy] = useState(false);
+  const applyActivity = (activity: RuntimeActivity, preserveDrafts = false) => {
+    onActivityLoaded?.(activity);
     const nextStatus = runtimeActivityStatus(activity.status);
     onActivityStatusChange(nextStatus);
     onActivityNameChange(activity.name);
     onActivityStartAtChange(toDateTimeLocal(activity.startsAt));
     onActivityEndAtChange(toDateTimeLocal(activity.endsAt));
     onActivityEventEndAtChange(toDateTimeLocal(activity.eventEndsAt || new Date(new Date(activity.endsAt).getTime() + 4 * 60 * 60 * 1000).toISOString()));
+    if (preserveDrafts) return;
     setActivityNameDraft(activity.name);
     setActivityStartDraft(toDateTimeLocal(activity.startsAt));
     setActivityEndDraft(toDateTimeLocal(activity.endsAt));
     setActivityEventEndDraft(toDateTimeLocal(activity.eventEndsAt || new Date(new Date(activity.endsAt).getTime() + 4 * 60 * 60 * 1000).toISOString()));
   };
+  const dirty = activityNameDraft !== activityName || activityStartDraft !== activityStartAt
+    || activityEndDraft !== activityEndAt || activityEventEndDraft !== activityEventEndAt;
+  const activityQuery = useLazyAdminQuery(activityId, Boolean(tab), async signal => {
+    // AdminEntry already read this activity. Reuse that first response only.
+    const snapshot = initialSnapshot.current;
+    initialSnapshot.current = null;
+    return snapshot?.id === Number(activityId) ? snapshot : loadAdminActivity(Number(activityId), signal);
+  }, activity => applyActivity(activity, dirty), Boolean(reopenDraft) || activityActionBusy || reopenBusy, tab);
+  const refreshActivity = activityQuery.refresh;
   const saveActivityConfig = async (): Promise<boolean> => {
     if (!activityNameDraft.trim()) {
       setActionNotice("请填写活动名称。" );
@@ -105,10 +123,7 @@ export function useActivitySettings({
     return true;
   };
   const publishCurrentActivity = async () => {
-    if (!productImportCompleted || !whitelistImportCompleted) {
-      setActionNotice("发布活动前必须完成商品和白名单导入。" );
-      return;
-    }
+    // Publishing validates actual server bindings, not unopened modules' local flags.
     if (!window.confirm(`发布后活动将于 ${activityStartDraft.replace("T", " ")} 自动开始，商品和白名单将锁定。确定发布吗？`)) return;
     if (!await saveActivityConfig()) return;
     try {
@@ -198,6 +213,17 @@ export function useActivitySettings({
       setReopenDraft({ ...reopenDraft, error: error instanceof ApiError ? error.message : "重新开放失败，请稍后重试。" });
     } finally { reopenPending.current = false; setReopenBusy(false); }
   };
-  return { activityNameDraft, setActivityNameDraft, activityStartDraft, setActivityStartDraft, activityEndDraft, setActivityEndDraft, activityEventEndDraft, setActivityEventEndDraft, saveActivityConfig, publishCurrentActivity, withdrawCurrentActivity, closeCurrentActivity, finishCurrentActivity,
+  const runAction = async <T,>(action: () => Promise<T>): Promise<T | undefined> => {
+    if (actionPending.current || activityQuery.loading || reopenPending.current) return undefined;
+    actionPending.current = true; setActivityActionBusy(true);
+    try { return await action(); }
+    finally { actionPending.current = false; setActivityActionBusy(false); }
+  };
+  return { dirty,
+    refreshActivity, activityRefreshing: activityQuery.loading || activityActionBusy || reopenBusy, activityRefreshError: activityQuery.error,
+    activityNameDraft, setActivityNameDraft, activityStartDraft, setActivityStartDraft, activityEndDraft, setActivityEndDraft, activityEventEndDraft, setActivityEventEndDraft,
+    saveActivityConfig: async () => (await runAction(saveActivityConfig)) ?? false,
+    publishCurrentActivity: () => runAction(publishCurrentActivity), withdrawCurrentActivity: () => runAction(withdrawCurrentActivity),
+    closeCurrentActivity: () => runAction(closeCurrentActivity), finishCurrentActivity: () => runAction(finishCurrentActivity),
     reopenDraft, setReopenDraft, reopenBusy, openReopenDialog, closeReopenDialog, submitReopen };
 }

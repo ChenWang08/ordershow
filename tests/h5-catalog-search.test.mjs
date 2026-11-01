@@ -84,7 +84,7 @@ test('updated catalog recalculates search and safely falls back from deleted pro
 
 test('integrated order flow preserves quantities and totals across global search and clearing',()=>{
   const slots=[];let cursor=0,changed=false;
-  const react={useState(initial){const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return[slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;changed=true;}];},useRef(initial){const i=cursor++;return slots[i]??={current:initial};},useMemo:fn=>fn(),useEffect:()=>{}};
+  const react={useState(initial){const i=cursor++;if(!(i in slots))slots[i]=typeof initial==='function'?initial():initial;return[slots[i],value=>{slots[i]=typeof value==='function'?value(slots[i]):value;changed=true;}];},useRef(initial){const i=cursor++;return slots[i]??={current:initial};},useMemo:fn=>fn(),useCallback:fn=>fn,useEffect:()=>{},useSyncExternalStore:(_subscribe,getSnapshot)=>getSnapshot()};
   const {useH5OrderFlow}=loadModule('app/features/h5/useH5OrderFlow.ts',{react,'../../api':{apiAssetUrl:u=>u},'./useH5Draft':{useH5Draft:()=>({})}});
   const rows=products.map(p=>({id:p.id,materialName:p.name,line:p.line,customerType:'综合',rebate:p.rebate?'参与':'不参与',branchScope:'',status:'有效',casePrice:'37.5'}));
   function render(){let model;do{changed=false;cursor=0;model=useH5OrderFlow({activityStatus:'running',importedRows:rows,importedWhitelistRows:[]});}while(changed);return model;}

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readPublicActivity } from "../tests/helpers/public-activity-snapshot.mjs";
 import { mkdir } from "node:fs/promises";
 
 // Run after the isolated Java E2E fixtures have been created. Never point at business services.
@@ -31,7 +32,7 @@ try {
   const usedNames = new Set(orders.map((order) => order.dealerFullName));
   const customer = customers.find((item) => item.customerType === "GENERAL" && !usedNames.has(item.dealerFullName));
   assert.ok(customer, "Use a fresh isolated fixture with a customer who has not ordered");
-  const publicActivity = (await (await admin.request.get(`${api}/public/activities/${activity.code}`)).json()).data;
+  const publicActivity = await readPublicActivity(api, activity.code);
   const regionName = publicActivity.regions.find((item) => item.code === customer.regionCode)?.name;
   assert.ok(regionName);
   console.log("PASS admin login and activity initialization");

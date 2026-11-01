@@ -75,7 +75,7 @@ for(const [type,size,phone] of [['GENERAL',180,'137'+String(stamp).slice(-8)],['
  records.at(-1).crossReplicaRevocation=true;
  records.at(-1).crossReplicaInactiveCustomer=true;
 }
-const releaseTag=process.env.ACK_IMAGE_TAG??'20261030.1';
+const releaseTag=process.env.ACK_IMAGE_TAG??'20261101.1';
 assert.match(releaseTag,/^\d{8}\.\d+$/);
 const resultDir='outputs/ack-release-'+releaseTag;mkdirSync(resultDir,{recursive:true});
 writeFileSync(resultDir+'/h5-submission-result.json',JSON.stringify({checks,records},null,2));

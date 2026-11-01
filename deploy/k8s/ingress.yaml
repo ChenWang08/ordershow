@@ -1,4 +1,7 @@
-# Standard Ingress. Operations adds controller-specific upload/SSE timeout settings.
+# Standard Ingress. Operations supplies controller-specific annotations.
+# Public /api/v1/public/activities/{code}/events requires streaming: buffering/cache off,
+# idle/read timeout >= 90 seconds for the default 30-second heartbeat; preserve /api/v1.
+# Verify these settings on the actual ACK NGINX/ALB controller before rollout.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

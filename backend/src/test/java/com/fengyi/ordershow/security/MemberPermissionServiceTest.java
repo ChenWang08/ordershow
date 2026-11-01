@@ -44,6 +44,15 @@ class MemberPermissionServiceTest {
     assertThatThrownBy(() -> check(actor, "GET", "/admin/activities/1/audit-logs")).isInstanceOf(DomainException.class);
     assertThatThrownBy(() -> check(actor, "GET", "/admin/activities/1/new-unclassified-module")).isInstanceOf(DomainException.class);
   }
+  @Test void overviewUsesOnlyOverviewPermissionAndKeepsLegacyRankingAccess() {
+    for (String resource : List.of("overview", "ranking")) {
+      check(member(AdminPermission.OVERVIEW), "GET", "/admin/activities/1/" + resource);
+      assertThatThrownBy(() -> check(member(AdminPermission.ORDER), "GET", "/admin/activities/1/" + resource))
+          .isInstanceOf(DomainException.class);
+      assertThatThrownBy(() -> check(member(), "GET", "/admin/activities/1/" + resource))
+          .isInstanceOf(DomainException.class);
+    }
+  }
   @Test void activityPickerAndOrderDependenciesDoNotRequireOtherModules() {
     check(member(), "GET", "/admin/me");
     check(member(), "GET", "/admin/activities");

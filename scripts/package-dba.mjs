@@ -52,3 +52,18 @@ await fs.writeFile(path.join(destination,'upgrade-v039-v041.sql'),upgrade);
 await fs.writeFile(path.join(destination,'upgrade-v039-v041.manifest.json'),JSON.stringify({scope:'existing V039 database only',from:'V039',to:'V041',
   migrations:manifest.filter(item=>incrementalFiles.includes(item.file)),bundleSha256:crypto.createHash('sha256').update(upgrade).digest('hex')},null,2)+'\n');
 console.log('Generated upgrade-v039-v041.sql and manifest; no database was accessed.');
+
+// Existing V041 databases receive only V042-V049; the empty installation bundle is never used here.
+const v041Files=files.filter(f=>Number(f.match(/^V(\d+)/)[1])>41);
+if(latestVersion!=='V049'||v041Files.length!==8)throw new Error('Review incremental package range before changing it');
+let v041Sql='-- EXISTING V041 DATABASE ONLY. DBA: stop all writers, verify version and back up first.\n'
+ +'-- Apply in order; stop on first error. DDL may implicitly commit. Never use --force.\n'
+ +'-- V048 inserts first-price tiers and invalidates catalog metadata; original orders/history are preserved.\n'
+ +'SET NAMES utf8mb4;\nSET time_zone = "+00:00";\n';
+for(const file of v041Files){
+ const content=(await fs.readFile(path.join(root,'db/migrations',file),'utf8')).replace(/\r\n/g,'\n');
+ v041Sql += "\n-- BEGIN "+file+"\n"+content+"\n-- END "+file+"\nINSERT INTO deployment_schema_history(version,description) VALUES ('"+file.split('__')[0]+"','DBA incremental "+file+"');\n";
+}
+await fs.writeFile(path.join(destination,'upgrade-v041-v049.sql'),v041Sql);
+await fs.writeFile(path.join(destination,'upgrade-v041-v049.manifest.json'),JSON.stringify({scope:'existing V041 database only',from:'V041',to:'V049',migrations:manifest.filter(i=>v041Files.includes(i.file)),bundleSha256:crypto.createHash('sha256').update(v041Sql).digest('hex')},null,2)+'\n');
+console.log('Generated V041-V049 incremental package; no database accessed.');

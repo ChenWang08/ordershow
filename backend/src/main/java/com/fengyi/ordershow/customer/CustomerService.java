@@ -130,7 +130,7 @@ public class CustomerService {
     if (replaceConfirmerPhone && !confirmerPhone.isEmpty() && confirmerPhone.length() != 11) {
       throw DomainException.badRequest("CONFIRMER_PHONE_INVALID", "分公司确认人手机号必须为 11 位");
     }
-    String regionCode = "GENERAL".equals(current.customerType()) ? regions.resolveCode(activityId, request.regionCode()) : null;
+    String regionCode = regions.resolveCode(activityId, request.regionCode());
     try {
       int changed = jdbc.update("""
           UPDATE activity_customer SET region_code = ?, branch_name = ?, normalized_branch_name = ?, dealer_short_name = ?,
@@ -152,6 +152,13 @@ public class CustomerService {
       throw DomainException.conflict("CUSTOMER_PHONE_EXISTS", "该渠道下手机号已对应其他客户");
     }
     reassociateAttendance(activityId);
+    if (!java.util.Objects.equals(normalize(current.branchName()), normalize(request.branchName()))
+        || !java.util.Objects.equals(normalize(current.dealerFullName()), normalize(request.dealerFullName()))) {
+      com.fengyi.ordershow.catalog.ProductCatalogChanges.all(jdbc, activityId);
+    }
+    if (!java.util.Objects.equals(current.regionCode(), regionCode)) {
+      com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
+    }
     return customer(activityId, customerId);
   }
 
@@ -167,7 +174,7 @@ public class CustomerService {
     if (!confirmerPhone.isEmpty() && confirmerPhone.length() != 11) {
       throw DomainException.badRequest("CONFIRMER_PHONE_INVALID", "分公司确认人手机号必须为 11 位");
     }
-    String regionCode = "GENERAL".equals(customerType) ? regions.resolveCode(activityId, request.regionCode()) : null;
+    String regionCode = regions.resolveCode(activityId, request.regionCode());
     VersionSource source = currentSource(activityId, "WHITELIST");
     try {
       String branchName = request.branchName() == null ? "" : request.branchName().trim();
@@ -195,6 +202,8 @@ public class CustomerService {
       Long id = jdbc.queryForObject("SELECT id FROM activity_customer WHERE activity_id = ? AND data_version_id = ? AND customer_id = ?",
           Long.class, activityId, source.versionId(), customerId);
       reassociateAttendance(activityId);
+      com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
+      com.fengyi.ordershow.catalog.ProductCatalogChanges.all(jdbc, activityId);
       return customer(activityId, id);
     } catch (DuplicateKeyException exception) {
       throw DomainException.conflict("CUSTOMER_EXISTS", "当前白名单已存在同名客户或该渠道下手机号已被使用");
@@ -203,6 +212,7 @@ public class CustomerService {
 
   @Transactional
   public void deleteCustomer(long activityId, long customerId, int expectedVersion) {
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     String status = activities.byId(activityId).status();
     if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后数据只读");
     if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后白名单已锁定，请先撤回发布");
@@ -214,6 +224,8 @@ public class CustomerService {
     if (changed != 1) throw DomainException.conflict("CUSTOMER_VERSION_CONFLICT", "客户已被删除或发生变化，请刷新后重试");
     jdbc.update("UPDATE h5_session SET revoked_at = UTC_TIMESTAMP(3) WHERE activity_customer_id = ? AND revoked_at IS NULL", customerId);
     reassociateAttendance(activityId);
+    com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
+    com.fengyi.ordershow.catalog.ProductCatalogChanges.all(jdbc, activityId);
   }
 
   public PageResponse<AttendeeView> attendees(long activityId, String matchStatus, String keyword, int page, int size, String traceId) {
@@ -334,6 +346,7 @@ public class CustomerService {
   }
 
   private void requireCustomerWritable(long activityId, String reason) {
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     String status = activities.byId(activityId).status();
     if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后数据只读");
     if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后白名单已锁定，请先撤回发布");

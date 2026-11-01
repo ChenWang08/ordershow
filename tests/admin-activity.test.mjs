@@ -80,6 +80,8 @@ function settingsHarness(overrides = {}, apiOverrides = {}, confirm = true) {
   let cursor = 0;
   const { useActivitySettings } = loadModule("app/features/admin/useActivitySettings.ts", {
     "../../api": api,
+    // Action-only harness; the real refresh lifecycle is exercised in admin-manual-refresh.test.mjs.
+    "./useLazyAdminQuery": { useLazyAdminQuery: () => ({ loading: false, error: "", refresh: async () => undefined }) },
     react: { useRef(initial) {
       const index = cursor++;
       if (!(index in slots)) slots[index] = { current: initial };
@@ -108,12 +110,11 @@ test("publication saves valid settings before publishing", async () => {
   assert.deepEqual(harness.calls, ["load", "save", "status:draft", "load", "publish", "status:scheduled"]);
 });
 
-test("publication requires both completed imports", async () => {
+test("publication delegates readiness to the server even when modules have not loaded", async () => {
   for (const missing of ["productImportCompleted", "whitelistImportCompleted"]) {
     const harness = settingsHarness({ [missing]: false });
     await harness.render().publishCurrentActivity();
-    assert.deepEqual(harness.calls, []);
-    assert.match(harness.notices[0], /必须完成商品和白名单导入/);
+    assert.deepEqual(harness.calls, ["load", "save", "status:draft", "load", "publish", "status:scheduled"]);
   }
 });
 

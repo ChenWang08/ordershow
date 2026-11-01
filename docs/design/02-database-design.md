@@ -117,7 +117,7 @@ V035 新增身份快照：`order_operation.actor_identity_snapshot` 和 `actor_r
 | `customer_order` | 每个活动客户的唯一当前订单 | 活动 + 活动客户唯一；订单号唯一 |
 | `order_item` | 当前订单明细、当前成交价和商品属性快照 | 订单 + 商品唯一；价格变化可自动更新当前明细 |
 | `order_version` | 每次成功非空提交的不可变版本 | 订单 + 版本号唯一 |
-| `order_version_item` | 提交版本的商品和客户/商品价格快照 | 版本 + 行号唯一；商品自动调价不回写 |
+| `order_version_item` | 提交版本的商品和客户/商品价格快照 | 版本 + 行号唯一；调价前补存尚未冻结的提交快照，已有快照不回写 |
 | `order_operation` | 客户提交、变更申请、审核及后台新增、调整、恢复、作废等操作记录 | 只追加；商品自动调价不新增 |
 | `order_change_request` | 有效订单的减量/删除商品/撤回申请及审核结果 | 订单同一时间最多一条 `PENDING`；申请快照不直接计入业务统计 |
 | `api_idempotency` | 命令请求的持久幂等记录 | 活动 + 调用者 + 接口 + 幂等键唯一 |
@@ -136,7 +136,7 @@ H5 ORDER_SUBMIT 的 response_json 使用 format=2，保存 orderId、orderVersio
 
 业务状态只有：
 
-- `SUBMITTED`：参加统计和抽奖；金额加权抽奖使用当前 `customer_order.total_amount`；
+- `SUBMITTED`：参加统计和抽奖；加权使用当前有效订单中匹配商品的金额、箱数或吨数小计，无商品筛选的金额/箱数可复用订单合计；
 - `WITHDRAWN`：保留最近一次非空明细，但不参加统计和抽奖；
 - `VOIDED`：管理员逻辑作废，保留订单号、明细、版本和操作记录，不参加统计和抽奖。
 
@@ -161,7 +161,11 @@ H5 ORDER_SUBMIT 的 response_json 使用 format=2，保存 orderId、orderVersio
 
 `activity_attendee.match_method` 新关联仅记录名称精确关联依据：`FULL_NAME_BRANCH`（客户类型 + 分公司 + 经销商全称）、`FULL_NAME`（无分公司范围时的历史/兼容全称匹配）、`SHORT_NAME` 或 `MANUAL`；`PHONE` 仅为兼容历史记录保留，新计算不再产生。现场手机号只作联系信息，不参与客户身份关联。Excel 发布不更新上一版本行，而是创建新版本并重新计算全部关联。白名单版本切换后，当前到场版本也必须在同一发布事务中重新计算，不能保留旧白名单关联。
 
-金额加权抽奖不创建实体奖券。`lottery_round.probability_mode = EQUAL` 时候选客户等概率；`ORDER_AMOUNT_WEIGHTED` 时只保留当前 `SUBMITTED` 且 `customer_order.total_amount > 0` 的候选，使用客户金额占候选金额总和的比例计算权重。开奖快照的规则 JSON 保存概率模式和候选订单金额总和，候选快照保存开奖时使用的订单金额。V032 为历史轮次写入等概率默认值。
+抽奖不创建实体奖券。`lottery_round.probability_mode` 支持 `EQUAL`、`ORDER_AMOUNT_WEIGHTED`、`ORDER_BOX_COUNT_WEIGHTED`、`ORDER_TONS_WEIGHTED`。加权模式使用有效SUBMITTED订单匹配商品的实际金额/箱数/吨数，先按最低门槛排除，再对剩余候选求总权重；对应权重0或缺失时排除，最低门槛0不取消该要求。吨数缺失部分按0计，有部分已知时按实际合计参与。
+
+V045新增最低吨数、项目组、品种数组和未填写筛选标记，候选快照增加吨数和缺失换算明细数；项目组与品种必须命中同一条明细。V046扩展概率模式约束并约束新增箱数/吨数模式与门槛一致。V032原有等概率默认值和历史金额组合保留，不重算已开奖数据。V045/V046在本轮仅应用于隔离测试库，未迁移业务库。
+
+开奖规则JSON保存概率模式、`weightMetric`、`totalCandidateWeight`和三种门槛/商品条件；`totalCandidateOrderAmount`始终为金额总计。候选快照保存三项匹配小计，结果摘要v2包含箱数。手动试算返回汇总与名单，不持久化可增量更新的候选池；读取规则不计算候选。查询复用已有订单及明细索引，本轮未增加订单明细索引或H5写入汇总维护。详见[ADR-010](adr/ADR-010-lottery-manual-preview-and-weighting.md)。
 
 ### 4.7 审计
 
@@ -188,6 +192,7 @@ customer(customer_type, normalized_dealer_full_name)
 activity_customer(activity_id, customer_type, phone_lookup_hash)
 activity_customer(activity_id, customer_id)
 activity_product(activity_id, business_key)
+activity_product_price_tier(activity_product_id, min_quantity)
 customer_order(activity_id, activity_customer_id)
 customer_order.order_no
 order_version(order_id, version_no)
@@ -207,6 +212,7 @@ api_idempotency(activity_id, actor_type, actor_id, endpoint_code, idempotency_ke
 - 活动客户：活动 + 客户类型 + 状态；活动 + 分公司；客户类型 + 标准化全称 + 标准化所属分公司唯一；手机号 HMAC 唯一索引；
 - 商品：活动 + 客户类型 + 状态 + 排序；物料代码；
 - 订单：活动 + 状态 + 最后提交时间；活动 + 客户类型 + 区域/分公司；
+- 订单明细：商品 ID + 订单 ID，定位商品调价涉及的明细；
 - 订单版本：订单 + 版本号；
 - 导入：活动 + 数据类型 + 创建时间；
 - 抽奖轮次：活动 + 状态 + 排序；
@@ -248,19 +254,21 @@ api_idempotency(activity_id, actor_type, actor_id, endpoint_code, idempotency_ke
 
 ### 9.3 商品价格自动同步
 
-1. 商品保存事务锁定活动行，并读取商品最新基础箱价和阶梯规则；
+1. 商品保存事务锁定活动行，并读取商品最新普通箱价和阶梯规则；开启阶梯时 `min_quantity=1` 的独立第一档为实际基础箱价，仅修改普通箱价不触发订单重算；V048 为已有阶梯商品补入原箱价，不改写订单金额；
 2. 查询同活动、同商品 ID、状态为 `SUBMITTED` 的订单；
 3. 按每张订单中该商品的箱数重新计算当前商品价格和小计；
-4. 只更新 `order_item`、订单主表总金额和更新时间，不写 `order_version`、`order_version_item` 或 `order_operation`；
+4. 修改前批量冻结本次变价商品尚未持久化的提交行到 `order_version_item`，已有快照保持不变；当前历史读取合并冻结行和未改行，产生下一版本前补齐全量；更新当前明细、订单总金额和内部锁版本，不新增 `order_version` 或 `order_operation`；
 5. 写 `ORDER_PRICE_UPDATED` outbox 事件，提交后由看板刷新；失败时商品和订单更新一起回滚；
-6. 重复保存相同价格规则时不产生数据库变化；撤回、作废及其他活动订单不处理。
+6. 重复保存相同价格规则时不更新订单；撤回、作废及其他活动订单不处理。
+
+V047 支持一个商品多个阶梯，以 `(activity_product_id,min_quantity)` 唯一；全部档位共用一种模式。`order_item` 与 `order_version_item` 的可空 `pricing_details JSON` 保存完整阶梯和实际计费段，旧单档列保留兼容；多档分段金额以计费段和 `line_amount` 为准。同步按最多 200 条批量写入，订单/商品线金额按差额更新，只有缺失或需重建的汇总进行全量重建。所有批次在同一商品保存事务完成，不释放活动锁。详情见 [商品多级阶梯价格](08-price-sync.md)。
 
 ### 9.4 抽奖
 
-1. 获取活动/轮次 Redis 锁；
-2. 数据库条件更新轮次 `READY → DRAWING`；
-3. 在事务内生成候选快照和安全随机结果；
-4. 写中奖记录并把轮次变为 `DRAWN`；
+1. 在事务外先取得本实例开奖名额，超额立即返回503；
+2. 获取轮次Redis辅助锁，数据库`SELECT ... FOR UPDATE`锁定轮次，校验READY/RESET及前序已完成；
+3. 在事务内查询当前匹配小计，按门槛和正权重筛选，生成安全随机结果；
+4. 每批250条写完整候选快照，批量写中奖记录并把轮次变为`DRAWN`；
 5. 写审计和 outbox 后提交；
 6. 提交成功后现场页面才允许揭晓。
 

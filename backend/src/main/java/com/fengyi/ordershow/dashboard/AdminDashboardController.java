@@ -14,10 +14,18 @@ public class AdminDashboardController {
   private final ActivityService activities;
   private final AuthService auth;
   private final DepartmentAccessService access;
+  private final PageStatisticsService pages;
 
   public AdminDashboardController(DashboardService dashboards, ActivityService activities,
-      AuthService auth, DepartmentAccessService access) {
+      AuthService auth, DepartmentAccessService access, PageStatisticsService pages) {
+    this.pages = pages;
     this.dashboards = dashboards; this.activities = activities; this.auth = auth; this.access = access;
+  }
+
+  @GetMapping("/admin/activities/{activityId}/overview")
+  ApiResponse<PageStatisticsService.Overview> overview(@PathVariable long activityId, HttpServletRequest request) {
+    access.requireActivityAccess(auth.requireAdmin(request), activityId);
+    return ApiResponse.of(pages.overview(activityId), TraceFilter.id(request));
   }
 
   @GetMapping("/admin/activities/{activityId}/ranking")

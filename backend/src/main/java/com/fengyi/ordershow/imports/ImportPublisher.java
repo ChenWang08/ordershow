@@ -94,6 +94,12 @@ public class ImportPublisher {
     jdbc.update("UPDATE import_publish_version SET status = 'PUBLISHED', published_at = UTC_TIMESTAMP(3) WHERE id = ?", versionId);
     jdbc.update("UPDATE import_task SET status = 'COMPLETED', published_version_id = ?, completed_at = UTC_TIMESTAMP(3), lease_owner = NULL, lease_expires_at = NULL WHERE id = ?", versionId, taskId);
     tasks.cancelReplaceableTasks(activityId, task.importType(), taskId);
+    if (List.of("PRODUCT", "WHITELIST").contains(task.importType())) {
+      com.fengyi.ordershow.catalog.ProductCatalogChanges.all(jdbc, activityId);
+    }
+    if ("WHITELIST".equals(task.importType())) {
+      com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
+    }
   }
 
   private List<ProductImageDecision> readImageDecisions(String value) {

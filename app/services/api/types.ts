@@ -1,6 +1,10 @@
+import type { PriceStep, PricingDetails } from "../../domain/tier-pricing";
 export type Envelope<T> = { data: T; traceId: string };
 export type PageEnvelope<T> = { data: T[]; page: { number: number; size: number; totalElements: number; totalPages: number }; traceId: string };
 export type RankingMetric = "AMOUNT" | "TONS";
+
+export type AdminActivitySummary = Pick<RuntimeActivity,
+  "id" | "departmentId" | "departmentName" | "code" | "name" | "status" | "startsAt" | "endsAt" | "eventEndsAt">;
 
 export type RuntimeActivity = {
   h5BackgroundUrl?: string | null;
@@ -29,9 +33,14 @@ export type RuntimeProduct = {
   varietyName?: string; specification?: string; casePack?: string; bottlePrice?: number; casePrice?: number;
   tonCaseFactor?: number; customerType: "GENERAL" | "SPECIAL" | "ALL"; rebateStatus: "PARTICIPATING" | "NOT_PARTICIPATING" | "ALL";
   giftBox: boolean; visible: boolean; orderable: boolean; dataStatus: string; sortNo: number; version: number; branchScope: string[];
-  priceTier?: { minQuantity: number; casePrice: number; pricingMode: "WHOLE_ORDER" | "INCREMENTAL" };
+  priceTier?: { minQuantity: number; casePrice: number; pricingMode: "WHOLE_ORDER" | "INCREMENTAL"; tiers?: PriceStep[] };
   images: Array<{ id: number; fileId: number; url: string; primary: boolean; sortNo: number;
     sourceType: "ZIP_IMPORT" | "MANUAL"; matchStatus: "MATCHED" | "PENDING" | "UNMATCHED" | "CONFIRMED" }>;
+};
+
+export type H5Product = Omit<RuntimeProduct, "brandName" | "varietyName" | "bottlePrice" | "tonCaseFactor"
+  | "dealerScope" | "effectiveDealerCount" | "dealerScopeRestricted" | "images"> & {
+  images: Array<{ id: number; url: string; primary: boolean; sortNo: number }>;
 };
 
 export type DealerMember = { customerId: number; dealerFullName: string; customerType: string; active: boolean };
@@ -53,13 +62,13 @@ export type RuntimeOrder = {
   items: Array<{ id: number; productId: number; lineNo: number; materialCode?: string; materialName: string; productLine?: string;
     specification?: string; casePack?: string; quantity: number; casePrice: number; appliedTierMinQuantity?: number;
     baseCasePrice?: number; basePriceQuantity?: number; tierCasePrice?: number; tierMinQuantity?: number; tierPriceQuantity?: number;
-    pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; tonCaseFactor?: number; lineTons?: number }>;
+    pricingDetails?: PricingDetails; pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; tonCaseFactor?: number; lineTons?: number }>;
   versions: Array<{ id: number; version: number; totalQuantity: number; totalTons?: number; totalAmount: number; submittedAt: string; submittedSource: string;
     submittedByAdminName?: string; reason?: string;
     items?: Array<{ id: number; productId?: number; lineNo: number; materialCode?: string; materialName: string; productLine?: string;
       specification?: string; casePack?: string; quantity: number; casePrice: number; appliedTierMinQuantity?: number;
       baseCasePrice?: number; basePriceQuantity?: number; tierCasePrice?: number; tierMinQuantity?: number; tierPriceQuantity?: number;
-      pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; tonCaseFactor?: number; lineTons?: number }> }>;
+      pricingDetails?: PricingDetails; pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; tonCaseFactor?: number; lineTons?: number }> }>;
   operations: Array<{ type: string; source: string; adminName?: string; orderVersion?: number; reason?: string; occurredAt: string }>;
 };
 
@@ -84,7 +93,7 @@ export type AdminOrderPreview = {
   items: Array<{ productId: number; materialCode?: string; materialName: string; productLine?: string;
     specification?: string; casePack?: string; quantity: number; casePrice: number; appliedTierMinQuantity?: number;
     baseCasePrice?: number; basePriceQuantity: number; tierCasePrice?: number; tierMinQuantity?: number;
-    tierPriceQuantity: number; pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; lineTons?: number }>;
+    tierPriceQuantity: number; pricingDetails?: PricingDetails; pricingMode?: "WHOLE_ORDER" | "INCREMENTAL"; lineAmount: number; lineTons?: number }>;
 };
 
 export type RuntimeOrderDraft = {
@@ -114,6 +123,12 @@ export type AttendanceMatchPreview = {
 };
 
 export type AdminOrderSummary = Omit<RuntimeOrder, "activityCustomerId" | "items" | "versions" | "operations" | "dealerShortName" | "withdrawnAt" | "withdrawnReason" | "voidedAt" | "voidedReason">;
+
+export type ActivityOverviewData = {
+  totals: DashboardData["totals"]; submittedByType: Record<string, number>;
+  customerCount: number; customersByType: Record<string, number>;
+  customerTypeMode: "TYPED" | "UNSPECIFIED"; generatedAt: string;
+};
 
 export type DashboardData = {
   activityId: number; activityName: string; status: string;
@@ -145,9 +160,11 @@ export type LotteryRoundApi = {
   prizeImageFileId?: number | null; prizeImageUrl?: string | null;
   winnerCount: number; candidateScope: "ALL_CUSTOMERS" | "ATTENDEES" | "VALID_ORDERS";
   customerType: "ALL" | "GENERAL" | "SPECIAL"; minimumOrderAmount: number;
-  qualificationMetric: "AMOUNT" | "BOX_COUNT"; probabilityMode: "EQUAL" | "ORDER_AMOUNT_WEIGHTED"; minimumOrderBoxCount: number;
+  qualificationMetric: "AMOUNT" | "BOX_COUNT" | "TONS"; probabilityMode: "EQUAL" | "ORDER_AMOUNT_WEIGHTED" | "ORDER_BOX_COUNT_WEIGHTED" | "ORDER_TONS_WEIGHTED"; minimumOrderBoxCount: number;
+  minimumOrderTons?: number; productLine?: string | null; varieties?: string[];
+  productLineUnassigned?: boolean; includeUnspecifiedVariety?: boolean;
   excludePreviousWinners: boolean; displayNameType: "SHORT_NAME" | "FULL_NAME"; status: string;
-  currentAttemptNo: number; candidateCount?: number; resultHash?: string; drawnAt?: string; completedAt?: string; lockVersion: number;
+  currentAttemptNo: number; candidateCount?: number | null; resultHash?: string; drawnAt?: string; completedAt?: string; lockVersion: number;
 };
 export type LotteryPrizeImageUpload = { fileId: number; url: string; filename: string; contentType: string; sizeBytes: number };
 
@@ -158,9 +175,12 @@ export type LotteryDrawResult = { roundId: number; attemptId: number; attemptNo:
   winners: LotteryWinnerApi[]; resultHash: string; drawnAt: string };
 export type LotteryCandidatePreviewItem = { activityCustomerId: number; dealerFullName: string; customerType: string;
   regionCode?: string; branchName?: string; phoneMasked?: string; qualificationSource: string;
-  qualifyingOrderAmount?: number; qualifyingOrderBoxCount?: number; probabilityPercent: number };
+  qualifyingOrderAmount?: number; qualifyingOrderBoxCount?: number; probabilityPercent: number;
+  qualifyingOrderTons?: number | null; missingTonnageItems?: number };
 export type LotteryCandidatePreview = { calculatedAt: string; candidateCount: number; configuredWinnerCount: number;
-  actualWinnerCount: number; unawardedCount: number; totalCandidateOrderAmount: number; candidates: LotteryCandidatePreviewItem[] };
+  actualWinnerCount: number; unawardedCount: number; totalCandidateOrderAmount: number; candidates: LotteryCandidatePreviewItem[];
+  missingTonnageCustomers?: number; weightMetric?: "EQUAL" | "AMOUNT" | "BOX_COUNT" | "TONS"; totalCandidateWeight?: number };
+export type LotteryProductOption = { productLine: string | null; varietyName: string | null };
 export type LotteryWinnerStatistics = { validWinnerRecords: number; validWinnerCustomers: number; invalidatedWinnerRecords: number };
 
 export type AdminCustomer = {

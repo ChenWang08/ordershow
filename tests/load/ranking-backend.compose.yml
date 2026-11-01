@@ -1,0 +1,10 @@
+# Test runtime only. Always use project order-show-load-ranking and port 8580.
+services:
+  backend:
+    image: eclipse-temurin:21-jre
+    entrypoint: ["java", "-jar", "/app/app.jar"]
+    volumes:
+      - ${RANKING_BENCH_JAR:?provide an isolated benchmark jar}:/app/app.jar:ro
+    environment:
+      SPRING_FLYWAY_USER: root
+      SPRING_FLYWAY_PASSWORD: load_only_root

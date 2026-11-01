@@ -87,10 +87,19 @@ public class ImportService {
   }
 
   public List<ImportTask> tasks(long activityId) {
+    return tasks(activityId, null);
+  }
+
+  public List<ImportTask> tasks(long activityId, String importType) {
+    if (importType != null && !List.of("PRODUCT", "WHITELIST", "ATTENDANCE").contains(importType)) {
+      throw DomainException.unprocessable("IMPORT_TYPE_INVALID", "导入类型无效");
+    }
+    String filter = importType == null ? "" : " AND t.import_type=?";
+    Object[] args = importType == null ? new Object[] { activityId } : new Object[] { activityId, importType };
     return jdbc.query("""
         SELECT t.*, f.original_filename FROM import_task t JOIN stored_file f ON f.id = t.source_file_id
-        WHERE t.activity_id = ? ORDER BY t.created_at DESC
-        """, taskRepository::mapTask, activityId);
+        WHERE t.activity_id = ?
+        """ + filter + " ORDER BY t.created_at DESC", taskRepository::mapTask, args);
   }
 
   public ImportTask task(long taskId) { return taskRepository.task(taskId); }

@@ -2,6 +2,18 @@
 
 ## 测试分工
 
+- 排行联动与空值：`ranking-filters.test.mjs`、`screens-manual-refresh.test.mjs` 覆盖上游重置、项目组收窄品种、缺失字段/空值、取消迟到请求、失败重试及最后成功条件刷新；`scripts/test-ranking-filters-browser.mjs` 用真实 React 和合成 HTTP 验证交互及 1920/1440/768/440 布局。`RankingFiltersIntegrationTest` 用隔离 MySQL 验证实际条件、适用且未下单的配置、分公司/经销商范围、新历史冻结与空格空值一致；`PageStatisticsControllerTest` 验证真实 MVC 参数和全局 NON_NULL 下仍输出 null 选项字段。运行与结果见[联动与空值验证](../docs/testing/ranking-cascade-2026-11-01.md)。
+
+- 旧活动 GET 清理：`ActivityRoutesTest` 验证真实 MVC 路由、旧地址 404 且不调用活动服务、`/current`/SSE/手机号验证/抽奖/后台活动路径保留；`ActivityInfoIntegrationTest` 追加完整 HTTP 栈的 404 验证并保留真实 SSE 更新/恢复验证。公开资料脚本与隔离 API E2E 改读 SSE 首帧；`public-activity-snapshot.test.mjs` 验证有界等待和断开清理。旧 `scripts/test-h5-entry.mjs` 改为依次运行现有手机号入口、活动 SSE 合成浏览器测试，不再保留旧 JSON 活动夹具或通道选择流程。详情见[清理验证](../docs/testing/retired-public-activity-2026-10-31.md)。
+
+- 抽奖三种加权：`lottery-settings.test.mjs`验证指标与门槛联动、0门槛、名单复用和旧规则兼容；`LotteryWeightingTest`与`LotteryIntegrationTest`验证金额/箱数/吨数实际小计、零权重排除、真实开奖和审计对账。千人在线、200单/分钟的同流量对照见[加权验证记录](../docs/testing/lottery-weighting-2026-10-31.md)。测试不构建或部署业务镜像。
+
+- H5 本机草稿与抽奖按页面加载：`h5-local-draft.test.mjs` 验证浏览器持久化、隔离、损坏/过期和存储失败；`h5-manual-refresh.test.mjs` 验证完整草稿生命周期及后台更新后的失效、提交成功清理/失败保留。`activity-info-stream.test.mjs` 与 `lottery-board.test.mjs` 分别保证公共/H5 初始化不查询抽奖，以及抽奖页独立读取正常。`scripts/test-h5-manual-refresh-browser.mjs` / `scripts/test-activity-info-browser.mjs` 使用真实组件和合成 HTTP 验证本机恢复、无草稿/抽奖请求及活动 SSE 兼容；见[验证记录](../docs/testing/h5-local-draft-2026-10-31.md)。
+
+- 手机端订单按需刷新：`h5-manual-refresh.test.mjs` 覆盖无轮询、15 秒冷却、共享查询、修改/撤回检查、审核及后台直接修改、草稿版本和迟到响应隔离；`scripts/test-h5-manual-refresh-browser.mjs` 使用真实 H5 组件及合成 HTTP，在手机/桌面验证静置无订单请求、最新购物车和失败恢复，见[验证记录](../docs/testing/h5-manual-refresh-2026-10-30.md)。
+
+- 后台手动刷新：`admin-manual-refresh.test.mjs` / `admin-session.test.mjs` 覆盖按需读取、请求合并、过期响应隔离和身份异常；`scripts/test-admin-refresh-browser.mjs` 用真实后台组件与合成 HTTP 在桌面/窄屏验证静置无轮询、手动刷新及失败恢复，详见 [后台取消轮询验证](../docs/testing/admin-manual-refresh-2026-10-30.md)。
+
 - `rendered-html.test.mjs`：运行构建后的服务端入口，检查实际 HTML 与必要资源。
 - `product-project-filter.test.mjs`：项目组动态选项、组合筛选、空值、分页与勾选重置、全选范围及只读列表；`scripts/test-product-project-filter-browser.mjs` 使用合成数据挂载真实商品表格与样式，验证 React 生命周期和宽窄布局，不访问业务接口。运行方式见 [项目组筛选验证说明](../docs/testing/product-project-filter-2026-10-27.md)。
 - `admin-*.test.mjs`、`workspace-orders.test.mjs`、`h5-flow.test.mjs`、`screens.test.mjs`：验证业务计算、操作结果、组件渲染及部分状态行为。其中 Hook 操作测试使用显式状态适配器，不能代替真实 React 浏览器生命周期测试。
@@ -19,7 +31,7 @@
 
 完整隔离检查使用 `scripts/run-automated-tests.ps1 -KeepEnvironment`，它创建专用测试栈并执行前后端测试。随后设置 `ORDER_SHOW_E2E=order-show-e2e`，运行 `node scripts/browser-regression.mjs`。Playwright 可安装在本机，或通过 `ORDER_SHOW_PLAYWRIGHT_MODULE` 指定已有的 `playwright/index.mjs` 文件 URL。
 
-浏览器脚本只使用固定的 3100/8180 测试端口，并依赖 API E2E 生成的夹具。测试会创建和修改订单、截止测试活动，因此整套复跑前必须重新生成隔离数据。验证后使用 `scripts/test-env.ps1 reset` 清理测试环境。
+`browser-regression.mjs` 使用固定的 3100/8180 测试端口，依赖 API E2E 生成的夹具，会创建/修改订单及截止测试活动，整套复跑前须重新生成隔离数据，完成后用 `scripts/test-env.ps1 reset` 清理。H5 手动刷新和活动 SSE 两个前端浏览器脚本分别使用 4188/4189，全部 HTTP 为合成夹具，不连接业务 API 或数据库，结束后自行关闭浏览器及测试服务。
 
 当前结果和未覆盖范围见 `docs/testing/refactor-regression-2026-09-07.md`。通过测试不代表此前记录的客户名称标准化缺陷已被修复，也不代表压测、灾备和全部浏览器兼容性已验收。
 
@@ -35,6 +47,12 @@ docker run --rm -e ORDER_SHOW_RANKING_TEST=order-show-e2e `
 完整隔离检查脚本 `scripts/run-automated-tests.ps1` 也已开启排行数据库专项。完成后使用 `scripts/test-env.ps1 reset` 清理独立测试环境。排行修复实测与部署边界见 [排行修复记录](../docs/deployment/2026-10-27-ranking-limits.md)。
 
 ## 性能测试
+
+抽奖手动试算、项目组/品种联动和吨数专项见 [抽奖验证记录](../docs/testing/lottery-manual-preview-2026-10-31.md)。`lottery-settings.test.mjs` 验证进入/修改/切轮不计算、手动仅当前轮、名单复用及过期请求取消。`LotteryIntegrationTest` 在固定端口33316的专用临时库验证真实SQL、旧规则升级、匹配小计、吨数、批量快照和失败回滚；只在 `ORDER_SHOW_LOTTERY_TEST=order-show-lottery-test` 时运行。`LotteryAdmissionFilterTest` 和 `LotteryQueryTimeoutTest` 验证并发隔离、许可释放和单查询超时。
+
+`tests/load/lottery-event-runner.mjs` 使用现有运行镜像挂载优化前后临时JAR，固定 `order-show-load-lottery` 项目、8680端口和合成库，对比每分钟100/200单时只下单、原抽奖和优化后抽奖。它会重建并最终清理该专用测试库及卷；不接受业务环境变量或业务数据库地址，不由常规测试自动执行。
+
+手机号优先登录专项见 [本地验证记录](../docs/testing/h5-phone-first-2026-10-30.md)：`tests/phone-verification.compose.yml` 使用专用无宿主端口 MySQL 合成库，`ORDER_SHOW_PHONE_BENCHMARK=true` 才开启服务级性能对照；`scripts/test-h5-phone-entry-browser.mjs` 用实际组件和模拟 HTTP 验证手机/桌面弹窗，不连接业务 API。本轮不部署业务服务。
 
 看板汇总层新增 V040、原查询差分测试、逐单回填/对账和专用压测。执行入口、隔离库、迁移权限、按活动开关及结果见 [汇总层验收记录](../docs/testing/dashboard-summary-2026-10-29.md)。默认不启用汇总读取；本次代码交付不代表部署。
 

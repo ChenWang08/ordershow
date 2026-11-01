@@ -44,3 +44,15 @@ test('rejection shows formal order and reason; approval displays the new formal 
  h.model.pendingChangeRequest=null;h.model.runtimeOrder.currentVersion=2;
  assert.match(h.html(),/V2/);assert.doesNotMatch(h.html(),/待审核/);
 });
+
+test('formal multi-tier order shows every charged segment and the server total',()=>{
+ const h=harness();h.model.pendingChangeRequest=null;h.model.runtimeOrder.totalAmount=350980;
+ h.model.runtimeOrder.items[0]={...h.model.runtimeOrder.items[0],quantity:1200,lineAmount:350980,casePrice:300,pricingDetails:{tiers:[],segments:[
+   {quantity:499,casePrice:300,amount:149700},{quantity:500,casePrice:290,amount:145000},{quantity:201,casePrice:280,amount:56280},
+ ]}};
+ const html=h.html();
+ assert.match(html,/499 箱 × ¥300\.00 ＝ ¥149,700\.00/);
+ assert.match(html,/500 箱 × ¥290\.00 ＝ ¥145,000\.00/);
+ assert.match(html,/201 箱 × ¥280\.00 ＝ ¥56,280\.00/);
+ assert.match(html,/350,980\.00/);assert.doesNotMatch(html,/¥300\.00\/箱/);
+});

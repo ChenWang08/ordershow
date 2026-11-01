@@ -12,7 +12,7 @@ function sql(statement) {
     'mysql','-uack_smoke','-N','ack_smoke','-e',statement], {encoding:'utf8'}).trim();
 }
 assert.equal(sql('SELECT DATABASE()'), 'ack_smoke');
-assert.equal(sql('SELECT MAX(version) FROM deployment_schema_history'), 'V041');
+assert.equal(sql('SELECT MAX(version) FROM deployment_schema_history'), 'V049');
 assert.equal(sql("SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema=DATABASE() AND trigger_name LIKE 'dashboard_item_%'"), '0');
 assert.equal(sql("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='flyway_schema_history'"), '0');
 const bases=['http://127.0.0.1:18081/api/v1','http://127.0.0.1:18082/api/v1'];

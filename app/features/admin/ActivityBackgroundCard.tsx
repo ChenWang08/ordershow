@@ -12,17 +12,23 @@ function BackgroundPreview({ path, kind }: { path?: string | null; kind: "h5" | 
   </div>;
 }
 
-export function ActivityBackgroundCard({ activityId, editable }: { activityId: number; editable: boolean }) {
-  const [activity, setActivity] = useState<RuntimeActivity | null>(null);
+export function ActivityBackgroundCard({ activityId, editable, initialActivity }: { activityId: number; editable: boolean; initialActivity?: RuntimeActivity | null }) {
+  const [activity, setActivity] = useState<RuntimeActivity | null>(initialActivity ?? null);
+  const [source, setSource] = useState(initialActivity);
+  if (source !== initialActivity) {
+    setSource(initialActivity);
+    if (initialActivity) setActivity(initialActivity);
+  }
   const [busy, setBusy] = useState<"h5" | "desktop" | null>(null);
   const [notice, setNotice] = useState("");
   const saving = useRef(false);
   useEffect(() => {
+    if (initialActivity) return;
     let active = true;
     loadAdminActivity(activityId).then(value => { if (active) setActivity(value); })
       .catch(() => { if (active) setNotice("背景配置加载失败，请刷新页面重试。"); });
     return () => { active = false; };
-  }, [activityId]);
+  }, [activityId, initialActivity]);
 
   async function save(kind: "h5" | "desktop", file: File | null) {
     if (saving.current || !activity || !editable) return;

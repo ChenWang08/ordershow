@@ -1,6 +1,8 @@
 package com.fengyi.ordershow.order;
 
 import com.fengyi.ordershow.common.UtcTime;
+import com.fengyi.ordershow.common.TierPricing;
+import com.fengyi.ordershow.common.TierPricing.Step;
 
 import static com.fengyi.ordershow.order.OrderData.*;
 import com.fengyi.ordershow.order.OrderService.*;
@@ -89,14 +91,19 @@ public class OrderRepository {
                    AND dm.normalized_dealer_full_name = dc.normalized_dealer_full_name))
         """ : "";
     List<Object> args = new ArrayList<>();
-    args.addAll(ids);
+    args.addAll(ids); args.addAll(ids);
     args.add(activityId); args.add(customerType); args.add(customerType); args.add(normalize(branchName)); args.add(activityCustomerId); args.addAll(ids);
     return jdbc.query("""
         SELECT p.*, img.object_key image_key, t.min_quantity price_tier_min_quantity, t.case_price price_tier_case_price,
-          t.pricing_mode price_tier_pricing_mode
+          t.pricing_mode price_tier_pricing_mode, t.price_tiers
         FROM activity_product p
         JOIN activity_data_binding b ON b.current_version_id = p.data_version_id AND b.activity_id = p.activity_id AND b.data_type = 'PRODUCT'
-        LEFT JOIN activity_product_price_tier t ON t.activity_product_id = p.id
+        LEFT JOIN (
+          SELECT activity_product_id, MIN(min_quantity) min_quantity, MAX(case_price) case_price, MIN(pricing_mode) pricing_mode,
+            JSON_ARRAYAGG(JSON_OBJECT('minQuantity',min_quantity,'casePrice',case_price)) price_tiers
+          FROM activity_product_price_tier WHERE activity_product_id IN (""" + placeholders + """
+          ) GROUP BY activity_product_id
+        ) t ON t.activity_product_id = p.id
         LEFT JOIN (
           SELECT activity_product_id, object_key FROM (
             SELECT pi.activity_product_id, sf.object_key,
@@ -210,23 +217,42 @@ public class OrderRepository {
 
   /** Freeze the still-current version before its lines or its version number change. An existing snapshot is left as-is. */
   void snapshotCurrentVersion(long orderId) {
+    snapshotCurrentVersions(List.of(orderId));
+  }
+
+  void snapshotCurrentVersions(List<Long> orderIds) {
+    snapshotCurrentVersions(orderIds, null);
+  }
+
+  /** Price synchronization changes one product only; freeze that line instead of copying every other product. */
+  void snapshotCurrentProductVersions(List<Long> orderIds, long productId) {
+    snapshotCurrentVersions(orderIds, productId);
+  }
+
+  private void snapshotCurrentVersions(List<Long> orderIds, Long productId) {
+    if (orderIds.isEmpty()) return;
+    String ids = orderIds.stream().map(id -> "?").collect(Collectors.joining(","));
+    var args = new ArrayList<Object>(orderIds);
+    if (productId != null) args.add(productId);
     jdbc.update("""
         INSERT INTO order_version_item(order_version_id, line_no, activity_product_id, material_code, material_name,
           category_name, product_line, brand_name, variety_name, specification, case_pack, customer_type, rebate_status,
           is_gift_box, primary_image_object_key, quantity, case_price, applied_tier_min_quantity, base_case_price,
           base_price_quantity, tier_case_price, tier_min_quantity, tier_price_quantity, pricing_mode, line_amount,
-          ton_case_factor, line_tons)
+          ton_case_factor, line_tons, pricing_details)
         SELECT v.id, i.line_no, i.activity_product_id, i.material_code, i.material_name, i.category_name, i.product_line,
           i.brand_name, i.variety_name, i.specification, i.case_pack, o.customer_type, i.rebate_status, i.is_gift_box,
           i.primary_image_object_key, i.quantity, i.case_price, i.applied_tier_min_quantity, i.base_case_price,
           i.base_price_quantity, i.tier_case_price, i.tier_min_quantity, i.tier_price_quantity, i.pricing_mode,
-          i.line_amount, i.ton_case_factor, i.line_tons
+          i.line_amount, i.ton_case_factor, i.line_tons, i.pricing_details
         FROM order_item i
         JOIN customer_order o ON o.id = i.order_id
         JOIN order_version v ON v.order_id = o.id AND v.version_no = o.current_version_no
-        WHERE i.order_id = ?
-          AND NOT EXISTS (SELECT 1 FROM order_version_item existing WHERE existing.order_version_id = v.id)
-        """, orderId);
+        WHERE i.order_id IN (""" + ids + """
+        )
+        """ + (productId == null ? "" : " AND i.activity_product_id=? ") + """
+          AND NOT EXISTS (SELECT 1 FROM order_version_item existing WHERE existing.order_version_id = v.id AND existing.line_no = i.line_no)
+        """, args.toArray());
   }
 
   void saveRepriced(long activityId, long orderId, Map<Long, PricingResult> prices, long adminId,
@@ -236,10 +262,10 @@ public class OrderRepository {
       var p = entry.getValue();
       jdbc.update("""
           UPDATE order_item SET case_price=?, base_case_price=?, base_price_quantity=?, tier_case_price=?,
-            tier_min_quantity=?, tier_price_quantity=?, pricing_mode=?, applied_tier_min_quantity=?, line_amount=?
+            tier_min_quantity=?, tier_price_quantity=?, pricing_mode=?, applied_tier_min_quantity=?, line_amount=?, pricing_details=?
           WHERE order_id=? AND activity_product_id=?
           """, p.casePriceSnapshot(), p.baseCasePrice(), p.baseQuantity(), p.tierCasePrice(), p.tierMinQuantity(),
-          p.tierQuantity(), p.pricingMode(), p.appliedTierMinQuantity(), p.lineAmount(), orderId, entry.getKey());
+          p.tierQuantity(), p.pricingMode(), p.appliedTierMinQuantity(), p.lineAmount(), TierPricing.encode(p.pricingDetails()), orderId, entry.getKey());
     }
     jdbc.update("""
         UPDATE customer_order SET total_amount=(SELECT SUM(line_amount) FROM order_item WHERE order_id=?),
@@ -268,21 +294,27 @@ public class OrderRepository {
         INSERT INTO order_item(order_id, activity_product_id, line_no, material_code, material_name, category_name,
           product_line, brand_name, variety_name, specification, case_pack, rebate_status, is_gift_box,
           primary_image_object_key, quantity, case_price, applied_tier_min_quantity, base_case_price, base_price_quantity,
-          tier_case_price, tier_min_quantity, tier_price_quantity, pricing_mode, line_amount, ton_case_factor, line_tons)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          tier_case_price, tier_min_quantity, tier_price_quantity, pricing_mode, line_amount, ton_case_factor, line_tons, pricing_details)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """;
     List<Object[]> rows = items.stream().map(item -> new Object[]{orderId, item.product().id(), item.lineNo(), item.product().materialCode(), item.product().materialName(),
         item.product().categoryName(), item.product().productLine(), item.product().brandName(), item.product().varietyName(),
         item.product().specification(), item.product().casePack(), item.product().rebateStatus(), item.product().giftBox(),
         item.product().imageKey(), item.quantity(), item.pricing().casePriceSnapshot(), item.pricing().appliedTierMinQuantity(),
         item.pricing().baseCasePrice(), item.pricing().baseQuantity(), item.pricing().tierCasePrice(), item.pricing().tierMinQuantity(), item.pricing().tierQuantity(),
-        item.pricing().pricingMode(), item.pricing().lineAmount(), item.product().tonCaseFactor(), item.lineTons()}).toList();
+        item.pricing().pricingMode(), item.pricing().lineAmount(), item.product().tonCaseFactor(), item.lineTons(), TierPricing.encode(item.pricing().pricingDetails())}).toList();
     insertItemBatches(sql, rows);
     refreshDashboardSummary(orderId);
   }
 
   void refreshDashboardSummary(long orderId) {
     if (summaries != null) summaries.refresh(orderId);
+  }
+
+  void refreshPriceSummaries(List<PriceSyncRepository.Change> changes) {
+    if (summaries != null) summaries.applyPriceChanges(changes.stream().map(change ->
+        new com.fengyi.ordershow.dashboard.DashboardSummaryStore.PriceDelta(change.row().id(), change.row().orderId(),
+            change.price().lineAmount().subtract(change.row().lineAmount()))).toList());
   }
 
   long insertVersion(long activityId, long orderId, int version, H5Principal customer, long totalQuantity,
@@ -324,8 +356,8 @@ public class OrderRepository {
         INSERT INTO order_version_item(order_version_id, line_no, activity_product_id, material_code, material_name,
           category_name, product_line, brand_name, variety_name, specification, case_pack, customer_type, rebate_status,
           is_gift_box, primary_image_object_key, quantity, case_price, applied_tier_min_quantity, base_case_price, base_price_quantity,
-          tier_case_price, tier_min_quantity, tier_price_quantity, pricing_mode, line_amount, ton_case_factor, line_tons)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          tier_case_price, tier_min_quantity, tier_price_quantity, pricing_mode, line_amount, ton_case_factor, line_tons, pricing_details)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """;
     List<Object[]> rows = items.stream().map(item -> new Object[]{versionId, item.lineNo(), item.product().id(), item.product().materialCode(), item.product().materialName(),
         item.product().categoryName(), item.product().productLine(), item.product().brandName(), item.product().varietyName(),
@@ -333,7 +365,7 @@ public class OrderRepository {
         item.product().giftBox(), item.product().imageKey(), item.quantity(), item.pricing().casePriceSnapshot(), item.pricing().appliedTierMinQuantity(),
         item.pricing().baseCasePrice(), item.pricing().baseQuantity(), item.pricing().tierCasePrice(), item.pricing().tierMinQuantity(), item.pricing().tierQuantity(),
         item.pricing().pricingMode(), item.pricing().lineAmount(),
-        item.product().tonCaseFactor(), item.lineTons()}).toList();
+        item.product().tonCaseFactor(), item.lineTons(), TierPricing.encode(item.pricing().pricingDetails())}).toList();
     insertItemBatches(sql, rows);
   }
 
@@ -429,18 +461,18 @@ public class OrderRepository {
           pricing.casePriceSnapshot(), pricing.appliedTierMinQuantity(),
           pricing.baseCasePrice(), pricing.baseQuantity(), pricing.tierCasePrice(),
           pricing.tierMinQuantity(), pricing.tierQuantity(), pricing.pricingMode(),
-          pricing.lineAmount(), p.tonCaseFactor(), item.lineTons());
+          pricing.lineAmount(), p.tonCaseFactor(), item.lineTons(), pricing.pricingDetails());
     }).toList();
   }
 
   private OrderView withOrderDetails(OrderView order, boolean includeHistory) {
     long orderId = order.id();
     List<ItemView> items = jdbc.query("SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no", this::mapItem, orderId);
-    List<OrderVersionView> versions = includeHistory ? withCurrentVersionItems(orderId, order.currentVersion(), jdbc.query("""
+    List<OrderVersionView> versions = includeHistory ? projectCurrentVersion(order.currentVersion(), withVersionItems(jdbc.query("""
         SELECT v.*, COALESCE(v.actor_identity_snapshot,u.display_name) submitted_by_admin_name FROM order_version v
         LEFT JOIN admin_user u ON u.id = v.submitted_by_admin_id
         WHERE v.order_id = ? ORDER BY v.version_no DESC
-        """, this::mapVersion, orderId)) : List.of();
+        """, this::mapVersion, orderId)), items) : List.of();
     List<OperationView> operations = includeHistory ? jdbc.query("""
         SELECT o.operation_type, o.source, COALESCE(o.actor_identity_snapshot,u.display_name) admin_name, o.order_version_no, o.reason, o.occurred_at
         FROM order_operation o LEFT JOIN admin_user u ON u.id = o.admin_user_id
@@ -487,17 +519,25 @@ public class OrderRepository {
         v.submittedAt(), v.submittedSource(), v.submittedByAdminName(), v.reason(), List.copyOf(byVersion.getOrDefault(v.id(), List.of())))).toList();
   }
 
-  /** A version with no copied lines is the live version: project order_item. Older empty versions stay empty. */
+  /** Frozen lines override live lines of the same still-current submission. Older versions never project live rows. */
   List<OrderVersionView> withCurrentVersionItems(long orderId, int currentVersion, List<OrderVersionView> versions) {
     List<OrderVersionView> loaded = withVersionItems(versions);
-    boolean projectCurrent = loaded.stream().anyMatch(version -> version.version() == currentVersion && version.items().isEmpty());
+    boolean projectCurrent = loaded.stream().anyMatch(version -> version.version() == currentVersion);
     if (!projectCurrent) return loaded;
     List<ItemView> currentItems = jdbc.query(
         "SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no", this::mapItem, orderId);
-    return loaded.stream().map(version -> version.version() == currentVersion && version.items().isEmpty()
-        ? new OrderVersionView(version.id(), version.version(), version.totalQuantity(), version.totalTons(), version.totalAmount(),
-            version.submittedAt(), version.submittedSource(), version.submittedByAdminName(), version.reason(), currentItems)
-        : version).toList();
+    return projectCurrentVersion(currentVersion, loaded, currentItems);
+  }
+
+  private List<OrderVersionView> projectCurrentVersion(int currentVersion, List<OrderVersionView> versions, List<ItemView> currentItems) {
+    return versions.stream().map(version -> {
+      if (version.version() != currentVersion) return version;
+      var lines = new java.util.TreeMap<Integer, ItemView>();
+      currentItems.forEach(item -> lines.put(item.lineNo(), item));
+      version.items().forEach(item -> lines.put(item.lineNo(), item));
+      return new OrderVersionView(version.id(), version.version(), version.totalQuantity(), version.totalTons(), version.totalAmount(),
+          version.submittedAt(), version.submittedSource(), version.submittedByAdminName(), version.reason(), List.copyOf(lines.values()));
+    }).toList();
   }
 
   IdempotencyResult beginIdempotency(long activityId, long actorId, String endpoint, String key, byte[] hash) {
@@ -611,7 +651,21 @@ public class OrderRepository {
 
   static String normalize(String value) { return value == null ? "" : value.toLowerCase(Locale.CHINA).replaceAll("[\\s　_-]+", ""); }
 
-  ProductSnapshot mapProduct(ResultSet rs, int rowNum) throws SQLException { return new ProductSnapshot(rs.getLong("id"), rs.getString("material_code"), rs.getString("material_name"), rs.getString("category_name"), rs.getString("product_line"), rs.getString("brand_name"), rs.getString("variety_name"), rs.getString("specification"), rs.getString("case_pack"), rs.getString("customer_type"), rs.getString("rebate_status"), rs.getBoolean("is_gift_box"), rs.getBigDecimal("case_price"), rs.getBigDecimal("ton_case_factor"), rs.getString("image_key"), nullableLong(rs, "price_tier_min_quantity"), rs.getBigDecimal("price_tier_case_price"), rs.getString("price_tier_pricing_mode")); }
+  private List<Step> readProductTiers(ResultSet rs) throws SQLException {
+    String value;
+    try { value = rs.getString("price_tiers"); }
+    catch (SQLException absentLegacyColumn) {
+      Long min = nullableLong(rs, "price_tier_min_quantity");
+      return min == null ? List.of() : List.of(new Step(min, rs.getBigDecimal("price_tier_case_price")));
+    }
+    if (value == null) return List.of();
+    try {
+      var values = json.readValue(value, new com.fasterxml.jackson.core.type.TypeReference<List<Step>>() {});
+      return values.stream().sorted(java.util.Comparator.comparingLong(Step::minQuantity)).toList();
+    } catch (com.fasterxml.jackson.core.JsonProcessingException exception) { throw new IllegalStateException("Invalid product tiers", exception); }
+  }
+
+  ProductSnapshot mapProduct(ResultSet rs, int rowNum) throws SQLException { return new ProductSnapshot(rs.getLong("id"), rs.getString("material_code"), rs.getString("material_name"), rs.getString("category_name"), rs.getString("product_line"), rs.getString("brand_name"), rs.getString("variety_name"), rs.getString("specification"), rs.getString("case_pack"), rs.getString("customer_type"), rs.getString("rebate_status"), rs.getBoolean("is_gift_box"), rs.getBigDecimal("case_price"), rs.getBigDecimal("ton_case_factor"), rs.getString("image_key"), nullableLong(rs, "price_tier_min_quantity"), rs.getBigDecimal("price_tier_case_price"), rs.getString("price_tier_pricing_mode"), readProductTiers(rs)); }
 
   OrderView mapOrder(ResultSet rs, int rowNum) throws SQLException { return new OrderView(rs.getLong("id"), rs.getLong("activity_id"), rs.getLong("activity_customer_id"), rs.getString("order_no"), rs.getString("status"), rs.getString("created_source"), rs.getString("last_modified_source"), rs.getInt("lock_version"), rs.getString("customer_type"), rs.getString("region_code"), rs.getString("branch_name_snapshot"), rs.getString("dealer_short_name_snapshot"), rs.getString("dealer_full_name_snapshot"), rs.getString("phone_masked"), rs.getInt("current_version_no"), rs.getLong("total_quantity"), rs.getBigDecimal("total_tons"), rs.getBigDecimal("total_amount"), UtcTime.read(rs, "first_submitted_at"), UtcTime.read(rs, "last_submitted_at"), UtcTime.read(rs, "last_modified_at"), instant(rs, "withdrawn_at"), rs.getString("withdrawn_reason"), instant(rs, "voided_at"), rs.getString("voided_reason"), List.of(), List.of(), List.of()); }
 
@@ -619,7 +673,7 @@ public class OrderRepository {
 
   ItemView mapVersionItem(ResultSet rs, int rowNum) throws SQLException { return item(rs, "id", "activity_product_id"); }
 
-  ItemView item(ResultSet rs, String idColumn, String productColumn) throws SQLException { return new ItemView(rs.getLong(idColumn), rs.getObject(productColumn) == null ? null : rs.getLong(productColumn), rs.getInt("line_no"), rs.getString("material_code"), rs.getString("material_name"), rs.getString("product_line"), rs.getString("specification"), rs.getString("case_pack"), rs.getLong("quantity"), rs.getBigDecimal("case_price"), nullableLong(rs, "applied_tier_min_quantity"), rs.getBigDecimal("base_case_price"), nullableLong(rs, "base_price_quantity"), rs.getBigDecimal("tier_case_price"), nullableLong(rs, "tier_min_quantity"), nullableLong(rs, "tier_price_quantity"), rs.getString("pricing_mode"), rs.getBigDecimal("line_amount"), rs.getBigDecimal("ton_case_factor"), rs.getBigDecimal("line_tons")); }
+  ItemView item(ResultSet rs, String idColumn, String productColumn) throws SQLException { return new ItemView(rs.getLong(idColumn), rs.getObject(productColumn) == null ? null : rs.getLong(productColumn), rs.getInt("line_no"), rs.getString("material_code"), rs.getString("material_name"), rs.getString("product_line"), rs.getString("specification"), rs.getString("case_pack"), rs.getLong("quantity"), rs.getBigDecimal("case_price"), nullableLong(rs, "applied_tier_min_quantity"), rs.getBigDecimal("base_case_price"), nullableLong(rs, "base_price_quantity"), rs.getBigDecimal("tier_case_price"), nullableLong(rs, "tier_min_quantity"), nullableLong(rs, "tier_price_quantity"), rs.getString("pricing_mode"), rs.getBigDecimal("line_amount"), rs.getBigDecimal("ton_case_factor"), rs.getBigDecimal("line_tons"), TierPricing.decode(rs.getString("pricing_details"))); }
 
 
   OrderVersionView mapVersion(ResultSet rs, int rowNum) throws SQLException { return new OrderVersionView(rs.getLong("id"), rs.getInt("version_no"), rs.getLong("total_quantity"), rs.getBigDecimal("total_tons"), rs.getBigDecimal("total_amount"), UtcTime.read(rs, "submitted_at"), rs.getString("submitted_source"), rs.getString("submitted_by_admin_name"), rs.getString("reason"), List.of()); }

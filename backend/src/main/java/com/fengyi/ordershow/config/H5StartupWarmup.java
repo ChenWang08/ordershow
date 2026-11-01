@@ -1,7 +1,7 @@
 package com.fengyi.ordershow.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fengyi.ordershow.catalog.ProductCatalogReader;
+import com.fengyi.ordershow.catalog.H5CatalogService;
 import com.fengyi.ordershow.common.ApiResponse;
 import com.fengyi.ordershow.order.OrderService;
 import com.fengyi.ordershow.security.H5Principal;
@@ -20,13 +20,13 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Order(300)
 public class H5StartupWarmup implements ApplicationRunner {
   private final JdbcTemplate jdbc;
-  private final ProductCatalogReader catalog;
+  private final H5CatalogService catalog;
   private final OrderService orders;
   private final ObjectMapper json;
   private final TransactionTemplate reads;
   private final boolean enabled;
 
-  public H5StartupWarmup(JdbcTemplate jdbc, ProductCatalogReader catalog, OrderService orders, ObjectMapper json,
+  public H5StartupWarmup(JdbcTemplate jdbc, H5CatalogService catalog, OrderService orders, ObjectMapper json,
       PlatformTransactionManager manager, @Value("${H5_WARMUP_ENABLED:true}") boolean enabled) {
     this.jdbc = jdbc; this.catalog = catalog; this.orders = orders; this.json = json; this.enabled = enabled;
     reads = new TransactionTemplate(manager); reads.setReadOnly(true); reads.setTimeout(3);
@@ -52,12 +52,15 @@ public class H5StartupWarmup implements ApplicationRunner {
     warmup: for (int round=0; round<32; round++) {
       for (var customer : customers) {
         if (System.nanoTime()-started > 15_000_000_000L) break warmup;
-        reads.executeWithoutResult(status -> {
-          try {
-            json.writeValueAsBytes(ApiResponse.of(catalog.h5Products(customer.activityCode(),customer,null,null),"startup-warmup"));
-            json.writeValueAsBytes(ApiResponse.of(orders.current(customer.activityCode(),customer,false),"startup-warmup"));
-          } catch (java.io.IOException failure) { throw new IllegalStateException("H5 warmup serialization failed",failure); }
-        });
+        try {
+          // Cache workers obtain their own read transaction; waiting must not occupy a pool connection.
+          json.writeValueAsBytes(ApiResponse.of(catalog.products(customer.activityCode(),customer,null,null),"startup-warmup"));
+          reads.executeWithoutResult(status -> {
+            try {
+              json.writeValueAsBytes(ApiResponse.of(orders.current(customer.activityCode(),customer,false),"startup-warmup"));
+            } catch (java.io.IOException failure) { throw new IllegalStateException("H5 warmup serialization failed",failure); }
+          });
+        } catch (java.io.IOException failure) { throw new IllegalStateException("H5 warmup serialization failed",failure); }
         completed++;
       }
     }

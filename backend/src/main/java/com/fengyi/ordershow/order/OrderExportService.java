@@ -37,18 +37,21 @@ public class OrderExportService {
       }
       for (int i = 0; i < headers.length; i++) sheet.autoSizeColumn(i);
       Sheet detailSheet = workbook.createSheet("订单商品明细");
-      String[] detailHeaders = {"订单编号", "状态", "来源", "客户类型", "大区", "分公司", "经销商", "电话", "订单版本", "行号", "物料代码", "物料名称", "项目组", "规格", "箱规", "订货箱数", "计价模式", "基础箱价", "基础价箱数", "阶梯箱价", "阶梯箱数", "阶梯起订箱数", "是否命中阶梯", "金额", "吨数", "最后提交（北京时间）"};
+      String[] detailHeaders = {"订单编号", "状态", "来源", "客户类型", "大区", "分公司", "经销商", "电话", "订单版本", "行号", "物料代码", "物料名称", "项目组", "规格", "箱规", "订货箱数", "计价模式", "基础箱价", "基础价箱数", "阶梯箱价", "阶梯箱数", "阶梯起订箱数", "是否命中阶梯", "金额", "吨数", "最后提交（北京时间）", "各档计费明细"};
       writeHeaders(detailSheet, detailHeaders);
       int detailRowNo = 1;
       for (Map<String, Object> item : details) {
+        var pricing = item.get("pricing_details") == null ? null
+            : com.fengyi.ordershow.common.TierPricing.decode(item.get("pricing_details").toString());
+        boolean multipleSegments = "INCREMENTAL".equals(item.get("pricing_mode")) && pricing != null && pricing.tiers().size() > 1;
         writeValues(detailSheet.createRow(detailRowNo++), item.get("order_no"), item.get("status"), sourceLabel(item.get("created_source")), item.get("customer_type"),
             item.get("region_code"), item.get("branch_name_snapshot"), item.get("dealer_full_name_snapshot"),
             item.get("phone"),
             item.get("current_version_no"), item.get("line_no"), item.get("material_code"), item.get("material_name"), item.get("product_line"),
             item.get("specification"), item.get("case_pack"), item.get("quantity"), item.get("pricing_mode"), item.get("base_case_price"),
-            item.get("base_price_quantity"), item.get("tier_case_price"), item.get("tier_price_quantity"), item.get("tier_min_quantity"),
+            item.get("base_price_quantity"), multipleSegments ? "多档，见计费明细" : item.get("tier_case_price"), item.get("tier_price_quantity"), multipleSegments ? "多档，见计费明细" : item.get("tier_min_quantity"),
             item.get("applied_tier_min_quantity") == null ? "否" : "是", item.get("line_amount"),
-            item.get("line_tons"), UtcTime.beijing(item.get("last_submitted_at")));
+            item.get("line_tons"), UtcTime.beijing(item.get("last_submitted_at")), pricingText(pricing));
       }
       Sheet productSheet = workbook.createSheet("有效商品汇总");
       writeHeaders(productSheet, new String[]{"物料代码", "物料名称", "项目组", "规格", "箱规", "订货箱数", "订货金额", "订货吨数", "下单客户数"});
@@ -65,6 +68,12 @@ public class OrderExportService {
     } catch (Exception exception) { throw new IllegalStateException("订单导出失败", exception); }
   }
 
+
+  private static String pricingText(com.fengyi.ordershow.common.TierPricing.Details details) {
+    if (details == null) return "";
+    return details.segments().stream().map(part -> part.quantity() + "箱×" + part.casePrice().toPlainString() + "元=" + part.amount().toPlainString() + "元")
+        .collect(java.util.stream.Collectors.joining("；"));
+  }
 
   private static void writeHeaders(Sheet sheet, String[] headers) {
     Row row = sheet.createRow(0);

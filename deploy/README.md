@@ -1,5 +1,9 @@
 # 阿里云 ACK 部署交付
 
+## 当前准备版本：20261101.1
+
+已合入 main `e3cacc3`（业务源码 `080493a`）及其全部分支历史，结构目标 V049。新 ACK 前后端正在本机构建和隔离验证；本轮按用户要求不推送 CODING、不部署 ACK，也不替换日常本地 3000/8080 服务。旧 `20261030.1` 镜像保留，历史交付记录见 [上轮记录](local-images-20261030.1.md)。
+
 ## 范围与分工
 
 本地 Docker Compose 长期保留（MySQL、Redis、MinIO）；测试与生产用 ACK 运行前后端，连接 PolarDB MySQL 兼容版、阿里云 Redis 和 OSS。正式业务数据重新导入，不复制本地数据库/MinIO 数据。支持人工调整副本，不交付 HPA。
@@ -22,7 +26,7 @@
 | DB_POOL_SIZE | 每个副本最大连接数，模板 10 | ConfigMap |
 | DB_POOL_MIN_IDLE | 每个副本最小空闲连接，模板 2 | ConfigMap |
 | H5_SESSION_CACHE_TTL_MS | ACK 固定建议 0；避免单副本身份缓存延迟感知跨副本撤销 | ConfigMap |
-| DASHBOARD_SUMMARY_ENABLED | 本版模板 true；已有库先升 V041、逐活动 repair/check，再启用 | ConfigMap |
+| DASHBOARD_SUMMARY_ENABLED | 本版模板 true；已有库先升 V049、逐活动 repair/check，再启用 | ConfigMap |
 | DASHBOARD_SUMMARY_ACTIVITIES | 空值表示所有活动；仅限制读取，不限制汇总维护 | ConfigMap |
 | REDIS_HOST / REDIS_PORT | 云 Redis 地址和端口；模板按单入口连接 | ConfigMap |
 | REDIS_USERNAME / REDIS_PASSWORD | 按托管 Redis 认证要求填写；无 ACL 用户名可留空 | ConfigMap / Secret |
@@ -42,6 +46,14 @@
 
 PolarDB 需要支持项目 SQL 使用的 MySQL 8 能力，具体版本须测试。Redis 需要允许 GET/SET/DEL 及 PUBLISH/SUBSCRIBE 等所用命令；当前使用单入口配置，若交付的是需要客户端直连分片的集群模式，应另行配置和验证。TLS 私有 CA 由运维通过 JVM truststore 配置，不关闭证书验证来绕过错误。
 
+## 新增同步与资源配置（20261101.1）
+
+活动资料通过 `/api/v1/public/activities/{code}/events` 的 SSE 首帧、变更和重连同步，旧活动资料 GET 返回 404；排行进入只读选项，确认后查询。Ingress 必须关闭 SSE 缓冲/缓存、保留路径，并为默认 30 秒心跳设置至少 90 秒空闲/读取超时；实际 NGINX/ALB 配置须由运维验证。服务端旧统计事件的兼容通道保留，不用于恢复页面统计轮询。
+
+`ACTIVITY_INFO_CHANNEL`、`H5_CATALOG_CHANNEL` 默认分别从 `REALTIME_CHANNEL` 派生后缀 `:activity-info:v1`、`:product-catalog:v1`；测试/生产模板显式分开，同环境副本必须一致。Redis Pub/Sub 不受数据库编号隔离，不能用 Redis DB 编号代替通道隔离。
+
+ConfigMap 与 test/prod 模板显式交付：活动心跳 30000ms、每副本最多 2000 个连接；商品缓存 32 活动/估算 32MiB/600 秒空闲淘汰、每副本 4 加载/128 等待者/5000ms 等待；抽奖试算并发 2、开奖并发 1、单查询 8 秒。这些并发限制分别按副本生效，需要与每副本 10 个数据库连接及滚动额外副本一起预算。H5 会话缓存继续为 0，汇总继续开启；真实密钥仍使用 Secret。
+
 ## 文件存储与访问方式
 
 `StorageService` 管理数据库文件元信息和业务权限，`ObjectStorage` 选择 MinIO 或 OSS。MinIO 沿用自动创建本地 Bucket；OSS 不创建或修改 Bucket，运维预先建好私有 Bucket。AK/SK 不进入浏览器。
@@ -50,7 +62,7 @@ PolarDB 需要支持项目 SQL 使用的 MySQL 8 能力，具体版本须测试�
 
 ## 镜像构建与推送
 
-本轮交付标签为 `20261030.1`，同步 main 至 `9b8df44`（业务源码基线 `d36cbca`），包含看板汇总、草稿并发、订单写入及旧请求重试修复。保留 ACK 云配置和多副本适配，详细验收状态见 [本轮记录](local-images-20261030.1.md)。CODING 前后端均已推送并核验，远端摘要与本地一致，平台 linux/amd64；后端曾因连接中断失败，随后重试成功。未推送 Git、未部署云端；不覆盖日常本地镜像。旧 `20261029.3` 已推送的历史记录见 [上轮记录](local-images-20261029.3.md)。旧标签保留不等于可在新数据上直接回滚。
+历史 20261030.1 交付标签为 `20261030.1`，同步 main 至 `9b8df44`（业务源码基线 `d36cbca`），包含看板汇总、草稿并发、订单写入及旧请求重试修复。保留 ACK 云配置和多副本适配，详细验收状态见 [本轮记录](local-images-20261030.1.md)。CODING 前后端均已推送并核验，远端摘要与本地一致，平台 linux/amd64；后端曾因连接中断失败，随后重试成功。未推送 Git、未部署云端；不覆盖日常本地镜像。旧 `20261029.3` 已推送的历史记录见 [上轮记录](local-images-20261029.3.md)。旧标签保留不等于可在新数据上直接回滚。
 
 20261027.1 无新增数据库结构迁移。已有活动的 20/20 上限与 FINISHED 历史快照不会随镜像自动修正；由 DBA 按[排行部署说明](../docs/deployment/2026-10-27-ranking-limits.md)审核目标环境名单再处理，保留自定义值，ARCHIVED 不自动处理。原本地数据与修正名单不能照搬到云端。
 
@@ -71,7 +83,7 @@ docker push REGISTRY/order-show/frontend:VERSION
 
 ## 数据库准备
 
-当前结构版本为 V041。空库使用最新 fresh-install.sql；已有 V039 库由 DBA 停止所有写入、备份后执行 `deploy/dba/generated/upgrade-v039-v041.sql`，逐活动补齐并对账汇总，再启用新应用与汇总读取。已有 V038 库先按历史步骤升至 V039。不得对已有库重跑空库包，迁移和回填不在应用启动时执行。
+当前交付结构版本为 V049。已有 V041 库使用 `deploy/dba/generated/upgrade-v041-v049.sql`；已有 V039 库先执行 V039→V041，再执行 V041→V049。必须先核对目标版本、停写、备份，由 DBA 顺序执行，遇错即停。空库使用最新 fresh-install.sql。所有升级路径均在最终达到 V049 后，逐活动检查汇总，需要时 repair，最后 check 差异为 0，再启用新应用与汇总读取。已有 V038 库先按历史步骤升至 V039。不得对已有库重跑空库包，迁移和回填不在应用启动时执行。
 
 先阅读 [DBA 执行说明](dba/README.md)。运行 `node scripts/package-dba.mjs` 生成空库初始化包，DBA 建库并执行，再创建初始管理员。V037 是 Java 数据清理迁移，此次全新空库明确不适用，已在 manifest 中标记。应用不会自动改表，也不会在云端创建本地演示活动。
 
@@ -81,7 +93,7 @@ docker push REGISTRY/order-show/frontend:VERSION
 2. DBA 完成空库初始化和管理员创建。不要在应用的 initContainer 中执行数据库迁移。
 3. 将模板复制到私有目录（如已忽略的 `deploy/private/`），填写实际配置。Secret 示例不能原样投入使用；真实值不提交 Git、不输出到聊天。
 4. `namespace.yaml` 默认 order-show-test，生产另建 order-show-prod。其他资源以 `kubectl -n` 明确指定 Namespace。填写 apps.yaml 镜像地址、资源配额；私有仓库按集群规范配置 imagePullSecrets 或节点拉取权限。
-5. 配置 Ingress class、域名、TLS Secret。路由保留完整 `/api/v1` 前缀，不做重写。控制器需要允许 170 MB 请求体（单文件 150 MB），SSE 关闭缓冲并设置足够的读超时，例如至少 60 秒；这些参数由具体 Nginx/ALB 控制器决定，通用模板不假设控制器。
+5. 配置 Ingress class、域名、TLS Secret。路由保留完整 `/api/v1` 前缀，不做重写。控制器需要允许 170 MB 请求体（单文件 150 MB），SSE 关闭缓冲并设置足够的读超时，例如至少 90 秒；这些参数由具体 Nginx/ALB 控制器决定，通用模板不假设控制器。
 6. 检查模板后执行（路径指向已填写的私有副本）：
 
 ```sh
@@ -100,7 +112,7 @@ Secret/ConfigMap 作为环境变量加载，变更后需 `rollout restart deploy
 
 - 会话、权限、CSRF 校验依托数据库；各副本共用业务密钥，不需要粘性会话。
 - ACK 的 H5 身份缓存 TTL 为 0，每次请求校验共享数据库；与保持开启的看板汇总完全独立。不应直接复制 main 的 2 秒实例缓存或单副本 60 个数据库连接配置。两个副本各 10 连接、滚动额外一个副本时，应用连接上限为 30，另为维护工具（每进程 2）、监控等留余量。
-- Outbox 事件通过 Redis 发布，各副本监听同一环境通道，再通知自身 SSE 客户端。发布器保留 READ COMMITTED 事务及 FOR UPDATE SKIP LOCKED 领取、发送后确认、失败回滚重试，故障窗口允许重复通知。服务端15秒 RECOVERY 补偿及抽奖等实时功能保留。自20261029.2起，订单看板、订货排行、专题战报不订阅统计 SSE，也不做15秒统计轮询或重连补拉：首次读取后仅手动刷新。活动元数据检查仍保留。旧浏览器页面需重新加载才能使用新行为，不能仅更新后端就认定自动查询已停止。
+- Outbox 事件通过 Redis 发布，各副本监听同一环境通道，再通知自身 SSE 客户端。发布器保留 READ COMMITTED 事务及 FOR UPDATE SKIP LOCKED 领取、发送后确认、失败回滚重试，故障窗口允许重复通知。服务端15秒 RECOVERY 补偿及抽奖等实时功能保留。自20261029.2起，订单看板、订货排行、专题战报不订阅统计 SSE，也不做15秒统计轮询或重连补拉：首次读取后仅手动刷新。活动元数据改用独立公共 SSE；新版不再轮询旧活动资料 GET。旧浏览器页面需重新加载才能使用新行为，不能仅更新后端就认定自动查询已停止。
 - 导入任务通过 `FOR UPDATE SKIP LOCKED` 在同一事务中领取和发布；容器崩溃会回滚领取，其他副本可重新处理。活动级锁串行化同活动发布。对象上传与数据库不是分布式事务，失败可能留下未引用对象，不影响当前已发布数据。
 - 定时状态切换使用条件更新并与事件写入处于事务内；幂等记录清理可重复执行。订单和抽奖已有数据库锁/唯一约束，扩容仍须执行并发验收。
 - 业务文件在对象存储，预览和任务状态在数据库；请求内临时内存不作为跨请求共享状态。前端镜像携带静态资源，不挂业务数据卷。
@@ -118,6 +130,6 @@ kubectl -n order-show-test scale deployment/frontend --replicas=3
 - 检查管理员登录/首次改密、正式数据导入、图片、H5 下单及变更审核、看板、抽奖。至少两副本测试跨副本会话、通知、重复请求和任务发布，再测试重启及手工扩缩容。
 - 看日志：`kubectl -n order-show-test logs deployment/backend --all-pods=true --tail=200`；旧版 kubectl 不支持时逐 Pod 查看。看事件：`kubectl -n order-show-test describe pod POD_NAME`。
 - ImagePullBackOff 检查仓库权限/标签；配置占位符报错检查 Secret/ConfigMap；SQL 错误先检查 DBA 版本；Redis 失败检查认证/TLS/网络和订阅权限；文件错误检查 Bucket 地域、AK/SK 和对象权限；SSE 延迟检查 Ingress 缓冲/超时。
-- 本版启用订单历史写时复制：当前版本的历史明细可能尚未实体化。新版本产生写入后，不能直接换回旧后端或执行 rollout undo；旧程序可能无法正确读取这些历史。回退须停写，由 DBA 评估历史补齐/经验证的兼容回退，或经业务确认恢复升级前备份（升级后数据会丢失，须另行处理）。数据库结构不随镜像自动回滚。
+- 本版同时包含 V048 独立第一档价格与订单历史写时复制：当前版本的历史明细可能尚未实体化。新版本产生写入后，不能直接换回旧后端或执行 rollout undo；旧程序可能无法正确读取这些历史。回退须停写，由 DBA 评估历史补齐/经验证的兼容回退，或经业务确认恢复升级前备份（升级后数据会丢失，须另行处理）。数据库结构不随镜像自动回滚。
 
 实际验证状态见 [验证记录](verification.md)。通用模板无法替代真实 ACK、PolarDB、托管 Redis TLS 和 OSS AK/SK 联调。

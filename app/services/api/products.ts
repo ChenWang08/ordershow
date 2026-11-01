@@ -13,23 +13,23 @@ export async function loadAdminProducts(activityId: number, filters: {
   customerType?: string;
   status?: string;
   keyword?: string;
-} = {}) {
+} = {}, signal?: AbortSignal) {
   const query = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
     if (value !== undefined && value !== "") query.set(key, String(value));
   });
   const suffix = query.toString() ? `?${query.toString()}` : "";
   const [products, scopes] = await Promise.all([
-    api<Envelope<RuntimeProduct[]>>(`/admin/activities/${activityId}/products${suffix}`),
-    api<Envelope<Record<string, DealerScopeSummary>>>(`/admin/activities/${activityId}/product-dealer-scopes`),
+    api<Envelope<RuntimeProduct[]>>(`/admin/activities/${activityId}/products${suffix}`, { signal }),
+    api<Envelope<Record<string, DealerScopeSummary>>>(`/admin/activities/${activityId}/product-dealer-scopes`, { signal }),
   ]);
   return products.data.map(p => {
     const scope=scopes.data[String(p.id)];
     return { ...p, dealerScope: scope?.scopes ?? [], effectiveDealerCount: scope?.effectiveCount, dealerScopeRestricted: scope?.restricted };
   });
 }
-export async function loadProductImageReviews(activityId: number) {
-  return (await api<Envelope<ProductImageReview[]>>(`/admin/activities/${activityId}/product-image-reviews`)).data;
+export async function loadProductImageReviews(activityId: number, signal?: AbortSignal) {
+  return (await api<Envelope<ProductImageReview[]>>(`/admin/activities/${activityId}/product-image-reviews`, { signal })).data;
 }
 export async function selectProductImageReview(activityId: number, candidateId: number) {
   return (await api<Envelope<boolean>>(`/admin/activities/${activityId}/product-image-reviews/${candidateId}/select`, { method: "POST" }, "admin")).data;

@@ -73,6 +73,9 @@ management:
         enabled: true
 
 order-show:
+  activity-info:
+    heartbeat-ms: ${ACTIVITY_INFO_HEARTBEAT_MS:30000}
+    max-connections: ${ACTIVITY_INFO_MAX_CONNECTIONS:2000}
   dashboard:
     summary-enabled: ${DASHBOARD_SUMMARY_ENABLED:false}
     summary-activities: ${DASHBOARD_SUMMARY_ACTIVITIES:}

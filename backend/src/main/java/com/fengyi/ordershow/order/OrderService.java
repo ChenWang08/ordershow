@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.DomainException;
+import com.fengyi.ordershow.common.TierPricing.Details;
 import com.fengyi.ordershow.common.PageResponse;
 import com.fengyi.ordershow.dashboard.DashboardService;
 import com.fengyi.ordershow.security.AdminPrincipal;
@@ -119,7 +120,7 @@ public class OrderService {
     int line = 0;
     for (ProductSnapshot product : products) {
       long quantity = quantities.get(product.id());
-      PricingResult pricing = calculatePrice(product.casePrice(), product.priceTierMinQuantity(), product.priceTierCasePrice(), product.priceTierPricingMode(), quantity);
+      PricingResult pricing = calculatePrice(product.casePrice(), product.priceTiers(), product.priceTierPricingMode(), quantity);
        BigDecimal lineTons = calculateTons(quantity, product.tonCaseFactor());
       items.add(new CalculatedItem(++line, product, quantity, pricing, lineTons));
       totalQuantity += quantity;
@@ -416,6 +417,7 @@ public class OrderService {
             || !samePriceValue(p.tierCasePrice(), stored.get("tier_case_price"))
             || !samePriceValue(p.tierMinQuantity(), stored.get("tier_min_quantity"))
             || !java.util.Objects.equals(p.pricingMode(), stored.get("pricing_mode"))
+            || !java.util.Objects.equals(p.pricingDetails(), com.fengyi.ordershow.common.TierPricing.decode(stored.get("pricing_details") == null ? null : stored.get("pricing_details").toString()))
             || !samePriceValue(p.lineAmount(), stored.get("line_amount"))) {
           changedPrices.put(item.product().id(), p);
         }
@@ -512,8 +514,7 @@ public class OrderService {
     int line = 0;
     for (ProductSnapshot product : products) {
       long quantity = quantities.get(product.id());
-      PricingResult pricing = calculatePrice(product.casePrice(), product.priceTierMinQuantity(),
-          product.priceTierCasePrice(), product.priceTierPricingMode(), quantity);
+      PricingResult pricing = calculatePrice(product.casePrice(), product.priceTiers(), product.priceTierPricingMode(), quantity);
        BigDecimal lineTons = calculateTons(quantity, product.tonCaseFactor());
       items.add(new CalculatedItem(++line, product, quantity, pricing, lineTons));
       totalQuantity += quantity;
@@ -529,7 +530,7 @@ public class OrderService {
         item.product().specification(), item.product().casePack(), item.quantity(), item.pricing().casePriceSnapshot(),
         item.pricing().appliedTierMinQuantity(), item.pricing().baseCasePrice(), item.pricing().baseQuantity(),
         item.pricing().tierCasePrice(), item.pricing().tierMinQuantity(), item.pricing().tierQuantity(),
-        item.pricing().pricingMode(), item.pricing().lineAmount(), item.lineTons())).toList();
+        item.pricing().pricingMode(), item.pricing().lineAmount(), item.lineTons(), item.pricing().pricingDetails())).toList();
     return new OrderPreview(calculated.totalQuantity(), calculated.totalTons(), calculated.totalAmount(), items);
   }
 
@@ -610,7 +611,9 @@ public class OrderService {
 
   // All order writers take this lock before reading catalog prices or locking orders.
 
+  @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
   public AdminOrderView adminOrder(long activityId, long orderId) { return repository.adminOrder(activityId, orderId); }
+  @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
   public List<OrderVersionView> versions(long activityId, long orderId) { return repository.versions(activityId, orderId); }
   public List<OperationView> operations(long activityId, long orderId) { return repository.operations(activityId, orderId); }
   private byte[] hash(Object value) {
@@ -639,7 +642,7 @@ public class OrderService {
                             String specification, String casePack, long quantity, BigDecimal casePrice,
                             Long appliedTierMinQuantity, BigDecimal baseCasePrice, long basePriceQuantity,
                             BigDecimal tierCasePrice, Long tierMinQuantity, long tierPriceQuantity,
-                            String pricingMode, BigDecimal lineAmount, BigDecimal lineTons) {}
+                            String pricingMode, BigDecimal lineAmount, BigDecimal lineTons, Details pricingDetails) {}
   public record OrderPreview(long totalQuantity, BigDecimal totalTons, BigDecimal totalAmount, List<PreviewItem> items) {}
   public record ChangeRequestItem(long productId, String materialCode, String materialName, String productLine, long quantity,
                                   BigDecimal casePrice, BigDecimal lineAmount, BigDecimal lineTons) {}
@@ -648,7 +651,11 @@ public class OrderService {
                                   BigDecimal currentTotalAmount, Long requestedTotalQuantity, BigDecimal requestedTotalTons,
                                   BigDecimal requestedTotalAmount, List<ChangeRequestItem> items, String customerNote, String reviewReason,
                                   String reviewedByName, Instant requestedAt, Instant reviewedAt, OrderView originalOrder) {}
-  public record ItemView(long id, Long productId, int lineNo, String materialCode, String materialName, String productLine, String specification, String casePack, long quantity, BigDecimal casePrice, Long appliedTierMinQuantity, BigDecimal baseCasePrice, Long basePriceQuantity, BigDecimal tierCasePrice, Long tierMinQuantity, Long tierPriceQuantity, String pricingMode, BigDecimal lineAmount, BigDecimal tonCaseFactor, BigDecimal lineTons) {}
+  public record ItemView(long id, Long productId, int lineNo, String materialCode, String materialName, String productLine, String specification, String casePack, long quantity, BigDecimal casePrice, Long appliedTierMinQuantity, BigDecimal baseCasePrice, Long basePriceQuantity, BigDecimal tierCasePrice, Long tierMinQuantity, Long tierPriceQuantity, String pricingMode, BigDecimal lineAmount, BigDecimal tonCaseFactor, BigDecimal lineTons, Details pricingDetails) {
+    public ItemView(long id, Long productId, int lineNo, String materialCode, String materialName, String productLine, String specification, String casePack, long quantity, BigDecimal casePrice, Long appliedTierMinQuantity, BigDecimal baseCasePrice, Long basePriceQuantity, BigDecimal tierCasePrice, Long tierMinQuantity, Long tierPriceQuantity, String pricingMode, BigDecimal lineAmount, BigDecimal tonCaseFactor, BigDecimal lineTons) {
+      this(id, productId, lineNo, materialCode, materialName, productLine, specification, casePack, quantity, casePrice, appliedTierMinQuantity, baseCasePrice, basePriceQuantity, tierCasePrice, tierMinQuantity, tierPriceQuantity, pricingMode, lineAmount, tonCaseFactor, lineTons, null);
+    }
+  }
   public record OrderVersionView(long id, int version, long totalQuantity, BigDecimal totalTons, BigDecimal totalAmount,
                                  Instant submittedAt, String submittedSource, String submittedByAdminName,
                                  String reason, List<ItemView> items) {}

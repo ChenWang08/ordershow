@@ -1,0 +1,18 @@
+.price-tiers { padding: 16px; border: 1px solid #e5cec5; border-radius: 10px; background: #fffaf6; display: grid; gap: 12px; min-width: 0; }
+.drawer-form-grid > .price-tiers { grid-column: 1 / -1; }
+.price-tier-head, .price-tier-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) 90px; align-items: center; gap: 12px; }
+.price-tier-head { font-size: 12px; color: #806b62; }
+.price-tier-row input { width: 100%; min-width: 0; }
+.price-tier-row span, .price-tier-row small { font-size: 12px; color: #806b62; }
+.price-tier-base { padding-bottom: 12px; border-bottom: 1px solid #e5cec5; }
+.price-tier-entry { display: grid; gap: 6px; }
+.price-tier-add { justify-self: start; }
+.price-tier-trial { padding: 12px; border-radius: 8px; background: #f5eae3; display: grid; grid-template-columns: minmax(140px, 1fr) minmax(0, 2fr); gap: 16px; align-items: center; }
+.price-tier-trial > div { display: grid; gap: 6px; overflow-wrap: anywhere; }
+.price-tier-trial strong { color: #8e1d18; }
+@media (max-width: 640px) {
+  .price-tiers { padding: 10px; }
+  .price-tier-head, .price-tier-row { grid-template-columns: minmax(0, 1.1fr) minmax(0, .8fr) minmax(0, 1fr) 44px; gap: 6px; }
+  .price-tier-row button { padding: 7px 3px; }
+  .price-tier-trial { grid-template-columns: 1fr; }
+}

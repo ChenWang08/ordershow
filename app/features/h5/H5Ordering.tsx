@@ -46,6 +46,7 @@ export function H5Ordering(props: H5Props) {
       <div className="phone-shell" ref={shellRef}>
         <div className="phone-screen">
           <FestivalDecor />
+          {props.activitySyncMessage && <p className="activity-sync-status" role="status">{props.activitySyncMessage}</p>}
           <H5LiveRoomExit url={props.runtimeActivity?.liveRoomUrl} disabled={model.runtimeBusy}
             prepare={model.prepareLiveRoomExit} />
           {(model.pendingSubmission || model.orderNeedsRefresh) && <div className="h5-submit-recovery" role="alert">

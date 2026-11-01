@@ -38,7 +38,7 @@ export function WhitelistFormDrawer({ rows, initialRow, customerTypeMode = "TYPE
           <label><span>分公司确认人电话</span><input inputMode="tel" maxLength={11} value={form.confirmerPhone} onChange={(e) => update("confirmerPhone", e.target.value.replace(/\D/g, ""))} /></label>
           {activityStarted && <label className="wide-field"><span>紧急修改原因 *</span><input value={editReason} onChange={(e) => setEditReason(e.target.value)} placeholder="请填写本次改单原因，保存后写入操作日志" /></label>}
         </div>
-        <p className="drawer-form-note">{customerTypeMode === "UNSPECIFIED" ? "当前白名单不区分客户类型，H5 将直接验证手机号。" : "当前白名单按客户类型区分，综合客户进入 H5 后还需选择大区。"} {activityStarted ? "活动已开始，本次手动调整会记录操作日志。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
+        <p className="drawer-form-note">{customerTypeMode === "UNSPECIFIED" ? "当前白名单不区分客户类型，H5 将直接验证手机号。" : "H5 根据手机号识别客户类型及大区，同号多身份时选择客户类型。"} 各类客户均可填写大区，也可留空。{activityStarted ? "活动已开始，本次手动调整会记录操作日志。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
         <footer><div className="drawer-save-error">{saveError && <small className="field-error" role="alert">{saveError}</small>}{requiresReload && <button type="button" onClick={() => window.location.reload()}>刷新列表</button>}</div><button disabled={saving} onClick={requestClose}>取消</button><button className="admin-primary" disabled={!canSave || saving || requiresReload} onClick={() => save(() => onSave({ ...form, sequence: nextSequence, status: "有效", source: isEditing ? form.source ?? "excel" : "manual", identityKey: whitelistIdentityKey(form), manuallyEdited: true }, editReason.trim()))}>{saving ? "保存中…" : isEditing ? "保存修改" : "添加客户"}</button></footer>
       </aside>
     </div>

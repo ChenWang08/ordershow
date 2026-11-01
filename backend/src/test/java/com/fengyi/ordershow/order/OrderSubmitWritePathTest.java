@@ -90,10 +90,26 @@ class OrderSubmitWritePathTest {
     OrderVersionView current = new OrderVersionView(4, 2, 6, BigDecimal.ONE, new BigDecimal("100"),
         Instant.EPOCH, "H5", null, null, List.of(kept));
     doReturn(List.of(version(3, 1), current)).when(orders).withVersionItems(any());
+    when(jdbc.query(eq("SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no"), any(RowMapper.class), eq(9L)))
+        .thenReturn(List.of(new ItemView(99, 10L, 1, "M", "N", "P", "S", "12", 5,
+            new BigDecimal("100"), null, new BigDecimal("100"), 5L, null, null, null, null, new BigDecimal("500"), null, null)));
     List<OrderVersionView> result = orders.withCurrentVersionItems(9, 2, List.of(version(3, 1), current));
     assertThat(result.get(0).items()).isEmpty();
     assertThat(result.get(1).items()).containsExactly(kept);
-    verify(jdbc, never()).query(contains("FROM order_item"), any(RowMapper.class), any(Object[].class));
+    verify(jdbc).query(eq("SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no"), any(RowMapper.class), eq(9L));
+  }
+
+  @Test
+  void partialPriceSnapshotMergesUnchangedLinesAndKeepsOriginalPrices() {
+    OrderRepository orders = spy(repository);
+    ItemView frozen = new ItemView(50, 10L, 1, "M", "N", "P", "S", "12", 5,
+        new BigDecimal("80"), null, new BigDecimal("80"), 5L, null, null, null, null, new BigDecimal("400"), null, null);
+    ItemView other = new ItemView(60, 11L, 2, "M2", "N2", "P", "S", "12", 1,
+        new BigDecimal("20"), null, new BigDecimal("20"), 1L, null, null, null, null, new BigDecimal("20"), null, null);
+    var current = new OrderVersionView(4, 2, 6, BigDecimal.ONE, new BigDecimal("420"), Instant.EPOCH, "H5", null, null, List.of(frozen));
+    doReturn(List.of(current)).when(orders).withVersionItems(any());
+    when(jdbc.query(eq("SELECT * FROM order_item WHERE order_id = ? ORDER BY line_no"), any(RowMapper.class), eq(9L))).thenReturn(List.of(other));
+    assertThat(orders.withCurrentVersionItems(9, 2, List.of(current)).getFirst().items()).containsExactly(frozen, other);
   }
 
   @Test

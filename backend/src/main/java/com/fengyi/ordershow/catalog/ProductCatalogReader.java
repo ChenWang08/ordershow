@@ -133,8 +133,8 @@ public class ProductCatalogReader {
             scopes.computeIfAbsent(rs.getLong(1), ignored -> new ArrayList<>()).add(rs.getString(2));
           }, args);
       jdbc.query("SELECT activity_product_id,min_quantity,case_price,pricing_mode FROM activity_product_price_tier WHERE activity_product_id IN ("
-          + ids + ")", (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
-            tiers.put(rs.getLong(1),new PriceTierView(rs.getLong(2),rs.getBigDecimal(3),rs.getString(4)));
+          + ids + ") ORDER BY activity_product_id,min_quantity", (org.springframework.jdbc.core.RowCallbackHandler) rs -> {
+            tiers.merge(rs.getLong(1),new PriceTierView(rs.getLong(2),rs.getBigDecimal(3),rs.getString(4)), PriceTierView::append);
           }, args);
     }
     return products.stream().map(p -> details(p, List.copyOf(images.getOrDefault(p.id(),List.of())),

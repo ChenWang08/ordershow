@@ -95,12 +95,12 @@ test("whitelist cancellation restores confirmed rows without clearing other task
   assert.equal(harness.options.serverImportTasks.ATTENDANCE, 8);
 });
 
-test("whitelist publication refreshes existing attendance and its pending preview", async () => {
+test("whitelist publication preserves attendance drafts without reading the hidden module", async () => {
   const harness = customerHarness();
   harness.render().attendance.setPendingAttendanceImport(draft());
   await harness.render().whitelist.confirmWhitelistImport();
-  assert.deepEqual(harness.calls, [["confirm", 1, 7], "wait", "committed", "attendees", ["refresh", "ATTENDANCE"]]);
-  assert.equal(harness.options.attendanceRows[0].id, "42");
+  assert.deepEqual(harness.calls, [["confirm", 1, 7], "wait", "committed"]);
+  assert.equal(harness.options.attendanceRows[0].id, "published");
 });
 
 test("blocked whitelist import cannot publish", async () => {

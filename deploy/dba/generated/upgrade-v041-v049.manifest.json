@@ -1,0 +1,40 @@
+{
+  "scope": "existing V041 database only",
+  "from": "V041",
+  "to": "V049",
+  "migrations": [
+    {
+      "file": "V042__activity_info_stream_version.sql",
+      "sha256": "c8a755d56bcdeec9efca5ea03841819b11acfa38a1cec16d003f3b45eb26b536"
+    },
+    {
+      "file": "V043__product_catalog_cache_version.sql",
+      "sha256": "4fbfe287e2105c79fb9e65772b9518775e5755f851b761ab20962e70a8b44e8e"
+    },
+    {
+      "file": "V044__ranking_filters.sql",
+      "sha256": "1cacb18c19bb986dc9f72ecee2b4f034728a3746af5153ee6c307eb6b42eefd2"
+    },
+    {
+      "file": "V045__lottery_product_filters_and_tons.sql",
+      "sha256": "32d7735f204b5ac64f02c4ed6f1bde19231f075f9628e434c468fb9e4761c473"
+    },
+    {
+      "file": "V046__lottery_box_and_tons_weighting.sql",
+      "sha256": "eb2efe0657c282b983f7f44b14fcb939b75cedbe6901dda649d123cc134b9c24"
+    },
+    {
+      "file": "V047__multiple_price_tiers.sql",
+      "sha256": "6fb1a51e9bdc502c0b3e00aafbd7aae86cbbb72f469b263d97d886bfa620aa71"
+    },
+    {
+      "file": "V048__independent_first_price_tier.sql",
+      "sha256": "d510c1e46f19dc4508287a06a9c026600c8d91c90da28a4634c0e4d7946db8ba"
+    },
+    {
+      "file": "V049__index_activity_customer_phone_lookup.sql",
+      "sha256": "ed19b9ee4a4c6c3517d857ef87d0bf50d22de9045a5290ad4f423bcc1761dd1f"
+    }
+  ],
+  "bundleSha256": "a8f8cad87b8f3f6a3f5010c36a80a75c5c85c55c95c964267f0c15ac6620bfb3"
+}

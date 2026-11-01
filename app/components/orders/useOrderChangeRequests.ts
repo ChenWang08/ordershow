@@ -1,42 +1,32 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLazyAdminQuery } from "../../features/admin/useLazyAdminQuery";
 import { ApiError, approveAdminOrderChangeRequest, rejectAdminOrderChangeRequest, loadOrderChangePage, loadOrderChangeDetail, loadPendingOrderChanges, loadAdminOrder, type OrderChangeRequest, type RuntimeOrder } from "../../api";
 
-export function useOrderChangeRequests(activityId: number, onChanged?: () => void) {
-  const [requests,setRequests]=useState<OrderChangeRequest[]>([]);
-  const [pending,setPending]=useState<Array<{id:number;orderId:number}>>([]);
+export function useOrderChangeRequests(activityId: number, onChanged?: () => void, enabled = true, revision = 0) {
   const [filters,setFilters]=useState({status:"PENDING",type:"ALL",keyword:"",page:1,size:20,newest:false});
-  const [total,setTotal]=useState(0);
-  const [loading,setLoading]=useState(false);
   const [busyId,setBusyId]=useState<number|null>(null);
   const [error,setError]=useState("");
   const [selected,setSelected]=useState<OrderChangeRequest|null>(null);
   const [original,setOriginal]=useState<RuntimeOrder|null>(null);
   const [reason,setReason]=useState("");
-  const generation=useRef(0);
   const detailGeneration=useRef(0);
-  const reload=useCallback(async()=>{
-    const token=++generation.current;
-    setLoading(true);
-    try {
-      const [result,ids]=await Promise.all([loadOrderChangePage(activityId,filters),loadPendingOrderChanges(activityId)]);
-      if(token!==generation.current)return;
-      setRequests(result.data);setTotal(result.page.totalElements);setPending(ids);
-    } catch(e) {if(token===generation.current)setError(e instanceof ApiError?e.message:"申请加载失败");}
-    finally {if(token===generation.current)setLoading(false);}
+  const detailController=useRef<AbortController|null>(null);
+  const loader=useCallback(async(signal:AbortSignal)=>{
+    const [result,ids]=await Promise.all([loadOrderChangePage(activityId,filters,signal),loadPendingOrderChanges(activityId,signal)]);
+    return {result,ids};
   },[activityId,filters]);
-  useEffect(()=>{
-    const sequence = generation;
-    const start=window.setTimeout(()=>void reload(),250);
-    const timer=window.setInterval(()=>void reload(),15000);
-    return()=>{sequence.current++;window.clearTimeout(start);window.clearInterval(timer);};
-  },[reload]);
-  useEffect(()=>()=>{detailGeneration.current++;},[activityId]);
+  const query=useLazyAdminQuery(JSON.stringify([activityId,filters,revision]),enabled,loader);
+  const reload=query.refresh;
+  useEffect(()=>()=>{detailGeneration.current++;detailController.current?.abort();},[activityId,enabled]);
   const open=async(id:number)=>{
     const token=++detailGeneration.current;setError("");setReason("");setSelected(null);setOriginal(null);
+    detailController.current?.abort();
+    const controller=new AbortController();detailController.current=controller;
     try {
-      const request=await loadOrderChangeDetail(activityId,id);
-      const order=await loadAdminOrder(activityId,request.orderId);
+      const request=await loadOrderChangeDetail(activityId,id,controller.signal);
+      if(token!==detailGeneration.current)return;
+      const order=await loadAdminOrder(activityId,request.orderId,controller.signal);
       if(token===detailGeneration.current){setSelected(request);setOriginal(order);}
     }catch(e){if(token===detailGeneration.current)setError(e instanceof ApiError?e.message:"详情加载失败");}
   };
@@ -46,10 +36,12 @@ export function useOrderChangeRequests(activityId: number, onChanged?: () => voi
     setBusyId(selected.id);setError("");
     try{
       const result=approve?await approveAdminOrderChangeRequest(activityId,selected.id,reason):await rejectAdminOrderChangeRequest(activityId,selected.id,reason);
-      setSelected(result);await reload();onChanged?.();
+      setSelected(result);query.invalidate();await reload();onChanged?.();
       if(approve&&result.status==="REJECTED")setError(result.reviewReason||"订单已变化，申请已自动驳回");
-    }catch(e){setError(e instanceof ApiError?e.message:"审核失败");await reload();}
+    }catch(e){setError(e instanceof ApiError?e.message:"审核失败");query.invalidate();await reload();}
     finally{setBusyId(null);}
   };
-  return {requests,pending,filters,setFilters,total,loading,busyId,error,setError,reload,selected,setSelected,original,reason,setReason,open,review};
+  return {requests:query.data?.result.data ?? [],pending:query.data?.ids ?? [],loaded:Boolean(query.data),
+    filters,setFilters,total:query.data?.result.page.totalElements ?? 0,loading:query.loading,busyId,
+    error:error || query.error,setError,reload,selected,setSelected,original,reason,setReason,open,review};
 }

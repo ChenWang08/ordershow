@@ -8,17 +8,22 @@ const { createH5SubmissionManager } = loadModule("app/features/h5/h5-submission.
 }, { setTimeout, clearTimeout, AbortController });
 const item = (productId, quantity) => ({ productId, quantity, materialName: "商品" + productId, casePrice: 10, lineAmount: quantity * 10 });
 async function harness(status = "SUBMITTED", pending = null, activity = { code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] }) {
-  let cursor = 0, fail = false;
+  let cursor = 0, fail = false, customerId = 2;
   const slots = [], calls = [], storage = new Map();
-  const order = { id: 1, orderNo: "ORDER1", status, currentVersion: 2, lockVersion: 4,
+  const order = { id: 1, activityCustomerId: 2, orderNo: "ORDER1", status, currentVersion: 2, lockVersion: 4,
     items: [item(1, 10)], operations: [], lastModifiedAt: "2026-10-10T01:00:00Z" };
   const api = {
     ApiError, apiAssetUrl: url => url,
-    verifyPhone: async (type, region, phone) => { calls.push(["verify", type, region, phone]); return { activityId: 1, customerId: type === "SPECIAL" ? 3 : 2, customerType: type, regionCode: region, dealerFullName: "测试客户" }; },
+    verifyPhone: async (phone, selectedType) => {
+      calls.push(["verify", phone, selectedType]);
+      const type = selectedType || activity.availableCustomerTypes?.[0] || "ALL";
+      customerId = type === "SPECIAL" ? 3 : 2;
+      return { selectionRequired: false, csrfToken: "test", customer: { activityId: 1, customerId,
+        customerType: type, regionCode: type === "GENERAL" ? "NORTH" : null, dealerFullName: "测试客户" } };
+    },
     loadH5Products: async () => [1, 2].map(id => ({ id, materialName: "商品" + id, images: [], casePrice: 10, customerType: "ALL", rebateStatus: "ALL", orderable: true })),
-    loadH5Order: async () => order,
-    loadH5OrderChangeRequest: async () => pending,
-    loadH5OrderDraft: async () => null,
+    loadH5Order: async () => ({ ...order, activityCustomerId: customerId }),
+    loadH5OrderChangeRequest: async () => pending ? { orderId: 1, baseVersion: 2, currentVersion: 2, ...pending } : null,
     createH5OrderChangeRequest: async (...args) => { calls.push(["review", ...args]); return { id: 8, status: "PENDING", requestType: args[3], items: args[4] }; },
     saveH5Order: async (...args) => {
       calls.push(["direct", ...args]);
@@ -26,15 +31,15 @@ async function harness(status = "SUBMITTED", pending = null, activity = { code: 
       return { ...order, status: "SUBMITTED", currentVersion: 3, lockVersion: 5, items: args[1].map(i => item(i.productId, i.quantity)) };
     },
   };
-  const draft = { setDraftReady() {}, draftMessage: "", setDraftMessage() {}, draftOwnerIdRef: { current: null },
-    lastSavedDraftSignatureRef: { current: "" }, latestDraftSnapshotRef: { current: null }, draftSaveTimerRef: { current: null },
-    draftSaveChainRef: { current: Promise.resolve() }, queueDraftSync: async () => {} };
+  const draft = { draftMessage: "", setDraftMessage() {}, restoreDraft: () => null,
+    flushDraft: () => true, discardDraft: () => true, resetDraft: () => true, hasDraftChanges: () => false };
   const { useH5OrderFlow } = loadModule("app/features/h5/useH5OrderFlow.ts", {
     "../../api": api,
     "./useH5Draft": { useH5Draft: () => draft },
     "./h5-submission": { createH5SubmissionManager: options => createH5SubmissionManager({ ...options, uuid: randomUUID, sleep: async () => {} }) },
     react: {
-      useEffect() {}, useMemo: fn => fn(),
+      useEffect() {}, useMemo: fn => fn(), useCallback: fn => fn,
+      useSyncExternalStore: (_subscribe, getSnapshot) => getSnapshot(),
       useRef(initial) { const i = cursor++; return slots[i] ??= { current: initial }; },
       useState(initial) { const i = cursor++; if (!(i in slots)) slots[i] = typeof initial === "function" ? initial() : initial;
         return [slots[i], value => { slots[i] = typeof value === "function" ? value(slots[i]) : value; }]; },
@@ -43,6 +48,7 @@ async function harness(status = "SUBMITTED", pending = null, activity = { code: 
     getItem: k => storage.get(k) ?? null, setItem: (k, v) => storage.set(k, v), removeItem: k => storage.delete(k),
   } } });
   const render = function useTestRender() { cursor = 0; return useH5OrderFlow({ activityStatus: "running", runtimeActivity: activity }); };
+  render().setPhone("13800000001");
   await render().verifyIdentity();
   calls.length = 0;
   return { render, calls, draft, api, fail: value => { fail = value; } };
@@ -69,7 +75,7 @@ test("unchanged quantities issue no request and retain the existing application"
 test("withdrawn and voided orders can be edited and directly restored with fewer boxes", async () => {
   for (const status of ["WITHDRAWN", "VOIDED"]) {
     const h = await harness(status); assert.equal(h.render().customerOrderReadOnly, false);
-    h.render().startEditingOrder(); assert.equal(h.render().step, "order");
+    await h.render().startEditingOrder(); assert.equal(h.render().step, "order");
     h.render().setQuantities({ 1: 5 }); await h.render().submitOrder();
     assert.equal(h.calls[0][0], "direct"); assert.equal(h.render().submitMode, "restore");
   }
@@ -104,7 +110,7 @@ test("recovery displays the administrator's latest quantities instead of the pen
 
 test("editing during a pending withdrawal starts from the effective items", async () => {
   const h = await harness("SUBMITTED", { id: 7, status: "PENDING", requestType: "WITHDRAW", items: [] });
-  h.render().startEditingOrder();
+  await h.render().startEditingOrder();
   assert.equal(h.render().quantities[1], 10);
   h.render().setQuantities({ 1: 12 }); await h.render().submitOrder();
   assert.equal(h.calls[0][0], "direct");
@@ -112,56 +118,33 @@ test("editing during a pending withdrawal starts from the effective items", asyn
 
 const mixedActivity = { code: "A", availableCustomerTypes: ["GENERAL", "SPECIAL"], regions: [{ code: "NORTH", name: "北区" }] };
 
-test("returning home clears the old identity and both channel switches verify the selected scope", async () => {
+test("returning home remembers the phone, clears the old identity and requires a new type confirmation", async () => {
   const h = await harness("SUBMITTED", null, mixedActivity);
-  for (const [channel, type, region] of [["综合客户", "GENERAL", "NORTH"], ["特渠专业客户", "SPECIAL", ""], ["综合客户", "GENERAL", "NORTH"]]) {
+  const login = h.api.verifyPhone;
+  h.api.verifyPhone = async (phone, type) => type ? login(phone, type) : { selectionRequired: true, customerTypes: ["GENERAL", "SPECIAL"] };
+  for (const type of ["GENERAL", "SPECIAL", "GENERAL"]) {
     await h.render().resetEntry();
-    assert.equal(h.render().phone, "");
+    assert.equal(h.render().phone, "13800000001");
     assert.equal(h.render().runtimeOrder, null);
     assert.equal(h.render().orderStatus, "none");
     assert.equal(Object.keys(h.render().quantities).length, 0);
-    await h.render().resetEntry(channel);
-    h.render().setRegion(region);
-    h.render().setStep("verify");
-    assert.equal(h.render().channel, channel);
-    assert.match(h.render().identityLabel, new RegExp(channel));
-    h.render().setPhone("13800000001");
+    assert.equal(h.render().visibleStep, "verify");
+    assert.equal(h.render().identityLabel, "手机号验证");
     await h.render().verifyIdentity();
-    assert.deepEqual(h.calls.at(-1), ["verify", type, region, "13800000001"]);
+    await h.render().verifyIdentity(type);
+    assert.deepEqual(h.calls.at(-1), ["verify", "13800000001", type]);
     assert.equal(h.render().step, "submitted");
   }
 });
 
-test("switching waits for draft completion and blocks overlapping verification", async () => {
-  const h = await harness("SUBMITTED", null, mixedActivity);
-  let release;
-  h.draft.draftSaveChainRef.current = new Promise(resolve => { release = resolve; });
-  const switching = h.render().resetEntry("特渠专业客户");
-  await h.render().verifyIdentity();
-  assert.equal(h.calls.length, 0);
-  assert.notEqual(h.render().runtimeOrder, null);
-  release(); await switching;
-  assert.equal(h.render().runtimeOrder, null);
-  assert.equal(h.render().channel, "特渠专业客户");
-  assert.equal(h.draft.latestDraftSnapshotRef.current, null);
-  assert.equal(h.draft.draftOwnerIdRef.current, null);
-});
-
-test("a failed draft flush keeps the original customer and order", async () => {
-  const h = await harness();
-  h.draft.latestDraftSnapshotRef.current = { customerId: 2, signature: "unsaved" };
-  await h.render().resetEntry("特渠专业客户");
-  assert.notEqual(h.render().runtimeOrder, null);
-  assert.match(h.render().runtimeMessage, /草稿尚未保存/);
-});
-
 test("single-type and unspecified activities retain their direct entry policy after reset", async () => {
-  for (const [activity, type] of [[{ code: "A", availableCustomerTypes: ["GENERAL"], regions: [] }, "GENERAL"], [{ code: "A", availableCustomerTypes: ["SPECIAL"], regions: [] }, "SPECIAL"], [{ code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] }, "ALL"]]) {
+  for (const activity of [{ code: "A", availableCustomerTypes: ["GENERAL"], regions: [] }, { code: "A", availableCustomerTypes: ["SPECIAL"], regions: [] }, { code: "A", whitelistCustomerTypeMode: "UNSPECIFIED", regions: [] }]) {
     const h = await harness("SUBMITTED", null, activity);
     await h.render().resetEntry();
     assert.equal(h.render().visibleStep, "verify");
+    h.render().setPhone("13800000001");
     await h.render().verifyIdentity();
-    assert.equal(h.calls.at(-1)[1], type);
+    assert.deepEqual(h.calls.at(-1), ["verify", "13800000001", undefined]);
   }
 });
 
@@ -173,7 +156,7 @@ test("failed verification after a switch cannot expose the previous order", asyn
   await h.render().verifyIdentity();
   assert.equal(h.render().step, "verify");
   assert.equal(h.render().runtimeOrder, null);
-  assert.equal(h.render().identityLabel, "综合客户 · SOUTH");
+  assert.equal(h.render().identityLabel, "手机号验证");
   assert.notEqual(h.render().verifyError, "");
 });
 
@@ -182,7 +165,8 @@ test("verification is serialized with channel switching even before rerender", a
   await h.render().resetEntry("特渠专业客户");
   let release;
   let requests = 0;
-  h.api.verifyPhone = async () => { requests++; await new Promise(resolve => { release = resolve; }); return { activityId: 1, customerId: 3, customerType: "SPECIAL" }; };
+  h.api.verifyPhone = async () => { requests++; await new Promise(resolve => { release = resolve; }); return { selectionRequired: false, customer: { activityId: 1, customerId: 3, customerType: "SPECIAL" }, csrfToken: "test" }; };
+  h.render().setPhone("13800000001");
   const model = h.render();
   const verifying = model.verifyIdentity();
   await model.verifyIdentity();

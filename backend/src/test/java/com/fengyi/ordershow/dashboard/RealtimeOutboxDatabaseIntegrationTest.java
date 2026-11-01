@@ -36,7 +36,7 @@ class RealtimeOutboxDatabaseIntegrationTest {
         CREATE TABLE IF NOT EXISTS domain_event_outbox (
           id BIGINT PRIMARY KEY, activity_id BIGINT, event_type VARCHAR(64), aggregate_type VARCHAR(64),
           aggregate_id VARCHAR(64), created_at DATETIME(3), available_at DATETIME(3),
-          status VARCHAR(16) DEFAULT 'PENDING', published_at DATETIME(3),
+          payload_json JSON, status VARCHAR(16) DEFAULT 'PENDING', published_at DATETIME(3),
           KEY idx_pending(status,available_at,id))
         """);
   }

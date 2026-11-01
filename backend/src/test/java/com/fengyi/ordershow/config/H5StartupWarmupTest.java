@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 import static org.mockito.ArgumentMatchers.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fengyi.ordershow.catalog.ProductCatalogReader;
+import com.fengyi.ordershow.catalog.H5CatalogService;
 import com.fengyi.ordershow.order.OrderService;
 import com.fengyi.ordershow.security.H5Principal;
 import java.util.List;
@@ -16,7 +16,7 @@ import org.springframework.transaction.TransactionStatus;
 
 class H5StartupWarmupTest {
   final JdbcTemplate jdbc=mock(JdbcTemplate.class);
-  final ProductCatalogReader catalog=mock(ProductCatalogReader.class);
+  final H5CatalogService catalog=mock(H5CatalogService.class);
   final OrderService orders=mock(OrderService.class);
   final PlatformTransactionManager manager=mock(PlatformTransactionManager.class);
   final H5Principal customer=new H5Principal(0,3,4,"A","SPECIAL",null,null,null,null,null);
@@ -27,7 +27,7 @@ class H5StartupWarmupTest {
   @Test void readsAndSerializesBoundedSamplesWithoutWritesOrHistory() {
     when(jdbc.query(anyString(),org.mockito.ArgumentMatchers.<RowMapper<H5Principal>>any())).thenReturn(List.of(customer));
     warmup(true).run(null);
-    verify(catalog,times(32)).h5Products("A",customer,null,null);verify(orders,times(32)).current("A",customer,false);
+    verify(catalog,times(32)).products("A",customer,null,null);verify(orders,times(32)).current("A",customer,false);
     verify(jdbc).query(contains("LIMIT 4"),any(RowMapper.class));verifyNoMoreInteractions(jdbc,catalog,orders);
     verify(manager,times(33)).commit(any());verify(manager,never()).rollback(any());
   }
@@ -37,8 +37,8 @@ class H5StartupWarmupTest {
   }
   @Test void queryFailureDoesNotSilentlyMarkStartupSuccessful() {
     when(jdbc.query(anyString(),org.mockito.ArgumentMatchers.<RowMapper<H5Principal>>any())).thenReturn(List.of(customer));
-    when(catalog.h5Products("A",customer,null,null)).thenThrow(new IllegalStateException("database failure"));
+    when(catalog.products("A",customer,null,null)).thenThrow(new IllegalStateException("database failure"));
     assertThatThrownBy(()->warmup(true).run(null)).isInstanceOf(IllegalStateException.class);
-    verify(manager).rollback(any());verifyNoInteractions(orders);
+    verify(manager).commit(any());verify(manager,never()).rollback(any());verifyNoInteractions(orders);
   }
 }

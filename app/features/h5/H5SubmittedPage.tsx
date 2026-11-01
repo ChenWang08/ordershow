@@ -7,7 +7,7 @@ import { useState } from "react";
 import type { H5OrderModel } from "./useH5OrderFlow";
 import { ProductArt } from "./ProductArt";
 import { money } from "../shared/utils";
-import { groupByProductLine } from "./h5-domain";
+import { groupByProductLine, unitPriceText } from "./h5-domain";
 
 export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
   const [formalRequestId, setFormalRequestId] = useState<number | null>(null);
@@ -16,6 +16,7 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
   const rejected = request?.status === "REJECTED";
   const showingRequest = pending && request.requestType === "MODIFY" && formalRequestId !== request.id;
   const items = showingRequest ? request.items : order?.items ?? [];
+  const pricingByProduct = new Map(order?.items.map(item => [item.productId, item.pricingDetails] as const));
   const groups = groupByProductLine(items, item => item.productLine?.trim() || "未分类");
   const amount = showingRequest ? request.requestedTotalAmount : order?.totalAmount;
   const boxes = showingRequest ? request.requestedTotalQuantity : order?.totalQuantity;
@@ -27,12 +28,13 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
     : orderStatus === "voided" ? "订单已由管理员作废，当前不计入有效订货；订货截止前可重新提交，直接恢复并沿用原订单号。" : "以下为当前生效订单。";
   if (model.visibleStep !== "submitted") return null;
   return <section className="h5-page submitted-page">
-    <header className="simple-header"><button onClick={() => model.setStep("verify")}>‹</button><b>我的订单</b><span /></header>
+    <header className="simple-header"><button disabled={model.runtimeBusy} onClick={() => model.setStep("verify")}>‹</button><b>我的订单</b><span /></header>
     {model.runtimeMessage && <div className="verify-error" role="alert">{model.runtimeMessage}</div>}
     <div className={`submitted-state-card ${rejected || orderStatus === "withdrawn" || orderStatus === "voided" ? "withdrawn" : ""}`}>
       <span className="submitted-status">{pending ? "待审核" : rejected ? "已驳回" : orderStatus === "withdrawn" ? "已撤回" : orderStatus === "voided" ? "已作废" : "已提交"}</span>
       <h2>{state}</h2><p>{note}</p>
     </div>
+    {model.draftMessage && <div className="h5-draft-status" role="status">{model.draftMessage}</div>}
     {pending && request.requestType === "MODIFY" && <button className="ghost-btn" style={{marginBottom:16,width:"100%"}} onClick={() => setFormalRequestId(showingRequest ? request.id : null)}>
       {showingRequest ? `查看${orderStatus === "withdrawn" ? "已撤回" : "当前生效"}订单 V${order?.currentVersion}` : "查看待审核申请"}
     </button>}
@@ -48,10 +50,12 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
       <header className="order-line-group-heading"><b>{group.line}</b><span>{group.items.length} 种 · {group.items.reduce((sum,i)=>sum+i.quantity,0)} 箱</span></header>
       {group.items.map(item => {
         const product = model.catalog.find(p=>p.id===String(item.productId));
+        const pricing = showingRequest ? undefined : pricingByProduct.get(item.productId);
         return <div key={item.productId}>
           <ProductArt atlas={product?.atlas ?? 0} imageUrl={product?.imageUrl} alt={item.materialName}/>
           <p>{product ? <button type="button" className="order-product-name-button" onClick={()=>model.setPreviewProduct(product)}>{item.materialName}</button> : <span>{item.materialName}</span>}<small className="product-line-label">项目组：{group.line}</small>
-            <span>{item.casePrice == null ? "—" : `¥${money(Number(item.casePrice))}/箱`} · 小计 {item.lineAmount == null ? "—" : `¥${money(Number(item.lineAmount))}`}</span>
+            {pricing?.segments.map((part, index) => <span key={index}>{part.quantity} 箱 × ¥{unitPriceText(part.casePrice)} ＝ ¥{money(part.amount)}</span>)}
+            <span>{pricing?.segments.length ? "" : item.casePrice == null ? "— · " : `¥${unitPriceText(Number(item.casePrice))}/箱 · `}小计 {item.lineAmount == null ? "—" : `¥${money(Number(item.lineAmount))}`}</span>
           </p><strong>× {item.quantity}</strong>
         </div>;
       })}
@@ -64,7 +68,7 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
     {activityClosed && <div className="submitted-note">订货已截止，不能新增或修改申请；截止前已提交的申请仍可由后台审核。</div>}
     {model.orderEvents.length > 0 && <section className="submitted-events"><h3>操作记录</h3>{model.orderEvents.map((event,index)=><p key={index}><b>{event.time} {event.title}</b><span>{event.detail}</span></p>)}</section>}
     <div className="submitted-actions">
-      {!customerOrderReadOnly && <button className="primary-btn" onClick={model.startEditingOrder}>{orderStatus === "withdrawn" || orderStatus === "voided" ? "重新订货" : pending ? "继续修改订单" : "修改订单"}</button>}
+      {!customerOrderReadOnly && <button className="primary-btn" disabled={model.runtimeBusy || model.pendingSubmission || model.orderNeedsRefresh} onClick={() => void model.startEditingOrder()}>{model.runtimeBusy ? "正在核对最新订单…" : orderStatus === "withdrawn" || orderStatus === "voided" ? "重新订货" : pending ? "继续修改订单" : "修改订单"}</button>}
       <button className="ghost-btn" disabled={model.runtimeBusy} onClick={()=>void model.resetEntry()}>返回活动首页</button>
     </div>
   </section>;

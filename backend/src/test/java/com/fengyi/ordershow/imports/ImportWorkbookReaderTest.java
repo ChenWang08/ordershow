@@ -101,6 +101,18 @@ class ImportWorkbookReaderTest {
     return workbook("商品目录", HEADERS, new String[]{"综合", "是", "调味品", "酱油", "P001", name, "品牌", "原味", "500ml", "12瓶", "8", "100", "10", "否", "", "说明"});
   }
 
+  @Test void allCustomerTypesCanKeepAnActualRegionOrLeaveItBlank() throws Exception {
+    for (String type : List.of("综合客户","特渠专业客户","")) {
+      for (String region : List.of("华东","")) {
+        var parsed = ImportWorkbookReader.read(7,"WHITELIST",workbook("白名单",
+            new String[]{"客户类型","大区","分公司名称","经销商名称（简）","经销商名称（全）","经销商姓名","经销商电话"},
+            new String[]{type,region,"甲分","测试","测试经销商","测试人","13800000001"}));
+        assertThat(parsed.summary().blocking()).isZero();
+        assertThat(((ParsedWorkbook.Staging)parsed.entries().getFirst()).data()).containsEntry("regionName",region);
+      }
+    }
+  }
+
   private byte[] workbook(String name, String[] headers, String[] values) throws Exception {
     try (var workbook = new XSSFWorkbook(); var output = new ByteArrayOutputStream()) {
       var sheet = workbook.createSheet(name);

@@ -42,7 +42,7 @@ public class WhitelistImportWriter {
             source_import_task_id, data_version_id)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?)
           """, activityId, customerId, customerType,
-          "GENERAL".equals(customerType) ? regions.resolveCode(activityId, text(data.get("regionName"))) : null,
+          regions.resolveCode(activityId, text(data.get("regionName"))),
           nullableText(data.get("branchName")), normalizedBranch, nullableText(data.get("dealerShortName")), fullName, normalizedName, nullableText(data.get("dealerCategory")),
           nullableText(data.get("contactName")), phone, crypto.lookupHash(phone), CryptoService.maskPhone(phone),
           nullableText(data.get("confirmerName")), confirmerPhone.isBlank() ? null : confirmerPhone,

@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, loadAdminOrders, loadAdminOrder, exportAdminOrders } from "../../api";
 import { toOrderRecord, type OrderRecord, type OrderStatus, type CustomerType } from "./order-domain";
 
-export function useOrderList(activityId: number, activityName: string) {
+export function useOrderList(activityId: number, activityName: string, enabled = true, revision = 0) {
+  const detailController = useRef<AbortController | null>(null);
+  useEffect(() => () => { detailController.current?.abort(); }, [activityId, enabled]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
   const [orderCounts, setOrderCounts] = useState({ all: 0, submitted: 0, withdrawn: 0, voided: 0 });
   const [loading, setLoading] = useState(false);
@@ -23,18 +25,20 @@ export function useOrderList(activityId: number, activityName: string) {
     ? linkedOrder : listedOrder ?? null;
 
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
+    const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       setLoading(true);
       try {
         const status = orderFilter === "已提交" ? "SUBMITTED" : orderFilter === "已撤回" ? "WITHDRAWN" : orderFilter === "已作废" ? "VOIDED" : undefined;
         const runtimeCustomerType = customerType === "综合" ? "GENERAL" : customerType === "特渠" ? "SPECIAL" : customerType === "不区分客户类型" ? "ALL" : undefined;
         const [current, all, submitted, withdrawn, voided] = await Promise.all([
-          loadAdminOrders(activityId, { status, customerType: runtimeCustomerType, keyword: search, page, size: 50 }),
-          loadAdminOrders(activityId, { page: 1, size: 1 }),
-          loadAdminOrders(activityId, { status: "SUBMITTED", page: 1, size: 1 }),
-          loadAdminOrders(activityId, { status: "WITHDRAWN", page: 1, size: 1 }),
-          loadAdminOrders(activityId, { status: "VOIDED", page: 1, size: 1 }),
+          loadAdminOrders(activityId, { status, customerType: runtimeCustomerType, keyword: search, page, size: 50 }, controller.signal),
+          loadAdminOrders(activityId, { page: 1, size: 1 }, controller.signal),
+          loadAdminOrders(activityId, { status: "SUBMITTED", page: 1, size: 1 }, controller.signal),
+          loadAdminOrders(activityId, { status: "WITHDRAWN", page: 1, size: 1 }, controller.signal),
+          loadAdminOrders(activityId, { status: "VOIDED", page: 1, size: 1 }, controller.signal),
         ]);
         if (!active) return;
         setOrders(current.data.map(toOrderRecord));
@@ -49,9 +53,10 @@ export function useOrderList(activityId: number, activityName: string) {
     }, 250);
     return () => {
       active = false;
+      controller.abort();
       window.clearTimeout(timer);
     };
-  }, [activityId, customerType, orderFilter, page, reloadKey, search]);
+  }, [activityId, customerType, orderFilter, page, reloadKey, search, enabled, revision]);
 
   const filteredOrders = useMemo(() => orders.filter((order) => {
     const keyword = search.trim();
@@ -63,25 +68,31 @@ export function useOrderList(activityId: number, activityName: string) {
   }), [customerType, orderFilter, orders, search]);
 
   const openOrder = async (order: OrderRecord) => {
+    detailController.current?.abort();
+    const controller = new AbortController(); detailController.current = controller;
     setLinkedOrder(null);
     setSelectedNo(order.no);
     setExpandedVersion(null);
     if (!order.id) return;
     try {
-      const detail = toOrderRecord(await loadAdminOrder(activityId, order.id));
+      const detail = toOrderRecord(await loadAdminOrder(activityId, order.id, controller.signal));
+      if (controller.signal.aborted) return;
       setOrders((current) => current.map((item) => item.no === order.no ? detail : item));
     } catch (reason) {
-      setLoadError(reason instanceof ApiError ? reason.message : "订单详情加载失败");
+      if (!controller.signal.aborted) setLoadError(reason instanceof ApiError ? reason.message : "订单详情加载失败");
     }
   };
 
   const openOrderById = async (id: number) => {
+    detailController.current?.abort();
+    const controller = new AbortController(); detailController.current = controller;
     try {
-      const detail = toOrderRecord(await loadAdminOrder(activityId,id));
+      const detail = toOrderRecord(await loadAdminOrder(activityId,id,controller.signal));
+      if (controller.signal.aborted) return false;
       setLinkedOrder(detail); setSelectedNo(detail.no); setExpandedVersion(null);
       return true;
     } catch (reason) {
-      setLoadError(reason instanceof ApiError ? reason.message : "订单详情加载失败");
+      if (!controller.signal.aborted) setLoadError(reason instanceof ApiError ? reason.message : "订单详情加载失败");
       return false;
     }
   };

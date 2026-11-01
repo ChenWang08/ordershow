@@ -225,11 +225,34 @@ paths:
             application/json:
               schema: { type: object }
         '403': { $ref: '#/components/responses/Problem' }
+  /admin/activities/{activityId}/overview:
+    get:
+      operationId: getAdminActivityOverview
+      tags: [AdminAuth]
+      summary: 活动概览专用统计与提交进度
+      description: 需要本活动部门访问权限及 OVERVIEW 模块权限。概览只调用此接口；活动统计与当前有效发布白名单人数在同一事务视图读取。历史活动沿用既有冻结统计口径。
+      security:
+        - adminCookie: []
+      parameters:
+        - name: activityId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: 概览统计，不包含排行、项目组、趋势或到场名单
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityOverviewResponse'
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
   /admin/activities/{activityId}/ranking:
     get:
       operationId: getAdminActivityRanking
       tags: [AdminAuth]
-      summary: 按部门权限读取活动概览统计（含本部门历史活动）
+      summary: 旧版后台排行兼容接口（概览已改用 overview）
       security:
         - adminCookie: []
       parameters:
@@ -274,27 +297,37 @@ paths:
           $ref: '#/components/responses/Problem'
         '409':
           $ref: '#/components/responses/Problem'
-  /public/activities/{activityCode}:
+  /public/activities/{activityCode}/events:
     get:
-      operationId: getPublicActivity
+      operationId: subscribePublicActivityInfo
       tags: [Public]
-      summary: 查询活动公开信息
+      summary: 独立的活动公开资料 SSE 同步
+      security: []
+      description: |
+        手机验证前后及公开展示页面共用。建立连接后发送当前 activity 快照；活动资料变化后直接发送最新快照，
+        不通知客户端重查接口。只包含现有公开活动资料，不包含订单、审核、商品目录、客户身份或统计数据。
+        原 GET /public/activities/{activityCode} 已删除，访问返回 404；初始加载和重连均使用本 SSE 快照。
+        默认每 30 秒发送 heartbeat，心跳不查数据库。断线后退避重连，每次新连接重新同步当前资料，
+        不提供 Last-Event-ID 历史续传。CLOSED/FINISHED 仍可订阅以感知重新开放；活动不存在时发送 unavailable 后结束。
+        服务端返回 Cache-Control: no-cache, no-transform 与 X-Accel-Buffering: no；代理须关闭缓冲并允许长连接。
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
       responses:
         '200':
-          description: 活动公开信息
+          description: |
+            text/event-stream。activity 的 data 为 ActivityInfoSnapshot；heartbeat 的 data 包含 serverTime、heartbeatIntervalMs；
+            unavailable 的 data 包含 code、message，随后结束连接。version 是独立公开资料版本的十进制字符串，
+            与后台保存版本和订单事件编号无关。允许重复快照；同版本只允许较新 serverTime 推进时间派生状态。
           content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PublicActivityResponse'
-        '404':
-          $ref: '#/components/responses/Problem'
+            text/event-stream:
+              schema: { type: string }
+              example: "event: heartbeat\ndata: {\"serverTime\":\"2026-10-31T01:00:00Z\",\"heartbeatIntervalMs\":30000}\n\n"
+        '503': { $ref: '#/components/responses/Problem' }
   /public/activities/{activityCode}/verify-phone:
     post:
       operationId: verifyActivityPhone
       tags: [Public]
-      summary: 按活动客户类型模式和手机号验证 H5 身份
+      summary: 手机号识别 H5 身份，多类型同号时选择后登录
       parameters:
         - $ref: '#/components/parameters/ActivityCode'
       requestBody:
@@ -305,7 +338,7 @@ paths:
               $ref: '#/components/schemas/PhoneVerificationRequest'
       responses:
         '200':
-          description: 验证成功
+          description: 唯一身份登录成功，或返回待选择的综合/特渠类型（待选择时不创建会话、不设置登录 Cookie）
           headers:
             Set-Cookie:
               description: 服务端设置的 Secure、HttpOnly、SameSite H5 会话 Cookie
@@ -321,11 +354,38 @@ paths:
           $ref: '#/components/responses/Problem'
         '429':
           $ref: '#/components/responses/Problem'
+  /public/activities/{activityCode}/lottery:
+    get:
+      operationId: getPublicLottery
+      tags: [Public, Lottery]
+      summary: 读取公开抽奖规则与中奖结果
+      description: 抽奖页面按需读取；独立于活动资料 SSE，H5 订货初始化不调用本接口。删除旧活动 GET 不影响此路径。
+      security: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      responses:
+        '200':
+          description: 已发布规则及公开中奖结果；不计算候选名单
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, traceId]
+                properties:
+                  data:
+                    type: object
+                    required: [rules, winners]
+                    properties:
+                      rules: { type: array, items: { type: object } }
+                      winners: { type: array, items: { type: object } }
+                  traceId: { type: string }
+        '404': { $ref: '#/components/responses/Problem' }
   /h5/activities/{activityCode}/products:
     get:
       operationId: listH5OrderableProducts
       tags: [H5]
       summary: 查询当前客户可订商品
+      description: 每次核对当前客户与目录版本，共用活动商品缓存后按客户权限过滤；响应为 H5 精简结构。商品加载时机不变，不新增商品推送或轮询。
       security:
         - h5Cookie: []
       parameters:
@@ -341,7 +401,7 @@ paths:
             maxLength: 100
       responses:
         '200':
-          description: 商品列表
+          description: 当前客户可见的商品列表（Cache-Control 为 private, no-store）
           content:
             application/json:
               schema:
@@ -351,11 +411,17 @@ paths:
                   data:
                     type: array
                     items:
-                      $ref: '#/components/schemas/OrderableProduct'
+                      $ref: '#/components/schemas/H5Product'
                   traceId:
                     type: string
         '401':
           $ref: '#/components/responses/Problem'
+        '503':
+          description: 商品加载并发、等待人数超限或等待超时（CATALOG_BUSY），保留当前页面数据后重试
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
   /h5/activities/{activityCode}/order:
     get:
       operationId: getH5CurrentOrder
@@ -821,26 +887,32 @@ paths:
       operationId: listActivities
       tags: [Activities]
       summary: 活动列表
+      description: 传 summary=true 时只返回活动切换所需的摘要字段，不逐场查询客户、大区或模块数据。未传时保留完整列表响应。均按账号所属部门限制范围。
       security:
         - adminCookie: []
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
-        - name: status
+        - name: summary
           in: query
           schema:
-            $ref: '#/components/schemas/ActivityStatus'
-        - name: keyword
-          in: query
-          schema:
-            type: string
+            type: boolean
+            enum: [true]
       responses:
         '200':
-          description: 分页活动
+          description: 当前账号可访问的未归档活动；data 为数组
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActivityPageResponse'
+                type: object
+                required: [data, traceId]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      anyOf:
+                        - $ref: '#/components/schemas/Activity'
+                        - $ref: '#/components/schemas/ActivitySummary'
+                  traceId:
+                    type: string
     post:
       operationId: createActivity
       tags: [Activities]
@@ -1059,15 +1131,26 @@ paths:
         - adminCookie: []
       parameters:
         - $ref: '#/components/parameters/ActivityId'
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
+        - name: importType
+          in: query
+          description: 打开哪个模块就只查询该类型的导入任务；未传时保留全部任务查询，仍受功能权限限制。
+          schema:
+            $ref: '#/components/schemas/ImportType'
       responses:
         '200':
           description: 导入任务列表
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ImportTaskPageResponse'
+                type: object
+                required: [data, traceId]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ImportTask'
+                  traceId:
+                    type: string
     post:
       operationId: createImportTask
       tags: [Imports]
@@ -1381,6 +1464,25 @@ paths:
                 branchScope:
                   type: string
                   description: 分公司限制，多个分公司用顿号或逗号分隔；留空表示全部分公司可订
+                casePrice:
+                  $ref: '#/components/schemas/Decimal'
+                priceTiers:
+                  type: array
+                  maxItems: 101
+                  description: 导入成功后手动设置的完整阶梯。第一档minQuantity=1、价格独立于普通casePrice，后续最多100档、起点递增且价格递减。旧数组不含第一档时以普通箱价补足。空数组表示不启用阶梯，Excel格式不增加字段。
+                  items:
+                    $ref: '#/components/schemas/ProductPriceStep'
+                priceTierPricingMode:
+                  type: string
+                  enum: [WHOLE_ORDER, INCREMENTAL]
+                  default: WHOLE_ORDER
+                priceTierMinQuantity:
+                  type: [integer, 'null']
+                  description: 兼容旧单档请求；有 priceTiers 时以数组为准。
+                priceTierCasePrice:
+                  oneOf:
+                    - $ref: '#/components/schemas/Decimal'
+                    - type: 'null'
                 reason:
                   type: string
                   maxLength: 500
@@ -1398,6 +1500,7 @@ paths:
       operationId: updateActivityProduct
       tags: [Catalog]
       summary: 紧急修改单条商品
+      description: 请求字段直接放在顶层。价格变化时同步更新本活动该商品的有效订单及统计，完成后才返回成功；任一步失败整体回滚。同活动下单可能等待该保存事务结束。H5 不轮询商品价格，提交时使用服务器最新规则。
       security:
         - adminCookie: []
       parameters:
@@ -1415,21 +1518,48 @@ paths:
           application/json:
             schema:
               type: object
-              required: [reason, changes]
               properties:
                 reason:
                   type: string
                   maxLength: 500
-                changes:
-                  type: object
-                  properties:
-                    description:
-                      type: [string, 'null']
-                      description: 商品说明，H5 商品详情展示；可为空
-                    branchScope:
-                      type: string
-                      description: 分公司限制，多个分公司用顿号或逗号分隔；留空表示全部分公司可订
-                  additionalProperties: true
+                  description: 活动开始后商品编辑器必填；下单范围等修改由服务端校验。
+                description:
+                  type: [string, 'null']
+                  description: 商品说明，H5 商品详情展示；传空字符串清除，省略保持原值。
+                branchScope:
+                  type: string
+                  description: 分公司限制，多个分公司用顿号或逗号分隔；留空表示全部分公司可订
+                casePrice:
+                  oneOf:
+                    - $ref: '#/components/schemas/Decimal'
+                    - type: 'null'
+                casePriceSet:
+                  type: boolean
+                  description: true时更新普通箱价；false或省略时保留。已开启独立阶梯时不修改第一档，也不触发订单重算。
+                priceTiers:
+                  type: array
+                  maxItems: 101
+                  description: 完整替换包含独立第一档的阶梯，省略时保留现有规则，空数组清除并恢复普通箱价。第一档minQuantity=1，后续起点递增且价格递减，所有档位共用一种模式。兼容不含第一档的旧数组。
+                  items:
+                    $ref: '#/components/schemas/ProductPriceStep'
+                priceTierPricingMode:
+                  type: string
+                  enum: [WHOLE_ORDER, INCREMENTAL]
+                  default: WHOLE_ORDER
+                  description: 替换档位时使用；更改模式需同时提交完整 priceTiers。
+                priceTierSet:
+                  type: boolean
+                  description: 兼容旧单档更新标识；true 且未传数组时使用旧门槛/价格，两项均空时清除。传入 priceTiers 时无需该标识。
+                priceTierMinQuantity:
+                  type: [integer, 'null']
+                  minimum: 2
+                  maximum: 999999
+                  description: 旧单档起始箱数；有 priceTiers 时以数组为准。
+                priceTierCasePrice:
+                  oneOf:
+                    - $ref: '#/components/schemas/Decimal'
+                    - type: 'null'
+              additionalProperties: true
       responses:
         '200':
           description: 修改后的商品
@@ -2324,8 +2454,8 @@ paths:
     post:
       operationId: previewLotteryCandidates
       tags: [Lottery]
-      summary: 按正式抽奖口径实时试算候选客户
-      description: 候选统一按白名单客户 ID 去重；结果仅为当前时刻预览，正式开奖时会再次校验并固定快照。
+      summary: 手动试算当前选中轮次候选客户
+      description: 进入、编辑、切换和读取规则不试算。候选按白名单客户 ID 去重，返回完整名单供弹窗复用；正式开奖重新校验。资格字段与 LotteryRoundWriteRequest 相同，另需 roundNo。响应 weightMetric/totalCandidateWeight 为权重单位和总权重，totalCandidateOrderAmount 始终为金额总计；候选 probabilityPercent 为首位抽中概率（权重占比），不是多奖项整轮中奖率。
       security:
         - adminCookie: []
       parameters:
@@ -2333,7 +2463,24 @@ paths:
         - $ref: '#/components/parameters/CsrfToken'
       responses:
         '200':
-          description: 实时候选人数、实际可中奖人数、空缺名额和完整候选名单
+          description: 当前候选人数、实际可中奖人数、空缺名额、完整候选名单及 missingTonnageCustomers；名单含 qualifyingOrderTons、missingTonnageItems
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/lottery/product-options:
+    get:
+      operationId: getLotteryProductOptions
+      tags: [Lottery]
+      summary: 读取抽奖项目组及联动品种选项
+      description: 当前发布有效商品和有效订单快照的去重组合。默认全部；前端保留选项，支持手动更新。超额并发返回503 LOTTERY_BUSY。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: data 数组，每项包含可为空的 productLine 和 varietyName
           content:
             application/json:
               schema:
@@ -2544,6 +2691,7 @@ paths:
       operationId: getRankingDashboard
       tags: [Dashboard]
       summary: 排行榜快照
+      description: 独立四维组合排行；客户类型、大区、项目组单选，品种多选，各维度默认不限制。页面进入仅加载选项，确认后查询，手动刷新沿用最后成功条件及金额/吨数口径。商品条件匹配同一明细行，进行中活动按需汇总当前有效明细；无商品条件时保留原整单吨数汇总优化。总计覆盖全部命中订单，不受 TopN 限制。FINISHED 随订单维护更新，ARCHIVED 冻结。不计算 sku_count，productLines/latestOrders 兼容字段为空数组；订单看板 TOP15 仍由 /dashboard 查询。
       security:
         - screenToken: []
       parameters:
@@ -2558,9 +2706,34 @@ paths:
         - name: regionCode
           in: query
           required: false
-          description: 活动配置的动态片区编码；不分片区活动无需传入。
+          description: 实际大区编码，各客户类型均适用；省略表示全部，空大区使用 regionUnassigned。
           schema:
             type: string
+        - name: regionUnassigned
+          in: query
+          description: 仅匹配未填写大区；不能与 regionCode 同传。
+          schema: {type: boolean, default: false}
+        - name: productLine
+          in: query
+          description: 实际项目组名；省略表示全部，不使用特殊名称代表空值。
+          schema: {type: string, maxLength: 200}
+        - name: productLineUnassigned
+          in: query
+          description: 仅匹配未填写项目组；不能与 productLine 同传。
+          schema: {type: boolean, default: false}
+        - name: varieties
+          in: query
+          description: 品种多选，重复参数传值；名称中的逗号保留原样，不按逗号拆分。省略且未选择空值时表示全部品种。
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 500
+            items: {type: string, maxLength: 100}
+        - name: includeUnspecifiedVariety
+          in: query
+          description: 同时包含未填写品种；可单独使用或与 varieties 组合。
+          schema: {type: boolean, default: false}
         - name: metric
           in: query
           required: false
@@ -2576,11 +2749,109 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardResponse'
+        '400':
+          description: 筛选值不合法、互斥空值标志或品种数量超限。
+        '409':
+          description: RANKING_HISTORY_MISMATCH，保留订单与旧冻结结果不一致，需核查历史资料。
+    post:
+      operationId: queryRankingDashboard
+      tags: [Dashboard]
+      summary: 排行组合查询（较多品种）
+      description: GET 的只读等价接口，不修改业务数据。前端在编码后的筛选串超过 6000 字符时使用，避免 URL 长度限制。
+      security:
+        - screenToken: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                customerType: {type: string, enum: [ALL, GENERAL, SPECIAL]}
+                regionCode: {type: string, maxLength: 64}
+                regionUnassigned: {type: boolean, default: false}
+                productLine: {type: string, maxLength: 200}
+                productLineUnassigned: {type: boolean, default: false}
+                varieties:
+                  type: array
+                  maxItems: 500
+                  items: {type: string, maxLength: 100}
+                includeUnspecifiedVariety: {type: boolean, default: false}
+                metric: {type: string, enum: [AMOUNT, TONS], default: AMOUNT}
+      responses:
+        '200':
+          description: 与 GET 相同的金额/吨数排行和总计。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardResponse'
+        '400':
+          description: 筛选值不合法。
+        '409':
+          description: 历史结果核对不一致。
+  /screen/activities/{activityCode}/ranking/options:
+    get:
+      operationId: getRankingFilterOptions
+      tags: [Dashboard]
+      summary: 排行筛选实际选项
+      description: 按客户类型和大区筛选适用商品维度。customers 保留完整客户类型/大区组合，前端按类型收窄大区；products 返回所选客户/大区范围的项目组/品种对，前端再按项目组联动品种。包含当前发布、适用但未订购的商品配置（遵守客户类型、分公司及经销商范围），以及有效订单实际维度。上游变化重置下游；默认全部，不自动统计金额、吨数或排行。空串、纯空格和 null 统一输出显式 null；实际名称“未填写”仍是普通值。新历史快照从冻结关联资料读取；旧历史首次确认并核对前暂读保留资料，已冻结但缺少关联资料时不可限定客户/大区。本轮不重写旧归档或修复旧历史核对错误。
+      security:
+        - screenToken: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - in: query
+          name: customerType
+          schema: {type: string, enum: [ALL, GENERAL, SPECIAL]}
+          description: 不传或 ALL 为全部客户，包含数据库中类型为 ALL 的不区分类型客户。
+        - in: query
+          name: regionCode
+          schema: {type: string, maxLength: 64}
+          description: 大区实际编号；与 regionUnassigned=true 互斥。
+        - in: query
+          name: regionUnassigned
+          schema: {type: boolean, default: false}
+          description: 只取大区未填写的客户，包含 null、空字符串及纯空格。
+      responses:
+        '200':
+          description: 实际客户类型、大区和商品项目组/品种组合；不返回客户姓名、手机号。
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      customers:
+                        type: array
+                        items:
+                          type: object
+                          required: [customerType, regionCode, regionName]
+                          properties:
+                            customerType: {type: string, enum: [GENERAL, SPECIAL, ALL]}
+                            regionCode: {type: [string, 'null']}
+                            regionName: {type: string}
+                      products:
+                        type: array
+                        items:
+                          type: object
+                          required: [productLine, varietyName]
+                          properties:
+                            productLine: {type: [string, 'null']}
+                            varietyName: {type: [string, 'null']}
+                  traceId: {type: string}
+        '400':
+          description: 筛选值不合法，或大区编号与未填写标记同时传入。
+        '409':
+          description: RANKING_OPTIONS_SCOPE_UNAVAILABLE；旧冻结快照没有联动资料，请使用全部客户、全部大区查看。不会改写归档。
   /screen/activities/{activityCode}/dashboard:
     get:
       operationId: getOrderDashboard
       tags: [Dashboard]
       summary: 订单综合看板快照
+      description: 专用看板查询，保留总计、项目组、客户类型、大区、小时趋势与 TOP15。giftCustomerTypes/topGeneral/topSpecial/dashboard.latestOrders 兼容字段为空数组。
       security:
         - screenToken: []
       parameters:
@@ -2597,6 +2868,7 @@ paths:
       operationId: getTopicReport
       tags: [Dashboard]
       summary: 专题战报快照
+      description: 一次返回全部九类专题所需数据，前端切换专题不重新请求。dashboard.totals 仅含 total_amount；dashboard.companies/dashboard.branches/dashboard.latestOrders/trend 兼容字段为空数组。不会计算完整排行榜、SKU 或趋势。
       security:
         - screenToken: []
       parameters:
@@ -2946,7 +3218,7 @@ components:
         eventEndsAt:
           type: string
           format: date-time
-          description: 整场活动结束时间；到时停止抽奖和实时推送，转为历史回看
+          description: 整场活动结束时间；到时停止抽奖，统计转为历史回看；独立活动资料 SSE 保留以感知重新开放
         timezone:
           type: string
         customerScope:
@@ -2980,6 +3252,18 @@ components:
           items:
             type: string
             enum: [GENERAL, SPECIAL]
+    ActivityInfoSnapshot:
+      type: object
+      required: [activityId, version, serverTime, heartbeatIntervalMs, activity]
+      properties:
+        activityId: { type: integer, format: int64 }
+        version:
+          type: string
+          pattern: '^[0-9]+$'
+          description: activity.public_info_version；使用字符串保留 BIGINT 精度，不作为事件续传游标。
+        serverTime: { type: string, format: date-time }
+        heartbeatIntervalMs: { type: integer, minimum: 1000, default: 30000 }
+        activity: { $ref: '#/components/schemas/Activity' }
     PublicActivityResponse:
       type: object
       required: [data, traceId]
@@ -2994,12 +3278,13 @@ components:
       properties:
         customerType:
           $ref: '#/components/schemas/CustomerType'
-          description: 有类型白名单时传 GENERAL 或 SPECIAL；白名单全为空时传 ALL 或省略。
+          description: 首次省略以自动识别；返回多身份时传 GENERAL 或 SPECIAL 确认。兼容明确传 ALL 的旧请求。
         regionCode:
           oneOf:
             - $ref: '#/components/schemas/RegionCode'
             - type: 'null'
-          description: 仅有综合客户的已发布有效白名单允许省略或传 null，服务端按手机号读取真实大区；显式提交大区仍须匹配。双类型白名单中综合客户继续按现有规则选择大区，有大区配置时不可省略，未分配客户传 UNASSIGNED。特渠及 ALL 不要求大区。
+          deprecated: true
+          description: 旧请求兼容字段；登录不再要求或校验用户选择的大区，实际大区来自白名单身份。
         phone:
           type: string
           minLength: 1
@@ -3010,22 +3295,44 @@ components:
       properties:
         data:
           type: object
-          required: [csrfToken, expiresAt, customer, activity]
+          required: [selectionRequired]
           properties:
-            permissions:
+            selectionRequired:
+              type: boolean
+              description: true 时只返回 customerTypes；false 时返回 customer 和 csrfToken。
+            customerTypes:
               type: array
               uniqueItems: true
               items:
-                $ref: '#/components/schemas/MemberPermission'
+                type: string
+                enum: [GENERAL, SPECIAL]
             csrfToken:
               type: string
-            expiresAt:
-              type: string
-              format: date-time
             customer:
-              $ref: '#/components/schemas/ActivityCustomerSummary'
-            activity:
-              $ref: '#/components/schemas/PublicActivity'
+              type: object
+              required: [sessionId, activityId, customerId, activityCode, customerType, phoneMasked]
+              properties:
+                sessionId:
+                  type: integer
+                  description: 兼容原登录返回值 0；真实会话以 HttpOnly Cookie 识别。
+                activityId:
+                  $ref: '#/components/schemas/Id'
+                customerId:
+                  $ref: '#/components/schemas/Id'
+                activityCode:
+                  type: string
+                customerType:
+                  $ref: '#/components/schemas/CustomerType'
+                regionCode:
+                  type: [string, 'null']
+                branchName:
+                  type: [string, 'null']
+                dealerShortName:
+                  type: [string, 'null']
+                dealerFullName:
+                  type: [string, 'null']
+                phoneMasked:
+                  type: string
         traceId:
           type: string
     ActivityCustomerSummary:
@@ -3147,21 +3454,131 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProductImage'
+    H5Product:
+      type: object
+      required: [id, materialName, customerType, rebateStatus, giftBox, visible, orderable, dataStatus, sortNo, version, images, branchScope]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        materialCode:
+          type: [string, 'null']
+        materialName:
+          type: string
+        description:
+          type: [string, 'null']
+        categoryName:
+          type: [string, 'null']
+        productLine:
+          type: [string, 'null']
+        specification:
+          type: [string, 'null']
+        casePack:
+          type: [string, 'null']
+        casePrice:
+          oneOf:
+            - $ref: '#/components/schemas/Decimal'
+            - type: 'null'
+        customerType:
+          $ref: '#/components/schemas/ProductCustomerType'
+        rebateStatus:
+          $ref: '#/components/schemas/ProductRebateStatus'
+        giftBox:
+          type: boolean
+        visible:
+          type: boolean
+        orderable:
+          type: boolean
+        dataStatus:
+          type: string
+        sortNo:
+          type: integer
+        version:
+          type: integer
+        branchScope:
+          type: array
+          items:
+            type: string
+        priceTier:
+          oneOf:
+            - $ref: '#/components/schemas/ProductPriceTier'
+            - type: 'null'
+        images:
+          type: array
+          items:
+            type: object
+            required: [id, url, primary, sortNo]
+            properties:
+              id:
+                $ref: '#/components/schemas/Id'
+              url:
+                type: string
+              primary:
+                type: boolean
+              sortNo:
+                type: integer
     ProductPriceTier:
       type: object
-      description: 商品阶梯优惠。WHOLE_ORDER 达到门槛后全部箱数按优惠价；INCREMENTAL 从门槛箱开始仅对该箱及超出部分按优惠价。
-      required: [minQuantity, casePrice, pricingMode]
+      description: 商品多级阶梯价格。tiers包含从1箱起的独立第一档，开启后不使用普通casePrice。WHOLE_ORDER全部箱数使用最高已达档位；INCREMENTAL各段分别计费。旧minQuantity/casePrice返回第一优惠档，仅有第一档时返回该档。
+      required: [minQuantity, casePrice, pricingMode, tiers]
       properties:
         minQuantity:
           type: integer
           format: int64
-          minimum: 2
+          minimum: 1
           maximum: 999999
         casePrice:
           $ref: '#/components/schemas/Decimal'
         pricingMode:
           type: string
           enum: [WHOLE_ORDER, INCREMENTAL]
+        tiers:
+          type: array
+          minItems: 1
+          maxItems: 101
+          items:
+            $ref: '#/components/schemas/ProductPriceStep'
+    ProductPriceStep:
+      type: object
+      required: [minQuantity, casePrice]
+      properties:
+        minQuantity:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 999999
+          description: 起始箱数，包含该箱；第一档固定为1，下一档起始前一箱为本档结束。兼容旧规则从优惠门槛起的数组。
+        casePrice:
+          $ref: '#/components/schemas/Decimal'
+          description: 大于零且最多四位小数；第一档价格独立于普通箱价，后续档位低于上一档。
+    OrderPricingDetails:
+      type: object
+      description: 当前订单或提交版本自己的完整阶梯快照及实际计费段，不依赖当前商品目录。无阶梯或旧记录可以为空；各段金额按累计舍入分配，合计等于 lineAmount。
+      required: [tiers, segments]
+      properties:
+        tiers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProductPriceStep'
+        segments:
+          type: array
+          items:
+            type: object
+            required: [minQuantity, quantity, casePrice, amount]
+            properties:
+              minQuantity:
+                type: integer
+                format: int64
+              maxQuantity:
+                type: [integer, 'null']
+                format: int64
+                description: 分段计价时为该档上界；最后一档及整批计价为空。
+              quantity:
+                type: integer
+                format: int64
+              casePrice:
+                $ref: '#/components/schemas/Decimal'
+              amount:
+                $ref: '#/components/schemas/Decimal'
     SubmitOrderItem:
       type: object
       required: [productId, quantity]
@@ -3335,7 +3752,7 @@ components:
           oneOf:
             - $ref: '#/components/schemas/Decimal'
             - type: 'null'
-          description: 下单时的阶梯优惠箱价快照。
+          description: 兼容单档的阶梯箱价字段；多档明细以 pricingDetails.segments 为准，不可将此价乘以所有优惠箱数推导总额。
         tierMinQuantity:
           type: [integer, 'null']
           format: int64
@@ -3343,11 +3760,15 @@ components:
         tierPriceQuantity:
           type: [integer, 'null']
           format: int64
-          description: 按阶梯优惠箱价计费的箱数。
+          description: 所有优惠档箱数合计；各档实际箱价和金额读取 pricingDetails.segments。
         pricingMode:
           type: [string, 'null']
           enum: [WHOLE_ORDER, INCREMENTAL, null]
           description: 下单时的计价模式快照。
+        pricingDetails:
+          oneOf:
+            - $ref: '#/components/schemas/OrderPricingDetails'
+            - type: 'null'
         lineAmount:
           $ref: '#/components/schemas/Decimal'
         tonCaseFactor:
@@ -3711,11 +4132,41 @@ components:
           enum: [ALL, GENERAL, SPECIAL]
         probabilityMode:
           type: string
-          enum: [EQUAL, ORDER_AMOUNT_WEIGHTED]
+          enum: [EQUAL, ORDER_AMOUNT_WEIGHTED, ORDER_BOX_COUNT_WEIGHTED, ORDER_TONS_WEIGHTED]
           default: ORDER_AMOUNT_WEIGHTED
-          description: 不勾选时等概率；按订单金额加权时使用开奖前当前有效 SUBMITTED 订单金额占候选有效订单金额总和的比例。
+          description: 等概率或按有效SUBMITTED订单匹配商品的实际金额、箱数、吨数小计加权。新选择加权方式绑定对应qualificationMetric，先按门槛排除再求总权重；门槛0不限，但对应权重0仍排除。吨数缺失部分按0计，部分已知可参与，不阻止整轮开奖。历史金额加权与其他门槛组合保留原义。
         minimumOrderAmount:
           $ref: '#/components/schemas/Decimal'
+        qualificationMetric:
+          type: string
+          enum: [AMOUNT, BOX_COUNT, TONS]
+          default: AMOUNT
+        minimumOrderBoxCount:
+          type: integer
+          minimum: 0
+          default: 0
+        minimumOrderTons:
+          type: number
+          minimum: 0
+          multipleOf: 0.000001
+          default: 0
+        productLine:
+          type: [string, 'null']
+          maxLength: 200
+          description: 单选项目组，null 表示不限，VALID_ORDERS 生效
+        productLineUnassigned:
+          type: boolean
+          default: false
+        varieties:
+          type: array
+          maxItems: 500
+          items:
+            type: string
+            maxLength: 100
+          description: 先选择项目组，再按字面名称多选品种；空数组且不包含未填写时表示全部
+        includeUnspecifiedVariety:
+          type: boolean
+          default: false
         excludePreviousWinners:
           type: boolean
         displayNameType:
@@ -3760,6 +4211,31 @@ components:
             finishedAt:
               type: [string, 'null']
               format: date-time
+    ActivitySummary:
+      type: object
+      required: [id, departmentId, departmentName, code, name, status, startsAt, endsAt, eventEndsAt]
+      properties:
+        id:
+          $ref: '#/components/schemas/Id'
+        departmentId:
+          $ref: '#/components/schemas/Id'
+        departmentName:
+          type: string
+        code:
+          type: string
+        name:
+          type: string
+        status:
+          $ref: '#/components/schemas/ActivityStatus'
+        startsAt:
+          type: [string, 'null']
+          format: date-time
+        endsAt:
+          type: [string, 'null']
+          format: date-time
+        eventEndsAt:
+          type: [string, 'null']
+          format: date-time
     ActivityWriteRequest:
       type: object
       required: [name, startsAt, endsAt, eventEndsAt, timezone, customerScope]
@@ -3969,7 +4445,8 @@ components:
             winnerCount:
               type: integer
             candidateCount:
-              type: integer
+              type: [integer, 'null']
+              description: 未开奖时不计算，仅已开奖时为持久化人数
             resultHash:
               type: [string, 'null']
             winners:
@@ -4022,6 +4499,32 @@ components:
               format: date-time
         traceId:
           type: string
+    ActivityOverviewResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        traceId: { type: string }
+        data:
+          type: object
+          required: [totals, submittedByType, customerCount, customersByType, customerTypeMode, generatedAt]
+          properties:
+            totals:
+              type: object
+              required: [order_count, total_amount, total_quantity, total_tons]
+              properties:
+                order_count: { type: integer, format: int64 }
+                total_amount: { type: number }
+                total_quantity: { type: integer, format: int64 }
+                total_tons: { type: number }
+            submittedByType:
+              type: object
+              additionalProperties: { type: integer, format: int64 }
+            customerCount: { type: integer, format: int64 }
+            customersByType:
+              type: object
+              additionalProperties: { type: integer, format: int64 }
+            customerTypeMode: { type: string, enum: [TYPED, UNSPECIFIED] }
+            generatedAt: { type: string, format: date-time }
     DashboardResponse:
       type: object
       required: [data, version, generatedAt, traceId]

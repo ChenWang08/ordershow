@@ -1,0 +1,25 @@
+name: order-show-activity-info-test
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: activity_info_test_only
+      MYSQL_DATABASE: order_show_activity_info_test
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-pactivity_info_test_only"]
+      interval: 2s
+      timeout: 2s
+      retries: 40
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 20
+networks:
+  default:
+    name: order-show-activity-info-test

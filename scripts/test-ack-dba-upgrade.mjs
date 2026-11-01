@@ -4,7 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 assert(process.argv.includes('--ack-smoke'));
-const container='order-show-ack-smoke-mysql-1',db='ack_upgrade_v039_20261030_v3';
+const container='order-show-ack-smoke-mysql-1',db='ack_upgrade_v039_20261101_v3';
 const docker=(args,input)=>execFileSync('docker',args,{encoding:'utf8',input,maxBuffer:128*1024*1024,timeout:120000});
 assert.equal(docker(['inspect',container,'--format','{{index .Config.Labels "com.docker.compose.project"}}']).trim(),'order-show-ack-smoke');
 const sql=(database,statement)=>docker(['exec','-i','-e','MYSQL_PWD=isolated_smoke_root',container,'mysql','-uroot','-N',database],statement).trim();
@@ -22,7 +22,7 @@ sql(db,readFileSync('deploy/dba/generated/upgrade-v039-v041.sql','utf8'));
 assert.equal(sql(db,'SELECT MAX(version) FROM deployment_schema_history'),'V041');
 assert.equal(sql(db,"SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema=DATABASE()"),'0');
 assert.equal(businessHash(),before);
-const out='outputs/ack-release-20261030.1';mkdirSync(out,{recursive:true});
+const out='outputs/ack-release-20261101.1';mkdirSync(out,{recursive:true});
 const ids=sql(db,'SELECT DISTINCT activity_id FROM customer_order').split(/\s+/).map(Number),records=[];
 for(const id of ids) {
  assert(id>0);

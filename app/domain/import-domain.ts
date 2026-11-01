@@ -42,6 +42,7 @@ export type ProductImportRow = {
   casePack: string;
   unitPrice: string;
   casePrice: string;
+  priceTiers?: Array<{ minQuantity: string; casePrice: string }>;
   priceTierMinQuantity: string;
   priceTierCasePrice: string;
   priceTierPricingMode: "WHOLE_ORDER" | "INCREMENTAL";

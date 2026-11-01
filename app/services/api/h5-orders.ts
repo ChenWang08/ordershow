@@ -1,20 +1,28 @@
 import { createIdempotencyKey } from "./idempotency-key";
 import { api, ApiError } from "./client";
 import { activeActivityPath } from "./context";
-import type { Envelope, OrderChangeRequest, RuntimeIdentity, RuntimeOrder, RuntimeOrderDraft, RuntimeProduct } from "./types";
+import type { Envelope, OrderChangeRequest, RuntimeIdentity, RuntimeOrder, RuntimeOrderDraft, H5Product } from "./types";
 
-export async function verifyPhone(customerType: "GENERAL" | "SPECIAL" | "ALL" | "", regionCode: string, phone: string) {
-  return (await api<Envelope<{ customer: RuntimeIdentity; csrfToken: string }>>(`/public/activities/${activeActivityPath()}/verify-phone`, {
-    method: "POST", body: JSON.stringify({ customerType: customerType || null, regionCode: regionCode || null, phone }),
-  })).data.customer;
+export type H5CustomerType = "GENERAL" | "SPECIAL" | "ALL";
+export type H5VerificationResult =
+  | { selectionRequired: true; customerTypes: Array<"GENERAL" | "SPECIAL"> }
+  | { selectionRequired: false; customer: RuntimeIdentity; csrfToken: string };
+
+export async function verifyPhone(phone: string, customerType?: H5CustomerType): Promise<H5VerificationResult> {
+  return (await api<Envelope<H5VerificationResult>>(`/public/activities/${activeActivityPath()}/verify-phone`, {
+    method: "POST", body: JSON.stringify({ phone, ...(customerType ? { customerType } : {}) }),
+  })).data;
 }
 
 export async function loadH5Products() {
-  return (await api<Envelope<RuntimeProduct[]>>(`/h5/activities/${activeActivityPath()}/products`)).data;
+  return (await api<Envelope<H5Product[]>>(`/h5/activities/${activeActivityPath()}/products`)).data;
 }
 
-export async function loadH5Order() {
-  try { return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${activeActivityPath()}/order?includeHistory=false`)).data; }
+type H5ReadOptions = { activityCode?: string; signal?: AbortSignal };
+
+export async function loadH5Order(options: H5ReadOptions = {}) {
+  const path = options.activityCode ? encodeURIComponent(options.activityCode) : activeActivityPath();
+  try { return (await api<Envelope<RuntimeOrder>>(`/h5/activities/${path}/order?includeHistory=false`, { signal: options.signal })).data; }
   catch (error) { if (error instanceof ApiError && error.status === 404) return null; throw error; }
 }
 
@@ -48,8 +56,9 @@ export async function withdrawH5Order(expectedVersion: number) {
   }, "h5")).data;
 }
 
-export async function loadH5OrderChangeRequest() {
-  return (await api<Envelope<OrderChangeRequest | null>>(`/h5/activities/${activeActivityPath()}/order-change-requests/current`)).data;
+export async function loadH5OrderChangeRequest(options: H5ReadOptions = {}) {
+  const path = options.activityCode ? encodeURIComponent(options.activityCode) : activeActivityPath();
+  return (await api<Envelope<OrderChangeRequest | null>>(`/h5/activities/${path}/order-change-requests/current`, { signal: options.signal })).data;
 }
 
 export async function createH5OrderChangeRequest(activityCode: string, customerId: number, expectedVersion: number,

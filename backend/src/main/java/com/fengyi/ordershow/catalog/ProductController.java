@@ -20,14 +20,15 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 public class ProductController {
   private final ProductService service;
+  private final H5CatalogService h5Catalog;
   private final AuthService auth;
   private final ProductDealerScopeService scopes;
   private final org.springframework.jdbc.core.JdbcTemplate jdbc;
   private final com.fasterxml.jackson.databind.ObjectMapper json;
 
-  public ProductController(ProductService service, AuthService auth, ProductDealerScopeService scopes,
+  public ProductController(ProductService service, AuthService auth, ProductDealerScopeService scopes, H5CatalogService h5Catalog,
       org.springframework.jdbc.core.JdbcTemplate jdbc, com.fasterxml.jackson.databind.ObjectMapper json) {
-    this.service = service; this.auth = auth; this.scopes=scopes; this.jdbc=jdbc; this.json=json;
+    this.service = service; this.h5Catalog = h5Catalog; this.auth = auth; this.scopes=scopes; this.jdbc=jdbc; this.json=json;
   }
 
   @GetMapping("/admin/activities/{activityId}/product-dealer-scopes")
@@ -53,9 +54,11 @@ public class ProductController {
   }
 
   @GetMapping("/h5/activities/{activityCode}/products")
-  ApiResponse<List<ProductService.ProductView>> h5(@PathVariable String activityCode,
-      @RequestParam(required = false) String rebateStatus, @RequestParam(required = false) String keyword, HttpServletRequest request) {
-    return ApiResponse.of(service.h5Products(activityCode, auth.requireH5(request), rebateStatus, keyword), TraceFilter.id(request));
+  ApiResponse<List<H5Product>> h5(@PathVariable String activityCode,
+      @RequestParam(required = false) String rebateStatus, @RequestParam(required = false) String keyword,
+      HttpServletRequest request, jakarta.servlet.http.HttpServletResponse response) {
+    response.setHeader("Cache-Control", "private, no-store");
+    return ApiResponse.of(h5Catalog.products(activityCode, auth.requireH5(request), rebateStatus, keyword), TraceFilter.id(request));
   }
 
   @GetMapping({"/admin/activities/{activityId}/products", "/admin/activities/{activityId}/orders/product-options"})

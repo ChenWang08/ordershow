@@ -4,18 +4,28 @@ import { useEffect, useState } from "react";
 import { ApiError, loadAdminActivity, updateActivityLiveRoom, type RuntimeActivity } from "../../api";
 import { validLiveRoomUrl } from "../shared/live-room";
 
-export function ActivityLiveRoomCard({ activityId, editable }: { activityId: number; editable: boolean }) {
-  const [activity, setActivity] = useState<RuntimeActivity | null>(null);
-  const [draft, setDraft] = useState("");
+export function ActivityLiveRoomCard({ activityId, editable, initialActivity, onDirtyChange }: { activityId: number; editable: boolean; initialActivity?: RuntimeActivity | null; onDirtyChange?: (dirty: boolean) => void }) {
+  const [activity, setActivity] = useState<RuntimeActivity | null>(initialActivity ?? null);
+  const [draft, setDraft] = useState(initialActivity?.liveRoomUrl || "");
+  const [source, setSource] = useState(initialActivity);
+  if (source !== initialActivity) {
+    setSource(initialActivity);
+    if (initialActivity) {
+      setActivity(initialActivity);
+      if (draft === (source?.liveRoomUrl || "")) setDraft(initialActivity.liveRoomUrl || "");
+    }
+  }
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
   useEffect(() => {
+    if (initialActivity) return;
     let active = true;
     loadAdminActivity(activityId).then(value => {
       if (active) { setActivity(value); setDraft(value.liveRoomUrl || ""); }
     }).catch(() => { if (active) setNotice("直播间配置加载失败，请刷新页面重试。"); });
     return () => { active = false; };
-  }, [activityId]);
+  }, [activityId, initialActivity]);
+  useEffect(() => { onDirtyChange?.(draft !== (activity?.liveRoomUrl || "")); }, [draft, activity, onDirtyChange]);
   async function save() {
     if (!activity || busy) return;
     if (draft.trim() && !validLiveRoomUrl(draft)) { setNotice("请填写有效的 HTTPS 直播间完整链接。"); return; }

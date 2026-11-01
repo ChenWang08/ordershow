@@ -192,14 +192,22 @@ H5 `ORDER_SUBMIT` 的确认规则（2026-10-30 用户确认）：已完成请求
 
 ## 10. 抽奖并发和随机性
 
-- Redis 锁键：`lottery:activity:{activityId}:round:{roundId}`，必须带唯一持有值和 TTL；
-- 数据库条件更新 `READY → DRAWING` 是第二道防线；
+- 当前Redis辅助锁键为`order-show:lottery:round:{roundId}`，TTL为30秒；Redis不可用时数据库行锁继续保证单轮执行；
+- 数据库使用`SELECT ... FOR UPDATE`锁定轮次并校验READY/RESET及前序完成状态，快照/中奖/轮次更新保持同一事务；
 - `lottery_draw_attempt(round_id, attempt_no)`、每次尝试内候选/中奖人/位置唯一约束是第三道防线；
 - 安全随机源使用 Java `SecureRandom`；
 - 候选生成前按当前有效数据重新校验，并固定规则与候选快照；
-- 对候选 ID、规则快照和结果计算 SHA-256 `result_hash`，用于事后核验；
+- 规则JSON保存客户与商品条件、门槛、概率模式和权重单位/总权重；SHA-256结果摘要v2包含轮次/尝试、概率模式、候选ID及三项小计、随机键和中奖ID，用于结合快照事后核验；
 - 任何实例崩溃后以 MySQL 事务状态为准，Redis 锁过期不能改变已保存结果；
 - 结果提交成功前不向大屏发送中奖名单。
+
+抽奖与H5共用数据库资源，需要单独限制昂贵查询：
+
+- 每后端实例试算和商品选项共用`LOTTERY_PREVIEW_CONCURRENCY=2`个名额，开奖使用独立`LOTTERY_DRAW_CONCURRENCY=1`个名额；进入事务前尝试取得，超额立即503 `LOTTERY_BUSY`，`Retry-After: 2`，不排队占用数据库连接；
+- `LOTTERY_QUERY_TIMEOUT_SECONDS=8`限制候选及商品选项的单条查询，不代表完整开奖事务超时，不修改共用连接池或H5写入名额；
+- 后端和Compose内置相同默认值，`.env.example`说明覆盖入口；实际`.env`可省略。多个后端实例分别计算名额，部署时按共享数据库容量核定总量；
+- 只手动试算当前轮、一次汇总匹配小计；开奖候选每批250、中奖批量写入，失败全部回滚；
+- 具体默认值的本机混合测试及局限见[三种加权验证](../testing/lottery-weighting-2026-10-31.md)，不能由单次短时测试承诺线上无资源影响。
 
 ## 11. 缓存和 SSE 一致性
 

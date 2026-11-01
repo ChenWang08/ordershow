@@ -1,13 +1,11 @@
 "use client";
 
 import { formatBeijingTime } from "../shared/time";
-
-
 import { adminNavigation, canUse, isManager } from "./permissions";
 import { MemberAdminPanel } from "./MemberAdminPanel";
 import { useModuleContext } from "./useModuleContext";
-import { useMemo, useState } from "react";
-import { loadImportRows, loadAttendanceMatchPreview, loadImportTask, loadAdminProducts } from "../../api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { loadImportRows, loadAttendanceMatchPreview, loadImportTask, type AdminActivitySummary } from "../../api";
 import { OrderManagement } from "../../components/orders/OrderManagement";
 import {
   bindAttendanceStaging, bindProductStaging, bindWhitelistStaging,
@@ -39,8 +37,10 @@ import type { OperationLogEntry } from "./admin-types";
 import { useAdminWorkspaceProps } from "../workspace/useAdminWorkspaceProps";
 import { DepartmentAdminPanel } from "./DepartmentAdminPanel";
 import { AdminLayout } from "./AdminLayout";
+import { useActivityWorkspace } from "../workspace/ActivityWorkspace";
 
-export function AdminWorkspace() {
+export function AdminWorkspace({ activities }: { activities?: AdminActivitySummary[] } = {}) {
+  const activityRuntime = useActivityWorkspace();
   const {
   lotteryRounds, onLotteryChange, activityCode,
     activityName, onActivityNameChange, activityId,
@@ -62,23 +62,49 @@ export function AdminWorkspace() {
   const navigation = adminNavigation(adminIdentity);
   const [selectedTab, setTab] = useState(navigation[0] || "");
   const tab = navigation.includes(selectedTab) ? selectedTab : navigation[0] || "";
-  const moduleContext = useModuleContext(activityId, navigation.some(t => t !== "成员管理" && t !== "部门与账号"));
+  const importVisibility = useRef({ tab, controller: new AbortController() });
+  useEffect(() => { importVisibility.current.tab = tab; }, [tab]);
+  useEffect(() => {
+    const controller = new AbortController(); importVisibility.current.controller = controller;
+    return () => controller.abort();
+  }, []);
+  const importWaitOptions = useCallback((scope: string) => ({ signal: importVisibility.current.controller.signal,
+    isVisible: () => importVisibility.current.tab === scope && document.visibilityState !== "hidden" }), []);
+  const [visitedTabs, setVisitedTabs] = useState([navigation[0] || ""]);
+  const selectTab = (next: string) => { setVisitedTabs(previous => previous.includes(next) ? previous : [...previous, next]); setTab(next); };
+  const [orderRevision, setOrderRevision] = useState(0);
+  const [statisticsStale, setStatisticsStale] = useState(false);
+  const [lotteryDirty, setLotteryDirty] = useState(false);
+  const [moduleRevision, setModuleRevision] = useState(0);
+  const moduleScope = ["商品导入", "白名单", "现场到场", "抽奖规则"].includes(tab) ? tab : null;
+  const moduleQuery = useModuleContext(activityId, moduleScope, moduleRevision);
+  const moduleContext = moduleQuery.data;
   const setProductRows = onProductRowsChange;
   const setWhitelistRows = onWhitelistRowsChange;
   const setProductImportCompleted = onProductImportCompleted;
   const setWhitelistImportCompleted = onWhitelistImportCompleted;
   const [actionNotice, setActionNotice] = useState("");
-  const adminActivities = useAdminActivities({ activityId, activityCode, setActionNotice });
+  const adminActivities = useAdminActivities({ activityId, activityCode, setActionNotice, initialActivities: activities, activeActivity: activityRuntime.runtimeActivity });
   const { currentActivity, minimumFutureAt } = adminActivities;
   const [operationLogs, setOperationLogs] = useState<OperationLogEntry[]>([]);
   const [operationLogOpen, setOperationLogOpen] = useState(false);
-  const whitelistMode = useMemo(() => canUse(adminIdentity, "WHITELIST") ? whitelistCustomerTypeMode(whitelistRows) : moduleContext?.customerTypeMode || "TYPED", [whitelistRows, adminIdentity, moduleContext]);
+  const whitelistMode = useMemo(() => whitelistRows.length ? whitelistCustomerTypeMode(whitelistRows)
+    : moduleContext?.customerTypeMode || activityRuntime.runtimeActivity?.whitelistCustomerTypeMode || "TYPED", [whitelistRows, moduleContext, activityRuntime.runtimeActivity]);
   const setAttendanceRows = onAttendanceRowsChange;
   const [serverImportTasks, setServerImportTasks] = useState<Partial<Record<"PRODUCT" | "WHITELIST" | "ATTENDANCE", number>>>({});
   const [serverImportBlocking, setServerImportBlocking] = useState<Partial<Record<"PRODUCT" | "WHITELIST" | "ATTENDANCE", number>>>({});
-  const [regionCodesByName, setRegionCodesByName] = useState<Record<string, string>>({});
+  const regionCodesByName = useMemo(() => Object.fromEntries((activityRuntime.runtimeActivity?.regions ?? []).map(region => [region.name, region.code])), [activityRuntime.runtimeActivity]);
   const recordOperation = (action: string, target: string, detail: string) => {
     setOperationLogs((current) => [{ id: createImportRowId("operation"), action, target, detail, operator: adminIdentity?.displayName || adminIdentity?.username || "运营管理员", time: formatBeijingTime(new Date()) }, ...current]);
+    moduleLoads.logs.invalidate();
+    setStatisticsStale(true);
+    if (/商品|价格|白名单|活动|订货/.test(action)) setOrderRevision(value => value + 1);
+    if (/白名单/.test(action)) { moduleLoads.product.invalidate(); moduleLoads.attendance.invalidate(); moduleLoads.lottery.invalidate(); }
+    if (/到场|商品|价格/.test(action)) moduleLoads.lottery.invalidate();
+  };
+  const recordModuleOperation = (action: string, target: string, detail: string) => {
+    recordOperation(action, target, detail);
+    setModuleRevision(value => value + 1);
   };
   const refreshServerImportPreview = async (type: "PRODUCT" | "WHITELIST" | "ATTENDANCE") => {
     const taskId = serverImportTasks[type];
@@ -113,32 +139,30 @@ export function AdminWorkspace() {
     }
   };
   const attendanceManagement = useAttendanceManagement({
+    importWaitOptions: () => importWaitOptions("现场到场"),
     activityId, activityStatus, setAttendanceRows, attendanceImportError,
     onAttendanceFileNameChange, onAttendanceWarningsChange, onAttendanceSheetCountsChange, onAttendanceImportErrorChange,
     serverImportTasks, serverImportBlocking, setServerImportTasks, setServerImportBlocking,
-    setActionNotice, recordOperation, refreshServerImportPreview,
+    setActionNotice, recordOperation: recordModuleOperation, refreshServerImportPreview,
   });
   const {
     attendanceFormOpen, setAttendanceFormOpen, editingAttendanceRow, setEditingAttendanceRow, pendingAttendanceImport, setPendingAttendanceImport, setAttendanceMatchPreview, attendancePreviewReady, attendancePreviewLoading, setAttendancePreviewLoading, attendancePublishing, attendanceImportAttemptName, setAttendanceImportAttemptName, handleAttendanceFile, retryAttendancePreview, cancelAttendanceImport, confirmAttendanceImport, saveAttendanceRow, deleteAttendanceRows,
   } = attendanceManagement;
   const whitelistImport = useWhitelistImport({
-    refreshProductScopes: async () => {
-      if (!productImportCompleted || !canUse(adminIdentity, "PRODUCT")) return;
-      const products = await loadAdminProducts(Number(activityId));
-      setProductRows(current => current.map(row => ({ ...row, dealerScope: products.find(p => String(p.id) === row.id)?.dealerScope ?? row.dealerScope })));
-    },
+    importWaitOptions: () => importWaitOptions("白名单"),
     activityId, activityStatus, whitelistRows, setWhitelistRows, whitelistImportHasRun,
     setWhitelistImportCompleted, onWhitelistImportCommitted, attendanceRows, setAttendanceRows,
     pendingAttendanceImport, serverImportTasks, serverImportBlocking, setServerImportTasks,
-    setServerImportBlocking, setActionNotice, recordOperation, refreshServerImportPreview,
+    setServerImportBlocking, setActionNotice, recordOperation: recordModuleOperation, refreshServerImportPreview,
   });
   const { setWhitelistFileName, setWhitelistImportInputCount, setWhitelistSheetCounts, setPendingWhitelistRollbackRows } = whitelistImport;
   const whitelistEditor = useWhitelistEditor({
     activityId, activityStatus, whitelistRows, setWhitelistRows, whitelistImportCompleted,
-    regionCodesByName, serverImportTasks, setActionNotice, recordOperation, refreshServerImportPreview, whitelistImport,
+    regionCodesByName, serverImportTasks, setActionNotice, recordOperation: recordModuleOperation, refreshServerImportPreview, whitelistImport,
   });
   const { editingWhitelistRow, setEditingWhitelistRow, whitelistFormOpen, setWhitelistFormOpen, saveWhitelistRow } = whitelistEditor;
   const productImport = useProductImport({
+    importWaitOptions: () => importWaitOptions("商品导入"),
     activityId, activityStatus, productRows, setProductRows, productImportCompleted,
     productImportHasRun, setProductImportCompleted, onProductImportCommitted,
     serverImportTasks, setServerImportTasks, serverImportBlocking, setServerImportBlocking,
@@ -150,7 +174,11 @@ export function AdminWorkspace() {
     serverImportTasks, setActionNotice, recordOperation, productImport, refreshServerImportPreview,
   });
   const { productFormOpen, editingProductRow, setProductFormOpen, setEditingProductRow, saveProductRow } = productEditor;
-  useAdminInitialization({
+  const moduleLoads = useAdminInitialization({
+    tab, logsOpen: operationLogOpen, activity: activityRuntime.runtimeActivity,
+    preservePreviews: { product: Boolean(productImport.productFileName && !productImportCompleted) || productFormOpen || Boolean(editingProductRow),
+      whitelist: Boolean(whitelistImport.whitelistFileName && !whitelistImportCompleted) || whitelistFormOpen || Boolean(editingWhitelistRow),
+      attendance: Boolean(pendingAttendanceImport) || attendanceFormOpen || Boolean(editingAttendanceRow), lottery: lotteryDirty },
     activityId, onAttendanceFileNameChange, onLotteryChange,
     onProductImportCommitted, onProductImportCompleted, onWhitelistImportCommitted,
     onWhitelistImportCompleted, setAttendanceRows, setProductRows,
@@ -158,44 +186,63 @@ export function AdminWorkspace() {
     setProductImportInputCount, setProductSheetCounts, setPendingWhitelistRollbackRows,
     setWhitelistFileName, setWhitelistImportInputCount, setWhitelistSheetCounts,
     setAttendanceImportAttemptName, setAttendanceMatchPreview, setPendingAttendanceImport,
-    setRegionCodesByName, setOperationLogs, setServerImportTasks,
+    setOperationLogs, setServerImportTasks,
     setServerImportBlocking, setActionNotice,
   });
   const activitySettings = useActivitySettings({
+    tab, initialActivity: activityRuntime.runtimeActivity,
+    onActivityLoaded: activityRuntime.setRuntimeActivity,
     activityId, activityCode, activityName, activityStatus, activityStartAt, activityEndAt, activityEventEndAt, productImportCompleted, whitelistImportCompleted, onActivityNameChange, onActivityStatusChange, onActivityStartAtChange, onActivityEndAtChange, onActivityEventEndAtChange, setActionNotice, recordOperation,
   });
-  const activityOverview = useActivityOverview(activityId, whitelistRows, canUse(adminIdentity, "OVERVIEW"), canUse(adminIdentity, "WHITELIST") ? null : moduleContext);
+  const activityOverview = useActivityOverview(activityId, canUse(adminIdentity, "OVERVIEW"));
+  const moduleLoad = tab === "商品导入" ? moduleLoads.product : tab === "白名单" ? moduleLoads.whitelist
+    : tab === "现场到场" ? moduleLoads.attendance : tab === "抽奖规则" ? moduleLoads.lottery : null;
+  const retryModule = async () => {
+    await Promise.all([moduleLoad?.refresh(), moduleQuery.refresh()]);
+  };
+  useEffect(() => {
+    let active = true;
+    if (activityOverview.updatedAt) void Promise.resolve().then(() => { if (active) setStatisticsStale(false); });
+    return () => { active = false; };
+  }, [activityOverview.updatedAt]);
   return (
     <>
-      <AdminLayout tab={tab} onTabChange={setTab} header={
+      <AdminLayout tab={tab} onTabChange={selectTab} header={
         <AdminHeader activityCode={activityCode} activityName={activityName} activityStatus={activityStatus}
           tab={tab} activities={adminActivities} operationLogs={operationLogs}
           operationLogOpen={operationLogOpen} setOperationLogOpen={setOperationLogOpen}
+          logQuery={moduleLoads.logs}
         />}>
+        {activitySettings.activityRefreshError && <div className="warning-box" role="alert">活动信息加载失败：{activitySettings.activityRefreshError}；保留当前信息。<button type="button" disabled={activitySettings.activityRefreshing} onClick={() => void activitySettings.refreshActivity()}>重试</button></div>}
+        {moduleScope && (moduleLoad?.error || moduleQuery.error) && <div className="warning-box" role="alert">当前页面加载失败：{moduleLoad?.error || moduleQuery.error}；保留已有内容。<button type="button" disabled={moduleLoad?.loading || moduleQuery.loading} onClick={() => void retryModule()}>重试</button></div>}
+        {moduleScope && moduleLoad?.loaded && (moduleLoad.loading || moduleQuery.loading) && <p role="status">正在加载最新数据…</p>}
         {!tab && <section className="admin-panel"><div className="empty-state">暂无功能权限，请联系部门管理员。</div></section>}
-        {tab === "成员管理" && isManager(adminIdentity) && <MemberAdminPanel />}
-        {tab === "部门与账号" && adminIdentity?.roleCode === "SUPER_ADMIN" && <DepartmentAdminPanel />}
-        {tab === "活动概览" && <ActivityOverview
+        {visitedTabs.includes("成员管理") && isManager(adminIdentity) && <div hidden={tab !== "成员管理"}><MemberAdminPanel active={tab === "成员管理"} /></div>}
+        {visitedTabs.includes("部门与账号") && adminIdentity?.roleCode === "SUPER_ADMIN" && <div hidden={tab !== "部门与账号"}><DepartmentAdminPanel active={tab === "部门与账号"} /></div>}
+        {moduleLoad && !moduleLoad.loaded && <section className="admin-panel" aria-busy={moduleLoad.loading}><p>{moduleLoad.error ? "当前模块尚未加载，请重试。" : "正在读取当前模块资料…"}</p></section>}
+        {visitedTabs.includes("活动概览") && <div hidden={tab !== "活动概览"}><ActivityOverview
           activityId={Number(activityId)}
           activityCode={activityCode} activityName={activityName} activityStatus={activityStatus}
           activityEndAt={activityEndAt} activityEventEndAt={activityEventEndAt}
           minimumFutureAt={minimumFutureAt}
           departmentName={currentActivity?.departmentName || adminIdentity?.departmentName || ""}
-          settings={activitySettings} overview={activityOverview} onViewOrders={() => setTab("订单管理")}
-        />}
-        {tab === "商品导入" && <ProductImportPage
+          settings={activitySettings} activity={activityRuntime.runtimeActivity}
+          overview={{ ...activityOverview, refresh: async () => { const result = await activityOverview.refresh(); if (result) setStatisticsStale(false); return result; } }}
+          statisticsStale={statisticsStale} onViewOrders={() => selectTab("订单管理")}
+        /></div>}
+        {visitedTabs.includes("商品导入") && moduleLoads.product.loaded && <div hidden={tab !== "商品导入"}><ProductImportPage
           activityStatus={activityStatus} productRows={productRows} productImportCompleted={productImportCompleted}
           serverImportBlocking={serverImportBlocking} productImport={productImport} productEditor={productEditor}
-        />}
-        {tab === "白名单" && <WhitelistPage
+        /></div>}
+        {visitedTabs.includes("白名单") && moduleLoads.whitelist.loaded && <div hidden={tab !== "白名单"}><WhitelistPage
           activityStatus={activityStatus} whitelistRows={whitelistRows} whitelistImportCompleted={whitelistImportCompleted}
           serverImportBlocking={serverImportBlocking} whitelistImport={whitelistImport} whitelistEditor={whitelistEditor}
-        />}
-        {tab === "现场到场" && <AttendancePage rows={pendingAttendanceImport?.rows ?? attendanceRows} fileName={attendanceFileName} warnings={attendanceWarnings} sheetCounts={attendanceSheetCounts} error={attendanceImportError} activityStarted={activityStarted} activityClosed={activityClosed} pendingImport={pendingAttendanceImport} importAttemptName={attendanceImportAttemptName} blockingCount={serverImportBlocking.ATTENDANCE ?? 0} previewLoading={attendancePreviewLoading} previewReady={attendancePreviewReady} onRetryPreview={retryAttendancePreview} publishing={attendancePublishing} onFile={handleAttendanceFile} onAdd={() => { setEditingAttendanceRow(null); setAttendanceFormOpen(true); }} onEdit={setEditingAttendanceRow} onDelete={deleteAttendanceRows} onConfirmImport={confirmAttendanceImport} onCancelImport={cancelAttendanceImport} customerTypeMode={whitelistMode} />}
-        {tab === "订单管理" && <OrderManagement activityClosed={activityClosed} activityStarted={activityStarted} activityId={Number(activityId)} activityName={activityName} />}
-        {tab === "抽奖规则" && <LotterySettings rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} attendeeCount={canUse(adminIdentity, "ATTENDANCE") ? attendanceRows.length : moduleContext?.attendeeCount || 0} customerCount={canUse(adminIdentity, "WHITELIST") ? whitelistRows.filter((row) => row.status === "有效").length : moduleContext?.customerCount || 0} customerTypeMode={whitelistMode} readOnly={activityFinished} onChange={onLotteryChange} />}
+        /></div>}
+        {visitedTabs.includes("现场到场") && moduleLoads.attendance.loaded && <div hidden={tab !== "现场到场"}><AttendancePage rows={pendingAttendanceImport?.rows ?? attendanceRows} fileName={attendanceFileName} warnings={attendanceWarnings} sheetCounts={attendanceSheetCounts} error={attendanceImportError} activityStarted={activityStarted} activityClosed={activityClosed} pendingImport={pendingAttendanceImport} importAttemptName={attendanceImportAttemptName} blockingCount={serverImportBlocking.ATTENDANCE ?? 0} previewLoading={attendancePreviewLoading} previewReady={attendancePreviewReady} onRetryPreview={retryAttendancePreview} publishing={attendancePublishing} onFile={handleAttendanceFile} onAdd={() => { setEditingAttendanceRow(null); setAttendanceFormOpen(true); }} onEdit={setEditingAttendanceRow} onDelete={deleteAttendanceRows} onConfirmImport={confirmAttendanceImport} onCancelImport={cancelAttendanceImport} customerTypeMode={whitelistMode} /></div>}
+        {visitedTabs.includes("订单管理") && <div hidden={tab !== "订单管理"}><OrderManagement active={tab === "订单管理"} revision={orderRevision} onChanged={() => { setStatisticsStale(true); moduleLoads.lottery.invalidate(); moduleLoads.logs.invalidate(); }} activityClosed={activityClosed} activityStarted={activityStarted} activityId={Number(activityId)} activityName={activityName} /></div>}
+        {visitedTabs.includes("抽奖规则") && moduleLoads.lottery.loaded && <div hidden={tab !== "抽奖规则"}><LotterySettings revision={moduleLoads.lottery.updatedAt ?? ""} active={tab === "抽奖规则" && !moduleLoads.lottery.loading} rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} attendeeCount={moduleContext?.attendeeCount ?? 0} customerCount={moduleContext?.customerCount ?? 0} customerTypeMode={whitelistMode} readOnly={activityFinished} onChange={rounds => { onLotteryChange(rounds); setLotteryDirty(true); }} onSaved={() => { setLotteryDirty(false); moduleLoads.logs.invalidate(); }} /></div>}
       </AdminLayout>
-      {(productFormOpen || editingProductRow) && <ProductFormDrawer key={editingProductRow?.id ?? "new-product"} rows={productRows} initialRow={editingProductRow ?? undefined} activityStarted={activityStarted} activityId={Number(activityId)} scopeEnabled={productImportCompleted && (whitelistImportCompleted || Boolean(moduleContext?.whitelistPublished))} onClose={() => { setProductFormOpen(false); setEditingProductRow(null); }} onSave={saveProductRow} />}
+      {(productFormOpen || editingProductRow) && <ProductFormDrawer key={editingProductRow?.id ?? "new-product"} rows={productRows} initialRow={editingProductRow ?? undefined} activityStarted={activityStarted} activityId={Number(activityId)} tiersEditable={productImportCompleted} scopeEnabled={productImportCompleted && (whitelistImportCompleted || Boolean(moduleContext?.whitelistPublished))} onClose={() => { setProductFormOpen(false); setEditingProductRow(null); }} onSave={saveProductRow} />}
       {(whitelistFormOpen || editingWhitelistRow) && <WhitelistFormDrawer key={editingWhitelistRow?.id ?? "new-whitelist"} rows={whitelistRows} initialRow={editingWhitelistRow ?? undefined} customerTypeMode={whitelistMode} activityStarted={activityStarted} onClose={() => { setWhitelistFormOpen(false); setEditingWhitelistRow(null); }} onSave={saveWhitelistRow} />}
       {(attendanceFormOpen || editingAttendanceRow) && !activityClosed && <AttendanceFormDrawer key={editingAttendanceRow?.id ?? "new-attendance"} rows={pendingAttendanceImport?.rows ?? attendanceRows} initialRow={editingAttendanceRow ?? undefined} onClose={() => { setAttendanceFormOpen(false); setEditingAttendanceRow(null); }} onSave={saveAttendanceRow} />}
       {adminActivities.newActivityOpen && <NewActivityDrawer activities={adminActivities} />}

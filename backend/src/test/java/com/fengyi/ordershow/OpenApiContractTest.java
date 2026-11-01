@@ -28,7 +28,16 @@ class OpenApiContractTest {
     Map<String, Object> paths = (Map<String, Object>) document.get("paths");
     assertThat(paths).containsKeys(
         "/admin/members", "/admin/members/{id}",
+        "/public/activities/current",
+        "/public/activities/{activityCode}/events",
+        "/public/activities/{activityCode}/verify-phone",
+        "/public/activities/{activityCode}/lottery",
+        "/admin/activities/{activityId}",
         "/admin/activities/{activityId}/module-context",
+        "/admin/activities/{activityId}/overview",
+        "/screen/activities/{activityCode}/ranking",
+        "/screen/activities/{activityCode}/dashboard",
+        "/screen/activities/{activityCode}/reports/{reportCode}",
         "/admin/activities/{activityId}/orders/customer-options",
         "/admin/activities/{activityId}/orders/product-options",
         "/admin/activities/{activityId}/orders",
@@ -60,5 +69,6 @@ class OpenApiContractTest {
     assertThat(orderCollection).containsKeys("get", "post");
     assertThat(orderResource).containsKeys("get", "put");
     assertThat(paths).doesNotContainKey("/admin/activities/{activityId}/customers/{customerId}/status");
+    assertThat(paths).doesNotContainKey("/public/activities/{activityCode}");
   }
 }

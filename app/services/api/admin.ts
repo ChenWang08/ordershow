@@ -14,8 +14,8 @@ export type AdminUser = {
   mustChangePassword: boolean; lastLoginAt?: string | null; lockVersion: number;
 };
 
-export async function loadAdminDepartments() {
-  return (await api<Envelope<AdminDepartment[]>>("/admin/departments")).data;
+export async function loadAdminDepartments(signal?: AbortSignal) {
+  return (await api<Envelope<AdminDepartment[]>>("/admin/departments", { signal })).data;
 }
 
 export async function createAdminDepartment(input: { name: string; username: string; password: string }) {
@@ -30,8 +30,8 @@ export async function updateAdminDepartment(id: number, changes: { name?: string
   }, "admin")).data;
 }
 
-export async function loadAdminUsers() {
-  return (await api<Envelope<AdminUser[]>>("/admin/users")).data;
+export async function loadAdminUsers(signal?: AbortSignal) {
+  return (await api<Envelope<AdminUser[]>>("/admin/users", { signal })).data;
 }
 
 export async function createDepartmentUser(departmentId: number, input: { username: string; password: string }) {

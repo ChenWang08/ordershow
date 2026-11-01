@@ -7,13 +7,19 @@ import { positiveProductNumber, productCompletenessStatus } from "../../../domai
 import { useDrawerClose } from "../../../components/useDrawerClose";
 import { createImportRowId, productImportRowsConflict, type ProductImportRow } from "../../../domain/import-domain";
 import { ProductImageEditor } from "../products/ProductImageEditor";
+import { PriceTierEditor } from "./PriceTierEditor";
+import { editablePriceTiers, priceTierInputErrors } from "../../../domain/tier-pricing-form";
 import { ProductScopeEditor } from "./ProductScopeEditor";
 import "./product-scope.css";
 
-export function ProductFormDrawer({ rows, initialRow, activityStarted = false, activityId, scopeEnabled, onClose, onSave }: { rows: ProductImportRow[]; initialRow?: ProductImportRow; activityStarted?: boolean; activityId: number; scopeEnabled: boolean; onClose: () => void; onSave: (row: ProductImportRow, reason?: string) => Promise<DrawerSaveResult> }) {
+export function ProductFormDrawer({ rows, initialRow, activityStarted = false, activityId, scopeEnabled, tiersEditable = true, onClose, onSave }: { rows: ProductImportRow[]; initialRow?: ProductImportRow; activityStarted?: boolean; activityId: number; scopeEnabled: boolean; tiersEditable?: boolean; onClose: () => void; onSave: (row: ProductImportRow, reason?: string) => Promise<DrawerSaveResult> }) {
   const isEditing = Boolean(initialRow);
-  const [form, setForm] = useState<ProductImportRow>(() => initialRow ? { ...initialRow, priceTierMinQuantity: initialRow.priceTierMinQuantity ?? "", priceTierCasePrice: initialRow.priceTierCasePrice ?? "", priceTierPricingMode: initialRow.priceTierPricingMode ?? "WHOLE_ORDER" } : { id: createImportRowId("product"), sequence: 0, customerType: "", rebate: "", category: "", line: "", materialCode: "", materialName: "", description: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER", conversion: "", gift: "否", branchScope: "", status: "有效", source: "manual" });
-  const [tierEnabled, setTierEnabled] = useState(() => Boolean(initialRow?.priceTierMinQuantity || initialRow?.priceTierCasePrice));
+  const [form, setForm] = useState<ProductImportRow>(() => {
+    const row: ProductImportRow = initialRow ? { ...initialRow, priceTierMinQuantity: initialRow.priceTierMinQuantity ?? "", priceTierCasePrice: initialRow.priceTierCasePrice ?? "", priceTierPricingMode: initialRow.priceTierPricingMode ?? "WHOLE_ORDER" } : { id: createImportRowId("product"), sequence: 0, customerType: "", rebate: "", category: "", line: "", materialCode: "", materialName: "", description: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER", conversion: "", gift: "否", branchScope: "", status: "有效", source: "manual" };
+    const existing = row.priceTiers ?? (row.priceTierMinQuantity || row.priceTierCasePrice ? [{ minQuantity: row.priceTierMinQuantity, casePrice: row.priceTierCasePrice }] : []);
+    return { ...row, priceTiers: existing.length ? editablePriceTiers(row.casePrice, existing) : [] };
+  });
+  const [tierEnabled, setTierEnabled] = useState(() => Boolean(initialRow?.priceTiers?.length || initialRow?.priceTierMinQuantity || initialRow?.priceTierCasePrice));
   const [editReason, setEditReason] = useState("");
   const { saving, saveError, requiresReload, save } = useDrawerSave(onClose);
   const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value, ...(field === "customerType" && scopeEnabled ? { dealerScopeEdited: true } : {}) }));
@@ -22,10 +28,13 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
   const conversionValid = positiveProductNumber(form.conversion) !== null;
   const automaticStatus = !form.materialName.trim() || duplicateProductIdentity ? "待核对" : productCompletenessStatus(form.casePrice, form.conversion);
   const basePrice = positiveProductNumber(form.casePrice) ?? 0;
-  const tierMinQuantity = Number(form.priceTierMinQuantity);
-  const tierCasePrice = Number(form.priceTierCasePrice);
-  const tierValid = !tierEnabled || (Number.isInteger(tierMinQuantity) && tierMinQuantity >= 2 && tierMinQuantity <= 999999
-    && Number.isFinite(tierCasePrice) && tierCasePrice > 0 && tierCasePrice < basePrice);
+  const tiers = form.priceTiers ?? (form.priceTierMinQuantity || form.priceTierCasePrice ? [{ minQuantity: form.priceTierMinQuantity, casePrice: form.priceTierCasePrice }] : []);
+  const tierValid = !tierEnabled || (tiers.length > 0 && tiers.length <= 101 && !priceTierInputErrors(basePrice, tiers).some(Boolean));
+  const changeTiers = (next: typeof tiers) => {
+    const discount = next.find(tier => Number(tier.minQuantity) > 1);
+    setForm(current => ({ ...current, priceTiers: next, priceTierMinQuantity: discount?.minQuantity ?? "", priceTierCasePrice: discount?.casePrice ?? "" }));
+    if (!next.length) setTierEnabled(false);
+  };
   const scopeValid = !form.dealerScopeEdited || (form.dealerScope ?? []).every(s => s.members.length > 0 && s.members.every(m => m.active && (!form.customerType || m.customerType === (form.customerType === "综合" ? "GENERAL" : "SPECIAL"))));
   const canSave = form.materialName.trim() !== "" && tierValid && !duplicateProductIdentity && scopeValid && (!activityStarted || editReason.trim() !== "");
   const requestClose = useDrawerClose({ form: { ...form, dealerScopeEdited: undefined, dealerScope: form.dealerScope ?? [] }, tierEnabled, editReason }, onClose, saving);
@@ -49,9 +58,13 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
           <label><span>规格</span><input value={form.spec} onChange={(e) => update("spec", e.target.value)} /></label>
           <label><span>箱规</span><input value={form.casePack} onChange={(e) => update("casePack", e.target.value)} /></label>
           <label><span>元/瓶</span><input inputMode="decimal" value={form.unitPrice} onChange={(e) => update("unitPrice", e.target.value)} /></label>
-          <label><span>元/箱</span><input inputMode="decimal" value={form.casePrice} onChange={(e) => update("casePrice", e.target.value)} /></label>
-          <label className="wide-field price-tier-toggle"><span>阶梯价格（选填）</span><span><input type="checkbox" checked={tierEnabled} onChange={(e) => { setTierEnabled(e.target.checked); if (!e.target.checked) setForm((current) => ({ ...current, priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER" })); }} /> 设置阶梯优惠</span><small>可选择达到门槛后整批降价，或仅从门槛箱开始对超出部分降价</small></label>
-          {tierEnabled && <><label><span>优惠起订箱数 *</span><input inputMode="numeric" type="number" min="2" max="999999" value={form.priceTierMinQuantity} onChange={(e) => update("priceTierMinQuantity", e.target.value)} placeholder="例如：1500" /><small className={!Number.isInteger(tierMinQuantity) || tierMinQuantity < 2 || tierMinQuantity > 999999 ? "field-error" : ""}>请输入 2～999999 的整数箱数</small></label><label><span>阶梯优惠箱价 *</span><input inputMode="decimal" value={form.priceTierCasePrice} onChange={(e) => update("priceTierCasePrice", e.target.value)} placeholder="例如：134" /><small className={!Number.isFinite(tierCasePrice) || tierCasePrice <= 0 || tierCasePrice >= basePrice ? "field-error" : ""}>必须大于 0 且低于基础箱价 {Number.isFinite(basePrice) ? basePrice : "—"} 元</small></label><label className="wide-field"><span>计价模式 *</span><select value={form.priceTierPricingMode} onChange={(e) => update("priceTierPricingMode", e.target.value)}><option value="WHOLE_ORDER">达量整批优惠（达到门槛后全部箱数按优惠价）</option><option value="INCREMENTAL">超出部分优惠（从门槛箱开始按优惠价）</option></select><small>{form.priceTierPricingMode === "INCREMENTAL" ? `例如满 ${form.priceTierMinQuantity || "1500"} 箱：前 ${Math.max(1, (tierMinQuantity || 1500) - 1)} 箱按基础价，第 ${form.priceTierMinQuantity || "1500"} 箱起按优惠价` : "达到门槛后，本商品本次订购的全部箱数按优惠价"}</small></label></>}
+          <label><span>元/箱</span><input inputMode="decimal" value={form.casePrice} onChange={(e) => update("casePrice", e.target.value)} />{tierEnabled && <small>未开启阶梯价格时使用；已开启时按下方阶梯价格计价。</small>}</label>
+          <label className="wide-field price-tier-toggle"><span>阶梯价格（选填）</span><span><input type="checkbox" disabled={!tiersEditable} checked={tierEnabled} onChange={event => {
+            setTierEnabled(event.target.checked);
+            if (event.target.checked) changeTiers(tiers.length ? tiers : editablePriceTiers(form.casePrice, [{ minQuantity: "", casePrice: "" }]));
+            else setForm(current => ({ ...current, priceTiers: [], priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER" }));
+          }} /> 设置阶梯优惠</span><small>{tiersEditable ? "支持多档达量整批优惠和超出部分优惠；起始箱数包含门槛箱。" : "商品导入成功后，可在编辑页面手动设置多级阶梯价格。"}</small></label>
+          {tierEnabled && tiersEditable && <PriceTierEditor basePrice={basePrice} tiers={tiers} mode={form.priceTierPricingMode} onChange={changeTiers} onModeChange={mode => update("priceTierPricingMode", mode)} />}
           <label><span>每吨箱数（箱/吨）</span><input inputMode="decimal" value={form.conversion} onChange={(e) => update("conversion", e.target.value)} /><small className={!conversionValid ? "field-error" : ""}>Excel 原列名：吨箱转换系数；统计时按订货箱数 ÷ 每吨箱数计算吨数</small></label>
           <label><span>是否礼盒</span><select value={form.gift} onChange={(e) => update("gift", e.target.value)}><option>否</option><option>是</option></select></label>
           <ProductScopeEditor activityId={activityId} form={form} enabled={scopeEnabled} onChange={(branchScope, dealerScope) => setForm(current => ({ ...current, branchScope, dealerScope, dealerScopeEdited: scopeEnabled }))} />
@@ -59,7 +72,7 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
         </div>
         {activityStarted && <label className="drawer-form-reason"><span>{isEditing ? "修改原因（必填）" : "新增商品原因"}</span><input maxLength={500} value={editReason} onChange={e => setEditReason(e.target.value)} placeholder="请填写本次商品或下单范围修改原因" /></label>}
         <p className="drawer-form-note">带 * 的字段为必填项；{activityStarted ? "价格修改保存后，相关有效订单自动更新。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
-        <footer><div className="drawer-save-error">{saveError && <small className="field-error" role="alert">{saveError}</small>}{requiresReload && <button type="button" onClick={() => window.location.reload()}>刷新列表</button>}</div><button disabled={saving} onClick={requestClose}>取消</button><button className="admin-primary" disabled={!canSave || saving || requiresReload} onClick={() => save(() => onSave({ ...form, status: automaticStatus, sequence: nextSequence, manuallyEdited: true }, editReason.trim()))}>{saving ? "保存中…" : isEditing ? "保存修改" : "添加商品"}</button></footer>
+        <footer><div className="drawer-save-error">{saveError && <small className="field-error" role="alert">{saveError}</small>}{requiresReload && <button type="button" onClick={() => window.location.reload()}>刷新列表</button>}</div><button disabled={saving} onClick={requestClose}>取消</button><button className="admin-primary" disabled={!canSave || saving || requiresReload} onClick={() => save(() => onSave({ ...form, priceTiers: tierEnabled ? tiers : [], status: automaticStatus, sequence: nextSequence, manuallyEdited: true }, editReason.trim()))}>{saving ? "保存中…" : isEditing ? "保存修改" : "添加商品"}</button></footer>
       </aside>
     </div>
   );

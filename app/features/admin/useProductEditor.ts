@@ -58,6 +58,7 @@ export function useProductEditor({
       casePrice: positiveProductNumber(nextRow.casePrice), tonCaseFactor: positiveProductNumber(nextRow.conversion), giftBox: nextRow.gift === "是",
       priceTierMinQuantity: numeric(nextRow.priceTierMinQuantity), priceTierCasePrice: numeric(nextRow.priceTierCasePrice),
       priceTierPricingMode: nextRow.priceTierPricingMode,
+      ...(productImportCompleted && nextRow.priceTiers ? { priceTiers: nextRow.priceTiers.map(tier => ({ minQuantity: Number(tier.minQuantity), casePrice: Number(tier.casePrice) })) } : {}),
       visible: true, orderable: positiveProductNumber(nextRow.casePrice) !== null, branchScope: nextRow.branchScope, reason,
       ...(nextRow.dealerScopeEdited ? { dealerScope: (nextRow.dealerScope ?? []).map(s => ({ branchName: s.branchName, customerIds: s.members.map(m => m.customerId) })) } : {}),
     };
@@ -163,6 +164,7 @@ export function useProductEditor({
         }
       }
       if (activityStarted) recordOperation("活动开始后改单条商品", nextRow.materialName, `修改前：物料代码 ${editingProductRow.materialCode || "—"}、名称 ${editingProductRow.materialName || "—"}、元/箱 ${editingProductRow.casePrice || "—"}、分公司 ${editingProductRow.branchScope || "全部"}、状态 ${editingProductRow.status}；修改后：物料代码 ${nextRow.materialCode || "—"}、名称 ${nextRow.materialName || "—"}、元/箱 ${nextRow.casePrice || "—"}、分公司 ${nextRow.branchScope || "全部"}、状态 ${nextRow.status}；原因：${reason || "—"}。`);
+      if (!activityStarted) recordOperation("修改商品", nextRow.materialName, "已保存当前商品资料。");
       setActionNotice("保存成功");
       return { ok: true };
     }

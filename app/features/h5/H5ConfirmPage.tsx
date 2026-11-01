@@ -3,7 +3,7 @@
 import type { H5OrderModel } from "./useH5OrderFlow";
 import { ProductArt } from "./ProductArt";
 import { money } from "../shared/utils";
-import { priceBreakdown, tierPriceLabel } from "./h5-domain";
+import { priceBreakdown, tierPriceLabel, unitPriceText } from "./h5-domain";
 
 export function H5ConfirmPage({ model }: { model: H5OrderModel }) {
   const { requiresReview, pendingSubmission, runtimeBusy, runtimeMessage, orderNeedsRefresh, setStep, setPreviewProduct, orderStatus, customerOrderReadOnly, quantities, visibleStep, selectedLineGroups, selectedLineSummaries, totalAmount, identityBranch, identityLabel, dealerName, submitOrder, reloadLatestOrder } = model;
@@ -19,7 +19,7 @@ export function H5ConfirmPage({ model }: { model: H5OrderModel }) {
                   {group.items.map(({ product, quantity }) => (
                   <div key={product.id}>
                     <ProductArt atlas={product.atlas} imageUrl={product.imageUrl} alt={product.name} />
-                    <p><button type="button" className="order-product-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button><small className="product-line-label">项目组：{group.line}</small><span>¥{money(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span></p>
+                    <p><button type="button" className="order-product-name-button" onClick={() => setPreviewProduct(product)}>{product.name}</button><small className="product-line-label">项目组：{group.line}</small><span>¥{unitPriceText(priceBreakdown(product, quantities[product.id]).displayPrice)}/箱{tierPriceLabel(product, quantities[product.id]) ? ` · ${tierPriceLabel(product, quantities[product.id])}` : ""}</span></p>
                     <strong>× {quantity}</strong>
                   </div>
                   ))}

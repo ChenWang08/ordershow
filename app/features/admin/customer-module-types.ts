@@ -12,6 +12,7 @@ export type CustomerModuleOptions = {
 };
 
 export type CustomerImportOptions = CustomerModuleOptions & {
+  importWaitOptions?: () => import("../../api").ImportWaitOptions;
   serverImportBlocking: ImportTaskIds;
   setServerImportTasks: Dispatch<SetStateAction<ImportTaskIds>>;
   setServerImportBlocking: Dispatch<SetStateAction<ImportTaskIds>>;

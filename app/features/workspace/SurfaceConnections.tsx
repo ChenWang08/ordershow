@@ -10,10 +10,10 @@ export function AdminSurface() {
 }
 
 export function H5Surface() {
-  const { activityStatus, runtimeActivity } = useActivityWorkspace();
+  const { activityStatus, runtimeActivity, runtimeMessage } = useActivityWorkspace();
   const { products, whitelist } = useImportWorkspace();
   return <H5Ordering key={runtimeActivity?.code ?? "loading"} activityStatus={activityStatus} importedRows={products.completed ? products.rows : null}
-    importedWhitelistRows={whitelist.completed ? whitelist.rows : null} runtimeActivity={runtimeActivity} />;
+    importedWhitelistRows={whitelist.completed ? whitelist.rows : null} runtimeActivity={runtimeActivity} activitySyncMessage={runtimeMessage} />;
 }
 
 export function LotterySurface() {

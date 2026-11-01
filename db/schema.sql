@@ -352,6 +352,7 @@ CREATE TABLE activity_customer (
   UNIQUE KEY uk_activity_customer_phone (activity_id, data_version_id, customer_type, phone_lookup_hash),
   KEY idx_activity_customer_filter (activity_id, customer_type, is_active, region_code, branch_name),
   KEY idx_activity_customer_dealer_name (activity_id, dealer_full_name),
+  KEY idx_ac_activity_phone (activity_id, phone_lookup_hash, is_active),
   CONSTRAINT fk_activity_customer_activity FOREIGN KEY (activity_id) REFERENCES activity (id),
   CONSTRAINT fk_activity_customer_customer FOREIGN KEY (customer_id) REFERENCES customer (id),
   CONSTRAINT fk_activity_customer_import FOREIGN KEY (source_import_task_id) REFERENCES import_task (id),
@@ -466,9 +467,9 @@ CREATE TABLE activity_product_price_tier (
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
-  UNIQUE KEY uk_product_price_tier (activity_product_id),
+  UNIQUE KEY uk_product_price_tier (activity_product_id, min_quantity),
   CONSTRAINT fk_product_price_tier_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
-  CONSTRAINT ck_product_price_tier_values CHECK (min_quantity >= 2 AND case_price > 0),
+  CONSTRAINT ck_product_price_tier_values CHECK (min_quantity >= 1 AND case_price > 0),
   CONSTRAINT ck_product_price_tier_mode CHECK (pricing_mode IN ('WHOLE_ORDER', 'INCREMENTAL'))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
@@ -636,11 +637,13 @@ CREATE TABLE order_item (
   tier_price_quantity BIGINT UNSIGNED NULL,
   pricing_mode VARCHAR(20) NULL,
   line_amount DECIMAL(18,2) NOT NULL,
+  pricing_details JSON NULL,
   ton_case_factor DECIMAL(18,8) NULL,
   line_tons DECIMAL(18,6) NULL,
   updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
   UNIQUE KEY uk_order_item_product (order_id, activity_product_id),
+  KEY idx_order_item_product_order (activity_product_id, order_id),
   UNIQUE KEY uk_order_item_line (order_id, line_no),
   CONSTRAINT fk_order_item_order FOREIGN KEY (order_id) REFERENCES customer_order (id),
   CONSTRAINT fk_order_item_product FOREIGN KEY (activity_product_id) REFERENCES activity_product (id),
@@ -709,6 +712,7 @@ CREATE TABLE order_version_item (
   tier_price_quantity BIGINT UNSIGNED NULL,
   pricing_mode VARCHAR(20) NULL,
   line_amount DECIMAL(18,2) NOT NULL,
+  pricing_details JSON NULL,
   ton_case_factor DECIMAL(18,8) NULL,
   line_tons DECIMAL(18,6) NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
@@ -835,6 +839,11 @@ CREATE TABLE lottery_round (
   qualification_metric VARCHAR(20) NOT NULL DEFAULT 'AMOUNT',
   probability_mode VARCHAR(32) NOT NULL DEFAULT 'EQUAL',
   minimum_order_box_count BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  minimum_order_tons DECIMAL(18,6) NOT NULL DEFAULT 0,
+  product_line VARCHAR(200) NULL,
+  product_line_unassigned BOOLEAN NOT NULL DEFAULT FALSE,
+  varieties_json JSON NULL,
+  include_unspecified_variety BOOLEAN NOT NULL DEFAULT FALSE,
   qualification_cutoff_at DATETIME(3) NULL,
   exclude_previous_winners BOOLEAN NOT NULL DEFAULT TRUE,
   display_name_type VARCHAR(20) NOT NULL DEFAULT 'SHORT_NAME',
@@ -862,8 +871,10 @@ CREATE TABLE lottery_round (
   CONSTRAINT fk_lottery_round_reset_by FOREIGN KEY (reset_by) REFERENCES admin_user (id),
   CONSTRAINT ck_lottery_round_scope CHECK (candidate_scope IN ('ALL_CUSTOMERS', 'ATTENDEES', 'VALID_ORDERS')),
   CONSTRAINT ck_lottery_round_customer CHECK (customer_type IN ('ALL', 'GENERAL', 'SPECIAL')),
-  CONSTRAINT ck_lottery_round_qualification_metric CHECK (qualification_metric IN ('AMOUNT', 'BOX_COUNT')),
-  CONSTRAINT ck_lottery_round_probability_mode CHECK (probability_mode IN ('EQUAL', 'ORDER_AMOUNT_WEIGHTED')),
+  CONSTRAINT ck_lottery_round_qualification_metric CHECK (qualification_metric IN ('AMOUNT', 'BOX_COUNT', 'TONS')),
+  CONSTRAINT ck_lottery_round_tons CHECK (minimum_order_tons >= 0),
+  CONSTRAINT ck_lottery_round_probability_mode CHECK (probability_mode IN ('EQUAL', 'ORDER_AMOUNT_WEIGHTED', 'ORDER_BOX_COUNT_WEIGHTED', 'ORDER_TONS_WEIGHTED')),
+  CONSTRAINT ck_lottery_round_weight_metric CHECK ((probability_mode <> 'ORDER_BOX_COUNT_WEIGHTED' OR qualification_metric = 'BOX_COUNT') AND (probability_mode <> 'ORDER_TONS_WEIGHTED' OR qualification_metric = 'TONS')),
   CONSTRAINT ck_lottery_round_status CHECK (status IN ('DRAFT', 'READY', 'DRAWING', 'DRAWN', 'COMPLETED', 'RESET')),
   CONSTRAINT ck_lottery_round_count CHECK (winner_count > 0 AND minimum_order_amount >= 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
@@ -911,6 +922,8 @@ CREATE TABLE lottery_candidate_snapshot (
   qualifying_order_id BIGINT UNSIGNED NULL,
   qualifying_order_amount DECIMAL(18,2) NULL,
   qualifying_order_box_count BIGINT UNSIGNED NULL,
+  qualifying_order_tons DECIMAL(18,6) NULL,
+  missing_tonnage_items INT UNSIGNED NOT NULL DEFAULT 0,
   random_sort_key BINARY(32) NOT NULL,
   created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
   PRIMARY KEY (id),
@@ -1091,3 +1104,45 @@ CREATE TABLE order_dashboard_product_line_stat (
 -- V041 drops the per-row order_item triggers. When the summary reader is enabled, DashboardSummaryStore.refresh
 -- marks this order dirty once at the end of the business transaction and rebuilds. Raw SQL that changes order_item
 -- does not mark the order dirty; use DashboardSummaryCommand (check / rebuild / repair).
+
+-- History stores the complete filterable basis, independently of displayed TopN results.
+CREATE TABLE activity_ranking_snapshot (
+  activity_id BIGINT UNSIGNED NOT NULL PRIMARY KEY,
+  options_json JSON NOT NULL,
+  data_version BIGINT NOT NULL,
+  generated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  CONSTRAINT fk_ranking_snapshot_activity FOREIGN KEY (activity_id) REFERENCES activity(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE activity_ranking_order_snapshot (
+  activity_id BIGINT UNSIGNED NOT NULL,
+  id BIGINT UNSIGNED NOT NULL,
+  customer_type VARCHAR(16) NOT NULL,
+  region_code VARCHAR(64) NULL,
+  dealer_full_name_snapshot VARCHAR(255) NOT NULL,
+  branch_name_snapshot VARCHAR(200) NULL,
+  total_amount DECIMAL(18,2) NOT NULL,
+  total_quantity BIGINT UNSIGNED NOT NULL,
+  last_submitted_at DATETIME(3) NOT NULL,
+  all_tons DECIMAL(38,6) NULL,
+  eligible_tons DECIMAL(38,6) NULL,
+  PRIMARY KEY (activity_id, id),
+  KEY idx_ranking_snapshot_customer (activity_id, customer_type, region_code),
+  KEY idx_ranking_snapshot_region (activity_id, region_code),
+  CONSTRAINT fk_ranking_snapshot_order_activity FOREIGN KEY (activity_id) REFERENCES activity_ranking_snapshot(activity_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE activity_ranking_product_snapshot (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  activity_id BIGINT UNSIGNED NOT NULL,
+  order_id BIGINT UNSIGNED NOT NULL,
+  product_line VARCHAR(200) NULL,
+  variety_name VARCHAR(100) NULL,
+  amount DECIMAL(38,2) NOT NULL,
+  quantity DECIMAL(38,0) NOT NULL,
+  all_tons DECIMAL(38,6) NULL,
+  eligible_tons DECIMAL(38,6) NULL,
+  KEY idx_ranking_snapshot_product (activity_id, order_id, product_line, variety_name),
+  KEY idx_ranking_snapshot_variety (activity_id, order_id, variety_name),
+  CONSTRAINT fk_ranking_snapshot_product_activity FOREIGN KEY (activity_id) REFERENCES activity_ranking_snapshot(activity_id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

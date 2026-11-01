@@ -1,10 +1,9 @@
 "use client";
 
 import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
-import { ApiError, cancelImport, confirmImport, waitForImport, uploadImport, loadImportRows, loadAdminAttendees, type ImportStagingRow } from "../../api";
+import { ApiError, cancelImport, confirmImport, waitForImport, uploadImport, loadImportRows, type ImportStagingRow } from "../../api";
 import { bindWhitelistStaging, cloneWhitelistRows, prepareWhitelistImportRows, summarizeWhitelistRows, type WhitelistRow, type AttendanceRow, type AttendanceImportDraft } from "../../domain/import-domain";
 import { parseWhitelistWorkbook } from "./admin-utils";
-import { mapAdminAttendanceRows } from "./attendance-utils";
 import type { CustomerImportOptions } from "./customer-module-types";
 
 type WhitelistImportOptions = CustomerImportOptions & {
@@ -22,9 +21,8 @@ type WhitelistImportOptions = CustomerImportOptions & {
 // The admin shell owns mounting so switching tabs retains the current preview.
 export function useWhitelistImport({
   activityId, activityStatus, whitelistRows, setWhitelistRows, whitelistImportHasRun,
-  setWhitelistImportCompleted, onWhitelistImportCommitted, attendanceRows, setAttendanceRows,
-  pendingAttendanceImport, serverImportTasks, serverImportBlocking, setServerImportTasks,
-  setServerImportBlocking, setActionNotice, recordOperation, refreshServerImportPreview, refreshProductScopes,
+  setWhitelistImportCompleted, onWhitelistImportCommitted, serverImportTasks, serverImportBlocking, setServerImportTasks,
+  setServerImportBlocking, setActionNotice, recordOperation, refreshProductScopes, importWaitOptions,
 }: WhitelistImportOptions) {
   const activityPublished = activityStatus !== "draft";
   const [whitelistFileName, setWhitelistFileName] = useState("");
@@ -82,22 +80,15 @@ export function useWhitelistImport({
     }
     const taskId = serverImportTasks.WHITELIST;
     if (taskId) {
-      try { await confirmImport(Number(activityId), taskId); await waitForImport(Number(activityId), taskId); }
+      try { await confirmImport(Number(activityId), taskId); await waitForImport(Number(activityId), taskId, importWaitOptions?.()); }
       catch (error) { setActionNotice(error instanceof ApiError ? error.message : "白名单导入发布失败，请处理异常数据后重试。"); return; }
     }
     setPendingWhitelistRollbackRows(null);
     setWhitelistImportCompleted(true);
     onWhitelistImportCommitted();
     await refreshProductScopes?.();
-    let refreshedAttendance = attendanceRows;
-    if (taskId && attendanceRows.length > 0) {
-      refreshedAttendance = mapAdminAttendanceRows(await loadAdminAttendees(Number(activityId)));
-      setAttendanceRows(refreshedAttendance);
-    }
-    if (pendingAttendanceImport && serverImportTasks.ATTENDANCE) await refreshServerImportPreview("ATTENDANCE");
-    const linkedAttendance = refreshedAttendance.filter((row) => row.lotteryEligible).length;
     recordOperation("替换白名单 Excel", whitelistFileName || "客户白名单 Excel", `共 ${whitelistImportStats.total} 名；有效 ${whitelistImportStats.valid} 名，待处理 ${whitelistImportStats.pending} 名。`);
-    setActionNotice(`白名单已替换：共 ${whitelistImportStats.total} 名，有效 ${whitelistImportStats.valid} 名；当前到场已重新关联 ${linkedAttendance} 名。`);
+    setActionNotice(`白名单已替换：共 ${whitelistImportStats.total} 名，有效 ${whitelistImportStats.valid} 名；到场关联已在服务器更新，打开现场到场模块时读取最新结果。`);
   };
   const handleWhitelistFile = async (file: File) => {
     if (activityPublished) {

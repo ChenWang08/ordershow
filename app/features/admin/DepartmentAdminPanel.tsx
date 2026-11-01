@@ -1,9 +1,10 @@
 "use client";
 
+import { useLazyAdminQuery } from "./useLazyAdminQuery";
 import { formatBeijingTime } from "../shared/time";
 
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ApiError, createAdminDepartment, createDepartmentUser, loadAdminDepartments, loadAdminUsers,
   updateAdminDepartment, updateAdminUser, type AdminDepartment, type AdminUser,
@@ -24,7 +25,7 @@ function suggestDepartmentCode(name: string) {
 
 type AccountTarget = Pick<AdminDepartment, "id" | "name" | "code">;
 
-export function DepartmentAdminPanel() {
+export function DepartmentAdminPanel({ active = true, onDirtyChange }: { active?: boolean; onDirtyChange?: (dirty: boolean) => void } = {}) {
   const [departments, setDepartments] = useState<AdminDepartment[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [departmentName, setDepartmentName] = useState("");
@@ -35,23 +36,12 @@ export function DepartmentAdminPanel() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
-  const refresh = useCallback(async () => {
-    const [nextDepartments, nextUsers] = await Promise.all([loadAdminDepartments(), loadAdminUsers()]);
-    setDepartments(nextDepartments);
-    setUsers(nextUsers.filter(user => user.roleCode !== "DEPARTMENT_MEMBER"));
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    void Promise.all([loadAdminDepartments(), loadAdminUsers()]).then(([nextDepartments, nextUsers]) => {
-      if (!active) return;
-      setDepartments(nextDepartments);
-      setUsers(nextUsers.filter(user => user.roleCode !== "DEPARTMENT_MEMBER"));
-    }).catch((reason) => {
-      if (active) setError(reason instanceof ApiError ? reason.message : "部门数据加载失败");
-    });
-    return () => { active = false; };
-  }, []);
+  const dirty = Boolean(departmentName || username || password);
+  const query = useLazyAdminQuery("departments", active, signal => Promise.all([loadAdminDepartments(signal), loadAdminUsers(signal)]), ([nextDepartments, nextUsers]) => {
+    setDepartments(nextDepartments); setUsers(nextUsers.filter(user => user.roleCode !== "DEPARTMENT_MEMBER"));
+  }, dirty || busy);
+  const refresh = query.refresh;
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   const departmentCodePreview = useMemo(
     () => accountTarget?.code || suggestDepartmentCode(departmentName),
@@ -68,6 +58,7 @@ export function DepartmentAdminPanel() {
     setNotice("");
     try {
       const result = await operation();
+      query.invalidate();
       await refresh();
       setNotice(typeof success === "function" ? success(result) : success);
     } catch (reason) {
@@ -165,6 +156,7 @@ export function DepartmentAdminPanel() {
           <p>每个部门绑定一个部门管理员账号，可在“成员管理”中新增成员。部门管理员密码由超级管理员统一设置和重置。</p>
         </div>
       </div>
+      {query.error && <p role="alert">加载失败：{query.error}<button type="button" disabled={query.loading || busy} onClick={() => void refresh()}>重试</button></p>}
       {error && <div className="warning-box"><b>操作失败</b><span>{error}</span></div>}
       {notice && <div className="import-completed-banner"><span className="success-icon">✓</span><p><b>{notice}</b><small>数据权限由后端按部门强制校验。</small></p></div>}
 

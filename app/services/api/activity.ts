@@ -1,20 +1,17 @@
 import { beijingDateTimeToUtc } from "../../features/shared/time";
 import { api } from "./client";
-import { activeActivityPath } from "./context";
-import type { Envelope, RuntimeActivity } from "./types";
-
-export async function loadActivity() { return (await api<Envelope<RuntimeActivity>>(`/public/activities/${activeActivityPath()}`)).data; }
+import type { AdminActivitySummary, Envelope, RuntimeActivity } from "./types";
 
 export async function loadCurrentActivity() {
   return (await api<Envelope<RuntimeActivity>>("/public/activities/current")).data;
 }
 
-export async function loadAdminActivities() {
-  return (await api<Envelope<RuntimeActivity[]>>("/admin/activities")).data;
+export async function loadAdminActivities(signal?: AbortSignal) {
+  return (await api<Envelope<AdminActivitySummary[]>>("/admin/activities?summary=true", { signal })).data;
 }
 
-export async function loadAdminActivity(id: number) {
-  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${id}`)).data;
+export async function loadAdminActivity(id: number, signal?: AbortSignal) {
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${id}`, { signal })).data;
 }
 
 export async function saveActivityBackground(activityId: number, kind: "h5" | "desktop", file: File | null) {

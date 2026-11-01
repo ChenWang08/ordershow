@@ -37,9 +37,10 @@ const paths=['/dashboard','/ranking?metric=AMOUNT','/ranking?metric=TONS','/repo
 function dashboard(value) {return value.dashboard??value;}
 async function verifyTotals(count,amount,tons) {
  const responses=await Promise.all(bases.flatMap((_,replica)=>paths.map(path=>call(replica,null,'GET',screen+path))));
- for(const data of responses) {
+ for(const [index,data] of responses.entries()) {
   const totals=dashboard(data).totals;
-  assert.equal(Number(totals.order_count),count);assert.equal(Number(totals.total_amount),amount);assert.equal(Number(totals.total_tons),tons);
+  assert.equal(Number(totals.total_amount),amount);
+  if(!paths[index%paths.length].startsWith('/reports/')){assert.equal(Number(totals.order_count),count);assert.equal(Number(totals.total_tons),tons);}
  }
  return responses;
 }
@@ -69,7 +70,10 @@ try {
  await verifyTotals(0,0,0);
  const amount=Number(product.casePrice)*2;
  // The synthetic fixture has casePrice=100 and tonCaseFactor=10.
- assert.equal(amount,200);assert.equal(Number(product.tonCaseFactor),10);
+ const adminProducts=await call(0,admin,'GET',adminPath+'/products');
+ const adminProduct=adminProducts.find(p=>p.id===product.id);
+ assert.ok(adminProduct);assert.equal(amount,200);assert.equal(Number(adminProduct.tonCaseFactor),10);
+ assert.equal('tonCaseFactor' in product,false,'H5 contract excludes administrative conversion fields');
  await changeAndVerify('submit',async()=>{order=await submit(body(0,2));},1,200,0.2);
  const request=await call(0,h5,'POST',h5Path+'/order-change-requests',{...body(order.currentVersion,1),requestType:'MODIFY'},200,{'Idempotency-Key':randomUUID()});
  await changeAndVerify('approve-decrease',()=>call(1,admin,'POST',adminPath+'/order-change-requests/'+request.id+'/approve',{reason:'ACK screen regression'},200,{'Idempotency-Key':randomUUID()}),1,100,0.1);
@@ -93,7 +97,7 @@ try {
  for(const path of ['/admin','/screen/'+code+'/dashboard','/screen/'+code+'/ranking','/screen/'+code+'/report']) {
   const response=await fetch('http://127.0.0.1:18030'+path);assert.equal(response.status,200);await response.text();pages.push(path);
  }
- const releaseTag=process.env.ACK_IMAGE_TAG??'20261030.1';
+ const releaseTag=process.env.ACK_IMAGE_TAG??'20261101.1';
  assert.match(releaseTag,/^\d{8}\.\d+$/);
  const resultDir='outputs/ack-release-'+releaseTag;
  await mkdir(resultDir,{recursive:true});

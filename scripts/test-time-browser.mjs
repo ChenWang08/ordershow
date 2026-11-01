@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readPublicActivity } from "../tests/helpers/public-activity-snapshot.mjs";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 
 assert.equal(process.env.ORDER_SHOW_E2E, "order-show-e2e", "Only the disposable test stack is allowed");
@@ -80,7 +81,7 @@ try {
     const customersResponse = await context.request.get(`${api}/admin/activities/${activity.id}/customers?size=200`);
     const customer = (await customersResponse.json()).data.find(item => item.id === order.activityCustomerId);
     assert.ok(customer);
-    const publicActivity = (await (await context.request.get(`${api}/public/activities/${activity.code}`)).json()).data;
+    const publicActivity = await readPublicActivity(api, activity.code);
     assert.ok(["ACTIVE", "CLOSED"].includes(publicActivity.status), "The fixture must allow H5 verification");
     const h5 = await context.newPage();
     h5.on("pageerror", error => errors.push({ timezoneId, message: error.message }));

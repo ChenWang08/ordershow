@@ -56,6 +56,7 @@ public class ActivityBackgroundService {
           WHERE id = ? AND activity_id = ? AND file_purpose = 'ACTIVITY_BACKGROUND'
           """, previousId, activityId);
     }
+    ActivityInfoChanges.record(jdbc, activityId);
     return activities.byId(activityId);
   }
 

@@ -68,6 +68,7 @@ public class ProductImageService {
             source_type = 'MANUAL', match_status = 'CONFIRMED', created_by = VALUES(created_by)
           """, target.id(), stored.id(), makePrimary, current == null ? 0 : current, adminId);
     }
+    ProductCatalogChanges.products(jdbc, activityId, targets.stream().map(ProductView::id).toList());
     return jdbc.queryForObject("""
         SELECT id, stored_file_id, is_primary, sort_no, source_type, match_status
         FROM product_image WHERE activity_product_id = ? AND stored_file_id = ? AND deleted_at IS NULL
@@ -83,6 +84,7 @@ public class ProductImageService {
     int changed = jdbc.update("UPDATE product_image SET is_primary = COALESCE(?, is_primary), sort_no = COALESCE(?, sort_no) WHERE id = ? AND activity_product_id = ? AND deleted_at IS NULL",
         primary, sortNo, imageId, productId);
     if (changed != 1) throw DomainException.notFound("PRODUCT_IMAGE_NOT_FOUND", "商品图片不存在");
+    ProductCatalogChanges.products(jdbc, activityId, List.of(productId));
   }
 
   public void deleteImage(long activityId, long productId, long imageId) {
@@ -100,6 +102,7 @@ public class ProductImageService {
       }
     }
     ensurePrimaryImages(targets);
+    ProductCatalogChanges.products(jdbc, activityId, targets.stream().map(ProductView::id).toList());
   }
 
   private List<ProductView> sameMaterialNameProducts(long activityId, ProductView product) {
@@ -148,6 +151,7 @@ public class ProductImageService {
           ON DUPLICATE KEY UPDATE deleted_at = NULL, is_primary = TRUE, sort_no = 0, match_status = 'CONFIRMED', created_by = VALUES(created_by)
           """, target.id(), candidate.storedFileId(), adminId);
     }
+    ProductCatalogChanges.products(jdbc, activityId, targets.stream().map(ProductView::id).toList());
   }
 
   public void excludeImageReview(long activityId, long candidateId, long adminId) {
@@ -173,6 +177,7 @@ public class ProductImageService {
   }
 
   public ZipPreview previewZip(long activityId, MultipartFile zip, boolean confirm, long adminId) {
+    if (confirm) requireImageWritable(activityId);
     if (zip.getSize() > 150L * 1024 * 1024) throw DomainException.badRequest("IMAGE_ZIP_TOO_LARGE", "图片 ZIP 不能超过 150MB");
     try {
       return processZip(activityId, null, null, zip.getBytes(), catalog.adminProducts(activityId, null, null, null), confirm, adminId, List.of());
@@ -274,6 +279,7 @@ public class ProductImageService {
       }
       if (images == 0) throw DomainException.unprocessable("IMAGE_ZIP_EMPTY", "ZIP 中没有找到支持的商品图片");
       if (confirm) ensurePrimaryImages(products);
+      if (confirm && versionId == null) ProductCatalogChanges.products(jdbc, activityId, products.stream().map(ProductView::id).toList());
     } catch (DomainException exception) { throw exception; }
     catch (Exception exception) { throw DomainException.unprocessable("IMAGE_ZIP_INVALID", "图片 ZIP 解析失败：" + exception.getMessage()); }
     return new ZipPreview(images, matched, ambiguous, unmatched, matches, confirm);
@@ -326,6 +332,7 @@ public class ProductImageService {
   private static void validateImage(String name, long size) { if (name == null || !isImage(name)) throw DomainException.badRequest("IMAGE_TYPE_INVALID", "仅支持 JPG、PNG、WEBP、GIF、BMP"); if (size > 10L * 1024 * 1024) throw DomainException.badRequest("IMAGE_TOO_LARGE", "单张图片不能超过 10MB"); }
 
   private void requireImageWritable(long activityId) {
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     String status = activities.byId(activityId).status();
     if ("CLOSED".equals(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后商品图片只读");
     if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品图片已锁定，请先撤回发布");

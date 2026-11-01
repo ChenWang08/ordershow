@@ -1,22 +1,23 @@
 import { api } from "./client";
 import type { AdminAttendee, AdminCustomer, Envelope, PageEnvelope } from "./types";
 
-async function loadAllPages<T>(path: string) {
+async function loadAllPages<T>(path: string, signal?: AbortSignal) {
   const rows: T[] = [];
   for (let page = 1; page <= 100; page += 1) {
     const separator = path.includes("?") ? "&" : "?";
-    const response = await api<PageEnvelope<T>>(`${path}${separator}page=${page}&size=200`);
+    if (signal?.aborted) throw new DOMException("已停止读取", "AbortError");
+    const response = await api<PageEnvelope<T>>(`${path}${separator}page=${page}&size=200`, { signal });
     rows.push(...response.data);
     if (page >= response.page.totalPages) break;
   }
   return rows;
 }
-export async function loadAdminCustomers(activityId: number) { return loadAllPages<AdminCustomer>(`/admin/activities/${activityId}/customers`); }
+export async function loadAdminCustomers(activityId: number, signal?: AbortSignal) { return loadAllPages<AdminCustomer>(`/admin/activities/${activityId}/customers`, signal); }
 export async function searchAdminCustomers(activityId: number, keyword: string) {
   const query = new URLSearchParams({ keyword, page: "1", size: "50" });
   return (await api<PageEnvelope<AdminCustomer>>(`/admin/activities/${activityId}/orders/customer-options?${query.toString()}`)).data;
 }
-export async function loadAdminAttendees(activityId: number) { return loadAllPages<AdminAttendee>(`/admin/activities/${activityId}/attendees`); }
+export async function loadAdminAttendees(activityId: number, signal?: AbortSignal) { return loadAllPages<AdminAttendee>(`/admin/activities/${activityId}/attendees`, signal); }
 export async function createAdminCustomer(activityId: number, body: Record<string, unknown>) {
   return (await api<Envelope<AdminCustomer>>(`/admin/activities/${activityId}/customers`, { method: "POST", body: JSON.stringify(body) }, "admin")).data;
 }

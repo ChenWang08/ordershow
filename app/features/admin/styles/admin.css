@@ -351,3 +351,10 @@
 .reopen-drawer .drawer-body textarea { min-height: 96px; resize: vertical; padding: 10px; border: 1px solid #dcd0c8; border-radius: 7px; background: #fff; font: inherit; }
 .reopen-drawer .drawer-body > p { color: #80695c; font-size: 12px; line-height: 1.6; }
 .reopen-drawer .drawer-body > p[role="alert"] { color: #a92321; padding: 10px; background: #fff0ed; border-radius: 7px; }
+
+.admin-refresh-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 16px; padding: 12px 16px; background: #fff; border: 1px solid #e8dfd8; border-radius: 10px; }
+.admin-refresh-bar > span { color: #786b62; font-size: 13px; }
+.admin-refresh-bar > [role="alert"] { flex-basis: 100%; color: #a92321; }
+.admin-refresh-bar button { padding: 8px 12px; border: 1px solid #dfd4cd; border-radius: 6px; cursor: pointer; background: #fff; color: #8b3025; }
+.admin-refresh-bar button:disabled { cursor: wait; opacity: .6; }
+.admin-activity-fields { border: 0; padding: 0; margin: 0; min-width: 0; }

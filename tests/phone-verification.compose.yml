@@ -1,0 +1,34 @@
+name: order-show-phone-test
+services:
+  phone-mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: order_show_phone_test
+      MYSQL_ROOT_PASSWORD: phone_test_only
+    volumes:
+      - phone-test-data:/var/lib/mysql
+    mem_limit: 1g
+    cpus: 2
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-pphone_test_only"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+  phone-tests:
+    image: maven:3.9.11-eclipse-temurin-21
+    working_dir: /workspace
+    environment:
+      ORDER_SHOW_PHONE_TEST: order-show-phone-test
+    volumes:
+      - ../:/workspace
+      - order-show-m2:/root/.m2
+    depends_on:
+      phone-mysql:
+        condition: service_healthy
+    command: ["mvn", "-o", "-f", "backend/pom.xml", "test"]
+    mem_limit: 2g
+    cpus: 2
+volumes:
+  phone-test-data:
+  order-show-m2:
+    external: true

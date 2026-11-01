@@ -47,7 +47,7 @@ for (const [folder, name, fieldLabel, newValue] of [
     const component = loadModule(`app/features/admin/${folder}/${name}.tsx`, {
       react: adapter.react, "../../shared/utils": { normalizePhone: value => value },
       "../products/ProductImageEditor": { ProductImageEditor: () => null },
-      "./ProductScopeEditor": { ProductScopeEditor: () => null }, "./product-scope.css": {},
+      "./ProductScopeEditor": { ProductScopeEditor: () => null }, "./product-scope.css": {}, "./price-tiers.css": {},
     }, { window: { confirm() { prompts++; return accepted; } }, crypto: { randomUUID: () => "test" } })[name];
     const props = { rows: [], activityId: 1, scopeEnabled: false, onClose: () => closes++, onSave: async () => ({ ok: false, message: "手机号重复，请直接编辑原客户" }) };
     let tree;

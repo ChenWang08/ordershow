@@ -1,3 +1,4 @@
+import { calculateTierPrice, legacyTiers, type PricingDetails } from "../../domain/tier-pricing";
 import { formatBeijingTime } from "../../features/shared/time";
 import { ApiError, type AdminCustomer, type AdminOrderSummary, type RuntimeOrder, type RuntimeProduct } from "../../api";
 
@@ -18,6 +19,7 @@ export type OrderVersionItem = {
   tierCasePrice?: string;
   tierMinQuantity?: number;
   tierPriceQuantity?: number;
+  pricingDetails?: PricingDetails;
   pricingMode?: "WHOLE_ORDER" | "INCREMENTAL";
   quantity: number;
   subtotal: string;
@@ -30,13 +32,10 @@ export function estimateLineAmount(product: RuntimeProduct | OrderVersionItem, q
   const tierMin = runtimeProduct ? product.priceTier?.minQuantity : product.tierMinQuantity;
   const tierPriceValue = runtimeProduct ? product.priceTier?.casePrice : product.tierCasePrice;
   const tierPrice = tierPriceValue == null ? null : Number(tierPriceValue);
-  if (tierMin == null || tierPrice == null || !Number.isFinite(tierPrice)) return basePrice * quantity;
-  const mode = runtimeProduct ? product.priceTier?.pricingMode || "WHOLE_ORDER" : product.pricingMode || "WHOLE_ORDER";
-  if (mode === "INCREMENTAL") {
-    const baseQuantity = Math.min(quantity, Math.max(0, tierMin - 1));
-    return basePrice * baseQuantity + tierPrice * Math.max(0, quantity - baseQuantity);
-  }
-  return quantity >= tierMin ? tierPrice * quantity : basePrice * quantity;
+  const tiers = runtimeProduct ? product.priceTier?.tiers ?? legacyTiers(tierMin, tierPrice ?? undefined)
+    : product.pricingDetails?.tiers ?? legacyTiers(tierMin, tierPrice ?? undefined);
+  const mode = runtimeProduct ? product.priceTier?.pricingMode : product.pricingMode;
+  return calculateTierPrice(basePrice, tiers, mode, quantity).amount;
 }
 
 export type OrderVersion = {
@@ -87,6 +86,10 @@ export function formatMoney(value: number) {
   return `¥${Number(value).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function snapshotPrice(value: number) {
+  return Number(value).toFixed(4).replace(/0{1,2}$/, "");
+}
+
 export function customerTypeLabel(customerType: string) {
   return customerType === "SPECIAL" ? "特渠" : customerType === "GENERAL" ? "综合" : "不区分客户类型";
 }
@@ -135,14 +138,15 @@ export function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRec
         materialName: item.materialName,
         spec: item.specification || "—",
         casePack: item.casePack || "—",
-        casePrice: Number(item.casePrice).toFixed(2),
+        casePrice: snapshotPrice(item.casePrice),
         appliedTierMinQuantity: item.appliedTierMinQuantity,
-        baseCasePrice: item.baseCasePrice == null ? undefined : Number(item.baseCasePrice).toFixed(2),
+        baseCasePrice: item.baseCasePrice == null ? undefined : snapshotPrice(item.baseCasePrice),
         basePriceQuantity: item.basePriceQuantity,
-        tierCasePrice: item.tierCasePrice == null ? undefined : Number(item.tierCasePrice).toFixed(2),
+        tierCasePrice: item.tierCasePrice == null ? undefined : snapshotPrice(item.tierCasePrice),
         tierMinQuantity: item.tierMinQuantity,
         tierPriceQuantity: item.tierPriceQuantity,
         pricingMode: item.pricingMode,
+        pricingDetails: item.pricingDetails,
         quantity: Number(item.quantity),
         subtotal: Number(item.lineAmount).toFixed(2),
       })),
@@ -190,14 +194,15 @@ export function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRec
         materialName: item.materialName,
         spec: item.specification || "—",
         casePack: item.casePack || "—",
-        casePrice: Number(item.casePrice).toFixed(2),
+        casePrice: snapshotPrice(item.casePrice),
         appliedTierMinQuantity: item.appliedTierMinQuantity,
-        baseCasePrice: item.baseCasePrice == null ? undefined : Number(item.baseCasePrice).toFixed(2),
+        baseCasePrice: item.baseCasePrice == null ? undefined : snapshotPrice(item.baseCasePrice),
         basePriceQuantity: item.basePriceQuantity,
-        tierCasePrice: item.tierCasePrice == null ? undefined : Number(item.tierCasePrice).toFixed(2),
+        tierCasePrice: item.tierCasePrice == null ? undefined : snapshotPrice(item.tierCasePrice),
         tierMinQuantity: item.tierMinQuantity,
         tierPriceQuantity: item.tierPriceQuantity,
         pricingMode: item.pricingMode,
+        pricingDetails: item.pricingDetails,
         quantity: Number(item.quantity),
         subtotal: Number(item.lineAmount).toFixed(2),
       })),

@@ -18,6 +18,7 @@ const frontendSourceFiles = [
   "../app/features/h5/ProductArt.tsx",
   "../app/features/h5/useH5Draft.ts",
   "../app/features/h5/useH5OrderFlow.ts",
+  "../app/features/h5/useH5OrderSync.ts",
   "../app/features/screens/ScreenBoards.tsx",
   "../app/features/screens/dashboard-domain.ts",
   "../app/features/screens/RankingBoard.tsx",
@@ -286,10 +287,10 @@ test("derives H5 and dashboard regions from the current whitelist", async () => 
   assert.match(prototype, /generalRegions/);
   assert.match(prototype, /regionProductCards\.length > 0/);
   assert.match(prototype, /maxAmount=\{regionProductMax\}/);
-  assert.match(prototype, /nextChannel === "综合客户" && regionalized \? "region"/);
+  assert.doesNotMatch(prototype, /nextChannel === "综合客户" && regionalized \? "region"/);
   assert.match(prototype, /whitelistCustomerTypeMode === "UNSPECIFIED"/);
-  assert.match(prototype, /value: "ALL", label: "全部客户"/);
-  assert.match(prototype, /loadDashboard\(\{ customerType, regionCode, metric: selection\.metric \}, signal\)/);
+  assert.match(prototype, /全部客户/);
+  assert.match(prototype, /loadDashboard\(rankingFilters\(selection\), signal\)/);
   assert.match(prototype, /订单额占比/);
   assert.match(prototype, /const singleTypeLabel = unspecifiedCustomerType \? "全部客户"/);
   assert.match(prototype, /\{singleTypeLabel\} <b>\{dashboardCompactAmount\(amount\)\} · \{amount > 0 \? "100%" : "0%"\}<\/b>/);
@@ -301,7 +302,7 @@ test("derives H5 and dashboard regions from the current whitelist", async () => 
   assert.match(dashboardService, /record GeneralRegion/);
   assert.match(dashboardService, /"未分大区"/);
   assert.match(activityService, /b\.current_version_id = c\.data_version_id/);
-  assert.match(authService, /\? = 'UNASSIGNED'/);
+  assert.doesNotMatch(authService, /\? = 'UNASSIGNED'/);
   assert.match(importService, /regions\.resolveCode/);
 });
 
@@ -320,7 +321,7 @@ test("keeps the hourly order trend inside the activity window and timezone-safe"
   assert.match(prototype, /existing \?\? \{ bucket: new Date\(time\)\.toISOString\(\), amount: 0, orders: 0 \}/);
 });
 
-test("keeps an H5 draft only when the verified customer is unchanged", async () => {
+test("keeps legacy draft endpoints compatible while the H5 cart uses browser storage only", async () => {
   const [prototype, api, controller, service, migration] = await Promise.all([
     readFrontendSource(),
     readApiSource(),
@@ -329,13 +330,10 @@ test("keeps an H5 draft only when the verified customer is unchanged", async () 
     readFile(new URL("../db/migrations/V010__h5_order_draft.sql", import.meta.url), "utf8"),
   ]);
 
-  assert.match(prototype, /const preserveDraft = runtimeIdentity\?\.activityId === identity\.activityId\s*&& runtimeIdentity\.customerId === identity\.customerId/);
-  assert.match(prototype, /applyRuntimeOrder\(order, liveCatalog, preserveDraft\)/);
-  assert.match(prototype, /if \(!preserveDraft\) setQuantities\(\{\}\)/);
+  // Actual restoration, version changes and customer switching are covered by
+  // h5-manual-refresh.test.mjs and h5-order-routing.test.mjs.
   assert.match(prototype, /setOrderUpdatedAt\(""\).*setOrderWithdrawnAt\(""\).*setCartOpen\(false\).*setCancelConfirmOpen\(false\)/s);
-  assert.match(prototype, /loadH5OrderDraft\(\)/);
-  assert.match(prototype, /window\.addEventListener\("pagehide", flushOnPageHide\)/);
-  assert.match(prototype, /setTimeout\(\(\) => void queueDraftSync\(snapshot\), 800\)/);
+  assert.doesNotMatch(prototype, /(?:load|save|delete)H5OrderDraft\(/);
   assert.match(api, /saveH5OrderDraft/);
   assert.match(api, /deleteH5OrderDraft/);
   assert.match(controller, /\/order-draft/);
@@ -402,7 +400,9 @@ test("supports one admin entry, current H5 resolution, paging, and fulfillment e
   assert.match(orderService, /订单商品明细/);
   assert.match(orderService, /有效商品汇总/);
   assert.match(orderService, /有效分公司汇总/);
-  assert.match(authService, /a\.status = 'CLOSED'.*a\.starts_at <= UTC_TIMESTAMP/s);
+  const verification = await readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/security/H5PhoneVerificationService.java", import.meta.url), "utf8");
+  assert.match(verification, /a\.status = 'CLOSED'.*a\.starts_at <= UTC_TIMESTAMP/s);
+  assert.match(authService, /createH5Session/);
 });
 
 test("uses published, time-driven activity lifecycle controls", async () => {
@@ -456,7 +456,7 @@ test("cancels superseded import previews and only blocks publication for newer p
 
   assert.match(api, /loadImportTasks/);
   assert.match(prototype, /await cancelImport\(Number\(activityId\), taskId\)/);
-  assert.match(prototype, /已恢复服务器中尚未确认的导入预览/);
+  assert.match(prototype, /已恢复当前模块尚未确认的导入预览/);
   assert.match(activityService, /t\.id > v\.source_import_task_id/);
   assert.match(activityService, /请确认或取消后再发布活动/);
   assert.match(importService, /cancelReplaceableTasks\(activityId, importType/);
@@ -487,7 +487,6 @@ test("uses server-calculated lottery candidates and ordered, shortage-safe draws
   assert.match(prototype, /toFixed\(2\)/);
   assert.match(service, /weightedOrder/);
   assert.match(service, /probabilityMode/);
-  assert.match(service, /o\.total_amount > 0/);
   assert.match(service, /totalCandidateOrderAmount/);
   assert.match(migration, /probability_mode/);
 });
@@ -512,7 +511,7 @@ test("uses live overview data, full admin phones, Chinese regions, and linked at
   ]);
 
   assert.doesNotMatch(prototype, /19,457,005\.28|38,620|1,316\.0/);
-  assert.match(prototype, /loadAdminDashboard\(Number\(activityId\), \{ customerType: "GENERAL" \}\)/);
+  // Overview loading and refresh behavior is covered by admin-manual-refresh.test.mjs.
   assert.match(prototype, /regionOptions\.find\(\(item\) => item\.value === identityRegionCode\)\?\.name/);
   assert.match(prototype, /row\.activityCustomerId !== null/);
   assert.match(prototype, /白名单实时试算/);

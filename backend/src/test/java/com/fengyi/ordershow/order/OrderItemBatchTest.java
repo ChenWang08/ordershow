@@ -36,10 +36,10 @@ class OrderItemBatchTest {
     var p = first.pricing();
     assertThat(batches.getFirst().getFirst()).containsExactly(7L, 101L, 1, "M", "商品", "C", "P", "B", "V", "S", "12",
         "ALL", false, null, 3L, p.casePriceSnapshot(), p.appliedTierMinQuantity(), p.baseCasePrice(), p.baseQuantity(),
-        p.tierCasePrice(), p.tierMinQuantity(), p.tierQuantity(), p.pricingMode(), p.lineAmount(), null, null);
+        p.tierCasePrice(), p.tierMinQuantity(), p.tierQuantity(), p.pricingMode(), p.lineAmount(), null, null, null);
     assertThat(batches.get(3).getFirst()).containsExactly(9L, 1, 101L, "M", "商品", "C", "P", "B", "V", "S", "12",
         "SPECIAL", "ALL", false, null, 3L, p.casePriceSnapshot(), p.appliedTierMinQuantity(), p.baseCasePrice(), p.baseQuantity(),
-        p.tierCasePrice(), p.tierMinQuantity(), p.tierQuantity(), p.pricingMode(), p.lineAmount(), null, null);
+        p.tierCasePrice(), p.tierMinQuantity(), p.tierQuantity(), p.pricingMode(), p.lineAmount(), null, null, null);
     assertThat(batches.get(2).getFirst()[2]).isEqualTo(201);
     assertThat(batches.get(5).getFirst()[1]).isEqualTo(201);
     verify(jdbc, never()).update(anyString(), any(Object[].class));
