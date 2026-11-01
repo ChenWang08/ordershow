@@ -4,7 +4,17 @@
 
 同步 main 至 `9b8df44`（业务源码 `d36cbca`），合入看板 SQL/汇总、草稿死锁重试、订单历史写时复制、精简提交回执、旧格式回执重试返回最新订单，以及后台登录临时故障处理。保留 ACK 云存储、共享会话、事件领取、双副本、非 root 镜像与 DBA 迁移边界。
 
-标签为 `20261030.1`，源码合并提交 `22ec17b7f9769d88a37e2b09c62885f9734a1e25`，父提交为 ACK `ea002fb` 和 main `9b8df44`。最终构建和本轮验收完成，后续仅补交付记录，不改变镜像代码。未推送 Git 或 CODING，未部署 ACK，不替换日常本地系统。main 文档提交为 `9b8df44`。
+标签为 `20261030.1`，源码合并提交 `22ec17b7f9769d88a37e2b09c62885f9734a1e25`，父提交为 ACK `ea002fb` 和 main `9b8df44`。最终构建和本轮验收完成，后续仅补交付记录，不改变镜像代码。CODING 前后端均已上传并核验远端摘要与本地一致，平台 linux/amd64，详见下节。未推送 Git、未部署 ACK，不替换日常本地系统。main 文档提交为 `9b8df44`。
+
+## CODING 推送状态：2026-10-30
+
+按用户授权推送已验证的两个本地镜像，未重新构建。前端 push 退出码 0；随后从仓库核验摘要为 `sha256:c4f658a96be11d297a13ae769be0f3f5f5db3e7567b74d371a699be9035d5b2e`，与本地一致，业务平台 linux/amd64。
+
+前端：`g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261030.1`
+
+后端：`g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261030.1`。前三次上传因 Docker 网络转发链路 `192.168.65.1:3128` 的 closed network connection / broken pipe 失败，当时远端标签为 not found。随后按用户要求再次重试，复用已上传层并补齐剩余层，push 退出码 0。独立查询仓库确认摘要为 `sha256:08516685269e3971cb28625b797efbf817fa50ae8aeff88222e6586968368877`，与本地一致，业务平台 linux/amd64。前后端镜像交付均已完成，未重新构建。
+
+旧 20261029.3 标签未覆盖。未修改 Docker 网络设置、业务容器或测试环境数据库，未部署云端。部署仍需 DBA 按下文完成 V039→V041 升级与汇总 repair/check，不能仅更换镜像。
 
 ## 最终镜像身份
 
