@@ -1,6 +1,6 @@
 # 订购会系统项目说明
 
-> 实施状态（2026-10-30）：最新本地版本、V041 与汇总开启状态见第 3 节及根目录 `README.md`。本文项目说明对应 React 正式前端、Spring Boot 后端、MySQL、Redis、MinIO 和 Docker Compose 实现。此前标注“仅前端内存/正式系统待接入”的段落属于原型阶段历史说明；当前运行与验收方式以根目录 `README.md`、Flyway 迁移、OpenAPI 契约和 `docs/design/07-department-account-and-activity-isolation-plan.md` 为准。商品价格保存后自动同步当前活动有效订单，订单当前明细和看板使用最新金额；订单历史版本保留原提交数据。订单综合看板的完整模块、统计口径、交互和验收规则见 `docs/design/06-order-dashboard-plan.md`。
+> 实施状态（2026-11-01）：本地前后端为 `080493a`、固定镜像标签 `local-080493a-20261101`，`latest` 已同步，数据库 V049，汇总继续开启；详情见[本次部署记录](docs/deployment/2026-11-01-main-local.md)。下文“待部署源码/尚未部署”保留开发当时的记录，已纳入本次提交的功能现已在本机部署；10 月 30 日 `d36cbca`/V041 为历史状态。本文项目说明对应 React 正式前端、Spring Boot 后端、MySQL、Redis、MinIO 和 Docker Compose 实现。此前标注“仅前端内存/正式系统待接入”的段落属于原型阶段历史说明；当前运行与验收方式以根目录 `README.md`、Flyway 迁移、OpenAPI 契约和 `docs/design/07-department-account-and-activity-isolation-plan.md` 为准。商品价格保存后自动同步当前活动有效订单，订单当前明细和看板使用最新金额；订单历史版本保留原提交数据。订单综合看板的完整模块、统计口径、交互和验收规则见 `docs/design/06-order-dashboard-plan.md`。
 
 ## 1. 文档目的
 
@@ -25,6 +25,8 @@
 - 管理后台只允许授权工作人员访问。
 
 ## 3. 当前项目状态
+
+**当前本地部署（2026-11-01）：** 已将 `main` 的合入内容及历史金额排行兼容修复部署到本机 3000/8080。458 笔订单逐单汇总对账差异 0，原订单、明细及历史记录复核一致，原 MySQL/Redis/MinIO 容器与挂载未变。数据库 V041→V049，固定镜像与 `latest` 均指向 `080493a`。备份恢复、升级演练、隔离集成测试及实际页面验收见[部署记录](docs/deployment/2026-11-01-main-local.md)。未推送代码或镜像，未更新 ACK/线上。
 
 **待部署源码：清理旧活动查询接口（2026-10-31）。** 删除 `GET /api/v1/public/activities/{activityCode}` 和前端零调用的 `loadActivity()`，旧路径返回现有 404，不再加载活动资料。首次加载、资料变化与重连继续使用公共活动 SSE 快照；保留 `/current`、手机号验证、抽奖、后台活动接口及内部 `ActivityService.byCode()`。更新受影响测试、压测步骤与 OpenAPI；旧前端或外部调用需要更新，删除端点不会停止它们已有的请求定时器。无新迁移、镜像构建或部署，详见[清理验证与兼容边界](docs/testing/retired-public-activity-2026-10-31.md)。
 
