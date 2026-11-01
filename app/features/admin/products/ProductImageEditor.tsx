@@ -1,10 +1,10 @@
 "use client";
-/* eslint-disable @next/next/no-img-element -- runtime product images and local previews. */
 
 import { useState } from "react";
 import { type ProductImageAsset, type ProductImageStatus } from "../../../domain/import-domain";
 import { createManualProductImageAssets, productImageRelationStatus, productImageStatusForAssets } from "../../../domain/product-images";
 import { ProductImageViewer } from "../../shared/components/ProductImageViewer";
+import { Thumbnail } from "../../shared/components/Thumbnail";
 
 const MAX_PRODUCT_IMAGES = 10;
 
@@ -78,7 +78,7 @@ export function ProductImageEditor({ materialName, images, onChange }: { materia
           const pending = productImageRelationStatus(image) === "CANDIDATE";
           return <div className={`product-image-tile ${!pending && index === 0 ? "primary" : ""} ${pending ? "pending" : ""}`} key={`${image.id}-${index}`}>
             <button type="button" className="product-image-tile-preview" disabled={uploading} onClick={() => setPreviewIndex(index)}>
-              <img src={image.url} alt={`${materialName} ${index + 1}`} />
+              <Thumbnail src={image.url} alt={`${materialName} ${index + 1}`} />
               <span>{pending ? "候选图片" : index === 0 ? "主图" : `第 ${index + 1} 张`}</span>
             </button>
             <div className="product-image-tile-actions">

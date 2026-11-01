@@ -3,6 +3,8 @@
 /* eslint-disable @next/next/no-img-element -- images are supplied by runtime APIs and local previews. */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { localOriginalUrl } from "../../../domain/local-image-preview";
+import { Thumbnail } from "./Thumbnail";
 
 type PreviewImage = { url: string; fileName?: string };
 
@@ -16,6 +18,15 @@ export function ProductImageViewer({ productName, images, initialIndex = 0, stat
   const imageRef = useRef<HTMLImageElement>(null);
   const currentImage = images[activeIndex];
   const currentImageUrl = currentImage?.url;
+  const [localImage, setLocalImage] = useState({ source: "", url: "" });
+  useEffect(() => {
+    if (!currentImageUrl?.startsWith("local-image:")) return;
+    let current = true;
+    localOriginalUrl(currentImageUrl).then(url => { if (current) setLocalImage({ source: currentImageUrl, url }); }).catch(() => {});
+    return () => { current = false; };
+  }, [currentImageUrl]);
+  const resolvedImageUrl = currentImageUrl?.startsWith("local-image:")
+    ? localImage.source === currentImageUrl ? localImage.url : undefined : currentImageUrl;
   const fitImageToStage = useCallback(() => {
     const stage = stageRef.current;
     const image = imageRef.current;
@@ -96,11 +107,11 @@ export function ProductImageViewer({ productName, images, initialIndex = 0, stat
         <header><div><b>{productName}</b><small>{images.length > 1 ? `${activeIndex + 1} / ${images.length}` : "商品图片"}{status ? ` · ${status}` : ""}</small></div><button type="button" aria-label="关闭图片预览" onClick={onClose}>×</button></header>
         <div ref={stageRef} className={`product-image-viewer-stage ${zoomed ? "zoomed" : ""}`} onTouchStart={handleTouchStart} onTouchEnd={handleTouchEnd}>
           {images.length > 1 && <button type="button" className="product-image-viewer-arrow prev" aria-label="上一张图片" onClick={() => goTo(activeIndex - 1)}>‹</button>}
-          <img ref={imageRef} src={currentImage.url} alt={`${productName} ${activeIndex + 1}`} style={!zoomed && fittedImageSize ? { width: fittedImageSize.width, height: fittedImageSize.height } : undefined} onLoad={fitImageToStage} onClick={handleImageClick} />
+          <img key={currentImage.url} ref={imageRef} src={resolvedImageUrl || undefined} alt={`${productName} ${activeIndex + 1}`} decoding="async" style={!zoomed && fittedImageSize ? { width: fittedImageSize.width, height: fittedImageSize.height } : undefined} onLoad={fitImageToStage} onClick={handleImageClick} />
           {images.length > 1 && <button type="button" className="product-image-viewer-arrow next" aria-label="下一张图片" onClick={() => goTo(activeIndex + 1)}>›</button>}
         </div>
         <footer><span>{currentImage.fileName || `${activeIndex + 1} / ${images.length}`}</span>{allowZoom && <button type="button" className="product-image-viewer-zoom" onClick={toggleZoom}>{zoomed ? "还原大小" : "放大图片"}</button>}</footer>
-        {images.length > 1 && <div className="product-image-viewer-thumbs" aria-label="图片缩略图列表">{images.map((image, index) => <button type="button" key={`${image.url}-${index}`} className={index === activeIndex ? "active" : ""} aria-label={`查看第 ${index + 1} 张图片`} onClick={() => goTo(index)}><img src={image.url} alt="" /></button>)}</div>}
+        {images.length > 1 && <div className="product-image-viewer-thumbs" aria-label="图片缩略图列表">{images.map((image, index) => <button type="button" key={`${image.url}-${index}`} className={index === activeIndex ? "active" : ""} aria-label={`查看第 ${index + 1} 张图片`} onClick={() => goTo(index)}><Thumbnail src={image.url} alt="" /></button>)}</div>}
       </div>
     </div>
   );

@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { ApiError, loadAdminActivity, saveActivityBackground, type RuntimeActivity } from "../../api";
 import { backgroundFileError, useBackgroundImage } from "../shared/activity-background";
+import { imageVariantUrl } from "../../domain/image-variants";
 
 function BackgroundPreview({ path, kind }: { path?: string | null; kind: "h5" | "desktop" }) {
-  const image = useBackgroundImage(path);
+  const image = useBackgroundImage(imageVariantUrl(path));
   return <div className={`activity-background-preview ${kind}`} style={image ? { backgroundImage: image } : undefined}
     role="img" aria-label={kind === "h5" ? "H5 背景预览" : "电脑端背景预览"}>
     <span>{path ? image ? "已配置背景" : "背景加载中或暂不可用，展示页将使用默认背景" : kind === "h5" ? "默认 H5 背景" : "各页面使用原有默认背景"}</span>

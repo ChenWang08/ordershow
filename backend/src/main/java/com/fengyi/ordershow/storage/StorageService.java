@@ -84,16 +84,57 @@ public class StorageService {
       return statement;
     }, keys);
     long id = keys.getKey().longValue();
+    if (List.of("PRODUCT_IMAGE", "LOTTERY_PRIZE_IMAGE", "ACTIVITY_BACKGROUND").contains(purpose)) {
+      var meta = new FileMeta(id, bucket, key, originalFilename, contentType, content.length);
+      try {
+        writeVariant(meta, ImageVariants.Kind.THUMBNAIL, ImageVariants.render(content, ImageVariants.Kind.THUMBNAIL));
+        if ("LOTTERY_PRIZE_IMAGE".equals(purpose)) writeVariant(meta, ImageVariants.Kind.DISPLAY, ImageVariants.render(content, ImageVariants.Kind.DISPLAY));
+      } catch (DomainException error) {
+        // Keep the original upload usable; a derivative failure must not corrupt an import.
+        log.warn("Image derivative preparation failed for file {}: {}", id, error.code());
+      }
+    }
     return new StoredFile(id, activityId, key, originalFilename, contentType, content.length, sha);
   }
 
   public byte[] read(long fileId) {
-    FileMeta meta = meta(fileId);
+    return read(meta(fileId));
+  }
+
+  public byte[] read(FileMeta meta) {
     try (InputStream input = minio.getObject(GetObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey()).build())) {
       return input.readAllBytes();
     } catch (Exception exception) {
       throw DomainException.notFound("FILE_NOT_AVAILABLE", "文件不存在或暂不可读取");
     }
+  }
+
+  public ImageVariants.Encoded readVariant(FileMeta meta, ImageVariants.Kind kind) {
+    try (var input = minio.getObject(GetObjectArgs.builder().bucket(meta.bucket()).object(variantObjectKey(meta, kind)).build())) {
+      return new ImageVariants.Encoded(input.readAllBytes(), input.headers().get("Content-Type"));
+    } catch (io.minio.errors.ErrorResponseException error) {
+      if (List.of("NoSuchKey", "NoSuchObject").contains(error.errorResponse().code())) return null;
+      throw ImageVariants.busy();
+    } catch (Exception error) { throw ImageVariants.busy(); }
+  }
+
+  public void writeVariant(FileMeta meta, ImageVariants.Kind kind, ImageVariants.Encoded image) {
+    try {
+      minio.putObject(PutObjectArgs.builder().bucket(meta.bucket()).object(variantObjectKey(meta, kind))
+          .stream(new ByteArrayInputStream(image.bytes()), (long) image.bytes().length, -1L).contentType(image.contentType()).build());
+    } catch (Exception error) { throw ImageVariants.busy(); }
+  }
+
+  // MinIO can reject path segments over 255 bytes; long source filenames need a short derivative name.
+  static String variantObjectKey(FileMeta meta, ImageVariants.Kind kind) {
+    String key = meta.objectKey() + kind.key();
+    int slash = key.lastIndexOf('/');
+    if (key.substring(slash + 1).getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 255) return key;
+    try {
+      String digest = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+          .digest(meta.objectKey().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+      return key.substring(0, slash + 1) + digest + kind.key();
+    } catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
   }
 
   public FileMeta meta(long fileId) {

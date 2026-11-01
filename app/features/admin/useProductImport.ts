@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { releaseLocalImage } from "../../domain/local-image-preview";
 import {
   ApiError, cancelImport, confirmImport, loadAdminProducts, loadProductImageReviews,
   loadImportRows, uploadImport, waitForImport, type ImportStagingRow,
@@ -40,6 +41,16 @@ export function useProductImport({
   const productImportStats = useMemo(() => summarizeProductImportRows(productRows), [productRows]);
   const [pendingProductRollbackRows, setPendingProductRollbackRows] = useState<ProductImportRow[] | null>(null);
   const [productImageAssets, setProductImageAssets] = useState<ProductImageAsset[]>([]);
+  const previousPreviews = useRef(new Set<string>());
+  useEffect(() => {
+    const retained = new Set([
+      ...productImageAssets,
+      ...productRows.flatMap(row => row.images ?? []),
+      ...(pendingProductRollbackRows ?? []).flatMap(row => row.images ?? []),
+    ].map(image => image.url).filter(url => url.startsWith("local-image:")));
+    previousPreviews.current.forEach(url => { if (!retained.has(url)) releaseLocalImage(url); });
+    previousPreviews.current = retained;
+  }, [productImageAssets, productRows, pendingProductRollbackRows]);
   const [productImageFileName, setProductImageFileName] = useState("");
   const [productImageAttemptName, setProductImageAttemptName] = useState("");
   const [productImageUploadFile, setProductImageUploadFile] = useState<File | null>(null);

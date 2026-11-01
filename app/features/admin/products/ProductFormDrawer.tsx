@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { releaseLocalImage } from "../../../domain/local-image-preview";
 import { useDrawerSave } from "../../../components/useDrawerSave";
 import type { DrawerSaveResult } from "../../../components/drawer-save-result";
 import { positiveProductNumber, productCompletenessStatus } from "../../../domain/product-completeness";
@@ -21,6 +22,22 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
   });
   const [tierEnabled, setTierEnabled] = useState(() => Boolean(initialRow?.priceTiers?.length || initialRow?.priceTierMinQuantity || initialRow?.priceTierCasePrice));
   const [editReason, setEditReason] = useState("");
+  const ownedPreviews = useRef(new Set<string>());
+  const initialPreviews = useRef(new Set(initialRow?.images?.map(image => image.url)));
+  const transferredPreviews = useRef(false);
+  useEffect(() => () => {
+    if (!transferredPreviews.current) ownedPreviews.current.forEach(releaseLocalImage);
+  }, []);
+  const changeImages = (images: ProductImportRow["images"], imageStatus: ProductImportRow["imageStatus"]) => {
+    const retained = new Set(images?.map(image => image.url));
+    ownedPreviews.current.forEach(url => {
+      if (!retained.has(url)) { releaseLocalImage(url); ownedPreviews.current.delete(url); }
+    });
+    images?.forEach(image => {
+      if (image.url.startsWith("local-image:") && !initialPreviews.current.has(image.url)) ownedPreviews.current.add(image.url);
+    });
+    setForm(current => ({ ...current, images, imageStatus }));
+  };
   const { saving, saveError, requiresReload, save } = useDrawerSave(onClose);
   const update = (field: keyof ProductImportRow, value: string | number) => setForm((current) => ({ ...current, [field]: value, ...(field === "customerType" && scopeEnabled ? { dealerScopeEdited: true } : {}) }));
   const nextSequence = isEditing ? form.sequence : Math.max(0, ...rows.filter((row) => row.customerType === form.customerType && row.rebate === form.rebate).map((row) => row.sequence)) + 1;
@@ -38,6 +55,11 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
   const scopeValid = !form.dealerScopeEdited || (form.dealerScope ?? []).every(s => s.members.length > 0 && s.members.every(m => m.active && (!form.customerType || m.customerType === (form.customerType === "综合" ? "GENERAL" : "SPECIAL"))));
   const canSave = form.materialName.trim() !== "" && tierValid && !duplicateProductIdentity && scopeValid && (!activityStarted || editReason.trim() !== "");
   const requestClose = useDrawerClose({ form: { ...form, dealerScopeEdited: undefined, dealerScope: form.dealerScope ?? [] }, tierEnabled, editReason }, onClose, saving);
+  const submitForm = async () => {
+    const result = await onSave({ ...form, priceTiers: tierEnabled ? tiers : [], status: automaticStatus, sequence: nextSequence, manuallyEdited: true }, editReason.trim());
+    if (result.ok || result.requiresReload) transferredPreviews.current = true;
+    return result;
+  };
   return (
     <div className="order-drawer-backdrop">
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
@@ -52,7 +74,7 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
           <label className="wide-field"><span>物料名称 *</span><input value={form.materialName} onChange={(e) => update("materialName", e.target.value)} /></label>
           <label className="wide-field"><span>产品说明</span><textarea value={form.description ?? ""} onChange={(e) => update("description", e.target.value)} placeholder="填写后可在 H5 商品详情展示" rows={3} /></label>
           {duplicateProductIdentity && <p className="field-error wide-field">同一客户类型、同一返利类型下商品身份重复；物料代码相同或任一代码为空时，同名商品不能重复。</p>}
-          <div className="product-form-image-field wide-field"><span>商品图片</span><ProductImageEditor materialName={form.materialName} images={form.images} imageStatus={form.imageStatus} onChange={(images, status) => setForm((current) => ({ ...current, images, imageStatus: status }))} /></div>
+          <div className="product-form-image-field wide-field"><span>商品图片</span><ProductImageEditor materialName={form.materialName} images={form.images} imageStatus={form.imageStatus} onChange={changeImages} /></div>
           <label><span>品牌</span><input value={form.brand} onChange={(e) => update("brand", e.target.value)} /></label>
           <label><span>品种</span><input value={form.variety} onChange={(e) => update("variety", e.target.value)} /></label>
           <label><span>规格</span><input value={form.spec} onChange={(e) => update("spec", e.target.value)} /></label>
@@ -72,7 +94,7 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
         </div>
         {activityStarted && <label className="drawer-form-reason"><span>{isEditing ? "修改原因（必填）" : "新增商品原因"}</span><input maxLength={500} value={editReason} onChange={e => setEditReason(e.target.value)} placeholder="请填写本次商品或下单范围修改原因" /></label>}
         <p className="drawer-form-note">带 * 的字段为必填项；{activityStarted ? "价格修改保存后，相关有效订单自动更新。" : "手动新增或修改仅对当前数据版本生效，重新导入 Excel 后以新文件为准。"}</p></div>
-        <footer><div className="drawer-save-error">{saveError && <small className="field-error" role="alert">{saveError}</small>}{requiresReload && <button type="button" onClick={() => window.location.reload()}>刷新列表</button>}</div><button disabled={saving} onClick={requestClose}>取消</button><button className="admin-primary" disabled={!canSave || saving || requiresReload} onClick={() => save(() => onSave({ ...form, priceTiers: tierEnabled ? tiers : [], status: automaticStatus, sequence: nextSequence, manuallyEdited: true }, editReason.trim()))}>{saving ? "保存中…" : isEditing ? "保存修改" : "添加商品"}</button></footer>
+        <footer><div className="drawer-save-error">{saveError && <small className="field-error" role="alert">{saveError}</small>}{requiresReload && <button type="button" onClick={() => window.location.reload()}>刷新列表</button>}</div><button disabled={saving} onClick={requestClose}>取消</button><button className="admin-primary" disabled={!canSave || saving || requiresReload} onClick={() => save(submitForm)}>{saving ? "保存中…" : isEditing ? "保存修改" : "添加商品"}</button></footer>
       </aside>
     </div>
   );

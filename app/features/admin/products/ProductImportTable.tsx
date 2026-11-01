@@ -1,10 +1,10 @@
 "use client";
 import { positiveProductNumber } from "../../../domain/product-completeness";
-/* eslint-disable @next/next/no-img-element -- runtime product images and local previews. */
 
 import { useMemo, useState } from "react";
 import { compareProductRows, type DeleteTarget, type ProductImageAsset, type ProductImportRow } from "../../../domain/import-domain";
 import { ProductImageViewer } from "../../shared/components/ProductImageViewer";
+import { Thumbnail } from "../../shared/components/Thumbnail";
 import { normalizeSearchText } from "../../shared/utils";
 import { normalizeMaterialCode } from "../admin-utils";
 import { DeleteConfirmDialog } from "../shared/DeleteConfirmDialog";
@@ -135,7 +135,7 @@ export function ProductImportTable({ rows, onEdit, onDelete, allowDelete = false
               : imageStatus === "未匹配"
                 ? imageStatus
                 : row.images?.length ? `${row.images.length} 张` : "未匹配";
-            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择商品 ${row.materialName}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => index === 8 ? <button type="button" key={index} className={`product-image-cell product-image-button-cell ${imageStatus === "待确认" ? "pending" : row.images?.length ? "matched" : "unmatched"}`} disabled={!row.images?.length} aria-label={`查看${row.materialName}商品图片`} onClick={() => row.images?.length && setImagePreview({ productName: row.materialName, images: row.images, status: imageLabel })}>{row.images?.[0]?.url ? <img src={row.images[0].url} alt={row.materialName} /> : <i>—</i>}<small>{imageLabel}</small></button> : <span key={index} title={index === 7 ? String(value || "") : undefined} className={`${index === 7 ? "description-cell" : ""} ${index === 19 ? `status-cell ${row.status !== "有效" ? "pending" : ""}` : ""}`}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" disabled={readOnly} onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
+            return <div className={`table-row ${row.manuallyEdited ? "manually-edited-row" : ""}`} key={row.id}>{allowDelete && <span className="select-cell"><input type="checkbox" aria-label={`选择商品 ${row.materialName}`} checked={selectedIds.includes(row.id)} onChange={() => setSelectedIds((current) => current.includes(row.id) ? current.filter((id) => id !== row.id) : [...current, row.id])} /></span>}{values.map((value, index) => index === 8 ? <button type="button" key={index} className={`product-image-cell product-image-button-cell ${imageStatus === "待确认" ? "pending" : row.images?.length ? "matched" : "unmatched"}`} disabled={!row.images?.length} aria-label={`查看${row.materialName}商品图片`} onClick={() => row.images?.length && setImagePreview({ productName: row.materialName, images: row.images, status: imageLabel })}>{row.images?.[0]?.url ? <Thumbnail src={row.images[0].url} alt={row.materialName} /> : <i>—</i>}<small>{imageLabel}</small></button> : <span key={index} title={index === 7 ? String(value || "") : undefined} className={`${index === 7 ? "description-cell" : ""} ${index === 19 ? `status-cell ${row.status !== "有效" ? "pending" : ""}` : ""}`}>{value || "—"}</span>)}<span className="table-row-actions"><button type="button" disabled={readOnly} onClick={() => onEdit(row)}>编辑</button>{allowDelete && <button type="button" onClick={() => openDelete([row.id])}>删除</button>}{row.manuallyEdited && <small>已修正</small>}</span></div>;
           })}
           {sortedRows.length === 0 && <div className="table-empty">{searchKeyword.trim() ? "当前搜索和筛选条件下没有商品" : "当前筛选条件下没有商品"}</div>}
         </div>

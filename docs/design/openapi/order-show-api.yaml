@@ -22,6 +22,60 @@ tags:
   - name: Exports
   - name: Audit
 paths:
+  /public/files/{fileId}/thumbnail:
+    get:
+      operationId: getImageThumbnail
+      tags: [Public]
+      summary: 获取图片缩略图（长边不超过 320px）
+      description: 仅商品、奖品、活动背景图片可访问；保持比例且不放大小图。上传时生成，历史文件首次读取时补齐并持久保存。替换上传产生新 fileId；前端使用 v=1 版本地址，公开缓存 30 天并支持 ETag/304。失败不返回原图。
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
+      responses:
+        '200':
+          description: JPEG 或保留透明背景的 PNG
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        '304': { description: 内容未变化，无正文 }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+  /public/files/{fileId}/display:
+    get:
+      operationId: getImageDisplay
+      tags: [Public]
+      summary: 获取较大展示图（长边不超过 960px）
+      description: 用于抽奖大屏奖品展示；保持比例、不放大小图，文件用途限制、版本地址、缓存和错误规则与缩略图相同。
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
+      responses:
+        '200':
+          description: JPEG 或保留透明背景的 PNG
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string } }
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+        '304': { description: 内容未变化，无正文 }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /admin/activities/{activityId}/backgrounds/{kind}:
     parameters:
       - $ref: '#/components/parameters/ActivityId'

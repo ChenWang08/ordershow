@@ -1,8 +1,8 @@
 "use client";
-/* eslint-disable @next/next/no-img-element -- product images are runtime API URLs. */
+import { Thumbnail } from "../shared/components/Thumbnail";
 
 export function ProductArt({ imageUrl, alt = "商品图片" }: { atlas?: number; imageUrl?: string; alt?: string }) {
-  if (imageUrl) return <img className="product-art product-photo" src={imageUrl} alt={alt} />;
+  if (imageUrl) return <Thumbnail className="product-art product-photo" src={imageUrl} alt={alt} />;
   return (
     <span className="product-art product-image-placeholder" role="img" aria-label="图片未匹配">
       <svg className="product-image-placeholder-icon" viewBox="0 0 32 28" aria-hidden="true">
