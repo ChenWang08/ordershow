@@ -237,6 +237,36 @@ class RankingFiltersIntegrationTest {
     total(read(f),"total_amount","999");
   }
 
+  @Test void legacyAmountSnapshotCanOmitZeroTonsWithoutRewritingFrozenJson() throws Exception {
+    var filter=filter(null,"WEST",null,null,RankingMetric.AMOUNT);
+    com.fasterxml.jackson.databind.node.ObjectNode frozen=JSON.valueToTree(read(filter));
+    for(var row:frozen.path("companies"))((com.fasterxml.jackson.databind.node.ObjectNode)row).remove("tons");
+    String payload=JSON.writeValueAsString(frozen);
+    jdbc.update("INSERT INTO activity_dashboard_snapshot VALUES(1,'RANKING:ALL:WEST',CAST(? AS JSON))",payload);
+    String saved=jdbc.queryForObject("SELECT CAST(payload_json AS CHAR) FROM activity_dashboard_snapshot",String.class);
+    status("ARCHIVED");
+    total(read(filter),"total_amount","50");
+    assertThat(store.hasSnapshot(1)).isTrue();
+    assertThat(jdbc.queryForObject("SELECT CAST(payload_json AS CHAR) FROM activity_dashboard_snapshot",String.class)).isEqualTo(saved);
+  }
+
+  @Test void missingLegacyTonsCannotHideNonzeroTonsOrWeakenTonsRankingChecks() throws Exception {
+    for(var metric:List.of(RankingMetric.AMOUNT,RankingMetric.TONS)){
+      if(metric==RankingMetric.TONS)jdbc.update("UPDATE customer_order SET region_code='ZERO' WHERE id=4");
+      var filter=filter(metric==RankingMetric.AMOUNT?"SPECIAL":"GENERAL",
+          metric==RankingMetric.AMOUNT?"EAST":"ZERO",null,null,metric);
+      com.fasterxml.jackson.databind.node.ObjectNode frozen=JSON.valueToTree(read(filter));
+      for(var row:frozen.path("companies"))((com.fasterxml.jackson.databind.node.ObjectNode)row).remove("tons");
+      String key=(metric==RankingMetric.AMOUNT?"RANKING:SPECIAL:EAST":"RANKING_TONS:GENERAL:ZERO");
+      jdbc.update("INSERT INTO activity_dashboard_snapshot VALUES(1,?,CAST(? AS JSON))",key,JSON.writeValueAsString(frozen));
+      status("ARCHIVED");
+      assertThatThrownBy(()->read(filter)).isInstanceOfSatisfying(DomainException.class,
+          e->assertThat(e.code()).isEqualTo("RANKING_HISTORY_MISMATCH"));
+      assertThat(store.hasSnapshot(1)).isFalse();
+      jdbc.update("DELETE FROM activity_dashboard_snapshot");status("ACTIVE");
+    }
+  }
+
   @Test void oldHistoryMismatchIsRejectedWithoutReplacingOldSnapshot() throws Exception {
     var all = read(filter(null,null,null,null,RankingMetric.AMOUNT));
     jdbc.update("INSERT INTO activity_dashboard_snapshot VALUES(1,'RANKING:ALL:ALL',CAST(? AS JSON))",JSON.writeValueAsString(all));

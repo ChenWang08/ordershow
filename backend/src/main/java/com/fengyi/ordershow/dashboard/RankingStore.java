@@ -208,16 +208,22 @@ public class RankingStore {
       var ranks = legacy.rankingRows(activity,parts[1].equals("ALL") ? null : parts[1],parts[2].equals("ALL") ? null : parts[2],
           parts[0].equals("RANKING_TONS") ? RankingMetric.TONS : RankingMetric.AMOUNT,
           retained.path("companies").size(),retained.path("branches").size());
-      compareRows(retained.path("companies"),json.valueToTree(ranks.companies()));
-      compareRows(retained.path("branches"),json.valueToTree(ranks.branches()));
+      boolean amountRanking = parts[0].equals("RANKING");
+      compareRows(retained.path("companies"),json.valueToTree(ranks.companies()),amountRanking);
+      compareRows(retained.path("branches"),json.valueToTree(ranks.branches()),amountRanking);
     }
   }
 
-  private void compareRows(com.fasterxml.jackson.databind.JsonNode expected, com.fasterxml.jackson.databind.JsonNode actual) {
+  private void compareRows(com.fasterxml.jackson.databind.JsonNode expected, com.fasterxml.jackson.databind.JsonNode actual,
+                           boolean amountRanking) {
     if (expected.size()!=actual.size()) historyMismatch();
     for(int i=0;i<expected.size();i++) {
       for(String key:List.of("rank","name","branch","amount","quantity","tons")) {
         var a=expected.get(i).path(key); var b=actual.get(i).path(key);
+        // Older amount snapshots omitted unknown tons; the current amount reader emits zero.
+        // Accept only that representation change, retaining strict checks for known/nonzero tons.
+        if (amountRanking && key.equals("tons") && (a.isMissingNode() || a.isNull())
+            && b.isNumber() && b.decimalValue().signum()==0) continue;
         if(a.isNumber() && b.isNumber() ? a.decimalValue().compareTo(b.decimalValue())!=0 : !a.equals(b)) historyMismatch();
       }
     }
