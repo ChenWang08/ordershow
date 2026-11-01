@@ -81,25 +81,31 @@ public class RankingStore {
           SELECT o.id,o.customer_type,NULLIF(TRIM(o.region_code),'') region_code FROM customer_order o
           WHERE o.activity_id=? AND o.status='SUBMITTED'
         """ + orders + """
+        ), customer_scopes AS (
+          SELECT DISTINCT customer_type,NULLIF(TRIM(region_code),'') region_code FROM scoped_customers
         )
         SELECT DISTINCT o.customer_type,o.region_code,NULLIF(TRIM(i.product_line),'') product_line,
           NULLIF(TRIM(i.variety_name),'') variety_name
         FROM scoped_orders o STRAIGHT_JOIN order_item i ON i.order_id=o.id
         UNION
-        SELECT DISTINCT c.customer_type,NULLIF(TRIM(c.region_code),''),NULLIF(TRIM(p.product_line),''),NULLIF(TRIM(p.variety_name),'')
+        SELECT DISTINCT scope.customer_type,scope.region_code,NULLIF(TRIM(p.product_line),''),NULLIF(TRIM(p.variety_name),'')
         FROM activity_product p
         JOIN activity_data_binding b ON b.activity_id=p.activity_id AND b.data_type='PRODUCT'
           AND b.current_version_id=p.data_version_id
-        JOIN scoped_customers c ON p.customer_type='ALL' OR p.customer_type=c.customer_type
+        JOIN customer_scopes scope ON p.customer_type='ALL' OR p.customer_type=scope.customer_type
         WHERE p.activity_id=?
-          AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id=p.id)
-            OR EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id=p.id
-              AND s.normalized_branch_name=COALESCE(c.normalized_branch_name,'')))
-          AND (NOT EXISTS (SELECT 1 FROM activity_product_dealer_scope s WHERE s.activity_product_id=p.id
-              AND s.normalized_branch_name=c.normalized_branch_name)
-            OR EXISTS (SELECT 1 FROM activity_product_dealer_member m WHERE m.activity_product_id=p.id
-              AND m.normalized_branch_name=c.normalized_branch_name AND m.customer_id=c.customer_id
-              AND m.customer_type=c.customer_type AND m.normalized_dealer_full_name=c.normalized_dealer_full_name))
+          AND (SELECT 1 FROM scoped_customers c
+            WHERE c.customer_type <=> scope.customer_type
+              AND NULLIF(TRIM(c.region_code),'') <=> scope.region_code
+              AND (NOT EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id=p.id)
+                OR EXISTS (SELECT 1 FROM activity_product_branch_scope s WHERE s.activity_product_id=p.id
+                  AND s.normalized_branch_name=COALESCE(c.normalized_branch_name,'')))
+              AND (NOT EXISTS (SELECT 1 FROM activity_product_dealer_scope s WHERE s.activity_product_id=p.id
+                  AND s.normalized_branch_name=c.normalized_branch_name)
+                OR EXISTS (SELECT 1 FROM activity_product_dealer_member m WHERE m.activity_product_id=p.id
+                  AND m.normalized_branch_name=c.normalized_branch_name AND m.customer_id=c.customer_id
+                  AND m.customer_type=c.customer_type AND m.normalized_dealer_full_name=c.normalized_dealer_full_name))
+            LIMIT 1) IS NOT NULL
         ORDER BY 1,2,3,4
         """;
     return jdbc.query(sql, (rs, n) -> new ProductScope(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)), args.toArray());
