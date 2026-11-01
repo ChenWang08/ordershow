@@ -4,30 +4,30 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 import react from "@vitejs/plugin-react";
 
-// A real EventSource and real React workspace; the HTTP server contains only synthetic test data.
+// Real fetch/React/StrictMode; synthetic finite HTTP only, never business APIs or data.
 const root = fileURLToPath(new URL("../", import.meta.url));
 const output = new URL("../outputs/activity-info/", import.meta.url);
 await mkdir(output, { recursive: true });
-const peers = new Set(), calls = [];
+const calls = [];
+let httpFailure = false;
 let version = 1;
 let activity = { id: 1, departmentId: 1, code: "ACTIVITY-TEST", name: "活动同步合成测试", status: "ACTIVE", configuredStatus: "ACTIVE",
   timezone: "Asia/Shanghai", startsAt: "2026-01-01T00:00:00Z", endsAt: "2099-01-01T00:00:00Z", eventEndsAt: "2099-01-02T00:00:00Z",
   whitelistCustomerTypeMode: "TYPED", availableCustomerTypes: ["GENERAL"], regions: [], companyRankingTopN: 90, branchRankingTopN: 30, version: 1 };
-const frame = () => ({ activityId: 1, version: String(version), serverTime: new Date().toISOString(), heartbeatIntervalMs: 30_000, activity });
-function send(event, data) { for (const peer of peers) peer.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); }
-function update(changes) { version++; activity = { ...activity, ...changes }; send("activity", frame()); }
+function update(changes) { version++; activity = { ...activity, ...changes }; }
 const server = await createServer({ root, configFile: false, plugins: [react(), { name: "synthetic-activity-http", configureServer(vite) {
   vite.middlewares.use((req, res, next) => {
     if (!req.url?.startsWith("/api/v1/")) return next();
-    const path = req.url.split("?")[0]; calls.push({ path, method: req.method });
+    const path = req.url.split("?")[0]; calls.push({ path, method: req.method, conditional: req.headers["if-none-match"] });
     if (path === "/api/v1/public/activities/ACTIVITY-TEST") {
-      res.writeHead(404, { "Content-Type": "application/problem+json" });
-      return res.end(JSON.stringify({ code: "RESOURCE_NOT_FOUND", status: 404 }));
+      if (httpFailure) { res.writeHead(503, { "Content-Type": "application/json" }); return res.end('{}'); }
+      const tag = `W/"activity-1-${version}-${activity.status}"`;
+      res.setHeader("ETag", tag); res.setHeader("Cache-Control", "private, no-cache");
+      if (req.headers["if-none-match"] === tag) { res.writeHead(304); return res.end(); }
+      res.setHeader("Content-Type", "application/json"); return res.end(JSON.stringify({ data: activity }));
     }
     if (path.endsWith("/events")) {
-      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
-      peers.add(res); res.on("close", () => peers.delete(res));
-      res.write(`event: activity\ndata: ${JSON.stringify(frame())}\n\n`); return;
+      res.writeHead(500); return res.end("Activity SSE must not be requested");
     }
     res.setHeader("Content-Type", "application/json");
     let data;
@@ -60,19 +60,25 @@ try {
       return route.continue();
     });
     const count = suffix => calls.filter(call => call.path.endsWith(suffix)).length;
-    const dataReads = () => calls.filter(call => call.method === "GET" && !call.path.endsWith("/events")).length;
-    const before = count("/events");
+    const metadataPath = "/api/v1/public/activities/ACTIVITY-TEST";
+    const dataReads = () => calls.filter(call => call.method === "GET" && call.path !== metadataPath).length;
+    const metadataReads = () => calls.filter(call => call.path === metadataPath).length;
+    const before = metadataReads();
     await page.clock.install();
     await page.goto("http://127.0.0.1:4189/tests/fixtures/activity-info/index.html");
     await page.getByLabel("手机号", { exact: true }).fill("13900000001");
-    assert.equal(count("/events"), before + 1, "StrictMode must establish one activity connection");
+    assert.equal(metadataReads(), before + 1, "StrictMode sends one initial HTTP request");
+    assert.equal(count("/lottery"), 0, "Unopened lottery must not load");
+    assert.equal(count("/ranking"), width === 1440 ? 1 : 0, "Unopened ranking must not query");
     await page.getByRole("button", { name: "验证并进入订货", exact: true }).click();
     const quantity = page.getByLabel("合成商品订货箱数", { exact: true });
     await quantity.fill("7"); await quantity.blur();
     const initial = dataReads();
-    send("heartbeat", { heartbeatIntervalMs: 30_000 }); await page.clock.fastForward(65_000);
-    assert.equal(dataReads(), initial, "Idle time and product changes must not query activity/order data");
+    await page.clock.runFor(33_000); await page.clock.runFor(33_000);
+    assert.equal(dataReads(), initial, "Idle metadata checks must not query orders or statistics");
+    assert.ok(calls.some(call => call.path === metadataPath && call.conditional), "Later HTTP checks carry ETag");
     update({ name: "更新后的活动名称" });
+    await page.clock.runFor(33_000);
     await page.getByText("更新后的活动名称", { exact: true }).first().waitFor({ state: "attached" });
     assert.equal(await quantity.inputValue(), "7"); assert.equal(dataReads(), initial);
 
@@ -86,32 +92,31 @@ try {
     assert.equal(rankingReads, 1 + (width === 1440 ? 1 : 0));
     update({ status: "CLOSED", configuredStatus: "CLOSED" });
     update({ status: "ACTIVE", configuredStatus: "ACTIVE", endsAt: "2099-01-02T00:00:00Z" });
-    send("invalidate", { eventType: "ORDER_SUBMITTED" });
-    await page.clock.fastForward(1000);
+    await page.clock.runFor(33_000);
     assert.equal(count("/ranking"), rankingReads);
     const expand = page.getByRole("button", { name: "展开顶部栏", exact: true });
     await expand.focus(); await expand.press("Enter");
     await page.locator(".surface-tabs button").filter({ hasText: "订货 H5" }).click();
     assert.equal(await quantity.inputValue(), "7");
 
-    for (const peer of peers) peer.destroy();
-    await page.getByRole("status").filter({ hasText: "活动信息正在重新同步" }).waitFor();
+    httpFailure = true; await page.clock.runFor(33_000);
+    await page.getByRole("button", { name: "重试活动资料", exact: true }).waitFor();
     assert.equal(await quantity.inputValue(), "7");
-    const reconnect = count("/events");
-    await page.clock.fastForward(2500);
+    httpFailure = false; const reconnect = metadataReads();
+    await page.getByRole("button", { name: "重试活动资料", exact: true }).click();
     await page.waitForFunction(() => !document.querySelector(".activity-sync-status"));
     assert.equal(count("/lottery"), 0); assert.equal(count("/order-draft"), 0);
-    assert.equal(count("/events"), reconnect + 1);
+    assert.equal(metadataReads(), reconnect + 1);
     assert.equal(count("/ranking"), rankingReads); assert.equal(await quantity.inputValue(), "7");
 
     await page.evaluate(() => { Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" }); document.dispatchEvent(new Event("visibilitychange")); });
     update({ name: "隐藏期间更新的活动" });
-    const hidden = count("/events"); await page.clock.fastForward(120_000); assert.equal(count("/events"), hidden);
+    const hidden = metadataReads(); await page.clock.runFor(120_000); assert.equal(metadataReads(), hidden);
     await page.evaluate(() => { Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
       document.dispatchEvent(new Event("visibilitychange")); window.dispatchEvent(new Event("focus")); window.dispatchEvent(new Event("pageshow")); });
     await page.getByText("隐藏期间更新的活动", { exact: true }).first().waitFor({ state: "attached" });
-    assert.equal(count("/events"), hidden + 1); assert.equal(await quantity.inputValue(), "7");
-    assert.equal(calls.filter(call => call.path === "/api/v1/public/activities/ACTIVITY-TEST").length, 0);
+    assert.equal(metadataReads(), hidden + 1); assert.equal(await quantity.inputValue(), "7");
+    assert.equal(count("/events"), 0);
     assert.equal(count("/lottery"), 0, "H5 and public activity initialization must not load lottery data");
     assert.equal(count("/order-draft"), 0, "Cart persistence must stay in the browser");
     // The standalone phone shell is fixed to the viewport: the notice must be inside it, not behind it.
@@ -119,17 +124,16 @@ try {
     await page.getByLabel("手机号", { exact: true }).fill("13900000001");
     await page.getByRole("button", { name: "验证并进入订货", exact: true }).click();
     await quantity.fill("7"); await quantity.blur();
-    for (const peer of peers) peer.destroy();
+    httpFailure = true; await page.clock.runFor(33_000);
     await page.locator(".phone-screen > .activity-sync-status").waitFor();
     assert.equal(await quantity.inputValue(), "7");
     await page.screenshot({ path: fileURLToPath(new URL(`activity-disconnected-${width}.png`, output)) });
-    await page.clock.fastForward(2500);
+    httpFailure = false; await page.getByRole("button", { name: "重试活动资料", exact: true }).click();
     await page.waitForFunction(() => !document.querySelector(".activity-sync-status"));
     assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
-    assert.equal(calls.filter(call => call.path === "/api/v1/public/activities/ACTIVITY-TEST").length, 0,
-      "Initial load, navigation and reconnect must all work without the removed activity GET");
+    assert.equal(count("/events"), 0, "New frontend must never establish activity SSE");
     await page.screenshot({ path: fileURLToPath(new URL(`activity-stream-${width}.png`, output)) });
     await context.close();
   }
-  console.log("PASS: 390px/1440px real EventSource and StrictMode workspace; independent initial snapshot, 65s idle, cart preservation, no statistics reload, disconnect/recovery and hidden-page resync. Synthetic HTTP only.");
-} finally { if (browser) await browser.close(); for (const peer of peers) peer.destroy(); await server.close(); }
+  console.log("PASS: 390px/1440px HTTP and StrictMode; conditional polling, no SSE, cart preservation, no statistics reload, retry and hidden-page resync. Synthetic HTTP only.");
+} finally { if (browser) await browser.close(); await server.close(); }

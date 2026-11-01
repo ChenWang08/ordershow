@@ -135,14 +135,14 @@ test("review queries only start on entry/filter/manual refresh and re-read after
   assert.equal(h.intervals.size, 0); h.unmount();
 });
 
-test("admin runtime remains on-demand; public runtime opens only the independent activity stream", async () => {
+test("admin runtime remains on-demand; public runtime starts only the independent activity HTTP lifecycle", async () => {
   const activity = { id: 1, name: "活动", status: "ACTIVE", startsAt: "2099-01-01T00:00:00Z", endsAt: "2099-01-02T00:00:00Z" };
   for (const admin of [true, false]) {
     let connections = 0;
     const h = hookHarness("app/features/workspace/useActivityRuntime.ts", "useActivityRuntime", admin ? [activity] : [], {
       "../../api": { getActiveActivityCode: () => "A", subscribeActiveActivityCode: () => () => {},
         loadPublicLottery: async () => ({ rules: [] }) },
-      "../../services/api/activity-info-stream": { subscribeActivityInfo: (_code, handlers) => {
+      "../../services/api/activity-info-http": { subscribeActivityInfo: (_code, handlers) => {
         connections++; handlers.onActivity(activity); handlers.onState("connected"); return () => {};
       } },
       "../lottery/Lottery": { initialLotteryRounds: [], mapLotteryRule: () => [] },

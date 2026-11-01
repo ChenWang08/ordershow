@@ -73,6 +73,12 @@ management:
         enabled: true
 
 order-show:
+  activity-http:
+    revision-ttl-ms: ${ACTIVITY_HTTP_REVISION_TTL_MS:2000}
+    max-activities: ${ACTIVITY_HTTP_MAX_ACTIVITIES:64}
+    max-loads: ${ACTIVITY_HTTP_MAX_LOADS:2}
+    max-waiters: ${ACTIVITY_HTTP_MAX_WAITERS:128}
+    wait-ms: ${ACTIVITY_HTTP_WAIT_MS:3000}
   activity-info:
     heartbeat-ms: ${ACTIVITY_INFO_HEARTBEAT_MS:30000}
     max-connections: ${ACTIVITY_INFO_MAX_CONNECTIONS:2000}

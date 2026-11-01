@@ -297,16 +297,50 @@ paths:
           $ref: '#/components/responses/Problem'
         '409':
           $ref: '#/components/responses/Problem'
+  /public/activities/{activityCode}:
+    get:
+      operationId: getPublicActivity
+      tags: [Public]
+      summary: 普通 HTTP 读取活动资料及条件检查
+      security: []
+      description: |
+        H5、看板、排行、战报和抽奖页面首次读取完整 JSON。携带上次 ETag 的 If-None-Match 检查，
+        未变化返回无正文的 304，变化返回完整资料。弱 ETag 包含公开版本及时间派生状态。
+        版本检查每副本短缓存默认 2 秒；完整资料按版本/状态缓存，同活动并发合并，等待不占数据库连接。
+        页面可见时约每 30 秒随机错开检查，隐藏暂停、恢复可见立即检查；不会自动刷新订单或统计。
+        Cache-Control 为 private, no-cache。服务器对下单和开奖仍实时校验，不使用浏览器资料作授权依据。
+      parameters:
+        - $ref: '#/components/parameters/ActivityCode'
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
+      responses:
+        '200':
+          description: 完整活动资料
+          headers:
+            ETag:
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublicActivityResponse'
+        '304':
+          description: 资料未变化，无正文；ETag 与 Cache-Control 保留
+          headers:
+            ETag:
+              schema: { type: string }
+        '404': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /public/activities/{activityCode}/events:
     get:
       operationId: subscribePublicActivityInfo
       tags: [Public]
-      summary: 独立的活动公开资料 SSE 同步
+      summary: 旧客户端兼容活动资料 SSE（新前端停用）
       security: []
       description: |
         手机验证前后及公开展示页面共用。建立连接后发送当前 activity 快照；活动资料变化后直接发送最新快照，
         不通知客户端重查接口。只包含现有公开活动资料，不包含订单、审核、商品目录、客户身份或统计数据。
-        原 GET /public/activities/{activityCode} 已删除，访问返回 404；初始加载和重连均使用本 SSE 快照。
+        本接口仅保留旧客户端兼容。新前端首次加载与约 30 秒检查均使用普通 GET，不建立活动 SSE。
         默认每 30 秒发送 heartbeat，心跳不查数据库。断线后退避重连，每次新连接重新同步当前资料，
         不提供 Last-Event-ID 历史续传。CLOSED/FINISHED 仍可订阅以感知重新开放；活动不存在时发送 unavailable 后结束。
         服务端返回 Cache-Control: no-cache, no-transform 与 X-Accel-Buffering: no；代理须关闭缓冲并允许长连接。
@@ -359,7 +393,7 @@ paths:
       operationId: getPublicLottery
       tags: [Public, Lottery]
       summary: 读取公开抽奖规则与中奖结果
-      description: 抽奖页面按需读取；独立于活动资料 SSE，H5 订货初始化不调用本接口。删除旧活动 GET 不影响此路径。
+      description: 仅抽奖页面打开且活动资料就绪后按需读取；H5 订货初始化不调用本接口。
       security: []
       parameters:
         - $ref: '#/components/parameters/ActivityCode'

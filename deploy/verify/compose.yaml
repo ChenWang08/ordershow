@@ -6,6 +6,11 @@ x-backend-env: &backend-env
   DB_POOL_SIZE: "10"
   DB_POOL_MIN_IDLE: "2"
   H5_SESSION_CACHE_TTL_MS: "0"
+  ACTIVITY_HTTP_REVISION_TTL_MS: "2000"
+  ACTIVITY_HTTP_MAX_ACTIVITIES: "64"
+  ACTIVITY_HTTP_MAX_LOADS: "2"
+  ACTIVITY_HTTP_MAX_WAITERS: "128"
+  ACTIVITY_HTTP_WAIT_MS: "3000"
   DASHBOARD_SUMMARY_ENABLED: "true"
   HTTP_MAX_THREADS: "40"
   H5_WRITE_CONCURRENCY: "12"
@@ -55,7 +60,7 @@ services:
       MINIO_ROOT_PASSWORD: isolated_smoke_minio_password
     tmpfs: [/data]
   backend-a:
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261101.1}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261101.2}
     mem_limit: 768m
     cpus: 2
     environment: *backend-env
@@ -65,7 +70,7 @@ services:
       redis: {condition: service_started}
       minio: {condition: service_started}
   backend-b:
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261101.1}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261101.2}
     mem_limit: 768m
     cpus: 2
     environment:
@@ -76,7 +81,7 @@ services:
     depends_on:
       backend-a: {condition: service_healthy}
   frontend:
-    image: order-show-ack-frontend:${ACK_IMAGE_TAG:-20261101.1}
+    image: order-show-ack-frontend:${ACK_IMAGE_TAG:-20261101.2}
     ports: ["127.0.0.1:18030:3000"]
   redis-cloud-check:
     profiles: [cloud-check]
@@ -85,7 +90,7 @@ services:
     tmpfs: [/data]
   cloud-check:
     profiles: [cloud-check]
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261101.1}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261101.2}
     mem_limit: 768m
     cpus: 2
     ports: ["127.0.0.1:18083:8080"]

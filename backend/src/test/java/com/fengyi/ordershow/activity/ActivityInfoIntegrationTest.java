@@ -53,13 +53,46 @@ class ActivityInfoIntegrationTest {
   @Autowired StringRedisTemplate redis;
   @Autowired RedisConnectionFactory redisConnections;
   @Autowired PlatformTransactionManager transactions;
+  @Autowired ActivityInfoHttpService httpInfo;
 
-  @Test void retiredActivityGetUsesExisting404ResponseInTheFullHttpStack() throws Exception {
+  @Test void finiteHttpChecksObserveDatabaseVersionsAndSeparateReplicaCaches() throws Exception {
+    String code = "HTTP-INFO-" + java.util.UUID.randomUUID();
+    long admin = jdbc.queryForObject("SELECT id FROM admin_user WHERE role_code='SUPER_ADMIN' ORDER BY id LIMIT 1", Long.class);
+    long department = jdbc.queryForObject("SELECT id FROM department WHERE department_code='DEFAULT'", Long.class);
+    jdbc.update("""
+        INSERT INTO activity(activity_code,name,status,starts_at,ends_at,event_ends_at,created_by,updated_by,department_id)
+        VALUES (?,'HTTP资料','ACTIVE','2026-01-01','2099-01-01','2099-01-02',?,?,?)
+        """, code, admin, admin, department);
+    long id = jdbc.queryForObject("SELECT id FROM activity WHERE activity_code=?", Long.class, code);
+    var second = new ActivityInfoHttpService(snapshots, new io.micrometer.core.instrument.simple.SimpleMeterRegistry(), 4, 2, 32, 0, 1000);
+    try (var client = HttpClient.newHttpClient()) {
+      URI url = URI.create("http://localhost:" + port + "/api/v1/public/activities/" + code);
+      var first = client.send(HttpRequest.newBuilder(url).timeout(Duration.ofSeconds(10)).GET().build(), HttpResponse.BodyHandlers.ofString());
+      assertThat(first.statusCode()).isEqualTo(200);
+      assertThat(json.readTree(first.body()).path("data").path("name").asText()).isEqualTo("HTTP资料");
+      String tag = first.headers().firstValue("ETag").orElseThrow();
+      assertThat(second.read(code, null).etag()).isEqualTo(tag);
+      var unchanged = client.send(HttpRequest.newBuilder(url).header("If-None-Match", tag).GET().build(), HttpResponse.BodyHandlers.ofString());
+      assertThat(unchanged.statusCode()).isEqualTo(304); assertThat(unchanged.body()).isEmpty();
+      new TransactionTemplate(transactions).executeWithoutResult(status -> {
+        jdbc.update("UPDATE activity SET name='HTTP已更新',status='CLOSED' WHERE id=?", id);
+        ActivityInfoChanges.record(jdbc, id);
+      });
+      assertThat(second.read(code, tag).activity().status()).isEqualTo("CLOSED");
+      Thread.sleep(2100);
+      var changed = client.send(HttpRequest.newBuilder(url).header("If-None-Match", tag).GET().build(), HttpResponse.BodyHandlers.ofString());
+      assertThat(changed.statusCode()).isEqualTo(200);
+      assertThat(changed.headers().firstValue("ETag").orElseThrow()).isNotEqualTo(tag);
+      assertThat(json.readTree(changed.body()).path("data").path("name").asText()).isEqualTo("HTTP已更新");
+    }
+  }
+
+  @Test void missingHttpActivityUsesDomain404InTheFullHttpStack() throws Exception {
     try (var client = HttpClient.newHttpClient()) {
       var response = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port
           + "/api/v1/public/activities/REMOVED-ENDPOINT")).GET().build(), HttpResponse.BodyHandlers.ofString());
       assertThat(response.statusCode()).isEqualTo(404);
-      assertThat(json.readTree(response.body()).path("code").asText()).isEqualTo("RESOURCE_NOT_FOUND");
+      assertThat(json.readTree(response.body()).path("code").asText()).isEqualTo("ACTIVITY_NOT_FOUND");
     }
   }
 
@@ -108,7 +141,7 @@ class ActivityInfoIntegrationTest {
       });
       assertThat(revision(id)).isEqualTo(initialRevision);
       assertThat(activities.byId(id).version()).isEqualTo(adminVersion);
-      assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM domain_event_outbox WHERE aggregate_type='ACTIVITY_INFO'", Integer.class)).isZero();
+      assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM domain_event_outbox WHERE aggregate_type='ACTIVITY_INFO' AND activity_id=?", Integer.class, id)).isZero();
 
       activities.updateLiveRoom(id, adminVersion, "https://example.com/live", admin);
       assertThat(first.next().path("activity").path("liveRoomUrl").asText()).isEqualTo("https://example.com/live");

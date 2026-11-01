@@ -65,7 +65,7 @@ public class SecurityConfiguration implements WebMvcConfigurer {
         .filter(origin -> !origin.isEmpty())
         .toList());
     config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-    config.setAllowedHeaders(List.of("Content-Type", "X-CSRF-Token", "Idempotency-Key", "If-Match", "X-Request-Id", "X-H5-Customer-Id"));
+    config.setAllowedHeaders(List.of("Content-Type", "X-CSRF-Token", "Idempotency-Key", "If-Match", "If-None-Match", "X-Request-Id", "X-H5-Customer-Id"));
     config.setExposedHeaders(List.of("X-Request-Id", "ETag", "Content-Disposition", "Retry-After"));
     config.setAllowCredentials(true);
     config.setMaxAge(3600L);

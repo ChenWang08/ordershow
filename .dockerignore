@@ -9,6 +9,14 @@ work
 .wrangler
 dist
 node_modules
+outputs
+work
+backups
+.env*
+.agents
+.codex
+.aws
+.qoder
 backend/target
 *.xlsx
 !public/import-template-products.xlsx
