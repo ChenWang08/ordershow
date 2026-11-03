@@ -2304,7 +2304,8 @@ paths:
     get:
       operationId: exportActivityOrders
       tags: [Orders]
-      summary: 按当前筛选条件导出订单 Excel
+      summary: 已停用的同步 Excel 导出接口
+      deprecated: true
       security:
         - adminCookie: []
       parameters:
@@ -2322,17 +2323,8 @@ paths:
           schema:
             type: string
       responses:
-        '200':
-          description: 订单 Excel 文件
-          headers:
-            Content-Disposition:
-              schema:
-                type: string
-          content:
-            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
-              schema:
-                type: string
-                format: binary
+        '410':
+          description: EXPORT_ENDPOINT_RETIRED，请使用异步 ORDER_PACKAGE 导出
   /admin/activities/{activityId}/orders/{orderId}:
     get:
       operationId: getActivityOrder
@@ -2959,10 +2951,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/LotteryRoundResponse'
   /admin/activities/{activityId}/exports:
+    get:
+      operationId: listOrderExportTasks
+      tags: [Exports]
+      summary: 系统管理员查询本活动最近 20 条订单导出任务
+      description: 仅整场活动已结束或已归档且未删除时可查询。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 最近的导出任务
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  traceId: { type: string }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/OrderExportTask' }
     post:
       operationId: createExportTask
       tags: [Exports]
-      summary: 创建异步导出任务
+      summary: 系统管理员创建异步订单 CSV ZIP 任务
+      description: 仅 FINISHED、ARCHIVED 或按现有规则整场活动时间已结束且未删除的活动可创建。CLOSED 本身不足以开放导出。相同筛选和活动代次的未完成任务复用；请求键可重试。全局最多一个执行任务，队列默认最多 10 个未完成任务。四份 CSV 来自同一读取快照，文件保留 24 小时。
       security:
         - adminCookie: []
       parameters:
@@ -2977,16 +2991,22 @@ paths:
               $ref: '#/components/schemas/CreateExportRequest'
       responses:
         '202':
-          description: 已创建任务
+          description: 已创建或复用任务
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExportTaskResponse'
+        '403':
+          description: SUPER_ADMIN_REQUIRED
+        '409':
+          description: 活动未结束或幂等请求参数冲突
+        '429':
+          description: EXPORT_QUEUE_FULL
   /admin/activities/{activityId}/exports/{taskId}:
     get:
       operationId: getExportTask
       tags: [Exports]
-      summary: 查询导出任务和下载地址
+      summary: 系统管理员查询订单导出进度
       security:
         - adminCookie: []
       parameters:
@@ -2999,6 +3019,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExportTaskResponse'
+  /admin/activities/{activityId}/exports/{taskId}/cancel:
+    post:
+      operationId: cancelOrderExportTask
+      tags: [Exports]
+      summary: 系统管理员取消未完成的导出任务
+      description: 取消运行中的任务后会等待文件操作停止，停止前仍阻止活动删除。允许在活动重新开放后取消。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 当前任务状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportTaskResponse'
+  /admin/activities/{activityId}/exports/{taskId}/download:
+    get:
+      operationId: downloadOrderExportPackage
+      tags: [Exports]
+      summary: 系统管理员下载已完成且未过期的订单 ZIP
+      description: 校验当前管理员身份、活动结束状态、删除标记及活动重新开放代次。响应从对象存储流式读取；通用 public/files 路径不能读取导出文件。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 包含订单汇总、订单商品明细、有效商品汇总、有效分公司汇总四份 CSV，没有说明 TXT
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '409':
+          description: 文件未完成、已过期或活动曾重新开放
   /admin/audit-logs:
     get:
       operationId: listAuditLogs
@@ -4861,38 +4922,52 @@ components:
       properties:
         exportType:
           type: string
-          enum: [ORDER_SUMMARY, ORDER_ITEMS, ORDER_VERSIONS, VISIT_FUNNEL, LOTTERY_WINNERS, IMPORT_ERRORS]
+          enum: [ORDER_PACKAGE]
         filters:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/OrderExportFilters'
+    OrderExportFilters:
+      type: object
+      properties:
+        status:
+          type: [string, 'null']
+          enum: [SUBMITTED, WITHDRAWN, VOIDED, null]
+        customerType:
+          type: [string, 'null']
+          enum: [GENERAL, SPECIAL, ALL, null]
+        keyword:
+          type: [string, 'null']
+          maxLength: 200
+      description: 订单汇总和商品明细使用全部筛选；两份有效汇总固定 SUBMITTED，仍使用客户类型及关键词筛选。
     ExportTaskResponse:
       type: object
       required: [data, traceId]
       properties:
         data:
-          type: object
-          required: [id, exportType, status, createdAt]
-          properties:
-            id:
-              $ref: '#/components/schemas/Id'
-            exportType:
-              type: string
-            status:
-              type: string
-              enum: [PENDING, RUNNING, COMPLETED, FAILED, EXPIRED]
-            rowCount:
-              type: [integer, 'null']
-            downloadUrl:
-              type: [string, 'null']
-              format: uri
-            expiresAt:
-              type: [string, 'null']
-              format: date-time
-            createdAt:
-              type: string
-              format: date-time
+          $ref: '#/components/schemas/OrderExportTask'
         traceId:
           type: string
+    OrderExportTask:
+      type: object
+      required: [id, activityId, status, stage, filters, orderCount, detailCount, sheetCounts, createdAt, cancelRequested]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        activityId: { $ref: '#/components/schemas/Id' }
+        status: { type: string, enum: [PENDING, RUNNING, COMPLETED, FAILED, EXPIRED] }
+        stage: { type: string, enum: [QUEUED, READING, COMPRESSING, UPLOADING, COMPLETED, FAILED, EXPIRED] }
+        filters: { $ref: '#/components/schemas/OrderExportFilters' }
+        orderCount: { type: integer, format: int64 }
+        detailCount: { type: integer, format: int64 }
+        sheetCounts:
+          type: array
+          items: { type: integer, format: int64 }
+          description: 完成后依次为订单汇总、订单商品明细、有效商品汇总、有效分公司汇总的数据行数；处理中为空数组。
+        snapshotAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        failureCode: { type: string }
+        failureMessage: { type: string }
+        cancelRequested: { type: boolean }
     ActivityOverviewResponse:
       type: object
       required: [data, traceId]

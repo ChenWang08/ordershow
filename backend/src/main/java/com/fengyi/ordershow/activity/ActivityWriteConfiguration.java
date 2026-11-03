@@ -50,7 +50,8 @@ public class ActivityWriteConfiguration {
         return invocation.proceed();
       boolean lifecycle = path.matches("/admin/activities/[0-9]+/(archive|unarchive|permanent-deletion)");
       boolean readOnly = path.matches("/screen/activities/[^/]+/ranking")
-          || path.matches("/admin/activities/[0-9]+/(orders|lottery/candidates)/preview");
+          || path.matches("/admin/activities/[0-9]+/(orders|lottery/candidates)/preview")
+          || path.matches("/admin/activities/[0-9]+/exports(?:/[0-9]+/cancel)?");
       try {
         return tx.execute(status -> {
           policy.lockWrite(activityId, lifecycle, readOnly, path.endsWith("/permanent-deletion"), !path.contains("/admin/"));

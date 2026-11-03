@@ -101,6 +101,35 @@ public class StorageService {
     return read(meta(fileId));
   }
 
+  /** Export-only streaming API. The caller reserves metadata before object I/O so deletion can discover the object. */
+  public FileMeta prepareExport(long activityId,String filename,long size,byte[] sha,long adminId,String token) {
+    String key=activityId+"/export_result/"+token+".zip";
+    GeneratedKeyHolder keys=new GeneratedKeyHolder();
+    jdbc.update(connection -> {
+      var statement=connection.prepareStatement("""
+          INSERT INTO stored_file(activity_id,storage_provider,bucket_name,object_key,original_filename,content_type,size_bytes,sha256,file_purpose,reference_count,created_by)
+          VALUES(?,'S3',?,?,?,'application/zip',?,?,'EXPORT_RESULT',1,?)
+          """,java.sql.Statement.RETURN_GENERATED_KEYS);
+      statement.setLong(1,activityId);statement.setString(2,bucket);statement.setString(3,key);statement.setString(4,filename);
+      statement.setLong(5,size);statement.setBytes(6,sha);statement.setLong(7,adminId);return statement;
+    },keys);
+    return new FileMeta(keys.getKey().longValue(),bucket,key,filename,"application/zip",size);
+  }
+  public void uploadExport(FileMeta meta,java.nio.file.Path path)throws Exception {
+    ensureBucket();
+    try(var input=java.nio.file.Files.newInputStream(path)) {
+      minio.putObject(PutObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey())
+          .stream(input,meta.sizeBytes(),-1L).contentType("application/zip").build());
+    }
+  }
+  public InputStream openExport(FileMeta meta)throws Exception {
+    return minio.getObject(GetObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey()).build());
+  }
+  public void discardExport(FileMeta meta)throws Exception {
+    minio.removeObject(io.minio.RemoveObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey()).build());
+    jdbc.update("UPDATE stored_file SET deleted_at=COALESCE(deleted_at,UTC_TIMESTAMP(3)) WHERE id=? AND file_purpose='EXPORT_RESULT'",meta.id());
+  }
+
   public byte[] read(FileMeta meta) {
     try (InputStream input = minio.getObject(GetObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey()).build())) {
       return input.readAllBytes();

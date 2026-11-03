@@ -45,23 +45,4 @@ class OrderQueryServiceTest {
     assertThat(args[15]).isEqualTo(0);
   }
 
-  @Test
-  void exportKeepsRequestedDetailStatusButUsesSubmittedOrdersForTotals() {
-    service.exportData(9, "WITHDRAWN", "SPECIAL", "客户名称");
-
-    ArgumentCaptor<Object[]> summaries = ArgumentCaptor.forClass(Object[].class);
-    verify(jdbc).query(anyString(), any(RowMapper.class), summaries.capture());
-    assertThat(summaries.getValue()[1]).isEqualTo("WITHDRAWN");
-    ArgumentCaptor<Object[]> detailsAndTotals = ArgumentCaptor.forClass(Object[].class);
-    org.mockito.Mockito.verify(jdbc, org.mockito.Mockito.times(3)).queryForList(anyString(), detailsAndTotals.capture());
-    List<Object[]> args = detailsAndTotals.getAllValues();
-    assertThat(args.get(0)[1]).isEqualTo("WITHDRAWN");
-    assertThat(args.get(1)[1]).isEqualTo("SUBMITTED");
-    assertThat(args.get(2)[1]).isEqualTo("SUBMITTED");
-    for (Object[] values : args) {
-      assertThat(values[0]).isEqualTo(9L);
-      assertThat(values[4]).isEqualTo("SPECIAL");
-      assertThat(values[7]).isEqualTo("客户名称");
-    }
-  }
 }

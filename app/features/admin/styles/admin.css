@@ -396,3 +396,16 @@
 .activity-switcher-menu .activity-department-filter { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 4px; font-size: 12px; }
 .activity-switcher-menu .activity-department-filter select { max-width: 220px; padding: 5px 8px; border: 1px solid #ded4cd; border-radius: 5px; background: #fff; }
 .deletion-task-drawer .drawer-body > button, .deletion-task button { align-self: flex-start; padding: 7px 12px; border: 1px solid #d8b7ab; border-radius: 6px; color: #9f2522; background: #fff; }
+.order-export-panel { margin: 16px 0; padding: 16px; border: 1px solid #dbe3ec; border-radius: 12px; background: #f8fafc; }
+.order-export-title, .order-export-record { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.order-export-title h3 { margin: 0 0 6px; font-size: 16px; }
+.order-export-title p, .order-export-help { font-size: 13px; color: #526175; line-height: 1.7; }
+.order-export-title p { margin: 0; }
+.order-export-help { margin: 10px 0; }
+.order-export-help summary { cursor: pointer; }
+.order-export-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; margin: 12px 0 0; padding: 0; list-style: none; }
+.order-export-list li { min-width: 0; padding: 14px; border: 1px solid #dbe3ec; border-radius: 8px; background: white; overflow-wrap: anywhere; }
+.order-export-list li p { margin: 8px 0; font-size: 13px; line-height: 1.6; }
+.order-export-record span { font-size: 12px; color: #526175; }
+.order-export-failure { color: #a02828; }
+.order-export-download { display: inline-block; padding: 8px 12px; background: #1d4ed8; color: white; border-radius: 6px; font-size: 13px; text-decoration: none; }

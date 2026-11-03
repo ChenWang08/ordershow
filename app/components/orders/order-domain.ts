@@ -217,4 +217,4 @@ export function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRec
 }
 
 export type OrderManagementProps = {
-  readOnly?: boolean; activityClosed: boolean; activityStarted: boolean; activityId: number; activityName: string };
+  readOnly?: boolean; activityClosed: boolean; activityStarted: boolean; activityFinished?: boolean; activityId: number; activityName: string };

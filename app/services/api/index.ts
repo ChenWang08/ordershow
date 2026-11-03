@@ -7,6 +7,7 @@ export * from "./auth";
 export * from "./admin";
 export * from "./imports";
 export * from "./orders";
+export * from "./order-exports";
 export * from "./dashboard";
 export * from "./lottery";
 export * from "./products";

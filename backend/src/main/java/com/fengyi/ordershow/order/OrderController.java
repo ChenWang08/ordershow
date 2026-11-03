@@ -6,13 +6,7 @@ import com.fengyi.ordershow.common.TraceFilter;
 import com.fengyi.ordershow.audit.AuditService;
 import com.fengyi.ordershow.security.AuthService;
 import jakarta.servlet.http.HttpServletRequest;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
-import org.springframework.http.ContentDisposition;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -132,10 +126,8 @@ public class OrderController {
   }
 
   @GetMapping("/admin/activities/{activityId}/orders/export")
-  ResponseEntity<byte[]> export(@PathVariable long activityId, @RequestParam(required = false) String status,
-      @RequestParam(required = false) String customerType, @RequestParam(required = false) String keyword) {
-    byte[] content = service.export(activityId, status, customerType, keyword);
-    return ResponseEntity.ok().contentType(MediaType.parseMediaType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"))
-        .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment().filename("orders.xlsx").build().toString()).body(content);
+  void export() {
+    throw new com.fengyi.ordershow.common.DomainException(org.springframework.http.HttpStatus.GONE,
+        "EXPORT_ENDPOINT_RETIRED", "导出已升级为后台生成CSV压缩包，请刷新页面后重新操作");
   }
 }

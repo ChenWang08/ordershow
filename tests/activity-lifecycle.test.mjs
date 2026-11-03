@@ -70,9 +70,9 @@ test("existing switcher defaults to unarchived, filters archived/all, and suppor
   assert.equal(a.model.activityArchiveFilter, "archived"); assert.equal(a.model.visibleActivities.length, 1); a.unmount();
 });
 test("archived order controls disable mutation while export and filters remain available", async () => {
-  const model = { readOnly: true, activityStarted: true, activityClosed: true, orderCounts: {}, orderFilter: "全部", customerType: "全部", search: "", setOrderFilter() {}, setCustomerType() {}, setSearch() {}, setPage() {} };
+  const model = { readOnly: true, activityStarted: true, activityClosed: true, activityFinished: true, canExport: true, exports: { busy: false }, orderCounts: {}, orderFilter: "全部", customerType: "全部", search: "", setOrderFilter() {}, setCustomerType() {}, setSearch() {}, setPage() {} };
   const h = hookHarness("app/components/orders/OrderFilterBar.tsx", "OrderFilterBar", [{ model }]);
-  assert.equal(button(h, "＋ 新增订单").props.disabled, true); assert.equal(button(h, "导出订单").props.disabled, undefined);
+  assert.equal(button(h, "＋ 新增订单").props.disabled, true); assert.equal(button(h, "导出订单").props.disabled, false);
   assert.match(text(h.model), /所有订单只读/);
 });
 

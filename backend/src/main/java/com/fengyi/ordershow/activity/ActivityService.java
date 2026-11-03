@@ -470,10 +470,18 @@ public class ActivityService {
     requireNoPublishedOverlap(id, current.departmentId(), current.startsAt(), eventEndsAt);
     int changed = jdbc.update("""
         UPDATE activity SET status = 'ACTIVE', ends_at = ?, event_ends_at = ?,
-          closed_at = NULL, finished_at = NULL, version = version + 1, updated_by = ?
+          closed_at = NULL, finished_at = NULL, export_generation=export_generation+1, version = version + 1, updated_by = ?
         WHERE id = ? AND version = ? AND deletion_requested_at IS NULL
         """, UtcTime.database(endsAt), UtcTime.database(eventEndsAt), admin.id(), id, expectedVersion);
     requireChanged(changed);
+    // Keep RUNNING as a lifecycle barrier until the worker has stopped its file I/O.
+    jdbc.update("""
+        UPDATE export_task SET cancel_requested=TRUE,
+          stage=CASE WHEN status='PENDING' THEN 'FAILED' WHEN status='COMPLETED' THEN 'EXPIRED' ELSE stage END,
+          status=CASE WHEN status='PENDING' THEN 'FAILED' WHEN status='COMPLETED' THEN 'EXPIRED' ELSE status END,
+          failure_code='EXPORT_ACTIVITY_REOPENED',failure_message='活动已重新开放，请在整场活动结束后重新生成',updated_at=UTC_TIMESTAMP(3)
+        WHERE activity_id=? AND export_type='ORDER_PACKAGE' AND status IN ('PENDING','RUNNING','COMPLETED')
+        """,id);
     jdbc.update("DELETE FROM activity_dashboard_snapshot WHERE activity_id = ?", id);
     jdbc.update("DELETE FROM activity_ranking_snapshot WHERE activity_id = ?", id);
     jdbc.update("""

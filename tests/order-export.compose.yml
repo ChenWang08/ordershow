@@ -1,0 +1,24 @@
+name: order-show-export-test
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: order_show_export_test
+      MYSQL_ROOT_PASSWORD: export_test_only
+      TZ: UTC
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--innodb-buffer-pool-size=134217728"]
+    ports: ["127.0.0.1:33327:3306"]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    tmpfs: ["/var/lib/mysql"]
+  minio:
+    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    environment:
+      MINIO_ROOT_USER: export_test
+      MINIO_ROOT_PASSWORD: export_test_only
+    command: server /data
+    ports: ["127.0.0.1:33328:9000"]
+    tmpfs: ["/data"]

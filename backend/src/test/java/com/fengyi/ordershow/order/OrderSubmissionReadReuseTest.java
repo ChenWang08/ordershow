@@ -23,7 +23,7 @@ class OrderSubmissionReadReuseTest {
   private final OrderChangeRequestRepository changes = mock(OrderChangeRequestRepository.class);
   private final H5Principal customer = new H5Principal(1, 2, 3, "A", "GENERAL", "EAST", "B", "S", "F", "139****0000");
   private final OrderRow current = new OrderRow(7, 3, "SUBMITTED", 1, 1);
-  private final OrderService service = new OrderService(repository, activities, null, new ObjectMapper(), null, null, changes);
+  private final OrderService service = new OrderService(repository, activities, null, new ObjectMapper(), null, changes);
   private final ProductSnapshot product = new ProductSnapshot(10, "M", "N", "C", "P", "B", "V", "S", "12", "GENERAL", "ALL", false, new BigDecimal("100"), null, null, null, null, null);
 
   @BeforeEach void setup() {

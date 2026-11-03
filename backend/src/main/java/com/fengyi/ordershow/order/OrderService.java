@@ -34,17 +34,15 @@ public class OrderService {
   private final DashboardService dashboards;
   private final ObjectMapper json;
   private final OrderQueryService queries;
-  private final OrderExportService exports;
   private final OrderChangeRequestRepository changeRequests;
 
   public OrderService(OrderRepository repository, ActivityService activities, DashboardService dashboards, ObjectMapper json,
-                      OrderQueryService queries, OrderExportService exports, OrderChangeRequestRepository changeRequests) {
+                      OrderQueryService queries, OrderChangeRequestRepository changeRequests) {
     this.repository = repository;
     this.activities = activities;
     this.dashboards = dashboards;
     this.json = json;
     this.queries = queries;
-    this.exports = exports;
     this.changeRequests = changeRequests;
   }
 
@@ -478,9 +476,6 @@ public class OrderService {
     return queries.adminOrders(activityId, status, customerType, keyword, page, size, traceId);
   }
 
-  public byte[] export(long activityId, String status, String customerType, String keyword) {
-    return exports.export(activityId, status, customerType, keyword);
-  }
 
 
   private Map<Long, Long> quantities(List<SubmitItem> items) {

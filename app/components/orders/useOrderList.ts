@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, loadAdminOrders, loadAdminOrder, exportAdminOrders } from "../../api";
+import { ApiError, loadAdminOrders, loadAdminOrder } from "../../api";
 import { toOrderRecord, type OrderRecord, type OrderStatus, type CustomerType } from "./order-domain";
 
-export function useOrderList(activityId: number, activityName: string, enabled = true, revision = 0) {
+export function useOrderList(activityId: number, _activityName: string, enabled = true, revision = 0) {
   const detailController = useRef<AbortController | null>(null);
   useEffect(() => () => { detailController.current?.abort(); }, [activityId, enabled]);
   const [orders, setOrders] = useState<OrderRecord[]>([]);
@@ -97,13 +97,6 @@ export function useOrderList(activityId: number, activityName: string, enabled =
     }
   };
 
-  const exportOrders = () => exportAdminOrders(activityId, {
-    status: orderFilter === "已提交" ? "SUBMITTED" : orderFilter === "已撤回" ? "WITHDRAWN" : orderFilter === "已作废" ? "VOIDED" : undefined,
-    customerType: customerType === "综合" ? "GENERAL" : customerType === "特渠" ? "SPECIAL" : customerType === "不区分客户类型" ? "ALL" : undefined,
-    keyword: search,
-  }, activityName);
-
-
   const operationRecords = selected?.operationRecords ?? [];
-  return { selected, setSelectedNo, expandedVersion, setExpandedVersion, orderCounts, loading, loadError, setLoadError, orderFilter, setOrderFilter, customerType, setCustomerType, search, setSearch, page, setPage, totalPages, filteredOrders, openOrder, openOrderById, exportOrders, operationRecords, setOrders, setReloadKey };
+  return { selected, setSelectedNo, expandedVersion, setExpandedVersion, orderCounts, loading, loadError, setLoadError, orderFilter, setOrderFilter, customerType, setCustomerType, search, setSearch, page, setPage, totalPages, filteredOrders, openOrder, openOrderById, operationRecords, setOrders, setReloadKey };
 }

@@ -75,4 +75,15 @@ class MemberPermissionServiceTest {
     assertThatThrownBy(() -> check(new AdminPrincipal(3,"unknown","未知","UNKNOWN",1L,"部门",false), "POST", "/admin/users"))
         .isInstanceOf(DomainException.class);
   }
+  @Test void exportsAlwaysRequireSuperAdminIncludingDepartmentManagersAndOrderMembers() {
+    var root=new AdminPrincipal(1,"root","系统管理员","SUPER_ADMIN",null,null,false);
+    var department=new AdminPrincipal(3,"dept","部门管理员","DEPARTMENT_ADMIN",1L,"部门",false);
+    for(String resource:List.of("exports","exports/3","exports/3/download","exports/3/cancel","orders/export")) {
+      String path="/admin/activities/1/"+resource;
+      check(root,"GET",path);
+      for(var denied:List.of(department,member(AdminPermission.ORDER)))
+        assertThatThrownBy(()->check(denied,"GET",path)).isInstanceOf(DomainException.class)
+            .extracting(e->((DomainException)e).code()).isEqualTo("SUPER_ADMIN_REQUIRED");
+    }
+  }
 }

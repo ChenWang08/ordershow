@@ -85,7 +85,7 @@ services:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    environment:
+    environment: &backend-environment
       DB_URL: jdbc:mysql://mysql:3306/order_show?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC&allowPublicKeyRetrieval=true&useSSL=false&cachePrepStmts=true&prepStmtCacheSize=250&prepStmtCacheSqlLimit=2048&rewriteBatchedStatements=true
       DB_USERNAME: order_show
       DB_PASSWORD: ${DB_PASSWORD:-order_show_local}
@@ -126,6 +126,30 @@ services:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  export-worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["--export-worker"]
+    environment:
+      <<: *backend-environment
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m -XX:ActiveProcessorCount=1
+      SPRING_FLYWAY_ENABLED: "false"
+      ORDER_SHOW_EXPORT_TEMP_DIR: /tmp/order-exports
+      ORDER_SHOW_EXPORT_MAX_TEMP_BYTES: "1073741824"
+    cpus: 0.5
+    mem_limit: 512m
+    pids_limit: 128
+    # /tmp uses the container's disk, not a tmpfs charged against the memory limit.
+    healthcheck:
+      disable: true
+    depends_on:
+      backend:
         condition: service_healthy
       minio:
         condition: service_healthy
