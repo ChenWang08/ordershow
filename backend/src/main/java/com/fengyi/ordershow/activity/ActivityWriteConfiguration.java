@@ -8,6 +8,7 @@ import org.springframework.aop.support.DefaultPointcutAdvisor;
 import org.springframework.aop.support.StaticMethodMatcherPointcut;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.context.annotation.Role;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.core.Ordered;
@@ -23,7 +24,8 @@ import org.springframework.web.servlet.HandlerMapping;
 public class ActivityWriteConfiguration {
   @Bean
   @Role(BeanDefinition.ROLE_INFRASTRUCTURE)
-  Advisor activityWriteAdvisor(ActivityAccessPolicy policy, PlatformTransactionManager manager) {
+  Advisor activityWriteAdvisor(@Lazy ActivityAccessPolicy policy, @Lazy PlatformTransactionManager manager) {
+    // Advisors are discovered while post-processors are being registered; defer database dependencies.
     var pointcut = new StaticMethodMatcherPointcut() {
       @Override public boolean matches(Method method, Class<?> type) {
         return type.isAnnotationPresent(RestController.class) &&

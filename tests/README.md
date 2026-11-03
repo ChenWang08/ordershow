@@ -2,6 +2,8 @@
 
 ## 测试分工
 
+- 活动写入保护启动顺序：`ActivityWriteStartupTest` 在同一33326端口临时库验证正式配置、Spring Boot连接池/Flyway/监控初始化、完整Bean处理及两组连接池参数。配合活动写入保护、H5路径回滚、草稿/导入事务及订单提交专项复测；修复前后证据、复跑命令及未部署边界见[启动顺序修复记录](../docs/testing/activity-write-startup-2026-11-03.md)。沿用 `ORDER_SHOW_ACTIVITY_TEST=activity-lifecycle-only` 开关，禁止与使用同库的生命周期测试并行运行。
+
 - 活动归档与永久删除：`npm run test:activity-lifecycle`、`npm run typecheck:activity-lifecycle` 和 `scripts/test-activity-lifecycle-browser.mjs` 验证原活动菜单筛选、超管操作、归档订单只读及删除进度。`ActivityLifecycleIntegrationTest` 使用固定33326端口临时库，只有 `ORDER_SHOW_ACTIVITY_TEST=activity-lifecycle-only` 才启用，覆盖真实迁移、关联数据分批清理、续跑、失败重试、锁、缓存隔离及草稿/导入事务兼容；`StorageDeletionTest` 验证文件及衍生版本清理。运行方式、证据与边界见[活动生命周期验证](../docs/testing/activity-lifecycle-2026-11-03.md)。只验证相关模块，不部署业务应用或访问业务库。
 
 - 排行联动与空值：`ranking-filters.test.mjs`、`screens-manual-refresh.test.mjs` 覆盖上游重置、项目组收窄品种、缺失字段/空值、取消迟到请求、失败重试及最后成功条件刷新；`scripts/test-ranking-filters-browser.mjs` 用真实 React 和合成 HTTP 验证交互及 1920/1440/768/440 布局。`RankingFiltersIntegrationTest` 用隔离 MySQL 验证实际条件、适用且未下单的配置、分公司/经销商范围、新历史冻结与空格空值一致；`PageStatisticsControllerTest` 验证真实 MVC 参数和全局 NON_NULL 下仍输出 null 选项字段。运行与结果见[联动与空值验证](../docs/testing/ranking-cascade-2026-11-01.md)。

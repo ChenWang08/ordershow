@@ -224,6 +224,14 @@ class ActivityLifecycleIntegrationTest {
         assertThat(org.springframework.aop.support.AopUtils.isAopProxy(probe)).isTrue();
         assertThatThrownBy(()->probe.fail(id)).isInstanceOf(IllegalStateException.class);
         assertThat(jdbc.queryForObject("SELECT name FROM activity WHERE id=?",String.class,id)).isEqualTo("活动"+id);
+        request.setRequestURI("/h5/activities/ACT"+id+"/order");
+        request.setAttribute(org.springframework.web.servlet.HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE,Map.of("activityCode","ACT"+id));
+        assertThatThrownBy(()->probe.fail(id)).isInstanceOf(IllegalStateException.class);
+        assertThat(jdbc.queryForObject("SELECT name FROM activity WHERE id=?",String.class,id)).isEqualTo("活动"+id);
+        probe.write(id);
+        assertThat(jdbc.queryForObject("SELECT name FROM activity WHERE id=?",String.class,id)).isEqualTo("changed");
+        request.setRequestURI("/admin/activities/"+id+"/probe");
+        request.setAttribute(org.springframework.web.servlet.HandlerMapping.URI_TEMPLATE_VARIABLES_ATTRIBUTE,Map.of("activityId",Long.toString(id)));
         jdbc.update("UPDATE activity SET status='ARCHIVED',archived_at=UTC_TIMESTAMP(3) WHERE id=?",id);
         assertThatThrownBy(()->probe.write(id)).isInstanceOf(DomainException.class);
         jdbc.update("UPDATE activity SET deletion_requested_at=UTC_TIMESTAMP(3) WHERE id=?",id);
