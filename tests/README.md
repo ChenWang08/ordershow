@@ -2,6 +2,8 @@
 
 ## 测试分工
 
+- 后台三份列表加载（2026-11-04）：`admin-list-cache.test.mjs`、`admin-product-images.test.mjs`、`admin-lazy-loading.test.mjs`、`admin-products.test.mjs`、`admin-customers.test.mjs` 和 `drawer-interactions.test.mjs` 共77项通过；`scripts/test-admin-list-loading-browser.mjs` 通过真实组件与合成接口验证保存/取消不整表重读、分页筛选保留、手动刷新、返回加载和候选缓存失效。`ProductEditorStateTest` 与权限/图片专项覆盖局部读取和边界；完整结果、原有失败及未部署范围见[验证记录](../docs/testing/admin-list-loading-2026-11-04.md)。
+
 - 活动写入保护启动顺序：`ActivityWriteStartupTest` 在同一33326端口临时库验证正式配置、Spring Boot连接池/Flyway/监控初始化、完整Bean处理及两组连接池参数。配合活动写入保护、H5路径回滚、草稿/导入事务及订单提交专项复测；修复前后证据、复跑命令及未部署边界见[启动顺序修复记录](../docs/testing/activity-write-startup-2026-11-03.md)。沿用 `ORDER_SHOW_ACTIVITY_TEST=activity-lifecycle-only` 开关，禁止与使用同库的生命周期测试并行运行。
 
 - 活动归档与永久删除：`npm run test:activity-lifecycle`、`npm run typecheck:activity-lifecycle` 和 `scripts/test-activity-lifecycle-browser.mjs` 验证原活动菜单筛选、超管操作、归档订单只读及删除进度。`ActivityLifecycleIntegrationTest` 使用固定33326端口临时库，只有 `ORDER_SHOW_ACTIVITY_TEST=activity-lifecycle-only` 才启用，覆盖真实迁移、关联数据分批清理、续跑、失败重试、锁、缓存隔离及草稿/导入事务兼容；`StorageDeletionTest` 验证文件及衍生版本清理。运行方式、证据与边界见[活动生命周期验证](../docs/testing/activity-lifecycle-2026-11-03.md)。只验证相关模块，不部署业务应用或访问业务库。

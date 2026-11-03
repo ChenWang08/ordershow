@@ -11,9 +11,10 @@ import { ProductImageEditor } from "../products/ProductImageEditor";
 import { PriceTierEditor } from "./PriceTierEditor";
 import { editablePriceTiers, priceTierInputErrors } from "../../../domain/tier-pricing-form";
 import { ProductScopeEditor } from "./ProductScopeEditor";
+import type { DealerCandidateCache } from "../dealer-candidate-cache";
 import "./product-scope.css";
 
-export function ProductFormDrawer({ rows, initialRow, activityStarted = false, activityId, scopeEnabled, tiersEditable = true, onClose, onSave }: { rows: ProductImportRow[]; initialRow?: ProductImportRow; activityStarted?: boolean; activityId: number; scopeEnabled: boolean; tiersEditable?: boolean; onClose: () => void; onSave: (row: ProductImportRow, reason?: string) => Promise<DrawerSaveResult> }) {
+export function ProductFormDrawer({ rows, initialRow, activityStarted = false, activityId, scopeEnabled, tiersEditable = true, onClose, onSave, candidateCache }: { rows: ProductImportRow[]; initialRow?: ProductImportRow; activityStarted?: boolean; activityId: number; scopeEnabled: boolean; candidateCache?: DealerCandidateCache; tiersEditable?: boolean; onClose: () => void; onSave: (row: ProductImportRow, reason?: string) => Promise<DrawerSaveResult> }) {
   const isEditing = Boolean(initialRow);
   const [form, setForm] = useState<ProductImportRow>(() => {
     const row: ProductImportRow = initialRow ? { ...initialRow, priceTierMinQuantity: initialRow.priceTierMinQuantity ?? "", priceTierCasePrice: initialRow.priceTierCasePrice ?? "", priceTierPricingMode: initialRow.priceTierPricingMode ?? "WHOLE_ORDER" } : { id: createImportRowId("product"), sequence: 0, customerType: "", rebate: "", category: "", line: "", materialCode: "", materialName: "", description: "", brand: "", variety: "", spec: "", casePack: "", unitPrice: "", casePrice: "", priceTierMinQuantity: "", priceTierCasePrice: "", priceTierPricingMode: "WHOLE_ORDER", conversion: "", gift: "否", branchScope: "", status: "有效", source: "manual" };
@@ -89,7 +90,7 @@ export function ProductFormDrawer({ rows, initialRow, activityStarted = false, a
           {tierEnabled && tiersEditable && <PriceTierEditor basePrice={basePrice} tiers={tiers} mode={form.priceTierPricingMode} onChange={changeTiers} onModeChange={mode => update("priceTierPricingMode", mode)} />}
           <label><span>每吨箱数（箱/吨）</span><input inputMode="decimal" value={form.conversion} onChange={(e) => update("conversion", e.target.value)} /><small className={!conversionValid ? "field-error" : ""}>Excel 原列名：吨箱转换系数；统计时按订货箱数 ÷ 每吨箱数计算吨数</small></label>
           <label><span>是否礼盒</span><select value={form.gift} onChange={(e) => update("gift", e.target.value)}><option>否</option><option>是</option></select></label>
-          <ProductScopeEditor activityId={activityId} form={form} enabled={scopeEnabled} onChange={(branchScope, dealerScope) => setForm(current => ({ ...current, branchScope, dealerScope, dealerScopeEdited: scopeEnabled }))} />
+          <ProductScopeEditor candidateCache={candidateCache} activityId={activityId} form={form} enabled={scopeEnabled} onChange={(branchScope, dealerScope) => setForm(current => ({ ...current, branchScope, dealerScope, dealerScopeEdited: scopeEnabled }))} />
           <label><span>数据状态（自动判定）</span><output>{automaticStatus}</output><small>仅元/箱或吨箱转换系数缺失、无效时为待完善；项目组、规格、箱规为选填。</small></label>
         </div>
         {activityStarted && <label className="drawer-form-reason"><span>{isEditing ? "修改原因（必填）" : "新增商品原因"}</span><input maxLength={500} value={editReason} onChange={e => setEditReason(e.target.value)} placeholder="请填写本次商品或下单范围修改原因" /></label>}

@@ -114,15 +114,27 @@ public class ProductImageService {
   }
 
   public List<ImageReviewView> pendingImageReviews(long activityId) {
+    return pendingImageReviews(activityId, null);
+  }
+
+  public List<ImageReviewView> pendingImageReviews(long activityId, List<String> names) {
+    if (names != null && names.isEmpty()) return List.of();
+    var keys = names == null ? List.<String>of() : names.stream().map(ProductImageMatcher::materialNameKey).distinct().toList();
+    if (keys.size() > 500) {
+      List<ImageReviewView> result = new ArrayList<>();
+      for (int start = 0; start < keys.size(); start += 500) result.addAll(pendingImageReviews(activityId, keys.subList(start, Math.min(start + 500, keys.size()))));
+      return result;
+    }
+    List<Object> args = new ArrayList<>(); args.add(activityId); args.addAll(keys);
+    String filter = names == null ? "" : " AND c.normalized_material_name IN (" + String.join(",", java.util.Collections.nCopies(keys.size(), "?")) + ")";
     return jdbc.query("""
         SELECT c.id, c.stored_file_id, c.archive_path, c.material_code, c.material_name, c.status
         FROM product_image_review_candidate c
         JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'PRODUCT' AND b.current_version_id = c.data_version_id
         WHERE c.activity_id = ? AND c.status = 'PENDING'
-        ORDER BY c.normalized_material_name, c.id
-        """, (rs, rowNum) -> new ImageReviewView(rs.getLong("id"), rs.getLong("stored_file_id"),
+        """ + filter + " ORDER BY c.normalized_material_name, c.id", (rs, rowNum) -> new ImageReviewView(rs.getLong("id"), rs.getLong("stored_file_id"),
         "/api/v1/public/files/" + rs.getLong("stored_file_id"), rs.getString("archive_path"),
-        rs.getString("material_code"), rs.getString("material_name"), rs.getString("status")), activityId);
+        rs.getString("material_code"), rs.getString("material_name"), rs.getString("status")), args.toArray());
   }
 
   public void selectImageReview(long activityId, long candidateId, long adminId) {

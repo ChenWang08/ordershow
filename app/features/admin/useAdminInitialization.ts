@@ -7,7 +7,7 @@ import { type Dispatch, type SetStateAction } from "react";
 import { loadAdminProducts, loadProductImageReviews, loadAdminCustomers, loadAdminAttendees,
   loadLotteryRules, loadAuditLogs, loadImportTasks, loadImportRows, loadAttendanceMatchPreview, waitForImport,
   type RuntimeActivity, type ImportTask } from "../../api";
-import { cloneProductRows, cloneWhitelistRows, type WhitelistRow } from "../../domain/import-domain";
+import { cloneProductRows, cloneWhitelistRows } from "../../domain/import-domain";
 import { initialLotteryRounds, mapLotteryRule } from "../lottery/Lottery";
 import { mergeProductImageReviews, runtimeProductToImportRow, restoreProductPreview, restoreWhitelistPreview,
   restoreAttendancePreview, restoredSheetCounts } from "./admin-utils";
@@ -17,6 +17,7 @@ import type { ImportTaskIds } from "./product-module-types";
 import type { useProductImport } from "./useProductImport";
 import type { useWhitelistImport } from "./useWhitelistImport";
 import type { useAttendanceManagement } from "./useAttendanceManagement";
+import { mapAdminWhitelistRows } from "./whitelist-utils";
 import { useLazyAdminQuery } from "./useLazyAdminQuery";
 
 type AdminInitializationOptions = Pick<AdminWorkspaceProps,
@@ -30,6 +31,8 @@ type AdminInitializationOptions = Pick<AdminWorkspaceProps,
   "setAttendanceImportAttemptName" | "setAttendanceMatchPreview" | "setPendingAttendanceImport"
 > & {
   tab: string;
+  cacheScope?: string;
+  onWhitelistLoaded?: () => void;
   logsOpen: boolean;
   activity: RuntimeActivity | null;
   preservePreviews?: { product: boolean; whitelist: boolean; attendance: boolean; lottery: boolean };
@@ -65,7 +68,7 @@ export function useAdminInitialization(options: AdminInitializationOptions) {
     o.setServerImportBlocking(current => ({ ...current, [type]: task?.errorCount ?? 0 }));
     if (task) o.setActionNotice("已恢复当前模块尚未确认的导入预览，请确认或取消后再发布活动。");
   }
-  const product = useLazyAdminQuery(o.activityId + ":PRODUCT", enabled("商品导入", "PRODUCT"), async signal => {
+  const product = useLazyAdminQuery((o.cacheScope ?? "") + o.activityId + ":PRODUCT", enabled("商品导入", "PRODUCT"), async signal => {
     const pending = await preview("PRODUCT", signal);
     const [products, reviews] = await Promise.all([
       loadAdminProducts(id, {}, signal), loadProductImageReviews(id, signal),
@@ -84,20 +87,14 @@ export function useAdminInitialization(options: AdminInitializationOptions) {
         o.setProductSheetCounts(restoredSheetCounts(pending.rows));
       }
     };
-  }, commit, o.preservePreviews?.product);
-  const whitelist = useLazyAdminQuery(o.activityId + ":WHITELIST", enabled("白名单", "WHITELIST"), async signal => {
+  }, commit, o.preservePreviews?.product, undefined, "entry");
+  const whitelist = useLazyAdminQuery((o.cacheScope ?? "") + o.activityId + ":WHITELIST", enabled("白名单", "WHITELIST"), async signal => {
     const pending = await preview("WHITELIST", signal);
     const customers = await loadAdminCustomers(id, signal);
     const regions = new Map(o.activity?.regions.map(region => [region.code, region.name]) ?? []);
-    const published: WhitelistRow[] = customers.map((customer, index) => ({
-      id: String(customer.id), serverVersion: customer.lockVersion, sequence: customer.excelSequence ?? index + 1,
-      customerType: customer.customerType === "GENERAL" ? "综合客户" : customer.customerType === "SPECIAL" ? "特渠专业客户" : "",
-      region: regions.get(customer.regionCode || "") || customer.regionCode || "", branch: customer.branchName || "",
-      dealerShort: customer.dealerShortName || "", dealerFull: customer.dealerFullName, dealerType: customer.dealerCategory || "",
-      dealerName: customer.contactName || "", dealerPhone: customer.phone || customer.phoneMasked, confirmerName: customer.confirmerName || "",
-      confirmerPhone: customer.confirmerPhone || customer.confirmerPhoneMasked || "", status: customer.active ? "有效" : "待处理", source: "excel",
-    }));
+    const published = mapAdminWhitelistRows(customers, regions);
     return () => {
+      o.onWhitelistLoaded?.();
       o.setWhitelistRows(published); o.onWhitelistImportCompleted(customers.length > 0);
       if (customers.length > 0) o.onWhitelistImportCommitted();
       o.setWhitelistFileName(customers.length ? "当前已发布白名单" : "");
@@ -110,8 +107,8 @@ export function useAdminInitialization(options: AdminInitializationOptions) {
         o.setWhitelistSheetCounts(restoredSheetCounts(pending.rows));
       }
     };
-  }, commit, o.preservePreviews?.whitelist);
-  const attendance = useLazyAdminQuery(o.activityId + ":ATTENDANCE", enabled("现场到场", "ATTENDANCE"), async signal => {
+  }, commit, o.preservePreviews?.whitelist, undefined, "entry");
+  const attendance = useLazyAdminQuery((o.cacheScope ?? "") + o.activityId + ":ATTENDANCE", enabled("现场到场", "ATTENDANCE"), async signal => {
     const pending = await preview("ATTENDANCE", signal);
     const attendees = await loadAdminAttendees(id, signal);
     const match = pending ? await loadAttendanceMatchPreview(id, pending.task.id, signal) : null;
@@ -127,13 +124,13 @@ export function useAdminInitialization(options: AdminInitializationOptions) {
           inputCount: pending.task.inputCount });
       }
     };
-  }, commit, o.preservePreviews?.attendance);
-  const lottery = useLazyAdminQuery(o.activityId + ":LOTTERY", enabled("抽奖规则", "LOTTERY"), async signal => {
+  }, commit, o.preservePreviews?.attendance, undefined, "entry");
+  const lottery = useLazyAdminQuery((o.cacheScope ?? "") + o.activityId + ":LOTTERY", enabled("抽奖规则", "LOTTERY"), async signal => {
     const rules = await loadLotteryRules(id, signal);
     const rule = rules.find(item => item.status === "PUBLISHED") ?? rules[0];
     return () => o.onLotteryChange(rule ? mapLotteryRule(rule) : initialLotteryRounds.map(item => ({ ...item })));
   }, commit, o.preservePreviews?.lottery);
-  const logs = useLazyAdminQuery(o.activityId + ":LOGS", o.logsOpen && isManager(identity), async signal => {
+  const logs = useLazyAdminQuery((o.cacheScope ?? "") + o.activityId + ":LOGS", o.logsOpen && isManager(identity), async signal => {
     const entries = await loadAuditLogs(id, signal);
     return () => o.setOperationLogs(entries.map(entry => ({ id: String(entry.id), action: entry.actionCode === "LOTTERY_ROUNDS_REORDERED" ? "调整抽奖顺序" : entry.actionCode,
       target: `${entry.objectType}${entry.objectId ? ` #${entry.objectId}` : ""}`,

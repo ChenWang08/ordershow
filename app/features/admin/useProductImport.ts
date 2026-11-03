@@ -21,6 +21,7 @@ type ProductImportOptions = ProductModuleOptions & {
   productImportHasRun: boolean;
   setProductImportCompleted: (completed: boolean) => void;
   onProductImportCommitted: () => void;
+  onReadbackFailed?: () => void;
   setServerImportTasks: Dispatch<SetStateAction<ImportTaskIds>>;
   setServerImportBlocking: Dispatch<SetStateAction<ImportTaskIds>>;
   serverImportBlocking: ImportTaskIds;
@@ -30,7 +31,7 @@ type ProductImportOptions = ProductModuleOptions & {
 export function useProductImport({
   activityId, activityStatus, productRows, setProductRows, productImportHasRun, setProductImportCompleted, onProductImportCommitted,
   serverImportTasks, setServerImportTasks, serverImportBlocking, setServerImportBlocking,
-  setActionNotice, recordOperation, importWaitOptions,
+  setActionNotice, recordOperation, importWaitOptions, onReadbackFailed,
 }: ProductImportOptions) {
   const activityPublished = activityStatus !== "draft";
   const [productFileName, setProductFileName] = useState("");
@@ -129,19 +130,24 @@ export function useProductImport({
     if (imageWarningCount > 0 && !window.confirm(`本批次有 ${productImageStats.pendingProducts} 个商品图片待确认、${productImageStats.unmatchedProducts} 个商品图片未匹配。发布后这些商品将使用默认图片，是否继续？`)) return;
     const taskId = serverImportTasks.PRODUCT;
     let publishedRows: ProductImportRow[] | null = null;
+    let readbackError = false;
     if (taskId) {
       try {
         await confirmImport(Number(activityId), taskId, productImageUploadFile ?? undefined,
           buildProductImageDecisions(productRows, resolvedProductImageAssets));
         await waitForImport(Number(activityId), taskId, importWaitOptions?.());
-        const [products, imageReviews] = await Promise.all([
-          loadAdminProducts(Number(activityId)), loadProductImageReviews(Number(activityId)),
-        ]);
-        publishedRows = mergeProductImageReviews(products.map(runtimeProductToImportRow), imageReviews);
       } catch (error) {
         setActionNotice(error instanceof ApiError ? error.message : "商品导入发布失败，请检查后重试。");
         return;
       }
+      try {
+        const [products, imageReviews] = await Promise.all([
+          loadAdminProducts(Number(activityId)), loadProductImageReviews(Number(activityId)),
+        ]);
+        publishedRows = mergeProductImageReviews(products.map(runtimeProductToImportRow), imageReviews);
+      } catch { readbackError = true; publishedRows = []; }
+      setServerImportTasks(current => ({ ...current, PRODUCT: undefined }));
+      setServerImportBlocking(current => ({ ...current, PRODUCT: 0 }));
     }
     const cleanRows = publishedRows ?? productRows;
     setProductRows(cleanRows);
@@ -149,7 +155,8 @@ export function useProductImport({
     setProductImportCompleted(true);
     onProductImportCommitted();
     recordOperation("替换商品 Excel", productFileName || "商品信息 Excel", `共 ${productImportStats.total} 条；有效 ${productImportStats.valid} 条，待完善 ${productImportStats.incomplete} 条。`);
-    setActionNotice(`商品目录已替换：共 ${productImportStats.total} 条，有效 ${productImportStats.valid} 条、待完善 ${productImportStats.incomplete} 条${productImageUploadFile ? "，本批次图片已同步" : "，未匹配商品使用默认图片"}。`);
+    if (readbackError) onReadbackFailed?.();
+    setActionNotice(readbackError ? "商品目录已替换成功，但最新列表读取失败。请点击刷新列表核对，请勿重复确认导入。" : `商品目录已替换：共 ${productImportStats.total} 条，有效 ${productImportStats.valid} 条、待完善 ${productImportStats.incomplete} 条${productImageUploadFile ? "，本批次图片已同步" : "，未匹配商品使用默认图片"}。`);
   };
   const handleProductFile = async (file: File) => {
     if (activityPublished) {

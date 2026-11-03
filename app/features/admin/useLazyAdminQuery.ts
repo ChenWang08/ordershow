@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 /** Read on each entry, retain the last snapshot, and protect edits from late responses. */
 export function useLazyAdminQuery<T>(key: string, enabled: boolean,
-  loader: (signal: AbortSignal) => Promise<T>, onLoaded?: (value: T) => void, preserveEdits = false, entryKey = key) {
+  loader: (signal: AbortSignal) => Promise<T>, onLoaded?: (value: T) => void, preserveEdits = false, entryKey = key,
+  reloadPolicy: "resume" | "entry" = "resume") {
   const callbacks = useRef({ loader, onLoaded, preserveEdits });
   const session = useRef<{ key: string; enabled: boolean; loaded: boolean; dirty: boolean;
-    controller?: AbortController; running?: Promise<T | undefined> } | null>(null);
+    entry?: string; pendingEntry?: boolean; controller?: AbortController; running?: Promise<T | undefined> } | null>(null);
   const [state, setState] = useState<{ key: string; data?: T; loaded: boolean; loading: boolean;
     stale: boolean; error: string; updatedAt: string | null } | null>(null);
   useEffect(() => { callbacks.current = { loader, onLoaded, preserveEdits }; }, [loader, onLoaded, preserveEdits]);
@@ -15,6 +16,7 @@ export function useLazyAdminQuery<T>(key: string, enabled: boolean,
     const current = session.current;
     if (!current || current.key !== key || !current.enabled || callbacks.current.preserveEdits) return Promise.resolve(undefined);
     if (current.running) return current.running;
+    current.pendingEntry = false;
     const controller = new AbortController();
     current.controller = controller;
     setState(previous => ({ key, data: previous?.key === key ? previous.data : undefined,
@@ -45,11 +47,12 @@ export function useLazyAdminQuery<T>(key: string, enabled: boolean,
     if (!session.current || session.current.key !== key) {
       session.current = { key, enabled, loaded: false, dirty: false };
     }
+    if (enabled && (!session.current.enabled || session.current.entry !== entryKey)) session.current.pendingEntry = true;
+    session.current.entry = entryKey;
     session.current.enabled = enabled;
     const current = session.current;
-    if (enabled && !preserveEdits) void refresh();
+    if (enabled && !preserveEdits && (reloadPolicy === "resume" || !current.loaded || current.pendingEntry)) void refresh();
     return () => {
-      current.enabled = false;
       if (current.running) {
         if (current.loaded) current.dirty = true;
         setState(previous => previous?.key === key
@@ -57,7 +60,23 @@ export function useLazyAdminQuery<T>(key: string, enabled: boolean,
       }
       current.controller?.abort(); current.controller = undefined; current.running = undefined;
     };
-  }, [key, enabled, preserveEdits, entryKey, refresh]);
+  }, [key, enabled, preserveEdits, entryKey, refresh, reloadPolicy]);
+  const acceptLocal = useCallback(() => {
+    const current = session.current;
+    if (!current || current.key !== key) return;
+    current.controller?.abort(); current.controller = undefined; current.running = undefined;
+    current.loaded = true; current.dirty = false; current.pendingEntry = false;
+    setState(previous => ({ key, data: previous?.key === key ? previous.data : undefined,
+      loaded: true, loading: false, stale: false, error: "", updatedAt: new Date().toISOString() }));
+  }, [key]);
+  const markRefreshError = useCallback((error: string) => {
+    const current = session.current;
+    if (!current || current.key !== key) return;
+    current.controller?.abort(); current.controller = undefined; current.running = undefined;
+    current.loaded = true; current.dirty = true; current.pendingEntry = false;
+    setState(previous => ({ key, data: previous?.key === key ? previous.data : undefined,
+      loaded: true, loading: false, stale: true, error, updatedAt: previous?.key === key ? previous.updatedAt : null }));
+  }, [key]);
   const invalidate = useCallback(() => {
     const current = session.current;
     if (!current || current.key !== key) return;
@@ -68,5 +87,5 @@ export function useLazyAdminQuery<T>(key: string, enabled: boolean,
   const current = state?.key === key ? state : null;
   return { data: current?.data, loaded: current?.loaded ?? false, loading: current?.loading ?? false,
     stale: current?.stale ?? false, error: current?.error ?? "", updatedAt: current?.updatedAt ?? null,
-    refresh, invalidate };
+    refresh, invalidate, acceptLocal, markRefreshError };
 }

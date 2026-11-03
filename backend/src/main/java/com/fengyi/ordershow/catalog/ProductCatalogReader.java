@@ -84,6 +84,33 @@ public class ProductCatalogReader {
     return withImages(rows.getFirst());
   }
 
+  /** The current published activity is the authorization boundary for editor refreshes. */
+  public List<ProductView> editorProducts(long activityId, long productId, List<String> imageGroupNames) {
+    if (imageGroupNames.size() > 12 || imageGroupNames.stream().anyMatch(name -> name.length() > 512)) {
+      throw DomainException.badRequest("PRODUCT_GROUP_INVALID", "商品图片分组参数不正确");
+    }
+    Long version = currentVersion(activityId);
+    var target = jdbc.query("SELECT * FROM activity_product WHERE activity_id=? AND data_version_id=? AND id=? AND is_visible=TRUE",
+        this::map, activityId, version, productId);
+    if (target.isEmpty()) throw DomainException.notFound("PRODUCT_NOT_FOUND", "当前商品不存在或商品目录已替换，请刷新列表");
+    if (imageGroupNames.isEmpty()) return withDetails(target);
+    var names = new java.util.HashSet<String>();
+    imageGroupNames.stream().map(ProductImageMatcher::materialNameKey).filter(name -> !name.isBlank()).forEach(names::add);
+    names.add(ProductImageMatcher.materialNameKey(target.getFirst().materialName()));
+    var ids = jdbc.query("SELECT id,material_name FROM activity_product WHERE activity_id=? AND data_version_id=? AND is_visible=TRUE",
+        (rs, row) -> new java.util.AbstractMap.SimpleImmutableEntry<>(rs.getLong(1), rs.getString(2)), activityId, version).stream()
+        .filter(row -> row.getKey() == productId || names.contains(ProductImageMatcher.materialNameKey(row.getValue())))
+        .map(Map.Entry::getKey).toList();
+    List<ProductView> result = new ArrayList<>();
+    for (int start = 0; start < ids.size(); start += 500) {
+      var batch = ids.subList(start, Math.min(start + 500, ids.size()));
+      List<Object> args = new ArrayList<>(); args.add(activityId); args.add(version); args.addAll(batch);
+      result.addAll(withDetails(jdbc.query("SELECT * FROM activity_product WHERE activity_id=? AND data_version_id=? AND is_visible=TRUE AND id IN ("
+          + String.join(",", java.util.Collections.nCopies(batch.size(), "?")) + ") ORDER BY sort_no,id", this::map, args.toArray())));
+    }
+    return result;
+  }
+
   Long currentVersion(long activityId) {
     return jdbc.query("SELECT current_version_id FROM activity_data_binding WHERE activity_id = ? AND data_type = 'PRODUCT'",
         rs -> rs.next() ? rs.getLong(1) : null, activityId);

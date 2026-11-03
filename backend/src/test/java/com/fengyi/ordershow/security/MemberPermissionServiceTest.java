@@ -34,6 +34,12 @@ class MemberPermissionServiceTest {
       assertThatThrownBy(() -> check(member(), "GET", path)).isInstanceOf(DomainException.class);
     }
   }
+  @Test void editorStateRequiresProductPermission() {
+    String path="/admin/activities/1/products/42/editor-state";
+    check(member(AdminPermission.PRODUCT),"GET",path);
+    for(var actor:List.of(member(),member(AdminPermission.WHITELIST),member(AdminPermission.ORDER)))
+      assertThatThrownBy(() -> check(actor,"GET",path)).isInstanceOf(DomainException.class);
+  }
   @Test void fullPermissionsNeverGrantActivityOrAccountAdministration() {
     var actor = member(AdminPermission.values());
     for (String path : List.of("/admin/activities", "/admin/activities/1", "/admin/activities/1/publish",

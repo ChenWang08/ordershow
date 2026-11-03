@@ -5,7 +5,7 @@ import { loadModule } from "./helpers/load-ts-module.mjs";
 function state() {
   let cursor = 0;
   const slots = [];
-  return { reset() { cursor = 0; }, react: { useRef(initial) {
+  return { reset() { cursor = 0; }, react: { useEffect() {}, useRef(initial) {
     const id = cursor++;
     if (!(id in slots)) slots[id] = { current: initial };
     return slots[id];

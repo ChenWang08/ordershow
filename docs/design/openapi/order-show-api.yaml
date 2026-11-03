@@ -1844,6 +1844,41 @@ paths:
       responses:
         '200':
           description: 已从当前商品目录删除；历史订单不受影响
+  /admin/activities/{activityId}/products/{productId}/editor-state:
+    get:
+      operationId: getProductEditorState
+      tags: [Catalog]
+      summary: 读取当前商品及受图片操作影响的同名商品状态
+      description: 需要商品管理权限与活动访问权限。只返回当前商品版本中的可见商品、这些商品的经销商范围摘要和待确认图片；不返回整份目录。不传图片分组时只返回当前商品。名称比较沿用图片匹配的标准化规则。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: productId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - name: imageGroupNames
+          in: query
+          description: 图片操作涉及的旧名称和新名称；每个名称单独传一个同名参数，名称内的逗号保留原样。
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 12
+            items:
+              type: string
+              maxLength: 512
+      responses:
+        '200':
+          description: data 包含 products、以商品编号为键的 scopes、reviews；字段结构与原商品、范围摘要和图片候选接口一致。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+        '404':
+          description: 当前商品不存在、已不可见或商品目录已经替换，需要重新读取列表。
   /admin/activities/{activityId}/products/{productId}/images:
     post:
       operationId: addProductImage

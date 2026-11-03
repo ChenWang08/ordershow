@@ -111,3 +111,42 @@ test("leaving an activity cancels its paused import progress reads", async () =>
   const rejected = assert.rejects(task, { name: "AbortError" }); controller.abort(); await rejected;
   assert.equal(h.timers.size, 0); assert.equal(h.calls.length, 0);
 });
+
+
+test("entry policy retains local rows when drawers save or cancel, with explicit and entry refreshes", async () => {
+  let reads = 0; const commits = [], loader = async () => ++reads, commit = n => commits.push(n);
+  const args = (enabled, editing = false, key = "account:activity") => [key, enabled, loader, commit, editing, key, "entry"];
+  const h = hookHarness(hook, "useLazyAdminQuery", args(true)); await h.flush();
+  for (const save of [false, true]) {
+    h.render(args(true, true)); await h.flush();
+    if (save) h.model.acceptLocal();
+    h.render(args(true)); await h.flush();
+    assert.equal(reads, 1, "closing a drawer must not reread the directory");
+  }
+  h.render(args(false)); h.model.invalidate(); h.render(args(true, true)); await h.flush();
+  assert.equal(reads, 1, "module entry protects ongoing edits");
+  h.render(args(true)); await h.flush(); assert.equal(reads, 2);
+  await Promise.all([h.model.refresh(), h.model.refresh()]); await h.flush(); assert.equal(reads, 3);
+  h.render(args(true, false, "different-account:activity")); await h.flush(); assert.equal(reads, 4);
+  assert.deepEqual(commits, [1, 2, 3, 4]); h.unmount();
+});
+
+test("accepting a local mutation aborts an older read and discards its late result", async () => {
+  const calls = [], commits = [];
+  const loader = signal => { const d = deferred(); calls.push({ ...d, signal }); return d.promise; };
+  const h = hookHarness(hook, "useLazyAdminQuery", ["one", true, loader, value => commits.push(value), false, "one", "entry"]);
+  await h.flush(); h.model.acceptLocal(); await h.flush();
+  assert.equal(calls[0].signal.aborted, true); assert.equal(h.model.loaded, true);
+  calls[0].resolve("outdated"); await h.flush(); assert.deepEqual(commits, []);
+  assert.equal(h.model.loading, false); assert.equal(h.model.stale, false); h.unmount();
+});
+
+
+test("post-import readback failure stays visible until an explicit successful refresh",async()=>{
+  let reads=0;const loader=async()=>++reads;
+  const args=editing=>["one",true,loader,undefined,editing,"one","entry"];
+  const h=hookHarness(hook,"useLazyAdminQuery",args(false));await h.flush();
+  h.render(args(true));h.model.acceptLocal();h.model.markRefreshError("已导入，请刷新");
+  h.render(args(false));await h.flush();assert.equal(reads,1);assert.equal(h.model.stale,true);assert.match(h.model.error,/请刷新/);
+  await h.model.refresh();await h.flush();assert.equal(reads,2);assert.equal(h.model.error,"");assert.equal(h.model.stale,false);h.unmount();
+});

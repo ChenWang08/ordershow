@@ -36,6 +36,7 @@ const frontendSourceFiles = [
   "../app/features/admin/useActivityOverview.ts",
   "../app/features/admin/useProductImport.ts",
   "../app/features/admin/useProductEditor.ts",
+  "../app/features/admin/product-editor-images.ts",
   "../app/features/admin/ProductImportPage.tsx",
   "../app/features/admin/useWhitelistImport.ts",
   "../app/features/admin/useWhitelistEditor.ts",
