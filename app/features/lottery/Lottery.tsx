@@ -194,6 +194,10 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
     ? Array.from({ length: Math.min(rollingCount, availableCandidateNames.length) }, (_, i) => availableCandidateNames[(ticker + i * 3) % availableCandidateNames.length])
     : Array.from({ length: rollingCount }, (_, index) => `幸运客户 ${index + 1}`);
   const winners = status === "done" || status === "finished" ? persistedWinners : rollingNames;
+  // Use the drawn count while rolling so revealing the names keeps the same layout.
+  const displayCount = status === "rolling" ? rollingCount : winners.length;
+  const winnerDensity = displayCount === 1 ? "single" : displayCount === 2 ? "pair"
+    : displayCount <= 4 ? "few" : displayCount <= 9 ? "medium" : "many";
   const retry = () => { setAnimation(null); setReload((value) => value + 1); };
   if (historyLoading && !currentRound) return <section className="screen-board lottery-board"><div className="lottery-ready"><h2>正在加载抽奖轮次</h2></div></section>;
   if (historyError && !currentRound) return <section className="screen-board lottery-board"><div className="lottery-ready"><h2>{historyError}</h2><button onClick={retry}>重新加载</button></div></section>;
@@ -255,7 +259,7 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
       ) : historyError ? (
         <div className="lottery-ready history-empty"><h2>抽奖结果暂时无法加载</h2><p>{historyError}</p><button onClick={retry}>重新加载</button></div>
       ) : readOnlyRound ? persistedWinners.length > 0 ? (
-        <div className="winner-grid finished">
+        <div className="winner-grid finished" data-density={winnerDensity}>
           {persistedWinners.map((name, index) => <div key={`${name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><b title={name}>{name}</b></div>)}
         </div>
       ) : (
@@ -267,7 +271,7 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
       ) : status === "finished" && winners.length === 0 ? (
         <div className="lottery-ready history-empty"><h2>暂无已保存的中奖名单</h2><p>请刷新页面重新读取本轮抽奖结果</p></div>
       ) : (
-        <div className={`winner-grid ${status}`}>
+        <div className={`winner-grid ${status}`} data-density={winnerDensity}>
           {winners.map((name, index) => <div key={`${name}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><b title={name}>{name}</b></div>)}
         </div>
       )}

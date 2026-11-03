@@ -10,6 +10,8 @@
 
 - H5 本机草稿与抽奖按页面加载：`h5-local-draft.test.mjs` 验证浏览器持久化、隔离、损坏/过期和存储失败；`h5-manual-refresh.test.mjs` 验证完整草稿生命周期及后台更新后的失效、提交成功清理/失败保留。`activity-info-http.test.mjs` 与 `lottery-board.test.mjs` 分别保证公共/H5 初始化不查询抽奖，以及抽奖页独立读取正常。浏览器验证无后台草稿请求、购物车保留和 HTTP 活动同步；本轮补充抽奖仅在页面打开且活动资料就绪后挂载。历史草稿验证见[记录](../docs/testing/h5-local-draft-2026-10-31.md)。
 
+- 抽奖大屏图片与名单展示：运行 `node --test tests/lottery-board.test.mjs` 和 `node scripts/test-lottery-display-browser.mjs`。后者用真实组件与模拟 HTTP 检查 1920×1080、1366×768、390×844 下的 1/2/3/4/5/9/10/30/60 家名单，图片两倍尺寸及横图/竖图/方图/小图/无图、长名称换行、大名单滚动、滚动/揭晓/回看与展开顶部栏。截图和测量结果位于 `outputs/lottery-display/`；只启动本地测试页面，不构建或部署镜像。Playwright 可通过 `ORDER_SHOW_PLAYWRIGHT_MODULE` 指定，浏览器可通过 `ORDER_SHOW_BROWSER_PATH` 指定。
+
 - 手机端订单按需刷新：`h5-manual-refresh.test.mjs` 覆盖无轮询、15 秒冷却、共享查询、修改/撤回检查、审核及后台直接修改、草稿版本和迟到响应隔离；`scripts/test-h5-manual-refresh-browser.mjs` 使用真实 H5 组件及合成 HTTP，在手机/桌面验证静置无订单请求、最新购物车和失败恢复，见[验证记录](../docs/testing/h5-manual-refresh-2026-10-30.md)。
 
 - 后台手动刷新：`admin-manual-refresh.test.mjs` / `admin-session.test.mjs` 覆盖按需读取、请求合并、过期响应隔离和身份异常；`scripts/test-admin-refresh-browser.mjs` 用真实后台组件与合成 HTTP 在桌面/窄屏验证静置无轮询、手动刷新及失败恢复，详见 [后台取消轮询验证](../docs/testing/admin-manual-refresh-2026-10-30.md)。
