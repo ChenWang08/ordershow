@@ -51,7 +51,7 @@ public class ActivityService {
     List<ActivityView> rows = jdbc.query("""
         SELECT a.*, d.department_name
         FROM activity a JOIN department d ON d.id = a.department_id
-        WHERE a.activity_code = ? AND a.archived_at IS NULL
+        WHERE a.activity_code = ? AND a.deletion_requested_at IS NULL
         """, this::map, code);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
     return withRegions(rows.getFirst());
@@ -61,7 +61,7 @@ public class ActivityService {
     List<ActivityView> rows = jdbc.query("""
         SELECT a.*, d.department_name
         FROM activity a JOIN department d ON d.id = a.department_id
-        WHERE a.id = ? AND a.archived_at IS NULL
+        WHERE a.id = ? AND a.deletion_requested_at IS NULL
         """, this::map, id);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
     return withRegions(rows.getFirst());
@@ -69,7 +69,7 @@ public class ActivityService {
 
   /** Internal order/catalog lookup: no UI regions or whitelist summaries on the request hot path. */
   public OrderingActivity orderingActivity(String code) {
-    var rows = jdbc.query("SELECT id,ends_at FROM activity WHERE activity_code=? AND archived_at IS NULL",
+    var rows = jdbc.query("SELECT id,ends_at FROM activity WHERE activity_code=? AND deletion_requested_at IS NULL",
         (rs, rowNum) -> new OrderingActivity(rs.getLong("id"),UtcTime.read(rs, "ends_at")),code);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
     return rows.getFirst();
@@ -82,7 +82,7 @@ public class ActivityService {
     List<ActivityView> rows = jdbc.query("""
         SELECT a.*, d.department_name
         FROM activity a JOIN department d ON d.id = a.department_id
-        WHERE a.archived_at IS NULL AND d.status = 'ACTIVE' AND a.published_at IS NOT NULL AND a.closed_at IS NULL
+        WHERE a.deletion_requested_at IS NULL AND d.status = 'ACTIVE' AND a.published_at IS NOT NULL AND a.closed_at IS NULL
           AND a.status IN ('SCHEDULED', 'ACTIVE')
           AND a.starts_at <= UTC_TIMESTAMP(3) AND a.ends_at > UTC_TIMESTAMP(3)
         ORDER BY a.starts_at, a.id
@@ -100,7 +100,7 @@ public class ActivityService {
     return jdbc.query("""
         SELECT a.*, d.department_name
         FROM activity a JOIN department d ON d.id = a.department_id
-        WHERE a.archived_at IS NULL ORDER BY a.created_at DESC
+        WHERE a.deletion_requested_at IS NULL ORDER BY a.created_at DESC
         """, this::map)
         .stream().map(this::withRegions).toList();
   }
@@ -112,7 +112,7 @@ public class ActivityService {
         SELECT a.id,a.department_id,d.department_name,a.activity_code,a.name,a.status,
           a.starts_at,a.ends_at,a.event_ends_at
         FROM activity a JOIN department d ON d.id=a.department_id
-        WHERE a.archived_at IS NULL
+        WHERE a.deletion_requested_at IS NULL
         """;
     Object[] args = admin.isSuperAdmin() ? new Object[] {} : new Object[] { admin.departmentId() };
     if (!admin.isSuperAdmin()) sql += " AND a.department_id=?";
@@ -136,7 +136,7 @@ public class ActivityService {
     return jdbc.query("""
         SELECT a.*, d.department_name
         FROM activity a JOIN department d ON d.id = a.department_id
-        WHERE a.archived_at IS NULL AND a.department_id = ?
+        WHERE a.deletion_requested_at IS NULL AND a.department_id = ?
         ORDER BY a.created_at DESC
         """, this::map, admin.departmentId()).stream().map(this::withRegions).toList();
   }
@@ -293,7 +293,7 @@ public class ActivityService {
   }
 
   public void requireWritable(long activityId) {
-    var rows = jdbc.query("SELECT status,starts_at,ends_at,event_ends_at FROM activity WHERE id=? AND archived_at IS NULL",
+    var rows = jdbc.query("SELECT status,starts_at,ends_at,event_ends_at FROM activity WHERE id=? AND deletion_requested_at IS NULL",
         (rs, rowNum) -> new OrderingWindow(rs.getString("status"),UtcTime.read(rs, "starts_at"),
             UtcTime.read(rs, "ends_at"),UtcTime.read(rs, "event_ends_at")),activityId);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
@@ -307,34 +307,34 @@ public class ActivityService {
   @Transactional
   public void synchronizeTimedActivities() {
     List<Long> starting = jdbc.queryForList("""
-        SELECT id FROM activity WHERE status = 'SCHEDULED'
+        SELECT id FROM activity WHERE deletion_requested_at IS NULL AND status = 'SCHEDULED'
           AND starts_at <= UTC_TIMESTAMP(3) AND ends_at > UTC_TIMESTAMP(3)
         """, Long.class);
     for (Long id : starting) {
       int changed = jdbc.update("""
           UPDATE activity SET status = 'ACTIVE', actual_started_at = COALESCE(actual_started_at, UTC_TIMESTAMP(3)), version = version + 1
-          WHERE id = ? AND status = 'SCHEDULED' AND starts_at <= UTC_TIMESTAMP(3) AND ends_at > UTC_TIMESTAMP(3)
+          WHERE id = ? AND deletion_requested_at IS NULL AND status = 'SCHEDULED' AND starts_at <= UTC_TIMESTAMP(3) AND ends_at > UTC_TIMESTAMP(3)
           """, id);
       if (changed == 1) outbox(id, "ACTIVITY_STARTED");
     }
     List<Long> closing = jdbc.queryForList("""
-        SELECT id FROM activity WHERE status IN ('SCHEDULED', 'ACTIVE') AND ends_at <= UTC_TIMESTAMP(3)
+        SELECT id FROM activity WHERE deletion_requested_at IS NULL AND status IN ('SCHEDULED', 'ACTIVE') AND ends_at <= UTC_TIMESTAMP(3)
         """, Long.class);
     for (Long id : closing) {
       int changed = jdbc.update("""
           UPDATE activity SET status = 'CLOSED', closed_at = COALESCE(closed_at, UTC_TIMESTAMP(3)), version = version + 1
-          WHERE id = ? AND status IN ('SCHEDULED', 'ACTIVE') AND ends_at <= UTC_TIMESTAMP(3)
+          WHERE id = ? AND deletion_requested_at IS NULL AND status IN ('SCHEDULED', 'ACTIVE') AND ends_at <= UTC_TIMESTAMP(3)
           """, id);
       if (changed == 1) outbox(id, "ACTIVITY_CLOSED");
     }
     List<Long> finishing = jdbc.queryForList("""
-        SELECT id FROM activity WHERE status = 'CLOSED' AND event_ends_at IS NOT NULL
+        SELECT id FROM activity WHERE deletion_requested_at IS NULL AND status = 'CLOSED' AND event_ends_at IS NOT NULL
           AND event_ends_at <= UTC_TIMESTAMP(3)
         """, Long.class);
     for (Long id : finishing) {
       int changed = jdbc.update("""
           UPDATE activity SET status = 'FINISHED', finished_at = COALESCE(finished_at, UTC_TIMESTAMP(3)), version = version + 1
-          WHERE id = ? AND status = 'CLOSED' AND event_ends_at <= UTC_TIMESTAMP(3)
+          WHERE id = ? AND deletion_requested_at IS NULL AND status = 'CLOSED' AND event_ends_at <= UTC_TIMESTAMP(3)
           """, id);
       if (changed == 1) {
         revokeH5Sessions(id);
@@ -471,7 +471,7 @@ public class ActivityService {
     int changed = jdbc.update("""
         UPDATE activity SET status = 'ACTIVE', ends_at = ?, event_ends_at = ?,
           closed_at = NULL, finished_at = NULL, version = version + 1, updated_by = ?
-        WHERE id = ? AND version = ? AND archived_at IS NULL
+        WHERE id = ? AND version = ? AND deletion_requested_at IS NULL
         """, UtcTime.database(endsAt), UtcTime.database(eventEndsAt), admin.id(), id, expectedVersion);
     requireChanged(changed);
     jdbc.update("DELETE FROM activity_dashboard_snapshot WHERE activity_id = ?", id);
@@ -523,7 +523,7 @@ public class ActivityService {
   private void requireNoPublishedOverlap(long activityId, long departmentId, Instant startsAt, Instant endsAt) {
     List<PublishedActivity> conflicts = jdbc.query("""
         SELECT activity_code, name, starts_at, COALESCE(event_ends_at, ends_at) FROM activity
-        WHERE id <> ? AND department_id = ? AND archived_at IS NULL AND published_at IS NOT NULL
+        WHERE id <> ? AND department_id = ? AND deletion_requested_at IS NULL AND published_at IS NOT NULL
           AND status IN ('SCHEDULED', 'ACTIVE', 'CLOSED')
           AND starts_at < ? AND COALESCE(event_ends_at, ends_at) > ?
           AND COALESCE(event_ends_at, ends_at) > UTC_TIMESTAMP(3)
@@ -615,7 +615,7 @@ public class ActivityService {
     String normalized = validateLiveRoomUrl(url);
     int changed = jdbc.update("""
         UPDATE activity SET live_room_url = ?, updated_by = ?, version = version + 1
-        WHERE id = ? AND version = ? AND archived_at IS NULL
+        WHERE id = ? AND version = ? AND deletion_requested_at IS NULL
         """, normalized, admin.id(), id, expectedVersion);
     requireChanged(changed);
     ActivityInfoChanges.record(jdbc, id);

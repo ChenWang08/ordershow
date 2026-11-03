@@ -22,6 +22,9 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice, 
   const [departmentsLoaded, setDepartmentsLoaded] = useState(false);
   const [activityDepartmentFilter, setActivityDepartmentFilter] = useState("");
   const [activityMenuOpen, setActivityMenuOpen] = useState(false);
+  const [activityArchiveFilter, setActivityArchiveFilter] = useState(() => activeActivity?.status === "ARCHIVED"
+    || Boolean(initialActivities?.length && initialActivities.every(item => item.status === "ARCHIVED")) ? "archived" : "unarchived");
+  const [deletionTasksOpen, setDeletionTasksOpen] = useState(false);
   const [newActivityOpen, setNewActivityOpen] = useState(false);
   const [creatingActivity, setCreatingActivity] = useState(false);
   const [newActivity, setNewActivity] = useState<{ name: string; startsAt: string; endsAt: string; eventEndsAt: string; departmentId: string }>(
@@ -33,9 +36,25 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice, 
     endsAt: activeActivity.endsAt, eventEndsAt: activeActivity.eventEndsAt } : item), [activities, activeActivity]);
   const currentActivity = displayedActivities.find((item) => item.code === activityCode);
   const visibleActivities = useMemo(
-    () => activityDepartmentFilter ? displayedActivities.filter((item) => String(item.departmentId) === activityDepartmentFilter) : displayedActivities,
-    [displayedActivities, activityDepartmentFilter],
+    () => displayedActivities.filter(item => (!activityDepartmentFilter || String(item.departmentId) === activityDepartmentFilter)
+      && (activityArchiveFilter === "all" || (item.status === "ARCHIVED") === (activityArchiveFilter === "archived"))),
+    [displayedActivities, activityDepartmentFilter, activityArchiveFilter],
   );
+  useEffect(() => {
+    let active = true;
+    void Promise.resolve().then(() => {
+      if (active && sessionStorage.getItem("activity-deletion-progress") === "open") {
+        sessionStorage.removeItem("activity-deletion-progress"); setDeletionTasksOpen(true);
+      }
+    });
+    return () => { active = false; };
+  }, []);
+  useEffect(() => {
+    if (!activityMenuOpen) return;
+    const controller = new AbortController();
+    void loadAdminActivities(controller.signal).then(setActivities).catch(() => {});
+    return () => controller.abort();
+  }, [activityMenuOpen]);
   useEffect(() => {
     if (initialActivities !== undefined) return;
     let active = true;
@@ -129,6 +148,7 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice, 
     setActivityDepartmentFilter,
     activityMenuOpen,
     setActivityMenuOpen,
+    activityArchiveFilter, setActivityArchiveFilter, deletionTasksOpen, setDeletionTasksOpen,
     newActivityOpen,
     setNewActivityOpen,
     creatingActivity,

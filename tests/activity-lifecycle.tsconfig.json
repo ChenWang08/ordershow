@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["../app/features/admin/ActivityManagementActions.tsx", "../app/features/admin/ActivitySwitcher.tsx", "../app/features/admin/ActivityDeletionTasks.tsx", "../app/features/admin/AdminWorkspace.tsx", "../app/features/admin/AdminEntry.tsx"],
+  "exclude": ["../node_modules", "../work", "../dist", "../build", "../.vinext"]
+}

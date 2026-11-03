@@ -73,6 +73,23 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 
 不得把数据库异常、堆栈、对象存储内部地址或密钥返回给客户端。手机号明文只允许在已鉴权的白名单、现场到场和订单管理接口中按权限返回；公开接口、H5、排行、战报、抽奖大屏和错误响应只能返回脱敏值或不返回。
 
+## 活动归档与永久删除
+
+以下写操作仅限超级管理员，并沿用管理员会话、CSRF 和操作审计；归档活动的读取与导出沿用现有部门与功能权限。
+
+| 接口 | 用途 |
+| --- | --- |
+| `POST /admin/activities/{activityId}/archive` | 已结束活动手动归档，`If-Match` 加 `{reason}` |
+| `POST /admin/activities/{activityId}/unarchive` | 解除归档到 FINISHED，不开放下单，`If-Match` 加 `{reason}` |
+| `GET /admin/activities/{activityId}/deletion-preview` | 超管查看活动、版本及订单、商品、客户、中奖记录、文件数量 |
+| `POST /admin/activities/{activityId}/permanent-deletion` | `If-Match` 加 `{code,reason}`，202 返回独立删除任务；重复请求返回原任务 |
+| `GET /admin/activity-deletion-tasks?page=1` | 超管分页查看进度，每页 20 条，响应为 data 数组 |
+| `POST /admin/activity-deletion-tasks/{taskId}/retry` | 超管继续 FAILED 任务，从已提交阶段恢复 |
+
+仅 DRAFT、FINISHED、ARCHIVED 可删除；归档或删除前须处理完待审批改单和未结束导入、导出。删除受理即从所有活动列表隐藏并封禁后续活动及文件请求，包括条件缓存请求；后台清理完成后才物理删除活动主记录。任务状态为 QUEUED、RUNNING、FAILED、COMPLETED，返回 stageName、deletedRows、deletedFiles、lastError 等字段。无自动备份、无回收站。版本过期返回 ACTIVITY_VERSION_CONFLICT；归档业务写返回 ACTIVITY_ARCHIVED_READ_ONLY；未处理业务返回 ACTIVITY_UNSETTLED_TASKS。
+
+`GET /admin/activities` 及 summary=true 均包含已归档活动并排除已受理删除的活动；前端原活动菜单负责筛选全部、未归档、已归档，底部提供删除进度入口。
+
 ## 4. 认证和会话
 
 ### 4.1 管理员
@@ -180,7 +197,7 @@ H5 商品展示按当前可见商品目录动态处理返利页签：只有同�
 - 同一调用者、接口和幂等键重复请求，载荷一致时返回第一次结果；
 - 幂等键相同但载荷不同，返回 409 `IDEMPOTENCY_KEY_REUSED`；
 - `PROCESSING` 状态重复请求返回 409/202 并携带可重试提示；
-- 订单和抽奖的幂等记录至少保留到活动结束后 30 天；当前不依赖活动归档作为正常生命周期节点。
+- 订单和抽奖的幂等记录默认至少保留到活动结束后 30 天；超级管理员明确永久删除整场活动时，关联幂等记录随任务一起清理。
 
 关键幂等记录、请求指纹、任务 ID 和可重放响应摘要最终保存于 MySQL 的 `api_idempotency`。Redis 可以在命中时加速重复请求和互斥，但缓存丢失、过期或重启后必须回到 MySQL，不得因此重新执行订单版本、导入发布或抽奖结果。
 

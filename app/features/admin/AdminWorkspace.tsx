@@ -56,6 +56,7 @@ export function AdminWorkspace({ activities }: { activities?: AdminActivitySumma
     onAttendanceSheetCountsChange, attendanceImportError, onAttendanceImportErrorChange,
 } = useAdminWorkspaceProps();
   const adminIdentity = useAdminIdentity();
+  const archived = activityRuntime.runtimeActivity?.status === "ARCHIVED";
   const activityStarted = activityStatus === "running" || activityStatus === "closed" || activityStatus === "finished";
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
   const activityFinished = activityStatus === "finished";
@@ -213,6 +214,7 @@ export function AdminWorkspace({ activities }: { activities?: AdminActivitySumma
           operationLogOpen={operationLogOpen} setOperationLogOpen={setOperationLogOpen}
           logQuery={moduleLoads.logs}
         />}>
+        {archived && <div className="activity-closed-banner"><b>活动已归档</b><span>历史数据只读，可查看和导出；修改前请由超级管理员解除归档。</span></div>}
         {activitySettings.activityRefreshError && <div className="warning-box" role="alert">活动信息加载失败：{activitySettings.activityRefreshError}；保留当前信息。<button type="button" disabled={activitySettings.activityRefreshing} onClick={() => void activitySettings.refreshActivity()}>重试</button></div>}
         {moduleScope && (moduleLoad?.error || moduleQuery.error) && <div className="warning-box" role="alert">当前页面加载失败：{moduleLoad?.error || moduleQuery.error}；保留已有内容。<button type="button" disabled={moduleLoad?.loading || moduleQuery.loading} onClick={() => void retryModule()}>重试</button></div>}
         {moduleScope && moduleLoad?.loaded && (moduleLoad.loading || moduleQuery.loading) && <p role="status">正在加载最新数据…</p>}
@@ -239,7 +241,7 @@ export function AdminWorkspace({ activities }: { activities?: AdminActivitySumma
           serverImportBlocking={serverImportBlocking} whitelistImport={whitelistImport} whitelistEditor={whitelistEditor}
         /></div>}
         {visitedTabs.includes("现场到场") && moduleLoads.attendance.loaded && <div hidden={tab !== "现场到场"}><AttendancePage rows={pendingAttendanceImport?.rows ?? attendanceRows} fileName={attendanceFileName} warnings={attendanceWarnings} sheetCounts={attendanceSheetCounts} error={attendanceImportError} activityStarted={activityStarted} activityClosed={activityClosed} pendingImport={pendingAttendanceImport} importAttemptName={attendanceImportAttemptName} blockingCount={serverImportBlocking.ATTENDANCE ?? 0} previewLoading={attendancePreviewLoading} previewReady={attendancePreviewReady} onRetryPreview={retryAttendancePreview} publishing={attendancePublishing} onFile={handleAttendanceFile} onAdd={() => { setEditingAttendanceRow(null); setAttendanceFormOpen(true); }} onEdit={setEditingAttendanceRow} onDelete={deleteAttendanceRows} onConfirmImport={confirmAttendanceImport} onCancelImport={cancelAttendanceImport} customerTypeMode={whitelistMode} /></div>}
-        {visitedTabs.includes("订单管理") && <div hidden={tab !== "订单管理"}><OrderManagement active={tab === "订单管理"} revision={orderRevision} onChanged={() => { setStatisticsStale(true); moduleLoads.lottery.invalidate(); moduleLoads.logs.invalidate(); }} activityClosed={activityClosed} activityStarted={activityStarted} activityId={Number(activityId)} activityName={activityName} /></div>}
+        {visitedTabs.includes("订单管理") && <div hidden={tab !== "订单管理"}><OrderManagement active={tab === "订单管理"} revision={orderRevision} onChanged={() => { setStatisticsStale(true); moduleLoads.lottery.invalidate(); moduleLoads.logs.invalidate(); }} readOnly={archived} activityClosed={activityClosed} activityStarted={activityStarted} activityId={Number(activityId)} activityName={activityName} /></div>}
         {visitedTabs.includes("抽奖规则") && moduleLoads.lottery.loaded && <div hidden={tab !== "抽奖规则"}><LotterySettings key={activityId} revision={moduleLoads.lottery.updatedAt ?? ""} active={tab === "抽奖规则" && !moduleLoads.lottery.loading} rounds={lotteryRounds} attendanceRows={attendanceRows} activityId={Number(activityId)} attendeeCount={moduleContext?.attendeeCount ?? 0} customerCount={moduleContext?.customerCount ?? 0} customerTypeMode={whitelistMode} readOnly={activityFinished} hasUnsavedChanges={lotteryDirty} onChange={rounds => { onLotteryChange(rounds); setLotteryDirty(true); }} onOrderSaved={rounds => { onLotteryChange(rounds); setLotteryDirty(false); moduleLoads.logs.invalidate(); }} onSaved={() => { setLotteryDirty(false); moduleLoads.logs.invalidate(); }} /></div>}
       </AdminLayout>
       {(productFormOpen || editingProductRow) && <ProductFormDrawer key={editingProductRow?.id ?? "new-product"} rows={productRows} initialRow={editingProductRow ?? undefined} activityStarted={activityStarted} activityId={Number(activityId)} tiersEditable={productImportCompleted} scopeEnabled={productImportCompleted && (whitelistImportCompleted || Boolean(moduleContext?.whitelistPublished))} onClose={() => { setProductFormOpen(false); setEditingProductRow(null); }} onSave={saveProductRow} />}

@@ -40,7 +40,7 @@ class ActivitySummaryTest {
     assertThat(result).hasSize(1);
     assertThat(result.getFirst().status()).isEqualTo("ACTIVE");
     assertThat(result.getFirst().code()).isEqualTo("FIXTURE");
-    verify(jdbc).query(argThat((String sql) -> sql.contains("a.archived_at IS NULL")
+    verify(jdbc).query(argThat((String sql) -> sql.contains("a.deletion_requested_at IS NULL") && !sql.contains("archived_at IS NULL")
         && !sql.contains("a.*") && !sql.contains("activity_customer") && !sql.contains("a.department_id=?")),
         any(RowMapper.class), eq(new Object[] {}));
     verifyNoMoreInteractions(jdbc);

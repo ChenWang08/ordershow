@@ -38,7 +38,7 @@ public class DepartmentService {
                COUNT(DISTINCT a.id) activity_count
         FROM department d
         LEFT JOIN admin_user u ON u.department_id = d.id AND u.role_code = 'DEPARTMENT_ADMIN'
-        LEFT JOIN activity a ON a.department_id = d.id AND a.archived_at IS NULL
+        LEFT JOIN activity a ON a.department_id = d.id AND a.deletion_requested_at IS NULL
         GROUP BY d.id, d.department_code, d.department_name, d.status,
                  u.id, u.username, u.display_name, u.status, u.last_login_at
         ORDER BY d.id
@@ -93,7 +93,7 @@ public class DepartmentService {
     if ("DISABLED".equals(nextStatus) && !"DISABLED".equals(current.status())) {
       Integer running = jdbc.queryForObject("""
           SELECT COUNT(*) FROM activity
-          WHERE department_id = ? AND archived_at IS NULL AND status IN ('SCHEDULED', 'ACTIVE', 'CLOSED')
+          WHERE department_id = ? AND deletion_requested_at IS NULL AND status IN ('SCHEDULED', 'ACTIVE', 'CLOSED')
           """, Integer.class, departmentId);
       if (running != null && running > 0) {
         throw DomainException.conflict("DEPARTMENT_HAS_RUNNING_ACTIVITY", "该部门仍有未结束活动，不能停用");
@@ -102,7 +102,7 @@ public class DepartmentService {
     jdbc.update("UPDATE department SET department_name = ?, status = ?, lock_version = lock_version + 1 WHERE id = ?",
         nextName, nextStatus, departmentId);
     if (!nextName.equals(current.name())) {
-      for (Long activityId : jdbc.queryForList("SELECT id FROM activity WHERE department_id = ? AND archived_at IS NULL", Long.class, departmentId)) {
+      for (Long activityId : jdbc.queryForList("SELECT id FROM activity WHERE department_id = ? AND deletion_requested_at IS NULL", Long.class, departmentId)) {
         com.fengyi.ordershow.activity.ActivityInfoChanges.record(jdbc, activityId);
       }
     }
@@ -191,7 +191,7 @@ public class DepartmentService {
                COUNT(DISTINCT a.id) activity_count
         FROM department d
         LEFT JOIN admin_user u ON u.department_id = d.id AND u.role_code = 'DEPARTMENT_ADMIN'
-        LEFT JOIN activity a ON a.department_id = d.id AND a.archived_at IS NULL
+        LEFT JOIN activity a ON a.department_id = d.id AND a.deletion_requested_at IS NULL
         WHERE d.id = ?
         GROUP BY d.id, d.department_code, d.department_name, d.status,
                  u.id, u.username, u.display_name, u.status, u.last_login_at

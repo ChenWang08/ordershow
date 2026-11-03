@@ -118,11 +118,26 @@ public class StorageService {
     } catch (Exception error) { throw ImageVariants.busy(); }
   }
 
+  @org.springframework.transaction.annotation.Transactional
   public void writeVariant(FileMeta meta, ImageVariants.Kind kind, ImageVariants.Encoded image) {
+    var available = jdbc.queryForList("""
+        SELECT a.id FROM activity a JOIN stored_file f ON f.activity_id=a.id
+        WHERE f.id=? AND f.deleted_at IS NULL AND a.deletion_requested_at IS NULL FOR SHARE
+        """, Long.class, meta.id());
+    if (available.isEmpty()) throw DomainException.notFound("FILE_NOT_FOUND", "图片不存在或活动已删除");
     try {
       minio.putObject(PutObjectArgs.builder().bucket(meta.bucket()).object(variantObjectKey(meta, kind))
           .stream(new ByteArrayInputStream(image.bytes()), (long) image.bytes().length, -1L).contentType(image.contentType()).build());
     } catch (Exception error) { throw ImageVariants.busy(); }
+  }
+
+  /** Idempotent object removal. The durable deletion manifest survives missing metadata. */
+  public void removeWithVariants(FileMeta meta) {
+    try {
+      for (var kind : ImageVariants.Kind.values()) minio.removeObject(io.minio.RemoveObjectArgs.builder()
+          .bucket(meta.bucket()).object(variantObjectKey(meta,kind)).build());
+      minio.removeObject(io.minio.RemoveObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey()).build());
+    } catch (Exception error) { throw new IllegalStateException("文件清理失败",error); }
   }
 
   // MinIO can reject path segments over 255 bytes; long source filenames need a short derivative name.

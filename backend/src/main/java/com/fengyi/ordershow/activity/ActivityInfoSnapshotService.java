@@ -22,7 +22,7 @@ public class ActivityInfoSnapshotService {
   public Revision revision(String activityCode) {
     var rows = jdbc.query("""
         SELECT id,public_info_version,status,starts_at,ends_at,event_ends_at
-        FROM activity WHERE activity_code=? AND archived_at IS NULL
+        FROM activity WHERE activity_code=? AND deletion_requested_at IS NULL
         """, (rs, row) -> new Revision(rs.getLong("id"), rs.getLong("public_info_version"),
             rs.getString("status"), UtcTime.read(rs, "starts_at"), UtcTime.read(rs, "ends_at"),
             UtcTime.read(rs, "event_ends_at")), activityCode);

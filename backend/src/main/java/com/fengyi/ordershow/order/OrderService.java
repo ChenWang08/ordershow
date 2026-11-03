@@ -536,7 +536,8 @@ public class OrderService {
 
   private ActivityService.ActivityView requireAdminOrderWritable(long activityId) {
     ActivityService.ActivityView activity = activities.byId(activityId);
-    if (!List.of("ACTIVE", "CLOSED", "FINISHED", "ARCHIVED").contains(activity.status())) {
+    if ("ARCHIVED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_ARCHIVED_READ_ONLY", "活动已归档，请先解除归档后维护订单");
+    if (!List.of("ACTIVE", "CLOSED", "FINISHED").contains(activity.status())) {
       throw DomainException.conflict("ADMIN_ORDER_ACTIVITY_NOT_READY", "活动开始后才可以维护正式订单");
     }
     return activity;

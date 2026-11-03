@@ -986,7 +986,7 @@ paths:
             enum: [true]
       responses:
         '200':
-          description: 当前账号可访问的未归档活动；data 为数组
+          description: 当前账号可访问的活动（含已归档，排除已受理删除）；data 为数组
           content:
             application/json:
               schema:
@@ -1206,6 +1206,177 @@ paths:
                 $ref: '#/components/schemas/ActivityResponse'
         '400':
           $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/archive:
+    post:
+      operationId: archiveActivity
+      tags: [Activities]
+      summary: 超级管理员手动归档已结束活动
+      description: 刷新最终快照后进入 ARCHIVED；全部业务数据只读，查看和导出沿用现有部门和功能权限。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityLifecycleReason'
+      responses:
+        '200':
+          description: 归档成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/unarchive:
+    post:
+      operationId: unarchiveActivity
+      tags: [Activities]
+      summary: 超级管理员解除归档
+      description: 仅恢复 FINISHED，不自动开放下单。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityLifecycleReason'
+      responses:
+        '200':
+          description: 已恢复为已结束
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/deletion-preview:
+    get:
+      operationId: previewActivityDeletion
+      tags: [Activities]
+      summary: 超级管理员核对永久删除范围
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 活动当前版本和关联数量
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ActivityDeletionPreview'
+                  traceId: { type: string }
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/permanent-deletion:
+    post:
+      operationId: permanentlyDeleteActivity
+      tags: [Activities]
+      summary: 超级管理员异步永久删除活动
+      description: 仅 DRAFT、FINISHED、ARCHIVED；须处理完待审批改单及未结束导入、导出。无自动备份、无回收站；受理后立即隐藏和封禁活动访问，后台分批清理全部关联数据和文件。相同活动重复请求返回原任务。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ActivityLifecycleReason'
+                - type: object
+                  required: [code]
+                  properties:
+                    code:
+                      type: string
+                      description: 精确输入活动编号确认
+      responses:
+        '202':
+          description: 已受理或已存在相同活动的删除任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityDeletionTaskResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activity-deletion-tasks:
+    get:
+      operationId: listActivityDeletionTasks
+      tags: [Activities]
+      summary: 超级管理员查看删除进度与凭证
+      security:
+        - adminCookie: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: 按任务编号倒序，每页 20 条
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActivityDeletionTask'
+                  traceId: { type: string }
+        '403':
+          $ref: '#/components/responses/Problem'
+  /admin/activity-deletion-tasks/{taskId}/retry:
+    post:
+      operationId: retryActivityDeletion
+      tags: [Activities]
+      summary: 超级管理员继续失败的清理任务
+      description: 仅 FAILED 可操作，保留已提交的清理进度；已清理的数据不会恢复。
+      security:
+        - adminCookie: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已重新排队
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityDeletionTaskResponse'
         '403':
           $ref: '#/components/responses/Problem'
         '409':
@@ -3280,7 +3451,53 @@ components:
     ActivityStatus:
       type: string
       enum: [DRAFT, SCHEDULED, ACTIVE, CLOSED, FINISHED, ARCHIVED]
-      description: 正常活动生命周期到 FINISHED 结束；ARCHIVED 仅为历史兼容状态，当前不提供活动归档接口。
+      description: FINISHED 表示整场活动已结束；超级管理员可手动归档到 ARCHIVED，全部业务写入冻结，解除归档仅恢复 FINISHED。
+    ActivityLifecycleReason:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    ActivityDeletionPreview:
+      type: object
+      required: [activityId, code, name, departmentName, version, orders, products, customers, winners, files]
+      properties:
+        activityId: { type: integer, format: int64 }
+        code: { type: string }
+        name: { type: string }
+        departmentName: { type: string }
+        version: { type: integer }
+        orders: { type: integer, format: int64 }
+        products: { type: integer, format: int64 }
+        customers: { type: integer, format: int64 }
+        winners: { type: integer, format: int64 }
+        files: { type: integer, format: int64 }
+    ActivityDeletionTask:
+      type: object
+      required: [id, activityId, activityCode, activityName, departmentName, requestedByName, reason, status, stage, stageName, deletedRows, deletedFiles, createdAt, updatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        activityId: { type: integer, format: int64 }
+        activityCode: { type: string }
+        activityName: { type: string }
+        departmentName: { type: string }
+        requestedByName: { type: string }
+        reason: { type: string }
+        status: { type: string, enum: [QUEUED, RUNNING, FAILED, COMPLETED] }
+        stage: { type: integer }
+        stageName: { type: string }
+        deletedRows: { type: integer, format: int64 }
+        deletedFiles: { type: integer, format: int64 }
+        lastError: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+    ActivityDeletionTaskResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          $ref: '#/components/schemas/ActivityDeletionTask'
+        traceId: { type: string }
     OrderStatus:
       type: string
       enum: [SUBMITTED, WITHDRAWN, VOIDED]

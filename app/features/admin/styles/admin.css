@@ -358,3 +358,41 @@
 .admin-refresh-bar button { padding: 8px 12px; border: 1px solid #dfd4cd; border-radius: 6px; cursor: pointer; background: #fff; color: #8b3025; }
 .admin-refresh-bar button:disabled { cursor: wait; opacity: .6; }
 .admin-activity-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.activity-management-actions { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e8dfd8; }
+.activity-management-actions h3 { margin: 0 0 8px; font-size: 15px; }
+.activity-management-actions > p { color: #786b62; font-size: 13px; line-height: 1.6; }
+.activity-management-actions .form-drawer form { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.activity-management-actions .drawer-body { flex: 1; overflow-y: auto; }
+.activity-management-actions .drawer-body label { display: grid; gap: 8px; margin: 16px 0; }
+.activity-management-actions textarea { width: 100%; min-height: 90px; padding: 10px; border: 1px solid #dfd4cd; border-radius: 6px; }
+.activity-management-actions label.deletion-acknowledgement { display: flex; align-items: flex-start; gap: 8px; }
+.deletion-acknowledgement input { width: auto; margin-top: 4px; }
+.deletion-preview { display: flex; flex-wrap: wrap; gap: 14px; padding: 12px; background: #f7f3ef; }
+.deletion-preview dt { font-size: 12px; color: #786b62; }
+.deletion-preview dd { margin: 4px 0 0; font-weight: 600; }
+.activity-management-actions .compact-drawer.form-drawer { width: min(470px, 94vw); }
+.activity-management-actions form > header { display: flex; align-items: center; justify-content: space-between; padding: 20px 22px; color: #fff7e9; background: linear-gradient(135deg,#4a1010,#771918); }
+.activity-management-actions form > header h2 { margin: 0; font-size: 18px; }
+.activity-management-actions form > header button { color: #fff; border: 0; background: transparent; font-size: 22px; }
+.activity-management-actions form > header button { width: auto; flex: 0 0 auto; padding: 0 4px; }
+.activity-management-actions form > header h2 { white-space: nowrap; }
+.activity-management-actions form > footer { display: flex; justify-content: flex-end; gap: 9px; padding: 16px 22px; border-top: 1px solid #e5dad3; background: #fff; }
+.activity-management-actions form > footer button { padding: 9px 14px; border: 1px solid #dacdc5; border-radius: 7px; }
+.activity-management-actions form > footer button { width: auto; font-size: 13px; }
+.activity-management-actions form > footer .danger-action { color: #fff; border-color: #a92321; background: #a92321; }
+.activity-management-actions p { display: block; border: 0; font-size: 13px; line-height: 1.6; }
+.activity-management-actions .drawer-body, .deletion-task-drawer .drawer-body { font-size: 13px; line-height: 1.6; }
+.activity-management-actions .drawer-body > label { font-size: 13px; }
+.activity-management-actions .deletion-acknowledgement input { flex: 0 0 auto; height: auto; }
+.activity-management-actions .drawer-body > label.deletion-acknowledgement { flex-direction: row; align-items: flex-start; }
+.deletion-task-drawer.form-drawer { width: min(560px, 100vw); }
+.deletion-task { padding: 16px 0; border-bottom: 1px solid #e8dfd8; overflow-wrap: anywhere; }
+.deletion-task h3 { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; font-size: 15px; }
+.deletion-task h3 span { color: #8b3025; }
+.deletion-task small { color: #786b62; }
+.deletion-task-drawer [role="alert"], .activity-management-actions [role="alert"] { color: #a92321; }
+.activity-switcher-menu > button > em.archived { background: #e9e8ed; color: #655d7d; }
+.activity-switcher-menu > p { padding: 10px; font-size: 13px; color: #786b62; }
+.activity-switcher-menu .activity-department-filter { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 4px; font-size: 12px; }
+.activity-switcher-menu .activity-department-filter select { max-width: 220px; padding: 5px 8px; border: 1px solid #ded4cd; border-radius: 5px; background: #fff; }
+.deletion-task-drawer .drawer-body > button, .deletion-task button { align-self: flex-start; padding: 7px 12px; border: 1px solid #d8b7ab; border-radius: 6px; color: #9f2522; background: #fff; }

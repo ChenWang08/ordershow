@@ -14,7 +14,7 @@ import { useOrderChangeRequests } from "./useOrderChangeRequests";
 export type OrderManagementModel = OrderManagementProps & ReturnType<typeof useOrderList> & ReturnType<typeof useOrderEditor>
   & { changeRequests: ReturnType<typeof useOrderChangeRequests>; refreshOrders: () => void };
 
-export function OrderManagement(props: OrderManagementProps & { active?: boolean; revision?: number; onChanged?: () => void; onDirtyChange?: (dirty: boolean) => void }) {
+export function OrderManagement(props: OrderManagementProps & { readOnly?: boolean; active?: boolean; revision?: number; onChanged?: () => void; onDirtyChange?: (dirty: boolean) => void }) {
   const [tab,setTab]=useState<"orders"|"review">("orders");
   const list = useOrderList(props.activityId, props.activityName, (props.active ?? true) && tab === "orders", props.revision);
   const changed: typeof list.setReloadKey = value => { list.setReloadKey(value); props.onChanged?.(); };
@@ -31,6 +31,6 @@ export function OrderManagement(props: OrderManagementProps & { active?: boolean
     {tab==="orders" ? <><OrderFilterBar model={model} /><OrderListTable model={model} /></> : <OrderChangeRequestPanel model={model} />}
     {tab==="orders" && changeRequests.selected && <OrderChangeRequestPanel model={model} detailOnly />}
     <OrderDetailDrawer model={model} />
-    <OrderEditorDrawer model={model} />
+    {!props.readOnly && <OrderEditorDrawer model={model} />}
   </div>;
 }

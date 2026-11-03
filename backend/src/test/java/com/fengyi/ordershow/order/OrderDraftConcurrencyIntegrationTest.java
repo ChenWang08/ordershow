@@ -44,7 +44,7 @@ class OrderDraftConcurrencyIntegrationTest {
     config.setConnectionInitSql("SET time_zone='+00:00'");
     source=new HikariDataSource(config);jdbc=new JdbcTemplate(source);manager=new DataSourceTransactionManager(source);
     tx=new TransactionTemplate(manager);tx.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-    jdbc.execute("CREATE TABLE activity(id BIGINT UNSIGNED PRIMARY KEY)");jdbc.execute("INSERT INTO activity VALUES(1)");
+    jdbc.execute("CREATE TABLE activity(id BIGINT UNSIGNED PRIMARY KEY,status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',deletion_requested_at DATETIME NULL)");jdbc.execute("INSERT INTO activity(id) VALUES(1)");
     jdbc.execute("CREATE TABLE activity_customer(id BIGINT UNSIGNED PRIMARY KEY,activity_id BIGINT,is_active BOOLEAN,customer_id BIGINT,customer_type VARCHAR(20),data_version_id BIGINT,normalized_branch_name VARCHAR(50),normalized_dealer_full_name VARCHAR(50))");
     for(long id=1;id<=20;id++)jdbc.update("INSERT INTO activity_customer VALUES(?,1,TRUE,?,'GENERAL',1,'branch','dealer')",id,id);
     try(var stream=OrderDraftConcurrencyIntegrationTest.class.getResourceAsStream("/db/migration/V010__h5_order_draft.sql")) {

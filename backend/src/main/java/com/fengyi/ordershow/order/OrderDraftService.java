@@ -54,6 +54,7 @@ public class OrderDraftService {
     var activity = activities.orderingActivity(activityCode);
     requireIdentity(activity.id(), customer);
     requireOwner(customer, request.customerId());
+    new com.fengyi.ordershow.activity.ActivityAccessPolicy(jdbc).lockWrite(activity.id(),false,false,false,true);
     OrderWriteLock.acquire(jdbc, activity.id(), customer.customerId());
     activities.requireWritable(activity.id());
     List<DraftItem> items = validateItems(activity.id(), customer, request.items());

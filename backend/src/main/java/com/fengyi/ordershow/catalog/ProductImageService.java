@@ -334,7 +334,7 @@ public class ProductImageService {
   private void requireImageWritable(long activityId) {
     jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     String status = activities.byId(activityId).status();
-    if ("CLOSED".equals(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动截止后商品图片只读");
+    if ("CLOSED".equals(status) || "ARCHIVED".equals(status)) throw DomainException.conflict("ACTIVITY_READ_ONLY", "活动已截止或归档，商品图片只读");
     if ("SCHEDULED".equals(status)) throw DomainException.conflict("ACTIVITY_PUBLISHED_CONFIG_LOCKED", "活动发布后商品图片已锁定，请先撤回发布");
   }
 

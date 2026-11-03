@@ -38,6 +38,7 @@ class AuthServiceSessionCacheTest {
     crypto = new CryptoService(properties);
     // Use 100ms TTL for fast test execution
     authService = new AuthService(jdbc, passwordEncoder, crypto, properties, 100);
+    when(jdbc.queryForObject(anyString(),org.mockito.ArgumentMatchers.eq(Boolean.class),org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
   }
 
   @Test
@@ -72,12 +73,18 @@ class AuthServiceSessionCacheTest {
     assertThat(authService.cachedH5SessionCount()).isEqualTo(1);
     verify(jdbc, times(1)).query(anyString(), any(RowMapper.class), any());
 
-    // Second call with new request object: hits cache, NO DB call
+    // Reuse the resolved identity, while validating that its activity is still available.
     MockHttpServletRequest request2 = new MockHttpServletRequest();
     request2.setCookies(new Cookie("ORDER_SHOW_H5_SESSION", token));
     H5Principal result2 = authService.requireH5(request2);
     assertThat(result2.customerId()).isEqualTo(201L);
     verify(jdbc, times(1)).query(anyString(), any(RowMapper.class), any());
+    when(jdbc.queryForObject(anyString(),org.mockito.ArgumentMatchers.eq(Boolean.class),org.mockito.ArgumentMatchers.anyLong())).thenReturn(false);
+    when(jdbc.query(anyString(), any(RowMapper.class), any())).thenReturn(List.of());
+    var deletedRequest=new MockHttpServletRequest();
+    deletedRequest.setCookies(new Cookie("ORDER_SHOW_H5_SESSION",token));
+    assertThatThrownBy(()->authService.requireH5(deletedRequest)).isInstanceOf(DomainException.class);
+    assertThat(authService.cachedH5SessionCount()).isZero();
   }
 
   @Test

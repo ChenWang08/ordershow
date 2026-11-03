@@ -2,6 +2,32 @@ import { beijingDateTimeToUtc } from "../../features/shared/time";
 import { api } from "./client";
 import type { AdminActivitySummary, Envelope, RuntimeActivity } from "./types";
 
+export type ActivityDeletionPreview = { activityId: number; code: string; name: string; departmentName: string; version: number;
+  orders: number; products: number; customers: number; winners: number; files: number };
+export type ActivityDeletionTask = { id: number; activityId: number; activityCode: string; activityName: string;
+  departmentName: string; requestedByName: string; reason: string; status: "QUEUED" | "RUNNING" | "FAILED" | "COMPLETED";
+  stage: number; stageName: string; deletedRows: number; deletedFiles: number; lastError?: string; createdAt: string; updatedAt: string; completedAt?: string };
+
+export async function changeActivityArchive(activity: RuntimeActivity, archive: boolean, reason: string) {
+  return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/${archive ? "archive" : "unarchive"}`, {
+    method: "POST", headers: { "If-Match": String(activity.version) }, body: JSON.stringify({ reason }),
+  }, "admin")).data;
+}
+export async function loadActivityDeletionPreview(id: number, signal?: AbortSignal) {
+  return (await api<Envelope<ActivityDeletionPreview>>(`/admin/activities/${id}/deletion-preview`, { signal })).data;
+}
+export async function permanentlyDeleteActivity(preview: ActivityDeletionPreview, code: string, reason: string) {
+  return (await api<Envelope<ActivityDeletionTask>>(`/admin/activities/${preview.activityId}/permanent-deletion`, {
+    method: "POST", headers: { "If-Match": String(preview.version) }, body: JSON.stringify({ code, reason }),
+  }, "admin")).data;
+}
+export async function loadActivityDeletionTasks(page: number, signal?: AbortSignal) {
+  return (await api<Envelope<ActivityDeletionTask[]>>(`/admin/activity-deletion-tasks?page=${page}`, { signal })).data;
+}
+export async function retryActivityDeletionTask(id: number) {
+  return (await api<Envelope<ActivityDeletionTask>>(`/admin/activity-deletion-tasks/${id}/retry`, { method: "POST" }, "admin")).data;
+}
+
 export async function loadCurrentActivity() {
   return (await api<Envelope<RuntimeActivity>>("/public/activities/current")).data;
 }

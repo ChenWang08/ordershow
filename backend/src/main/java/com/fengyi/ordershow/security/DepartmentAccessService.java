@@ -44,7 +44,7 @@ public class DepartmentAccessService {
     Integer matches = jdbc.queryForObject("""
         SELECT COUNT(*) FROM activity a
         JOIN department d ON d.id = a.department_id AND d.status = 'ACTIVE'
-        WHERE a.id = ? AND a.archived_at IS NULL AND a.department_id = ?
+        WHERE a.id = ? AND a.deletion_requested_at IS NULL AND a.department_id = ?
         """, Integer.class, activityId, admin.departmentId());
     if (matches == null || matches != 1) {
       throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
