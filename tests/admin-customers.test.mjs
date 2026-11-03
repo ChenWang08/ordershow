@@ -63,6 +63,7 @@ function customerHarness(overrides = {}, apiOverrides = {}, domainOverrides = {}
     },
     react: {
       useMemo: (calculate) => calculate(),
+      useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
       useState(initial) {
         const index = cursor++;
         if (!(index in slots)) slots[index] = initial;
