@@ -3,7 +3,7 @@
 import { useAdminQuery } from "../admin/useAdminQuery";
 import { useLazyAdminQuery } from "../admin/useLazyAdminQuery";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { apiAssetUrl, ApiError, completeLotteryRound, createLotteryRule, deleteLotteryPrizeImage, drawLotteryRound, loadLotteryStatistics, loadLotteryProductOptions, loadPublicLottery, previewLotteryCandidates, publishLotteryRule, updateLotteryRule, uploadLotteryPrizeImage, type LotteryCandidatePreview, type LotteryProductOption, type LotteryRuleApi, type LotteryWinnerApi, type LotteryWinnerStatistics } from "../../api";
+import { apiAssetUrl, ApiError, completeLotteryRound, createLotteryRule, deleteLotteryPrizeImage, drawLotteryRound, loadLotteryRules, loadLotteryStatistics, loadLotteryProductOptions, loadPublicLottery, previewLotteryCandidates, publishLotteryRule, reorderLotteryRounds, updateLotteryRule, uploadLotteryPrizeImage, type LotteryCandidatePreview, type LotteryProductOption, type LotteryRuleApi, type LotteryRoundOrder, type LotteryWinnerApi, type LotteryWinnerStatistics } from "../../api";
 import type { AttendanceCustomerType, AttendanceRow } from "../../domain/import-domain";
 import { FestivalDecor } from "../shared/components/FestivalDecor";
 import { Thumbnail } from "../shared/components/Thumbnail";
@@ -16,6 +16,9 @@ export type LotteryRoundStatus = "draft" | "published" | "completed";
 export type LotteryRound = {
   id: number;
   ruleId?: number;
+  ruleRevision?: number;
+  currentAttemptNo?: number;
+  roundNo?: number;
   serverStatus?: string;
   name: string;
   prize: string;
@@ -66,7 +69,7 @@ function weightingMetric(mode: LotteryProbabilityMode): QualificationMetric | nu
 }
 
 export function mapLotteryRule(rule: LotteryRuleApi): LotteryRound[] {
-  return rule.rounds.map((round) => ({ id: round.id, ruleId: rule.id, serverStatus: round.status, name: round.name,
+  return rule.rounds.map((round) => ({ id: round.id, ruleId: rule.id, ruleRevision: rule.revision ?? 0, currentAttemptNo: round.currentAttemptNo ?? 0, roundNo: round.roundNo, serverStatus: round.status, name: round.name,
     prize: round.prizeName, winnerCount: round.winnerCount,
     customerType: round.customerType === "GENERAL" ? "综合客户" : round.customerType === "SPECIAL" ? "特渠专业客户" : "全部客户",
     scope: round.candidateScope === "ATTENDEES" ? "attended" : round.candidateScope === "VALID_ORDERS" ? "ordered" : "all",
@@ -83,6 +86,21 @@ export function mapLotteryRule(rule: LotteryRuleApi): LotteryRound[] {
     savedPrizeImageFileId: round.prizeImageFileId ?? undefined,
     excludeWinners: round.excludePreviousWinners, status: round.status === "COMPLETED" ? "completed" : round.status === "DRAFT" ? "draft" : "published",
     candidateCount: round.candidateCount ?? 0 }));
+}
+
+export function applyLotteryOrder(rounds: LotteryRound[], order: LotteryRoundOrder): LotteryRound[] {
+  const byId = new Map(rounds.map(round => [round.id, round]));
+  return order.rounds.map(position => ({ ...byId.get(position.id)!, roundNo: position.roundNo,
+    ruleRevision: order.revision, currentAttemptNo: position.currentAttemptNo, serverStatus: position.status,
+    status: position.status === "COMPLETED" ? "completed" : position.status === "DRAFT" ? "draft" : "published" }));
+}
+
+export function lotteryLockedThrough(rounds: LotteryRound[]) {
+  let locked = -1;
+  rounds.forEach((round, index) => {
+    if (round.status === "completed" || (round.currentAttemptNo ?? 0) > 0 || (round.serverStatus && !["DRAFT", "READY"].includes(round.serverStatus))) locked = index;
+  });
+  return locked;
 }
 
 export function groupLotteryWinnersByRound(winners: LotteryWinnerApi[]) {
@@ -209,14 +227,19 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
       actionLock.current = true;
       setSubmitting(true);
       try {
-        const result = await drawLotteryRound(activityId, currentRound.id);
+        const result = await drawLotteryRound(activityId, currentRound.id, currentRound.ruleRevision ?? 0);
         setHistoryResult((previous) => previous?.requestKey === requestKey && previous.status === "ready" ? {
           ...previous,
-          rounds: previous.rounds.map((item) => item.id === currentRound.id ? { ...item, serverStatus: "DRAWN" } : item),
+          rounds: previous.rounds.map((item) => ({ ...item, ruleRevision: result.ruleRevision ?? (currentRound.ruleRevision ?? 0) + 1,
+            ...(item.id === currentRound.id ? { serverStatus: "DRAWN" } : {}) })),
           winnersByRound: { ...previous.winnersByRound, [currentRound.id]: result.winners.map((winner) => winner.dealerDisplayName) },
         } : previous);
         setAnimation({ activityId, roundId: currentRound.id, status: "rolling" });
-      } catch (error) { setActionError(error instanceof ApiError ? error.message : "抽奖执行失败"); retry(); }
+      } catch (error) {
+        setActionError(error instanceof ApiError ? error.message : "抽奖执行失败");
+        if (error instanceof ApiError && error.code === "LOTTERY_RULE_CHANGED") setRoundSelection({ activityId, roundId: null });
+        retry();
+      }
       finally { actionLock.current = false; setSubmitting(false); }
     }
     else if (status === "rolling") {
@@ -230,10 +253,9 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
         setHistoryResult((previous) => previous?.requestKey === requestKey && previous.status === "ready" ? {
           ...previous, rounds: previous.rounds.map((item) => item.id === currentRound.id ? { ...item, status: "completed", serverStatus: "COMPLETED" } : item),
         } : previous);
-        const currentIndex = availableRounds.findIndex((item) => item.id === currentRound.id);
-        const next = availableRounds.slice(currentIndex + 1).find((item) => item.status !== "completed");
-        setRoundSelection({ activityId, roundId: next?.id ?? currentRound.id });
-        setAnimation(null);
+        setRoundSelection({ activityId, roundId: null });
+        // One on-demand reload also picks up configuration changes made while this round was displayed.
+        retry();
       } catch (error) { setActionError(error instanceof ApiError ? error.message : "完成本轮抽奖失败"); retry(); }
       finally { actionLock.current = false; setSubmitting(false); }
     }
@@ -285,17 +307,34 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
 
 
 
-export function LotterySettings({ active = true, revision = "", rounds, attendanceRows, attendeeCount = attendanceRows.length, activityId, customerCount, customerTypeMode = "TYPED", readOnly, onChange, onSaved }: { active?: boolean; revision?: string; onSaved?: () => void; rounds: LotteryRound[]; attendanceRows: AttendanceRow[]; activityId: number; customerCount: number; attendeeCount?: number; customerTypeMode?: "TYPED" | "UNSPECIFIED"; readOnly: boolean; onChange: (rounds: LotteryRound[]) => void }) {
+export function LotterySettings({ active = true, revision = "", rounds, attendanceRows, attendeeCount = attendanceRows.length, activityId, customerCount, customerTypeMode = "TYPED", readOnly, hasUnsavedChanges = false, onChange, onSaved, onOrderSaved }: { active?: boolean; revision?: string; onSaved?: () => void; onOrderSaved?: (rounds: LotteryRound[]) => void; hasUnsavedChanges?: boolean; rounds: LotteryRound[]; attendanceRows: AttendanceRow[]; activityId: number; customerCount: number; attendeeCount?: number; customerTypeMode?: "TYPED" | "UNSPECIFIED"; readOnly: boolean; onChange: (rounds: LotteryRound[]) => void }) {
   const [selectedId, setSelectedId] = useState(rounds.find((item) => item.status === "published")?.id ?? rounds[0]?.id ?? -1);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewRevision, setPreviewRevision] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [edited, setEdited] = useState(false);
+  const [orderSaving, setOrderSaving] = useState(false);
+  const [orderNotice, setOrderNotice] = useState("");
+  const [orderNeedsReload, setOrderNeedsReload] = useState(false);
+  const [dragTarget, setDragTarget] = useState<number | null>(null);
+  const dragging = useRef<number | null>(null);
+  const orderLock = useRef(false);
+  const scope = useRef({ activityId, alive: true });
+  useEffect(() => {
+    const current = scope.current;
+    current.activityId = activityId; current.alive = true;
+    return () => { current.alive = false; };
+  }, [activityId]);
   const [prizeImageUploading, setPrizeImageUploading] = useState(false);
   const [prizeImageError, setPrizeImageError] = useState("");
   const selected = rounds.find((item) => item.id === selectedId) ?? rounds[0];
   const selectedIndex = Math.max(0, rounds.findIndex((item) => item.id === selected.id));
-  const selectedLocked = readOnly || prizeImageUploading || Boolean(selected.serverStatus && !["DRAFT", "READY"].includes(selected.serverStatus));
+  const selectedLocked = readOnly || saving || orderSaving || orderNeedsReload || prizeImageUploading || (selected.currentAttemptNo ?? 0) > 0 || Boolean(selected.serverStatus && !["DRAFT", "READY"].includes(selected.serverStatus));
+  const lockedThrough = lotteryLockedThrough(rounds);
+  const localOnly = rounds.every(round => round.id < 0 && !round.ruleId);
+  const orderDisabled = !active || readOnly || saving || orderSaving || orderNeedsReload || prizeImageUploading
+    || (!localOnly && (edited || hasUnsavedChanges || rounds.some(round => round.id < 0 || !round.ruleId)));
   const effectiveSelectedCustomerType = customerTypeMode === "UNSPECIFIED" ? "全部客户" : selected.customerType;
   const customerTypeOptions = customerTypeMode === "UNSPECIFIED" ? ["全部客户"] : ["全部客户", "特渠专业客户", "综合客户"];
   const statusLabel = { draft: "草稿", published: "已发布", completed: "已完成" } as const;
@@ -307,6 +346,7 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
   const invalidatePreview = () => { setPreviewOpen(false); setPreviewRevision(value => value + 1); };
   const selectSettingsRound = (id: number) => { if (id !== selected.id) invalidatePreview(); setSelectedId(id); };
   const updateSelected = (patch: Partial<LotteryRound>) => {
+    setEdited(true);
     if (Object.keys(patch).some(key => !["name", "prize", "prizeImageFileId", "prizeImageUrl"].includes(key))) invalidatePreview();
     onChange(rounds.map((item) => item.id === selected.id ? { ...item, ...patch } : item));
   };
@@ -382,23 +422,29 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
   const previewLoading = candidateQuery.loading;
   const statistics = statisticsQuery.data;
   const addRound = () => {
-    if (prizeImageUploading) return;
+    if (prizeImageUploading || orderLock.current || orderNeedsReload) return;
+    setEdited(true);
     const id = Math.min(-1, ...rounds.map((item) => item.id - 1));
     const next: LotteryRound = { id, name: `第${rounds.length + 1}轮`, prize: "待配置奖品", winnerCount: 10, customerType: "全部客户", scope: "all", minAmount: 0, qualificationMetric: "AMOUNT", probabilityMode: "ORDER_AMOUNT_WEIGHTED", minBoxCount: 0, excludeWinners: true, status: "draft", candidateCount: 0 };
     onChange([...rounds, next]);
     invalidatePreview(); setSelectedId(id);
   };
   const duplicateRound = () => {
-    if (prizeImageUploading) return;
+    if (prizeImageUploading || orderLock.current || orderNeedsReload) return;
+    setEdited(true);
     const id = Math.min(-1, ...rounds.map((item) => item.id - 1));
     const metric = weightingMetric(selected.probabilityMode);
-    onChange([...rounds, { ...selected, ...(metric ? { qualificationMetric: metric } : {}), id, ruleId: undefined, serverStatus: undefined, name: `${selected.name}副本`, status: "draft" }]);
+    onChange([...rounds, { ...selected, ...(metric ? { qualificationMetric: metric } : {}), id, ruleId: undefined, ruleRevision: undefined, currentAttemptNo: 0, serverStatus: undefined, name: `${selected.name}副本`, status: "draft" }]);
     invalidatePreview(); setSelectedId(id);
   };
   const saveAndPublish = async () => {
+    if (saving || orderLock.current || orderNeedsReload) return;
+    const targetActivity = activityId;
+    orderLock.current = true;
     setSaving(true); setSaveError("");
     try {
-      const body = { name: "订货会幸运抽奖规则", rounds: rounds.map((round, index) => ({ name: round.name, prizeName: round.prize,
+      const body = { name: "订货会幸运抽奖规则", expectedRevision: rounds.find(round => round.ruleId)?.ruleRevision,
+        roundIds: rounds.map(round => round.id > 0 && round.ruleId ? round.id : null), rounds: rounds.map((round) => ({ name: round.name, prizeName: round.prize,
         winnerCount: round.winnerCount, candidateScope: round.scope === "attended" ? "ATTENDEES" : round.scope === "ordered" ? "VALID_ORDERS" : "ALL_CUSTOMERS",
          customerType: lotteryCustomerTypeCode(customerTypeMode === "UNSPECIFIED" ? "全部客户" : round.customerType),
          minimumOrderAmount: round.scope === "ordered" ? round.minAmount : 0,
@@ -411,17 +457,23 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
          varieties: round.scope === "ordered" ? round.varieties ?? [] : [],
          includeUnspecifiedVariety: round.scope === "ordered" && Boolean(round.includeUnspecifiedVariety),
         prizeImageFileId: round.prizeImageFileId ?? null,
-        excludePreviousWinners: index === 0 ? false : round.excludeWinners, displayNameType: "FULL_NAME" })) };
+        excludePreviousWinners: round.excludeWinners, displayNameType: "FULL_NAME" })) };
       const existingRuleId = rounds.find((round) => round.ruleId && ["DRAFT", "READY", "DRAWN", "COMPLETED", "RESET"].includes(round.serverStatus || ""))?.ruleId;
       const saved = existingRuleId ? await updateLotteryRule(activityId, existingRuleId, body) : await createLotteryRule(activityId, body);
       const published = saved.status === "DRAFT" ? await publishLotteryRule(activityId, saved.id) : saved;
+      if (!scope.current.alive || scope.current.activityId !== targetActivity) return;
       const mapped = mapLotteryRule(published);
-      invalidatePreview(); onChange(mapped); onSaved?.(); setSelectedId(mapped[selectedIndex]?.id ?? mapped[0]?.id ?? -1);
-    } catch (error) { setSaveError(error instanceof ApiError ? error.message : "抽奖规则保存失败"); }
-    finally { setSaving(false); }
+      invalidatePreview(); onChange(mapped); onSaved?.(); setEdited(false); setSelectedId(mapped.find(round => round.id === selected.id)?.id ?? mapped[selectedIndex]?.id ?? mapped[0]?.id ?? -1);
+    } catch (error) {
+      if (!scope.current.alive || scope.current.activityId !== targetActivity) return;
+      setSaveError(error instanceof ApiError ? error.message : "抽奖规则保存失败");
+      if (error instanceof ApiError && error.code === "LOTTERY_RULE_CHANGED") setOrderNeedsReload(true);
+    }
+    finally { if (scope.current.alive && scope.current.activityId === targetActivity) { orderLock.current = false; setSaving(false); } }
   };
   const removeRound = () => {
     if (selectedLocked || rounds.length === 1) return;
+    setEdited(true);
     if (selected.prizeImageFileId && selected.prizeImageFileId !== selected.savedPrizeImageFileId
         && !rounds.some((item) => item.id !== selected.id && item.prizeImageFileId === selected.prizeImageFileId)) {
       void deleteLotteryPrizeImage(activityId, selected.prizeImageFileId).catch(() => undefined);
@@ -429,6 +481,45 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
     const rest = rounds.filter((item) => item.id !== selected.id);
     invalidatePreview(); onChange(rest);
     setSelectedId(rest[0].id);
+  };
+  const commitOrder = (next: LotteryRound[]) => {
+    if (onOrderSaved) onOrderSaved(next); else onChange(next);
+    setEdited(false);
+  };
+  const reloadOrderRules = async () => {
+    const targetActivity = activityId;
+    const rules = await loadLotteryRules(targetActivity);
+    if (!scope.current.alive || scope.current.activityId !== targetActivity) return;
+    const rule = rules.find(item => item.status === "PUBLISHED") ?? rules.find(item => item.id === selected.ruleId);
+    if (!rule) throw new Error("抽奖规则不存在，请重新进入页面");
+    commitOrder(mapLotteryRule(rule)); invalidatePreview(); setOrderNeedsReload(false); setSaveError("");
+  };
+  const moveRound = async (id: number, target: number) => {
+    const from = rounds.findIndex(round => round.id === id);
+    if (orderLock.current || orderDisabled || from <= lockedThrough || target <= lockedThrough || target < 0 || target >= rounds.length || from === target) return;
+    const next = [...rounds]; next.splice(target, 0, next.splice(from, 1)[0]);
+    invalidatePreview(); setOrderNotice(""); setSaveError("");
+    if (localOnly) { onChange(next); setEdited(true); setOrderNotice("顺序已调整，保存并发布后生效"); return; }
+    const original = rounds, targetActivity = activityId;
+    orderLock.current = true; setOrderSaving(true); onChange(next);
+    try {
+      const saved = await reorderLotteryRounds(activityId, selected.ruleId!, selected.ruleRevision ?? 0, next.map(round => round.id));
+      if (!scope.current.alive || scope.current.activityId !== targetActivity) return;
+      commitOrder(applyLotteryOrder(original, saved)); setOrderNotice("抽奖顺序已更新");
+    } catch (error) {
+      if (!scope.current.alive || scope.current.activityId !== targetActivity) return;
+      commitOrder(original);
+      if (!(error instanceof ApiError) || error.status >= 500 || error.code === "LOTTERY_RULE_CHANGED") {
+        try {
+          await reloadOrderRules();
+          if (scope.current.alive && scope.current.activityId === targetActivity) setOrderNotice(error instanceof ApiError ? "轮次已更新，请按最新顺序重新调整" : "已核对服务器保存结果，请查看当前顺序");
+        } catch {
+          if (scope.current.alive && scope.current.activityId === targetActivity) { setOrderNeedsReload(true); setSaveError("暂时无法确认最新顺序，请重新加载规则后操作"); }
+        }
+      } else setSaveError(error.message);
+    } finally {
+      if (scope.current.alive && scope.current.activityId === targetActivity) { orderLock.current = false; setOrderSaving(false); }
+    }
   };
   const thresholdSummary = selected.scope !== "ordered" ? "" : selected.qualificationMetric === "TONS"
     ? (selected.minTons ?? 0) > 0 ? " · 订货满 " + selected.minTons!.toLocaleString(undefined, { maximumFractionDigits: 6 }) + " 吨" : ""
@@ -447,8 +538,16 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
   const candidateSteps: [string, number][] = [["当前有效白名单", customerCount], [selected.scope === "attended" ? "已匹配到场客户" : selected.scope === "ordered" ? "有效订单客户" : "客户类型匹配", resolvedCandidateCount ?? 0], ...(selectedIndex > 0 && selected.excludeWinners ? [["排除已中奖", resolvedCandidateCount ?? 0] as [string, number]] : [])];
   return (
     <div className="admin-panel lottery-settings">
-      <div className="panel-title"><div><h2>抽奖规则工作台</h2><p>{readOnly ? "整场活动已结束，抽奖规则和结果只读" : "候选按白名单客户 ID 去重并严格按轮次执行；已开始轮次自动锁定"}</p></div><div className="panel-actions"><span className="attendance-not-linked">现场名单已同步 {attendeeCount} 名</span><button className="admin-primary" disabled={readOnly || saving || prizeImageUploading || rounds.length === 0 || rounds.some(r => r.scope === "ordered" && r.varieties != null && r.varieties.length === 0 && !r.includeUnspecifiedVariety)} onClick={saveAndPublish}>{readOnly ? "活动已结束" : saving ? "正在保存…" : rounds.some((round) => round.serverStatus === "READY") ? "保存规则修改" : "保存并发布"}</button></div></div>
+      <div className="panel-title"><div><h2>抽奖规则工作台</h2><p>{readOnly ? "整场活动已结束，抽奖规则和结果只读" : "候选按白名单客户 ID 去重并严格按轮次执行；已开始轮次自动锁定"}</p></div><div className="panel-actions"><span className="attendance-not-linked">现场名单已同步 {attendeeCount} 名</span><button className="admin-primary" disabled={readOnly || saving || orderSaving || orderNeedsReload || prizeImageUploading || rounds.length === 0 || rounds.some(r => r.scope === "ordered" && r.varieties != null && r.varieties.length === 0 && !r.includeUnspecifiedVariety)} onClick={saveAndPublish}>{readOnly ? "活动已结束" : saving ? "正在保存…" : rounds.some((round) => round.serverStatus === "READY") ? "保存规则修改" : "保存并发布"}</button></div></div>
       {(saveError || candidateQuery.error || statisticsQuery.error || optionsQuery.error) && <div className="warning-box"><b>抽奖资料读取或保存失败</b><span>{saveError || candidateQuery.error || statisticsQuery.error || optionsQuery.error}</span></div>}
+      {orderNotice && <p className="lottery-order-notice" role="status">{orderNotice}</p>}
+      {orderNeedsReload && <button type="button" className="secondary-button" disabled={orderSaving} onClick={() => {
+        if (orderLock.current) return;
+        orderLock.current = true; setOrderSaving(true);
+        void reloadOrderRules().then(() => { if (scope.current.alive && scope.current.activityId === activityId) setOrderNotice("已重新加载抽奖规则"); })
+          .catch(() => { if (scope.current.alive && scope.current.activityId === activityId) setSaveError("规则加载失败，请重试"); })
+          .finally(() => { if (scope.current.alive && scope.current.activityId === activityId) { orderLock.current = false; setOrderSaving(false); } });
+      }}>重新加载规则（放弃未保存修改）</button>}
       <div className="lottery-overview">
         <article><span>抽奖轮次</span><strong>{rounds.length}</strong><small>{rounds.filter((x) => x.status === "completed").length} 轮已完成</small></article>
         <article><span>活动客户</span><strong>{customerCount.toLocaleString()}</strong><small>白名单有效客户</small></article>
@@ -456,9 +555,22 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
         <article><span>已中奖客户</span><strong>{statistics?.validWinnerCustomers ?? "—"}</strong><small>{statistics ? `数据库当前有效 · ${statistics.invalidatedWinnerRecords} 条已作废` : statisticsQuery.error ? "暂未加载" : "正在加载…"}</small>{statisticsQuery.error && <button type="button" disabled={statisticsQuery.loading} onClick={() => void statisticsQuery.refresh()}>重试</button>}</article>
       </div>
       <div className="lottery-config-grid">
-        <section className="round-list"><div className="section-heading"><h3>抽奖轮次</h3><span>按顺序执行</span></div>{rounds.map((item, index) => <button key={item.id} className={selected.id === item.id ? "active" : ""} onClick={() => selectSettingsRound(item.id)}><i>{String(index + 1).padStart(2, "0")}</i><span><b>{item.name}</b><small>{item.prize}</small></span><em><small className={`round-status ${item.status}`}>{statusLabel[item.status]}</small>{item.winnerCount} 人</em></button>)}<button className="add-round" disabled={readOnly} onClick={addRound}>＋ 新增抽奖轮次</button></section>
+        <section className="round-list"><div className="section-heading"><h3>抽奖轮次</h3><span>{orderSaving ? "正在保存顺序…" : "按顺序执行"}</span></div>
+          <p className="round-order-help">{readOnly ? "活动已结束，轮次只读" : !localOnly && (edited || hasUnsavedChanges || rounds.some(round => round.id < 0)) ? "请先保存规则，再调整顺序" : "拖动 ⋮⋮ 调整未开始轮次；已开始轮次位置固定"}</p>
+          {rounds.map((item, index) => <div key={item.id} className={`round-row${dragTarget === index ? " drop-target" : ""}`} data-round-id={item.id}
+            onDragOver={event => { if (dragging.current !== null && !orderDisabled && index > lockedThrough) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; if (dragTarget !== index) setDragTarget(index); } }}
+            onDrop={event => { event.preventDefault(); const id = dragging.current; dragging.current = null; setDragTarget(null); if (id !== null) void moveRound(id, index); }}>
+            <button type="button" className="round-drag-handle" aria-label={index <= lockedThrough ? `${item.name}位置已锁定` : `拖动调整${item.name}顺序`} title={index <= lockedThrough ? "已开始轮次位置固定" : "拖动排序，也可按上下方向键移动"}
+              disabled={orderDisabled || index <= lockedThrough} draggable={!orderDisabled && index > lockedThrough}
+              onDragStart={event => { if (orderDisabled || index <= lockedThrough) { event.preventDefault(); return; } dragging.current = item.id; event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", String(item.id)); }}
+              onDragEnd={() => { dragging.current = null; setDragTarget(null); }}
+              onKeyDown={event => { if (event.key === "ArrowUp" || event.key === "ArrowDown") { event.preventDefault(); void moveRound(item.id, index + (event.key === "ArrowUp" ? -1 : 1)); } }}>
+              {index <= lockedThrough ? <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="5" y="10" width="14" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg> : "⋮⋮"}</button>
+            <button type="button" className={selected.id === item.id ? "round-select active" : "round-select"} onClick={() => selectSettingsRound(item.id)}><i>{String(index + 1).padStart(2, "0")}</i><span><b>{item.name}</b><small>{item.prize}</small></span><em><small className={`round-status ${item.status}`}>{statusLabel[item.status]}</small>{item.winnerCount} 人</em></button>
+            <span className="round-move-actions"><button type="button" aria-label={`上移${item.name}`} disabled={orderDisabled || index <= lockedThrough + 1} onClick={() => void moveRound(item.id, index - 1)}>↑</button><button type="button" aria-label={`下移${item.name}`} disabled={orderDisabled || index <= lockedThrough || index === rounds.length - 1} onClick={() => void moveRound(item.id, index + 1)}>↓</button></span>
+          </div>)}<button className="add-round" disabled={readOnly || saving || orderSaving || orderNeedsReload} onClick={addRound}>＋ 新增抽奖轮次</button></section>
         <section className="round-form">
-          <div className="round-form-heading"><div><h3>{selected.name}</h3><span className={`round-status ${selected.status}`}>{statusLabel[selected.status]}</span></div><div><button onClick={duplicateRound} disabled={readOnly}>复制</button><button onClick={removeRound} disabled={selectedLocked}>删除</button></div></div>
+          <div className="round-form-heading"><div><h3>{selected.name}</h3><span className={`round-status ${selected.status}`}>{statusLabel[selected.status]}</span></div><div><button onClick={duplicateRound} disabled={readOnly || saving || orderSaving || orderNeedsReload}>复制</button><button onClick={removeRound} disabled={selectedLocked}>删除</button></div></div>
           <label><span>轮次名称</span><input value={selected.name} disabled={selectedLocked} onChange={(e) => updateSelected({ name: e.target.value })} /></label>
           <label><span>奖品名称</span><input value={selected.prize} disabled={selectedLocked} onChange={(e) => updateSelected({ prize: e.target.value })} /></label>
           <div className="lottery-prize-image-setting">

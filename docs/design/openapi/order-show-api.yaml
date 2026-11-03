@@ -2456,7 +2456,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
   /admin/activities/{activityId}/lottery/rules/{ruleId}:
-    patch:
+    put:
       operationId: updateLotteryRule
       tags: [Lottery]
       summary: 修改未归档抽奖规则组
@@ -2476,11 +2476,25 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name]
+              required: [name, rounds, expectedRevision, roundIds]
               properties:
                 name:
                   type: string
                   maxLength: 200
+                expectedRevision:
+                  type: integer
+                  minimum: 0
+                  description: 规则列表返回的 revision；版本过期返回409，不覆盖新顺序
+                roundIds:
+                  type: array
+                  description: 与 rounds 一一对应；既有轮次填原ID，新增轮次填null，排序须使用独立接口
+                  items:
+                    type: [integer, 'null']
+                rounds:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
       responses:
         '200':
           description: 修改成功
@@ -2488,6 +2502,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/lottery/rules/{ruleId}/round-order:
+    get:
+      operationId: getLotteryRoundOrder
+      tags: [Lottery]
+      summary: 按需读取当前规则的轻量轮次顺序
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: ruleId、revision、规则状态和轮次id/roundNo/status/currentAttemptNo；不含候选或中奖名单
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+    put:
+      operationId: reorderLotteryRounds
+      tags: [Lottery]
+      summary: 调整未开始轮次的执行顺序，不改变配置、身份或历史结果
+      description: 固定所有已开始轮次及其之前的位置；从未开奖的DRAFT/READY后缀可重排。版本一致的同序重放不重复写入；版本过期或锁忙立即409；不触发候选试算、统计查询或全活动通知。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedRevision, roundIds]
+              properties:
+                expectedRevision:
+                  type: integer
+                  minimum: 0
+                roundIds:
+                  type: array
+                  description: 当前规则全部轮次ID，包含位置不变的固定前缀，不得遗漏或重复
+                  items:
+                    $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: 已保存的最新轻量顺序和revision；相同顺序直接返回，不重复记录成功审计
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
   /admin/activities/{activityId}/lottery/rules/{ruleId}/rounds:
     post:
       operationId: createLotteryRound
@@ -2639,9 +2716,21 @@ paths:
         - $ref: '#/components/parameters/RoundId'
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedRevision]
+              properties:
+                expectedRevision:
+                  type: integer
+                  minimum: 0
+                  description: 页面当前规则revision；过期时409且不开奖，需读取最新轮次并由工作人员再次确认
       responses:
         '200':
-          description: 已持久化的结果；现场页可开始动画后揭晓
+          description: 已持久化的结果及最新ruleRevision；现场页可开始动画后揭晓
           content:
             application/json:
               schema:

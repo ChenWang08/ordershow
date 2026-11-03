@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "../next-env.d.ts",
+    "../types/**/*.d.ts",
+    "../app/features/lottery/Lottery.tsx",
+    "../app/features/admin/AdminWorkspace.tsx",
+    "../app/features/admin/useAdminInitialization.ts",
+    "../app/services/api/lottery.ts",
+    "../app/services/api/types.ts"
+  ],
+  "exclude": ["../node_modules", "../work", "../outputs"]
+}

@@ -135,7 +135,7 @@ export function useAdminInitialization(options: AdminInitializationOptions) {
   }, commit, o.preservePreviews?.lottery);
   const logs = useLazyAdminQuery(o.activityId + ":LOGS", o.logsOpen && isManager(identity), async signal => {
     const entries = await loadAuditLogs(id, signal);
-    return () => o.setOperationLogs(entries.map(entry => ({ id: String(entry.id), action: entry.actionCode,
+    return () => o.setOperationLogs(entries.map(entry => ({ id: String(entry.id), action: entry.actionCode === "LOTTERY_ROUNDS_REORDERED" ? "调整抽奖顺序" : entry.actionCode,
       target: `${entry.objectType}${entry.objectId ? ` #${entry.objectId}` : ""}`,
       detail: entry.result === "SUCCESS" ? `操作成功 · 追踪号 ${entry.traceId}` : `操作失败：${entry.errorCode || "未知错误"}`,
       operator: entry.actorName || (entry.actorType === "H5_CUSTOMER" ? "H5 客户" : "系统"), time: formatBeijingTime(entry.occurredAt) })));

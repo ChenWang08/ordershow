@@ -168,11 +168,13 @@ export type LotteryRoundApi = {
 };
 export type LotteryPrizeImageUpload = { fileId: number; url: string; filename: string; contentType: string; sizeBytes: number };
 
-export type LotteryRuleApi = { id: number; activityId: number; name: string; status: string; createdAt: string; updatedAt: string; rounds: LotteryRoundApi[] };
+export type LotteryRuleApi = { id: number; activityId: number; name: string; status: string; createdAt: string; updatedAt: string; revision: number; rounds: LotteryRoundApi[] };
+export type LotteryRoundOrder = { ruleId: number; revision: number; status: string; rounds: Array<{ id: number; roundNo: number; status: string; currentAttemptNo: number }> };
+export type LotteryRuleWrite = { name: string; rounds: Array<Record<string, unknown>>; expectedRevision?: number; roundIds?: Array<number | null> };
 export type LotteryWinnerApi = { roundId: number; position: number; activityCustomerId: number; dealerDisplayName: string; customerType: string; regionCode?: string; branchName?: string; phoneMasked: string };
 export type LotteryDrawResult = { roundId: number; attemptId: number; attemptNo: number; candidateCount: number;
   configuredWinnerCount: number; actualWinnerCount: number; unawardedCount: number;
-  winners: LotteryWinnerApi[]; resultHash: string; drawnAt: string };
+  winners: LotteryWinnerApi[]; resultHash: string; drawnAt: string; ruleRevision: number };
 export type LotteryCandidatePreviewItem = { activityCustomerId: number; dealerFullName: string; customerType: string;
   regionCode?: string; branchName?: string; phoneMasked?: string; qualificationSource: string;
   qualifyingOrderAmount?: number; qualifyingOrderBoxCount?: number; probabilityPercent: number;

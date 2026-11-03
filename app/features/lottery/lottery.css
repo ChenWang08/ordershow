@@ -20,6 +20,25 @@
 .lottery-controls select { margin-left: 5px; padding: 5px 22px 5px 8px; color: #fff0cc; border: 1px solid rgba(255,214,137,.3); border-radius: 5px; background: #741416; font-size: 10px; }
 .lottery-controls select:focus { outline: 2px solid rgba(255,215,125,.72); outline-offset: 2px; }
 .lottery-controls select:disabled { cursor: wait; opacity: .72; }
+.round-order-help { margin: 9px 0; color: #9a8b82; font-size: 9px; line-height: 1.6; }
+.round-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) 23px; align-items: stretch; gap: 3px; margin-top: 7px; border: 1px solid #e1d6d0; border-radius: 8px; background: #fff; }
+.round-row:has(.active) { border-color: #cf9e91; background: #fff3f0; }
+.round-row.drop-target { outline: 2px solid #b42c25; outline-offset: 2px; }
+.round-row > .round-select { display: grid; grid-template-columns: 27px minmax(0, 1fr) 50px; align-items: center; gap: 6px; min-width: 0; padding: 11px 2px; border: 0; background: transparent; color: #66564e; text-align: left; font-size: 9px; }
+.round-row > .round-select.active { color: #9f211f; }
+.round-select > i { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 7px; background: #f4ede9; color: #9f7a6d; font-size: 8px; font-style: normal; }
+.round-select > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.round-select > span b, .round-select > span small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.round-select > span small { color: #9c8d85; font-size: 8px; }
+.round-select > em { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+.round-row > .round-drag-handle { padding: 0; border: 0; border-radius: 8px 0 0 8px; background: transparent; color: #a58473; cursor: grab; font-size: 14px; }
+.round-row > .round-drag-handle:active { cursor: grabbing; }
+.round-row > .round-drag-handle:disabled { cursor: default; opacity: .4; }
+.round-move-actions { display: flex; flex-direction: column; justify-content: center; }
+.round-move-actions > button { min-height: 27px; padding: 0; border: 0; background: transparent; color: #9f7a6d; font-size: 13px; }
+.round-move-actions > button:disabled { opacity: .22; }
+.round-row button:focus-visible { outline: 2px solid #b42c25; outline-offset: -2px; }
+.lottery-order-notice { color: #26704e; font-size: 11px; }
 .lottery-controls > span { color: #ffd77d; font-size: 10px; }
 .lottery-title { position: relative; z-index: 2; flex-shrink: 0; max-width: 94vw; margin: clamp(8px, 1.8vh, 20px) 0 0; text-align: center; }
 .lottery-title b { display: block; color: #ffd45f; font-family: serif; font-size: clamp(32px, 3.2vw, 44px); line-height: 1.12; letter-spacing: .04em; text-shadow: 0 3px 16px rgba(75,0,0,.3); }

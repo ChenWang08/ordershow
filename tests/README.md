@@ -10,6 +10,8 @@
 
 - H5 本机草稿与抽奖按页面加载：`h5-local-draft.test.mjs` 验证浏览器持久化、隔离、损坏/过期和存储失败；`h5-manual-refresh.test.mjs` 验证完整草稿生命周期及后台更新后的失效、提交成功清理/失败保留。`activity-info-http.test.mjs` 与 `lottery-board.test.mjs` 分别保证公共/H5 初始化不查询抽奖，以及抽奖页独立读取正常。浏览器验证无后台草稿请求、购物车保留和 HTTP 活动同步；本轮补充抽奖仅在页面打开且活动资料就绪后挂载。历史草稿验证见[记录](../docs/testing/h5-local-draft-2026-10-31.md)。
 
+- 抽奖轮次排序：`npm run test:lottery-order`、`npm run typecheck:lottery-order` 及 `scripts/test-lottery-order-browser.mjs` 仅验证相关组件、排序保存和请求行为。后端 `LotteryOrderTest` 验证锁定边界、版本、位移写入及审计；`LotteryIntegrationTest#reordering*` 的4个真实MySQL用例及 `LotteryOrderHttpTest` 的12/100轮排序耗时、冲突/回滚验证已通过。HTTP专项沿用 `ORDER_SHOW_LOTTERY_TEST=order-show-lottery-test` 和33316固定隔离库，仅注册必要组件，管理员身份使用替身，不启动完整应用；禁止与同库测试并行。结果、复跑和性能边界见[本次记录](../docs/testing/lottery-round-order-2026-11-03.md)。不运行整体回归或部署镜像。
+
 - 抽奖大屏图片与名单展示：运行 `node --test tests/lottery-board.test.mjs` 和 `node scripts/test-lottery-display-browser.mjs`。后者用真实组件与模拟 HTTP 检查 1920×1080、1366×768、390×844 下的 1/2/3/4/5/9/10/30/60 家名单，图片两倍尺寸及横图/竖图/方图/小图/无图、长名称换行、大名单滚动、滚动/揭晓/回看与展开顶部栏。截图和测量结果位于 `outputs/lottery-display/`；只启动本地测试页面，不构建或部署镜像。Playwright 可通过 `ORDER_SHOW_PLAYWRIGHT_MODULE` 指定，浏览器可通过 `ORDER_SHOW_BROWSER_PATH` 指定。
 
 - 手机端订单按需刷新：`h5-manual-refresh.test.mjs` 覆盖无轮询、15 秒冷却、共享查询、修改/撤回检查、审核及后台直接修改、草稿版本和迟到响应隔离；`scripts/test-h5-manual-refresh-browser.mjs` 使用真实 H5 组件及合成 HTTP，在手机/桌面验证静置无订单请求、最新购物车和失败恢复，见[验证记录](../docs/testing/h5-manual-refresh-2026-10-30.md)。

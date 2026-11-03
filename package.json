@@ -10,6 +10,8 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "test:lottery-order": "node --test tests/lottery-settings.test.mjs tests/lottery-board.test.mjs",
+    "typecheck:lottery-order": "node node_modules/typescript/bin/tsc --noEmit --incremental false -p tests/lottery-order.tsconfig.json",
     "typecheck": "tsc --noEmit --incremental false",
     "types:generate": "wrangler types types/worker-runtime.d.ts --config scripts/worker-types.jsonc --include-env false",
     "lint": "eslint .",

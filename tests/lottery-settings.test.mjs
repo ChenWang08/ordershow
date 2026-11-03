@@ -16,19 +16,25 @@ function harness(options={}) {
   const calls=[];
   const base={id:1,name:"第一轮",prize:"奖品",winnerCount:10,customerType:"全部客户",scope:"all",minAmount:0,
     qualificationMetric:"AMOUNT",probabilityMode:"ORDER_AMOUNT_WEIGHTED",minBoxCount:0,excludeWinners:false,status:"draft",candidateCount:0};
-  const props={active:true,revision:"first",rounds:[base,{...base,id:2,name:"第二轮"}],attendanceRows:[],activityId:1,customerCount:100,readOnly:false,
+  const props={active:true,revision:"first",rounds:options.rounds ?? [base,{...base,id:2,name:"第二轮"}],attendanceRows:[],activityId:1,customerCount:100,readOnly:false,
     onChange:rounds=>{props.rounds=rounds;}};
-  const api={ApiError:class extends Error {},apiAssetUrl:url=>url,
+  props.onOrderSaved=rounds=>{props.rounds=rounds;calls.push(["order-saved"]);};
+  const api={ApiError:class extends Error {constructor(status,code,message){super(message);this.status=status;this.code=code;}},apiAssetUrl:url=>url,
+    reorderLotteryRounds:async(activity,rule,revision,ids)=>{calls.push(["reorder",activity,rule,revision,[...ids]]);
+      if(options.reorder)return options.reorder(activity,rule,revision,ids);
+      return {ruleId:rule,revision:revision+1,status:"PUBLISHED",rounds:ids.map((id,index)=>({id,roundNo:index+1,status:props.rounds.find(r=>r.id===id).serverStatus,currentAttemptNo:0}))};},
+    loadLotteryRules:async()=>{calls.push(["rules"]);return options.rules();},
     previewLotteryCandidates:async(id,input,signal)=>{calls.push(["preview",id,structuredClone(input),signal]);
       if(options.preview) return options.preview(id,input,signal);
       return {candidateCount:2,configuredWinnerCount:10,actualWinnerCount:2,unawardedCount:8,candidates:[{activityCustomerId:7,dealerFullName:"候选甲",customerType:"GENERAL"}],totalCandidateOrderAmount:20};},
     loadLotteryStatistics:async()=>{calls.push(["statistics"]);return{validWinnerCustomers:3,invalidatedWinnerRecords:0};},
     loadLotteryProductOptions:async()=>{calls.push(["options"]);return[{productLine:"项目A",varietyName:"品种A"},{productLine:"项目A",varietyName:"品种,B"},{productLine:"项目B",varietyName:"品种B"}];},
     createLotteryRule:async(id,body)=>{calls.push(["save",id,structuredClone(body)]);return {id:20,status:"DRAFT",rounds:body.rounds};},
+    updateLotteryRule:async(id,ruleId,body)=>{calls.push(["update",id,ruleId,structuredClone(body)]);return {id:ruleId,status:"PUBLISHED",revision:body.expectedRevision+1,rounds:body.rounds.map((round,i)=>({...round,id:body.roundIds[i] ?? 1000+i,roundNo:i+1,status:props.rounds[i].serverStatus}))};},
     publishLotteryRule:async(id,ruleId)=>{calls.push(["publish",id,ruleId]);return {id:20,status:"PUBLISHED",rounds:calls.find(c=>c[0]==="save")[2].rounds.map((r,i)=>({...r,id:100+i,roundNo:i+1,status:"READY"}))};},
   };
   const h=hookHarness("app/features/lottery/Lottery.tsx","LotterySettings",[props],{"../../api":api,"../shared/components/FestivalDecor":{FestivalDecor:()=>null}});
-  return {...h,props,calls,options,
+  return {...h,props,calls,options,ApiError:api.ApiError,
     get tree(){return h.model;},
     text:()=>text(h.model),
     find:predicate=>nodes(h.model).find(predicate),
@@ -97,7 +103,7 @@ test("saving preserves linked filters and tonnage and keeps the selected round w
   const body=h.calls.find(c=>c[0]==="save")[2];
   assert.equal(body.rounds[1].minimumOrderTons,0.000001);assert.equal(body.rounds[1].productLine,"项目A");assert.deepEqual(body.rounds[1].varieties,["品种,B"]);
   assert.equal(h.props.rounds[1].id,101);assert.equal(h.props.rounds[1].minTons,0.000001);assert.deepEqual(h.props.rounds[1].varieties,["品种,B"]);
-  assert(h.find(n=>n.type==="button"&&n.props.className==="active"&&text(n).includes("第二轮")));
+  assert(h.find(n=>n.type==="button"&&n.props.className?.split(" ").includes("active")&&text(n).includes("第二轮")));
   assert.equal(h.calls.filter(c=>c[0]==="preview").length,0);h.unmount();
 });
 
@@ -141,5 +147,90 @@ test("copying a legacy mixed rule binds the new copy and preserves the original"
   const h=harness();await h.patch({scope:"ordered",qualificationMetric:"TONS",minTons:1});
   await h.click("复制");assert.equal(h.props.rounds[0].qualificationMetric,"TONS");
   assert.equal(h.props.rounds.at(-1).probabilityMode,"ORDER_AMOUNT_WEIGHTED");assert.equal(h.props.rounds.at(-1).qualificationMetric,"AMOUNT");
+  assert.equal(h.calls.filter(c=>c[0]==="preview").length,0);h.unmount();
+});
+
+function publishedRounds(statuses=["COMPLETED","READY","READY"]) {
+  return statuses.map((serverStatus,i)=>({id:i+1,ruleId:20,ruleRevision:4,currentAttemptNo:serverStatus==="COMPLETED"?1:0,
+    name:"轮次"+(i+1),prize:"奖品"+(i+1),winnerCount:2,customerType:"全部客户",scope:"all",minAmount:0,
+    qualificationMetric:"AMOUNT",probabilityMode:"EQUAL",minBoxCount:0,excludeWinners:true,
+    serverStatus,status:serverStatus==="COMPLETED"?"completed":"published",candidateCount:0}));
+}
+test("moving future rounds saves once by identity and never recalculates or reloads statistics",async()=>{
+  const h=harness({rounds:publishedRounds()});await h.flush();
+  await h.click("手动试算");const previews=h.calls.filter(c=>c[0]==="preview").length;
+  await h.field("下移轮次2").props.onClick();await h.flush();
+  assert.deepEqual(h.calls.find(c=>c[0]==="reorder").slice(1),[1,20,4,[1,3,2]]);
+  assert.deepEqual(Array.from(h.props.rounds,r=>r.id),[1,3,2]);assert.equal(h.props.rounds[2].prize,"奖品2");
+  assert.equal(h.props.rounds[2].ruleRevision,5);assert.match(h.text(),/抽奖顺序已更新/);
+  assert.match(h.text(),/待试算/);assert.equal(h.calls.filter(c=>c[0]==="preview").length,previews);
+  assert.equal(h.calls.filter(c=>c[0]==="statistics").length,1);assert.equal(h.calls.filter(c=>c[0]==="rules").length,0);
+  assert.equal(h.intervals.size,0);await h.runTimers();assert.equal(h.calls.filter(c=>c[0]==="reorder").length,1);h.unmount();
+});
+test("dragging only a handle waits until drop; cancelled and same-position drags send nothing",async()=>{
+  const h=harness({rounds:publishedRounds()});await h.flush();
+  const event={preventDefault(){},dataTransfer:{setData(){}}};
+  const handle=()=>h.field("拖动调整轮次2顺序");
+  handle().props.onDragStart(event);
+  h.find(n=>n.props?.["data-round-id"]===3).props.onDragOver(event);await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==="reorder").length,0);
+  handle().props.onDragEnd();await h.flush();assert.deepEqual(Array.from(h.props.rounds,r=>r.id),[1,2,3]);
+  handle().props.onDragStart(event);h.find(n=>n.props?.["data-round-id"]===2).props.onDrop(event);await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==="reorder").length,0);
+  handle().props.onDragStart(event);h.find(n=>n.props?.["data-round-id"]===3).props.onDrop(event);await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==="reorder").length,1);assert.deepEqual(Array.from(h.props.rounds,r=>r.id),[1,3,2]);h.unmount();
+});
+test("drawn, drawing, reset and formerly drawn rounds lock their complete prefix",async()=>{
+  for(const status of ["DRAWING","DRAWN","RESET","COMPLETED"]) {
+    const rounds=publishedRounds(["READY",status,"READY"]);rounds[1].currentAttemptNo=1;
+    const h=harness({rounds});await h.flush();
+    assert.equal(h.field("轮次1位置已锁定").props.disabled,true);assert.equal(h.field("轮次2位置已锁定").props.disabled,true);
+    assert.equal(h.field("上移轮次3").props.disabled,true);h.unmount();
+  }
+  const rounds=publishedRounds(["READY","READY","READY"]);rounds[1].currentAttemptNo=1;
+  const h=harness({rounds});assert.equal(h.field("轮次2位置已锁定").props.disabled,true);h.unmount();
+});
+test("unsaved published edits block sorting and local drafts reorder without network",async()=>{
+  const h=harness({rounds:publishedRounds()});await h.flush();
+  h.find(n=>n.type==="input"&&n.props.value==="奖品2").props.onChange({target:{value:"修改奖品"}});await h.flush();
+  assert.equal(h.field("下移轮次2").props.disabled,true);await h.field("下移轮次2").props.onClick();await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==="reorder").length,0);assert.match(h.text(),/请先保存规则/);h.unmount();
+  const drafts=publishedRounds(["DRAFT","DRAFT"]).map((r,i)=>({...r,id:-1-i,ruleId:undefined,status:"draft"}));
+  const d=harness({rounds:drafts});await d.flush();await d.field("下移轮次1").props.onClick();await d.flush();
+  assert.deepEqual(Array.from(d.props.rounds,r=>r.id),[-2,-1]);assert.equal(d.calls.filter(c=>c[0]==="reorder").length,0);d.unmount();
+});
+test("a synchronous action lock prevents duplicate saves and known failures restore the old order",async()=>{
+  let reject;const h=harness({rounds:publishedRounds(),reorder:()=>new Promise((_yes,no)=>{reject=no;})});await h.flush();
+  const click=h.field("下移轮次2").props.onClick;click();click();await h.flush();
+  assert.equal(h.calls.filter(c=>c[0]==="reorder").length,1);assert.equal(h.field("下移轮次3").props.disabled,true);
+  reject(new h.ApiError(409,"LOTTERY_RULE_BUSY","开奖正在处理"));await h.flush();
+  assert.deepEqual(Array.from(h.props.rounds,r=>r.id),[1,2,3]);assert.match(h.text(),/开奖正在处理/);
+  assert.equal(h.calls.filter(c=>c[0]==="rules").length,0);h.unmount();
+});
+test("lost responses reconcile once without resubmitting and failed reconciliation blocks further writes",async()=>{
+  const rounds=publishedRounds();
+  const rule={id:20,status:"PUBLISHED",revision:5,rounds:[rounds[0],rounds[2],rounds[1]].map(r=>({...r,status:r.serverStatus,prizeName:r.prize}))};
+  const h=harness({rounds,reorder:async()=>{throw new Error("lost response");},rules:async()=>[rule]});await h.flush();
+  await h.field("下移轮次2").props.onClick();await h.flush();
+  assert.deepEqual(Array.from(h.props.rounds,r=>r.id),[1,3,2]);assert.equal(h.calls.filter(c=>c[0]==="rules").length,1);
+  assert.equal(h.calls.filter(c=>c[0]==="reorder").length,1);assert.equal(h.calls.filter(c=>c[0]==="statistics").length,1);h.unmount();
+  const failed=harness({rounds:publishedRounds(),reorder:async()=>{throw new Error("offline");},rules:async()=>{throw new Error("offline");}});await failed.flush();
+  await failed.field("下移轮次2").props.onClick();await failed.flush();assert.match(failed.text(),/暂时无法确认最新顺序/);
+  assert.equal(failed.field("下移轮次2").props.disabled,true);assert.equal(failed.button("保存规则修改").props.disabled,true);failed.unmount();
+});
+test("a late sorting response cannot replace another activity",async()=>{
+  let resolve;const h=harness({rounds:publishedRounds(),reorder:()=>new Promise(yes=>{resolve=yes;})});await h.flush();
+  h.field("下移轮次2").props.onClick();await h.flush();h.props.activityId=2;h.props.rounds=publishedRounds().map(r=>({...r,id:r.id+10}));h.render([h.props]);
+  resolve({ruleId:20,revision:5,rounds:[1,3,2].map((id,i)=>({id,roundNo:i+1,status:"READY",currentAttemptNo:0}))});await h.flush();
+  assert.deepEqual(Array.from(h.props.rounds,r=>r.id),[11,12,13]);h.unmount();
+});
+
+test("saving configuration after sorting sends the latest version and the same round identities",async()=>{
+  const h=harness({rounds:publishedRounds()});await h.flush();await h.field("下移轮次2").props.onClick();await h.flush();
+  h.find(n=>n.type==="input"&&n.props.value==="奖品2").props.onChange({target:{value:"改后的奖品2"}});await h.flush();
+  await h.click("保存规则修改");const body=h.calls.find(c=>c[0]==="update")[3];
+  assert.equal(body.expectedRevision,5);assert.deepEqual(body.roundIds,[1,3,2]);assert.equal(body.rounds[2].prizeName,"改后的奖品2");
+  assert.equal(body.rounds[0].excludePreviousWinners,true);
+  assert.deepEqual(Array.from(h.props.rounds,r=>r.id),[1,3,2]);assert.equal(h.props.rounds[2].prize,"改后的奖品2");
   assert.equal(h.calls.filter(c=>c[0]==="preview").length,0);h.unmount();
 });
