@@ -2,6 +2,7 @@ export * from "./context";
 export * from "./client";
 export * from "./types";
 export * from "./activity";
+export * from "./activity-copy";
 export * from "./h5-orders";
 export * from "./auth";
 export * from "./admin";

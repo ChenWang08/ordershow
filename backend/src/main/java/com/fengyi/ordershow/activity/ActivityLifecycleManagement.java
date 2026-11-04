@@ -100,6 +100,8 @@ public class ActivityLifecycleManagement {
   }
   private long count(String table,long id) { return jdbc.queryForObject("SELECT COUNT(*) FROM "+table+" WHERE activity_id=?",Long.class,id); }
   private void requireSettled(long id) {
+    if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM activity_copy_task WHERE source_activity_id=? AND status IN ('QUEUED','RUNNING'))",Boolean.class,id)))
+      throw DomainException.conflict("ACTIVITY_COPY_IN_PROGRESS","活动配置正在被复用，请等待复制完成后再归档或删除");
     if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM order_change_request WHERE activity_id=? AND status='PENDING')",Boolean.class,id))
         ||Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM import_task WHERE activity_id=? AND status NOT IN ('COMPLETED','FAILED','CANCELLED'))",Boolean.class,id))
         ||Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM export_task WHERE activity_id=? AND status IN ('PENDING','RUNNING'))",Boolean.class,id)))

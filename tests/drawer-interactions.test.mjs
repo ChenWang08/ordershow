@@ -89,10 +89,11 @@ for (const [folder, name, fieldLabel, newValue] of [
 test("new activity protects changes and resets discarded fields to the opening defaults", () => {
   const adapter = state(); let accepted = false, open = true;
   const { NewActivityDrawer } = loadModule("app/features/admin/NewActivityDrawer.tsx", {
+    "./useActivityCopy": { copySelectionValid: () => false },
     react: adapter.react, "../../admin-context": { useAdminIdentity: () => ({ roleCode: "SUPER_ADMIN" }) },
   }, { window: { confirm: () => accepted } });
   const initial = { name: "", startsAt: "2026-12-01T09:00", endsAt: "2026-12-01T12:00", eventEndsAt: "2026-12-01T18:00", departmentId: "1" };
-  const activities = { creatingActivity: false, newActivity: initial, departments: [], minimumFutureAt: "", setNewActivityOpen: value => { open = value; }, setNewActivity: value => { activities.newActivity = value; } };
+  const activities = { copy: { enabled: false, task: null }, creatingActivity: false, newActivity: initial, departments: [], minimumFutureAt: "", setNewActivityOpen: value => { open = value; }, setNewActivity: value => { activities.newActivity = value; } };
   const render = () => { adapter.reset(); return NewActivityDrawer({ activities }); };
   assert.equal(render().props.onClick, undefined);
   activities.newActivity = { ...initial, name: "新活动" };

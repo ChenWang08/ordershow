@@ -2,11 +2,6 @@ package com.fengyi.ordershow.storage;
 
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.config.OrderShowProperties;
-import io.minio.BucketExistsArgs;
-import io.minio.GetObjectArgs;
-import io.minio.MakeBucketArgs;
-import io.minio.MinioClient;
-import io.minio.PutObjectArgs;
 import jakarta.annotation.PostConstruct;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
@@ -26,15 +21,19 @@ import org.springframework.web.multipart.MultipartFile;
 @Service
 public class StorageService {
   private static final Logger log = LoggerFactory.getLogger(StorageService.class);
-  private final MinioClient minio;
+  private final ObjectStorage storage;
   private final JdbcTemplate jdbc;
   private final String bucket;
 
   public StorageService(OrderShowProperties properties, JdbcTemplate jdbc) {
+    this(properties,jdbc,new MinioObjectStorage(properties.storage()));
+  }
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public StorageService(OrderShowProperties properties, JdbcTemplate jdbc, ObjectStorage storage) {
     this.jdbc = jdbc;
     this.bucket = properties.storage().bucket();
-    this.minio = MinioClient.builder().endpoint(properties.storage().endpoint())
-        .credentials(properties.storage().accessKey(), properties.storage().secretKey()).build();
+    this.storage = storage;
   }
 
   @PostConstruct
@@ -62,25 +61,24 @@ public class StorageService {
     byte[] sha = MessageDigest.getInstance("SHA-256").digest(content);
     String safeName = originalFilename == null ? "file" : originalFilename.replaceAll("[^A-Za-z0-9._\\-\\u4e00-\\u9fa5]", "_");
     String key = activityId + "/" + purpose.toLowerCase() + "/" + UUID.randomUUID() + "-" + safeName;
-    minio.putObject(PutObjectArgs.builder().bucket(bucket).object(key)
-        .stream(new ByteArrayInputStream(content), (long) content.length, -1L)
-        .contentType(contentType == null ? "application/octet-stream" : contentType).build());
+    storage.put(bucket,key,new ByteArrayInputStream(content),content.length,contentType == null ? "application/octet-stream" : contentType);
     GeneratedKeyHolder keys = new GeneratedKeyHolder();
     jdbc.update(connection -> {
       var statement = connection.prepareStatement("""
           INSERT INTO stored_file(activity_id, storage_provider, bucket_name, object_key, original_filename,
                                   content_type, size_bytes, sha256, file_purpose, reference_count, created_by)
-          VALUES (?, 'S3', ?, ?, ?, ?, ?, ?, ?, 1, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
           """, java.sql.Statement.RETURN_GENERATED_KEYS);
       statement.setLong(1, activityId);
-      statement.setString(2, bucket);
-      statement.setString(3, key);
-      statement.setString(4, originalFilename == null ? "file" : originalFilename);
-      statement.setString(5, contentType == null ? "application/octet-stream" : contentType);
-      statement.setLong(6, content.length);
-      statement.setBytes(7, sha);
-      statement.setString(8, purpose);
-      if (adminId == null) statement.setNull(9, java.sql.Types.BIGINT); else statement.setLong(9, adminId);
+      statement.setString(2, storage.provider());
+      statement.setString(3, bucket);
+      statement.setString(4, key);
+      statement.setString(5, originalFilename == null ? "file" : originalFilename);
+      statement.setString(6, contentType == null ? "application/octet-stream" : contentType);
+      statement.setLong(7, content.length);
+      statement.setBytes(8, sha);
+      statement.setString(9, purpose);
+      if (adminId == null) statement.setNull(10, java.sql.Types.BIGINT); else statement.setLong(10, adminId);
       return statement;
     }, keys);
     long id = keys.getKey().longValue();
@@ -108,30 +106,29 @@ public class StorageService {
     jdbc.update(connection -> {
       var statement=connection.prepareStatement("""
           INSERT INTO stored_file(activity_id,storage_provider,bucket_name,object_key,original_filename,content_type,size_bytes,sha256,file_purpose,reference_count,created_by)
-          VALUES(?,'S3',?,?,?,'application/zip',?,?,'EXPORT_RESULT',1,?)
+          VALUES(?,?,?,?,?,'application/zip',?,?,'EXPORT_RESULT',1,?)
           """,java.sql.Statement.RETURN_GENERATED_KEYS);
-      statement.setLong(1,activityId);statement.setString(2,bucket);statement.setString(3,key);statement.setString(4,filename);
-      statement.setLong(5,size);statement.setBytes(6,sha);statement.setLong(7,adminId);return statement;
+      statement.setLong(1,activityId);statement.setString(2,storage.provider());statement.setString(3,bucket);statement.setString(4,key);statement.setString(5,filename);
+      statement.setLong(6,size);statement.setBytes(7,sha);statement.setLong(8,adminId);return statement;
     },keys);
     return new FileMeta(keys.getKey().longValue(),bucket,key,filename,"application/zip",size);
   }
   public void uploadExport(FileMeta meta,java.nio.file.Path path)throws Exception {
     ensureBucket();
     try(var input=java.nio.file.Files.newInputStream(path)) {
-      minio.putObject(PutObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey())
-          .stream(input,meta.sizeBytes(),-1L).contentType("application/zip").build());
+      storage.put(meta.bucket(),meta.objectKey(),input,meta.sizeBytes(),"application/zip");
     }
   }
   public InputStream openExport(FileMeta meta)throws Exception {
-    return minio.getObject(GetObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey()).build());
+    return storage.read(meta.bucket(),meta.objectKey());
   }
   public void discardExport(FileMeta meta)throws Exception {
-    minio.removeObject(io.minio.RemoveObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey()).build());
+    storage.remove(meta.bucket(),meta.objectKey());
     jdbc.update("UPDATE stored_file SET deleted_at=COALESCE(deleted_at,UTC_TIMESTAMP(3)) WHERE id=? AND file_purpose='EXPORT_RESULT'",meta.id());
   }
 
   public byte[] read(FileMeta meta) {
-    try (InputStream input = minio.getObject(GetObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey()).build())) {
+    try (InputStream input = storage.read(meta.bucket(),meta.objectKey())) {
       return input.readAllBytes();
     } catch (Exception exception) {
       throw DomainException.notFound("FILE_NOT_AVAILABLE", "文件不存在或暂不可读取");
@@ -139,11 +136,12 @@ public class StorageService {
   }
 
   public ImageVariants.Encoded readVariant(FileMeta meta, ImageVariants.Kind kind) {
-    try (var input = minio.getObject(GetObjectArgs.builder().bucket(meta.bucket()).object(variantObjectKey(meta, kind)).build())) {
-      return new ImageVariants.Encoded(input.readAllBytes(), input.headers().get("Content-Type"));
-    } catch (io.minio.errors.ErrorResponseException error) {
-      if (List.of("NoSuchKey", "NoSuchObject").contains(error.errorResponse().code())) return null;
-      throw ImageVariants.busy();
+    try (var input = storage.readIfPresent(meta.bucket(),variantObjectKey(meta,kind))) {
+      if(input==null)return null;
+      byte[] bytes=input.readAllBytes();
+      String type=java.net.URLConnection.guessContentTypeFromStream(new ByteArrayInputStream(bytes));
+      if(!List.of("image/png","image/jpeg").contains(type))throw ImageVariants.busy();
+      return new ImageVariants.Encoded(bytes,type);
     } catch (Exception error) { throw ImageVariants.busy(); }
   }
 
@@ -155,17 +153,17 @@ public class StorageService {
         """, Long.class, meta.id());
     if (available.isEmpty()) throw DomainException.notFound("FILE_NOT_FOUND", "图片不存在或活动已删除");
     try {
-      minio.putObject(PutObjectArgs.builder().bucket(meta.bucket()).object(variantObjectKey(meta, kind))
-          .stream(new ByteArrayInputStream(image.bytes()), (long) image.bytes().length, -1L).contentType(image.contentType()).build());
+      storage.put(meta.bucket(),variantObjectKey(meta,kind),new ByteArrayInputStream(image.bytes()),image.bytes().length,image.contentType());
     } catch (Exception error) { throw ImageVariants.busy(); }
   }
 
   /** Idempotent object removal. The durable deletion manifest survives missing metadata. */
   public void removeWithVariants(FileMeta meta) {
+    if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM activity_copy_file f JOIN activity_copy_task t ON t.id=f.task_id WHERE f.source_file_id=? AND t.status IN ('QUEUED','RUNNING'))",Boolean.class,meta.id())))
+      throw DomainException.conflict("FILE_COPY_IN_PROGRESS","图片正在被活动配置复用，请稍后再删除");
     try {
-      for (var kind : ImageVariants.Kind.values()) minio.removeObject(io.minio.RemoveObjectArgs.builder()
-          .bucket(meta.bucket()).object(variantObjectKey(meta,kind)).build());
-      minio.removeObject(io.minio.RemoveObjectArgs.builder().bucket(meta.bucket()).object(meta.objectKey()).build());
+      for (var kind : ImageVariants.Kind.values()) storage.remove(meta.bucket(),variantObjectKey(meta,kind));
+      storage.remove(meta.bucket(),meta.objectKey());
     } catch (Exception error) { throw new IllegalStateException("文件清理失败",error); }
   }
 
@@ -192,9 +190,14 @@ public class StorageService {
   }
 
   private synchronized void ensureBucket() throws Exception {
-    if (!minio.bucketExists(BucketExistsArgs.builder().bucket(bucket).build())) {
-      minio.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
-    }
+    storage.initialize();
+  }
+
+  /** Native server-side copies never download or re-encode image bytes. Metadata is reserved first. */
+  public void copyImage(FileMeta source,FileMeta target)throws Exception {
+    storage.copy(source.bucket(),source.objectKey(),target.bucket(),target.objectKey());
+    for(var kind:ImageVariants.Kind.values())
+      storage.copyIfPresent(source.bucket(),variantObjectKey(source,kind),target.bucket(),variantObjectKey(target,kind));
   }
 
   public record StoredFile(long id, long activityId, String objectKey, String originalFilename,

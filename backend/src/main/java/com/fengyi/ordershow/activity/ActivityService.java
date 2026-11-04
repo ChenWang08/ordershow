@@ -51,7 +51,7 @@ public class ActivityService {
     List<ActivityView> rows = jdbc.query("""
         SELECT a.*, d.department_name
         FROM activity a JOIN department d ON d.id = a.department_id
-        WHERE a.activity_code = ? AND a.deletion_requested_at IS NULL
+        WHERE a.activity_code = ? AND a.deletion_requested_at IS NULL AND a.configuration_state='READY'
         """, this::map, code);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
     return withRegions(rows.getFirst());
@@ -61,7 +61,7 @@ public class ActivityService {
     List<ActivityView> rows = jdbc.query("""
         SELECT a.*, d.department_name
         FROM activity a JOIN department d ON d.id = a.department_id
-        WHERE a.id = ? AND a.deletion_requested_at IS NULL
+        WHERE a.id = ? AND a.deletion_requested_at IS NULL AND a.configuration_state='READY'
         """, this::map, id);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
     return withRegions(rows.getFirst());
@@ -69,7 +69,7 @@ public class ActivityService {
 
   /** Internal order/catalog lookup: no UI regions or whitelist summaries on the request hot path. */
   public OrderingActivity orderingActivity(String code) {
-    var rows = jdbc.query("SELECT id,ends_at FROM activity WHERE activity_code=? AND deletion_requested_at IS NULL",
+    var rows = jdbc.query("SELECT id,ends_at FROM activity WHERE activity_code=? AND deletion_requested_at IS NULL AND configuration_state='READY'",
         (rs, rowNum) -> new OrderingActivity(rs.getLong("id"),UtcTime.read(rs, "ends_at")),code);
     if (rows.size() != 1) throw DomainException.notFound("ACTIVITY_NOT_FOUND", "活动不存在");
     return rows.getFirst();
@@ -82,7 +82,7 @@ public class ActivityService {
     List<ActivityView> rows = jdbc.query("""
         SELECT a.*, d.department_name
         FROM activity a JOIN department d ON d.id = a.department_id
-        WHERE a.deletion_requested_at IS NULL AND d.status = 'ACTIVE' AND a.published_at IS NOT NULL AND a.closed_at IS NULL
+        WHERE a.deletion_requested_at IS NULL AND a.configuration_state='READY' AND d.status = 'ACTIVE' AND a.published_at IS NOT NULL AND a.closed_at IS NULL
           AND a.status IN ('SCHEDULED', 'ACTIVE')
           AND a.starts_at <= UTC_TIMESTAMP(3) AND a.ends_at > UTC_TIMESTAMP(3)
         ORDER BY a.starts_at, a.id
@@ -100,7 +100,7 @@ public class ActivityService {
     return jdbc.query("""
         SELECT a.*, d.department_name
         FROM activity a JOIN department d ON d.id = a.department_id
-        WHERE a.deletion_requested_at IS NULL ORDER BY a.created_at DESC
+        WHERE a.deletion_requested_at IS NULL AND a.configuration_state='READY' ORDER BY a.created_at DESC
         """, this::map)
         .stream().map(this::withRegions).toList();
   }
@@ -112,7 +112,7 @@ public class ActivityService {
         SELECT a.id,a.department_id,d.department_name,a.activity_code,a.name,a.status,
           a.starts_at,a.ends_at,a.event_ends_at
         FROM activity a JOIN department d ON d.id=a.department_id
-        WHERE a.deletion_requested_at IS NULL
+        WHERE a.deletion_requested_at IS NULL AND a.configuration_state='READY'
         """;
     Object[] args = admin.isSuperAdmin() ? new Object[] {} : new Object[] { admin.departmentId() };
     if (!admin.isSuperAdmin()) sql += " AND a.department_id=?";
@@ -136,7 +136,7 @@ public class ActivityService {
     return jdbc.query("""
         SELECT a.*, d.department_name
         FROM activity a JOIN department d ON d.id = a.department_id
-        WHERE a.deletion_requested_at IS NULL AND a.department_id = ?
+        WHERE a.deletion_requested_at IS NULL AND a.configuration_state='READY' AND a.department_id = ?
         ORDER BY a.created_at DESC
         """, this::map, admin.departmentId()).stream().map(this::withRegions).toList();
   }

@@ -1381,6 +1381,142 @@ paths:
           $ref: '#/components/responses/Problem'
         '409':
           $ref: '#/components/responses/Problem'
+  /admin/activity-copy-sources:
+    get:
+      operationId: listActivityCopySources
+      tags: [Activities]
+      summary: 查询同部门可复用的历史活动摘要（含已归档）
+      security: [{ adminCookie: [] }]
+      parameters:
+        - name: departmentId
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 仅管理账号可用；不预加载商品、客户或轮次明细
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer, format: int64 }
+                        code: { type: string }
+                        name: { type: string }
+                        status: { $ref: '#/components/schemas/ActivityStatus' }
+                  traceId: { type: string }
+  /admin/activities/{activityId}/copy-preview:
+    get:
+      operationId: previewActivityCopy
+      tags: [Activities]
+      summary: 读取所选来源的可复制数量与配置校验标记
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: departmentId
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 商品与客户为当前有效版本数量；抽奖优先已发布方案，否则最近保存的草稿
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      sourceId: { type: integer, format: int64 }
+                      sourceName: { type: string }
+                      stamp: { type: string }
+                      products: { type: integer }
+                      customers: { type: integer }
+                      rounds: { type: integer }
+                  traceId: { type: string }
+  /admin/activity-copies:
+    post:
+      operationId: createActivityCopy
+      tags: [Activities]
+      summary: 新建独立草稿并在后台复用历史活动配置
+      description: 仅同部门管理员可用。requestKey 按创建人去重，相同请求返回原任务，载荷变化返回409。复制完成前新活动隐藏；到场、订单、候选快照和中奖历史不复制。
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityCopyRequest'
+      responses:
+        '200':
+          description: 已受理或返回相同请求的原任务；不代表后台复制已经完成
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityCopyTaskResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/activity-copies/{taskId}:
+    get:
+      operationId: getActivityCopyTask
+      tags: [Activities]
+      summary: 读取本部门配置复用进度
+      security: [{ adminCookie: [] }]
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 不返回客户资料或复制快照；只有完成且活动仍存在时才返回可进入的活动编号
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityCopyTaskResponse' }
+  /admin/activity-copies/{taskId}/retry:
+    post:
+      operationId: retryActivityCopy
+      tags: [Activities]
+      summary: 继续失败的配置复用任务
+      description: 仅FAILED可重试，保留创建时的配置快照和已复制图片，不重新创建活动。
+      security: [{ adminCookie: [] }]
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已重新排队
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityCopyTaskResponse' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/activity-copies/{taskId}/discard:
+    post:
+      operationId: discardActivityCopy
+      tags: [Activities]
+      summary: 放弃失败的配置复用并排队清理隐藏草稿
+      security: [{ adminCookie: [] }]
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 清理已排队，返回data=true；既有删除工作器负责实际清理
+        '409': { $ref: '#/components/responses/Problem' }
   /admin/activities/{activityId}/imports:
     get:
       operationId: listImportTasks
@@ -3575,6 +3711,43 @@ components:
         customers: { type: integer, format: int64 }
         winners: { type: integer, format: int64 }
         files: { type: integer, format: int64 }
+    ActivityCopyRequest:
+      type: object
+      required: [name, startsAt, endsAt, eventEndsAt, sourceId, sourceStamp, selection, requestKey]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        eventEndsAt: { type: string, format: date-time }
+        departmentId: { type: integer, format: int64, description: 超级管理员必填，部门管理员使用自身部门 }
+        sourceId: { type: integer, format: int64, minimum: 1 }
+        sourceStamp: { type: string, minLength: 1 }
+        selection:
+          type: object
+          description: 至少选择一项；所选模块在来源中必须有有效配置
+          properties:
+            products: { type: boolean, default: false }
+            whitelist: { type: boolean, default: false }
+            lottery: { type: boolean, default: false }
+        requestKey: { type: string, pattern: '^[A-Za-z0-9_-]{8,64}$' }
+    ActivityCopyTask:
+      type: object
+      required: [id, status, stage, copiedFiles, totalFiles]
+      properties:
+        id: { type: integer, format: int64 }
+        status: { type: string, enum: [QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED] }
+        stage: { type: string, enum: [QUEUED, IMAGES, CONFIGURATION, COMPLETED] }
+        copiedFiles: { type: integer }
+        totalFiles: { type: integer }
+        failureMessage: { type: string }
+        activityId: { type: integer, format: int64 }
+        activityCode: { type: string }
+    ActivityCopyTaskResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data: { $ref: '#/components/schemas/ActivityCopyTask' }
+        traceId: { type: string }
     ActivityDeletionTask:
       type: object
       required: [id, activityId, activityCode, activityName, departmentName, requestedByName, reason, status, stage, stageName, deletedRows, deletedFiles, createdAt, updatedAt]

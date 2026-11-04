@@ -23,7 +23,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableAutoConfiguration(exclude=org.springframework.boot.autoconfigure.flyway.FlywayAutoConfiguration.class)
 @EnableScheduling
 @EnableConfigurationProperties({OrderShowProperties.class,DataSourceProperties.class})
-@Import({ExportRepository.class,ExportPolicy.class,StorageService.class})
+@Import({ExportRepository.class,ExportPolicy.class,StorageService.class,com.fengyi.ordershow.storage.StorageConfiguration.class})
 public class ExportWorkerApplication {
   @Bean @Primary HikariDataSource dataSource(DataSourceProperties p){return pool(p,"export-control");}
   @Bean(name="exportReadDataSource") HikariDataSource readDataSource(DataSourceProperties p){return pool(p,"export-read");}

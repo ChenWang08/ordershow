@@ -2,10 +2,11 @@
 
 
 import { beijingDateTimeMillis } from "../shared/time";
-import { useEffect, useMemo, useState } from "react";
-import { ApiError, createActivity, getPreferredAdminActivityCode, setPreferredAdminActivityCode, loadAdminActivities, loadAdminDepartments, type AdminActivitySummary, type AdminDepartment, type RuntimeActivity } from "../../api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createActivity, getPreferredAdminActivityCode, setPreferredAdminActivityCode, loadAdminActivities, loadAdminDepartments, type AdminActivitySummary, type AdminDepartment, type RuntimeActivity } from "../../api";
 import { useAdminIdentity } from "../../admin-context";
 import { nextMinuteDateTimeLocal, runtimeActivityStatus, toDateTimeLocal } from "../shared/utils";
+import { useActivityCopy } from "./useActivityCopy";
 
 type AdminActivitiesOptions = {
   activityId: string;
@@ -31,6 +32,9 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice, 
     { name: "", startsAt: nextMinuteDateTimeLocal(), endsAt: "", eventEndsAt: "", departmentId: "" },
   );
   const [minimumFutureAt, setMinimumFutureAt] = useState(nextMinuteDateTimeLocal);
+  const creationLock = useRef(false);
+  const copy = useActivityCopy({ open: newActivityOpen, departmentId: newActivity.departmentId,
+    owner: String(adminIdentity?.id ?? ""), setBusy: setCreatingActivity, notice: setActionNotice });
   const displayedActivities = useMemo(() => activities.map(item => item.id === activeActivity?.id ? { ...item,
     name: activeActivity.name, status: activeActivity.status, startsAt: activeActivity.startsAt,
     endsAt: activeActivity.endsAt, eventEndsAt: activeActivity.eventEndsAt } : item), [activities, activeActivity]);
@@ -95,14 +99,16 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice, 
     startsAt.setSeconds(0, 0);
     const endsAt = new Date(startsAt.getTime() + 2 * 24 * 60 * 60 * 1000);
     const eventEndsAt = new Date(endsAt.getTime() + 4 * 60 * 60 * 1000);
-    const currentDepartmentId = activities.find((item) => item.code === activityCode)?.departmentId
+    const currentDepartmentId = adminIdentity?.departmentId ?? activities.find((item) => item.code === activityCode)?.departmentId
       ?? departments.find((item) => item.code === "DEFAULT")?.id;
     setNewActivity({ name: "", startsAt: toDateTimeLocal(startsAt.toISOString()), endsAt: toDateTimeLocal(endsAt.toISOString()), eventEndsAt: toDateTimeLocal(eventEndsAt.toISOString()), departmentId: currentDepartmentId == null ? "" : String(currentDepartmentId) });
     setActivityMenuOpen(false);
+    copy.reset();
     setNewActivityOpen(true);
   };
 
   const submitNewActivity = async () => {
+    if (creationLock.current || creatingActivity || copy.task || copy.pending) return;
     if (adminIdentity?.roleCode === "DEPARTMENT_MEMBER") return;
     if (!newActivity.name.trim() || !newActivity.startsAt || !newActivity.endsAt || !newActivity.eventEndsAt) {
       setActionNotice("请完整填写活动名称、订货时间和整场活动结束时间。");
@@ -124,20 +130,25 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice, 
       setActionNotice("整场活动结束时间必须晚于订货截止时间。");
       return;
     }
+    creationLock.current = true;
     setCreatingActivity(true);
     try {
-      const created = await createActivity({
+      const input = {
         name: newActivity.name,
         startsAt: newActivity.startsAt,
         endsAt: newActivity.endsAt,
         eventEndsAt: newActivity.eventEndsAt,
         ...(adminIdentity?.roleCode === "SUPER_ADMIN" ? { departmentId: Number(newActivity.departmentId) } : {}),
-      });
+      };
+      if (copy.enabled) { await copy.start(input); return; }
+      const created = await createActivity(input);
       setPreferredAdminActivityCode(created.code);
       window.location.assign("/admin");
     } catch (error) {
-      setActionNotice(error instanceof ApiError ? error.message : "新建活动失败，请稍后重试。");
+      setActionNotice(error instanceof Error ? error.message : "新建活动失败，请稍后重试。");
       setCreatingActivity(false);
+    } finally {
+      creationLock.current = false;
     }
   };
   return {
@@ -157,5 +168,6 @@ export function useAdminActivities({ activityId, activityCode, setActionNotice, 
     minimumFutureAt,
     openNewActivity,
     submitNewActivity,
+    copy,
   };
 }

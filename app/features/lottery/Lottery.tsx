@@ -595,6 +595,7 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
           <label><span>中奖人数</span><input type="number" min="1" value={selected.winnerCount} disabled={selectedLocked} onChange={(e) => updateSelected({ winnerCount: Number(e.target.value) })} /></label>
           <label><span>客户类型</span><select value={effectiveSelectedCustomerType} disabled={selectedLocked || customerTypeMode === "UNSPECIFIED"} onChange={(e) => updateSelected({ customerType: e.target.value as LotteryRound["customerType"] })}>{customerTypeOptions.map((x) => <option key={x}>{x}</option>)}</select></label>
           <fieldset className="candidate-scope"><legend>候选客户范围</legend>{scopeOptions.map((option) => <button type="button" key={option.key} className={selected.scope === option.key ? "active" : ""} disabled={selectedLocked} onClick={() => updateSelected({ scope: option.key })}><i>{selected.scope === option.key ? "✓" : ""}</i><span><b>{option.title}</b><small>{option.detail}</small></span></button>)}</fieldset>
+          {selected.scope === "attended" && attendeeCount === 0 && <p className="field-help">本次活动尚无现场到场名单，请先导入本次名单，再手动试算抽奖候选人。</p>}
           <label><span>抽取方式</span><select aria-label="抽取方式" value={selected.probabilityMode} disabled={selectedLocked} onChange={e => {
             const probabilityMode = e.target.value as LotteryProbabilityMode;
             const metric = weightingMetric(probabilityMode);
