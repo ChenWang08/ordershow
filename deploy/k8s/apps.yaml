@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: backend
 spec:
-  replicas: 2
+  replicas: 4
   revisionHistoryLimit: 3
   strategy:
     type: RollingUpdate
@@ -30,7 +30,7 @@ spec:
             - secretRef: {name: order-show-secrets}
           resources:
             requests: {cpu: 250m, memory: 512Mi}
-            limits: {cpu: "2", memory: 2Gi}
+            limits: {cpu: "2", memory: 4Gi}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
