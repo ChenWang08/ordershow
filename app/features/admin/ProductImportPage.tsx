@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ImportTemplateDownload, ImportTemplateHint } from "./ImportTemplateDownload";
 
 import type { ProductImportRow } from "../../domain/import-domain";
@@ -17,10 +18,11 @@ type ProductImportPageProps = {
   serverImportBlocking: ImportTaskIds;
   productImport: ReturnType<typeof useProductImport>;
   productEditor: ReturnType<typeof useProductEditor>;
+  refreshAction?: ReactNode;
 };
 
 export function ProductImportPage({
-  activityStatus, productRows, productImportCompleted, serverImportBlocking, productImport, productEditor,
+  activityStatus, productRows, productImportCompleted, serverImportBlocking, productImport, productEditor, refreshAction,
 }: ProductImportPageProps) {
   const activityStarted = activityStatus === "running" || activityStatus === "closed" || activityStatus === "finished";
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
@@ -33,7 +35,7 @@ export function ProductImportPage({
   const removedProductCount = Math.max(0, parsedProductCount - productImportStats.total);
   return (
           <div className="admin-panel" aria-busy={productImportBusy}>
-            <div className="panel-title"><div><h2>{productImportCompleted ? "当前活动商品" : "活动商品导入"}</h2><p>{productImportCompleted ? "当前数据来自最近一次确认的完整 Excel；发布活动后锁定" : "上传完整商品 Excel，浏览器解析后替换当前商品目录"}</p></div><div className="panel-actions"><ImportTemplateDownload kind="product" /><button className="secondary-button" disabled={baseDataReadOnly || (!productImportCompleted && (!productFileName || Boolean(productImportError)))} onClick={openProductForm}>＋ 手动添加商品</button>{productImportCompleted && <button className="admin-primary" disabled={importControlsDisabled} onClick={beginProductImport}>重新导入 Excel</button>}</div></div>
+            <div className="panel-title"><div><h2>{productImportCompleted ? "当前活动商品" : "活动商品导入"}</h2><p>{productImportCompleted ? "当前数据来自最近一次确认的完整 Excel；发布活动后锁定" : "上传完整商品 Excel，浏览器解析后替换当前商品目录"}</p></div><div className="panel-actions">{refreshAction}<ImportTemplateDownload kind="product" /><button className="secondary-button" disabled={baseDataReadOnly || (!productImportCompleted && (!productFileName || Boolean(productImportError)))} onClick={openProductForm}>＋ 手动添加商品</button>{productImportCompleted && <button className="admin-primary" disabled={importControlsDisabled} onClick={beginProductImport}>重新导入 Excel</button>}</div></div>
             {!productImportCompleted && <div className="import-rule-hint"><b>全量替换规则</b><span>{activityPublished ? "活动已发布，商品 Excel 和批量图片导入已锁定；待开始状态可先撤回发布再修改。" : "每次 Excel 与本次 ZIP 构成一套独立批次，不比较上一版本，也不继承上一版本图片。上传只生成预览，点击确认且全部保存成功后，才会整体替换当前商品目录。"}</span></div>}
             {!productImportCompleted && <ImportTemplateHint />}
             {!productImportCompleted && <div className="dual-upload-grid product-import-upload-grid">
