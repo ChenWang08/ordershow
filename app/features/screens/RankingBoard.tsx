@@ -58,11 +58,11 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
       <FestivalDecor />
       <header className="screen-title">
         <div className="ranking-heading">
-          <div className="ranking-metric-switch" role="tablist" aria-label="排行口径">
-            <button type="button" role="tab" aria-selected={metric === "AMOUNT"} className={metric === "AMOUNT" ? "active" : ""} disabled={refreshing} onClick={() => updateSelection({ metric: "AMOUNT" })}>金额排行</button>
-            <button type="button" role="tab" aria-selected={metric === "TONS"} className={metric === "TONS" ? "active" : ""} disabled={refreshing} onClick={() => updateSelection({ metric: "TONS" })}>吨数排行</button>
-          </div>
           <div className="ranking-filters" aria-label="排行筛选">
+            <div className="ranking-metric-switch" role="tablist" aria-label="排行口径">
+              <button type="button" role="tab" aria-selected={metric === "AMOUNT"} className={metric === "AMOUNT" ? "active" : ""} disabled={refreshing} onClick={() => updateSelection({ metric: "AMOUNT" })}>金额排行</button>
+              <button type="button" role="tab" aria-selected={metric === "TONS"} className={metric === "TONS" ? "active" : ""} disabled={refreshing} onClick={() => updateSelection({ metric: "TONS" })}>吨数排行</button>
+            </div>
             <label>客户类型<select aria-label="客户类型" value={selection.customerType} disabled={refreshing || !options} onChange={e => updateSelection({ customerType: e.target.value })}>
               <option value="ALL">全部客户</option>{choices.customerTypes.map(type => <option key={type} value={type}>{labels[type]}</option>)}
             </select></label>

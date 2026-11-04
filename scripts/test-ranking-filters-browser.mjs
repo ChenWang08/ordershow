@@ -171,6 +171,14 @@ try {
     await page.setViewportSize({ width, height });
     await page.getByRole("tab", { name: metric === "AMOUNT" ? "金额排行" : "吨数排行", exact: true }).click();
     await readRanking();
+    if (headerOpen) {
+      // Keep the pointer in the panel while measuring; moving to the toolbar starts its normal auto-close timer.
+      if (await page.locator(".screen-header").getAttribute("data-open") !== "true") {
+        await page.getByRole("button", { name: "展开顶部栏", exact: true }).evaluate(button => button.click());
+      }
+      await page.locator(".screen-header .prototype-nav").hover();
+      await page.waitForFunction(() => document.querySelector(".screen-header").getBoundingClientRect().height === 74);
+    }
     await page.evaluate(() => document.fonts.ready);
     const layout = await page.evaluate(() => {
       const rect = selector => {
@@ -184,7 +192,8 @@ try {
       const canvas = document.querySelector(".prototype-canvas");
       return {
         switch: rect(".ranking-metric-switch"), filters: rect(".ranking-filters"), totals: rect(".ranking-totals"), ranking: rect(".ranking-layout"),
-        firstFilter: rect(".ranking-filters > label"), amount: rect(".ranking-totals .screen-metric:first-child"), tons: rect(".ranking-totals .screen-metric:last-child"),
+        firstFilter: rect(".ranking-filters > label"), firstSelect: rect(".ranking-filters > label select"), amount: rect(".ranking-totals .screen-metric:first-child"), tons: rect(".ranking-totals .screen-metric:last-child"),
+        toolbarOrder: [...document.querySelector(".ranking-filters").children].map(el => el.getAttribute("aria-label") || el.textContent),
         totalAlignment: [...document.querySelectorAll(".ranking-totals .screen-metric")].map(el => getComputedStyle(el).textAlign),
         reset: rect(".ranking-filters > button:last-of-type"), refresh: rect(".ranking-refresh-controls button"), time: rect(".ranking-refresh-controls small"),
         fonts: Object.fromEntries([".ranking-metric-switch button", ".ranking-filters > label", ".ranking-filters select", ".ranking-confirm", ".screen-metric span", ".screen-metric strong", ".screen-metric strong small", ".rank-column h2", ".rank-column h2 small", ".rank-row b", ".rank-row strong", ".branch-row b", ".branch-row strong", ".ranking-refresh-controls small"].map(selector => [selector, styles(selector)])),
@@ -197,10 +206,13 @@ try {
         text: document.querySelector(".ranking-board").innerText,
       };
     });
-    assert.ok(layout.switch.bottom <= layout.filters.y, "Metric switch has its own first row");
-    assert.ok(Math.abs(layout.switch.right - layout.filters.right) <= 1, "Metric switch aligns with the toolbar right edge");
+    assert.equal(layout.toolbarOrder[0], "排行口径", "Switch is the first toolbar control");
+    assert.match(layout.toolbarOrder[1], /^客户类型/, "Customer type immediately follows the switch");
+    assert.ok(layout.switch.right < layout.firstFilter.x, "Switch is left of customer type");
+    assert.ok(Math.abs(layout.switch.y + layout.switch.height / 2 - layout.firstSelect.y - layout.firstSelect.height / 2) <= 1, "Switch shares the filter control centerline");
+    assert.ok(layout.switch.y >= layout.filters.y && layout.switch.bottom <= layout.filters.bottom + 1, "Switch is inside the same toolbar row");
     assert.ok(Math.abs(layout.time.right - layout.filters.right) <= 1, "Filter toolbar aligns to the right");
-    assert.ok(layout.firstFilter.x > width / 4, "Toolbar leaves the left side open");
+    assert.ok(layout.switch.x > layout.filters.x, "Right-aligned toolbar leaves free space to its left");
     assert.ok(Math.abs((layout.amount.x + layout.tons.right) / 2 - width / 2) <= 1, "Amount and tonnage are centered as a pair across the full page");
     assert.ok(Math.abs(layout.amount.y - layout.tons.y) <= 1, "Totals stay side by side");
     assert.ok(layout.amount.right < layout.tons.x, "Centered totals have a visible gap");
@@ -220,7 +232,7 @@ try {
     assert.equal(layout.fonts[".rank-row b"].family, "serif");
     assert.equal(layout.fonts[".rank-row b"].weight, "700");
     assert.equal(layout.fonts[".rank-row strong"].weight, "500");
-    await page.screenshot({ path: fileURLToPath(new URL(`layout-${width}x${height}-${metric}${headerOpen ? "-header-open" : ""}.png`, output)) });
+    await page.screenshot({ path: fileURLToPath(new URL(`single-row-${width}x${height}-${metric}${headerOpen ? "-header-open" : ""}.png`, output)) });
     layouts.push({ width, height, metric, headerOpen, ...layout });
   }
   for (const [width, height] of [[1920, 1080], [2560, 1440], [1366, 768]]) {
@@ -268,7 +280,7 @@ try {
   const lastRow = await page.locator(".rank-row").last().boundingBox();
   assert.ok(lastRow.y >= 0 && lastRow.y + lastRow.height <= 421);
   assert.equal(await page.locator(".rank-row b").first().evaluate(el => getComputedStyle(el).fontSize), "11px");
-  await writeFile(new URL("layout-measurements.json", output), JSON.stringify(layouts, null, 2));
+  await writeFile(new URL("single-row-measurements.json", output), JSON.stringify(layouts, null, 2));
   await page.locator(".prototype-canvas").evaluate(el => el.scrollTo(0, 0));
   // Dropdown must remain above ranking rows and its scrollable options must stay inside the screen.
   for(const width of [1920,1440,768,440]) {
@@ -284,7 +296,7 @@ try {
   }
   const beforeIdle=stats().length; await page.waitForTimeout(1100); assert.equal(stats().length,beforeIdle);
   assert.deepEqual(errors,[]);
-  console.log("PASS ranking React/HTTP: cascade, confirm/reset/manual refresh, failure recovery and retained results; right-aligned switch/filter toolbar, centered amount/tonnage pair and all 90+30 rows at 1920x1080/2560x1440/1366x768, both metrics, original font sizes, expanded header, no historical label, empty results, branch overflow, short-window scrolling; dropdown at 1920/1440/768/440; no initial or idle stats, no page errors");
+  console.log("PASS ranking React/HTTP: cascade, confirm/reset/manual refresh, failure recovery and retained results; single right-aligned toolbar with switch before customer type, centered amount/tonnage pair and all 90+30 rows at 1920x1080/2560x1440/1366x768, both metrics, original font sizes, expanded header, no historical label, empty results, branch overflow, short-window scrolling; dropdown at 1920/1440/768/440; no initial or idle stats, no page errors");
 } catch(error) {
   if(page) { await writeFile(new URL("failure.html",output),await page.content()); await page.screenshot({path:fileURLToPath(new URL("failure.png",output)),fullPage:true}); }
   throw error;
