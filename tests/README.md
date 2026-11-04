@@ -2,6 +2,8 @@
 
 ## 测试分工
 
+- 活动删除到场导入引用（2026-11-04）：`ActivityLifecycleIntegrationTest` 补充白名单/到场导入真实外键、既有第31阶段FAILED任务重试、分批解除引用、工作器重启续跑及跨活动引用保护；配合 `StorageDeletionTest` 验证后续文件清理。使用固定33326端口临时库，须显式设置 `ORDER_SHOW_ACTIVITY_TEST=activity-lifecycle-only` 并核对Skipped为0，不能将环境条件跳过视为通过。执行结果与发布后恢复方式见[修复验证记录](../docs/testing/activity-deletion-import-reference-2026-11-04.md)。
+
 - 订货排行布局（2026-11-04）：仅运行排行组件/刷新22项和筛选联动4项，共26项通过；`scripts/test-ranking-filters-browser.mjs`验证四层布局、原字号、1920×1080/2560×1440/1366×768下90名完整显示及相关筛选、刷新、失败恢复、弹层和滚动访问。无后端改动、整站构建或镜像部署，见[定向验证记录](../docs/testing/ranking-layout-2026-11-04.md)。
 
 - 后台订单/审核加载（2026-11-04）：`order-loading.test.mjs` 及订单、审核、手动刷新、导出、活动只读相关测试共58项通过；`scripts/test-order-loading-browser.mjs` 通过真实组件与合成HTTP核对1440/440宽度的分页、失败独立恢复、审核入口、通过/驳回及新增/调整/作废后的请求次数。后端订单/权限相关43项和隔离MySQL的3项查询测试通过；类型检查使用 `tests/order-loading.tsconfig.json`。测试数据库通过 `docker compose -p order-query-test -f tests/order-query.compose.yml up --abort-on-container-exit --exit-code-from test` 启动，用完执行同项目前缀的 `down`；无业务数据库或业务服务部署，详见[完整记录](../docs/testing/order-list-loading-2026-11-04.md)。

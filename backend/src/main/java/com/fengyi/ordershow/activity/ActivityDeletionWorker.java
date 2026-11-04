@@ -89,8 +89,19 @@ public class ActivityDeletionWorker {
         }
       }else if(stage<=STEPS.size()){
         Step step=STEPS.get(stage-1);
-        rows=jdbc.update("DELETE FROM "+step.table()+" WHERE "+step.predicate()+" LIMIT ?",id,batchSize);
-        advance=rows==0;
+        int unlinked=0;
+        if("import_publish_version".equals(step.table())){
+          // Keep the durable stage number: existing failed tasks must also unlink before deleting versions.
+          unlinked=jdbc.update("""
+              UPDATE import_task SET match_base_version_id=NULL
+              WHERE activity_id=? AND match_base_version_id IN
+                (SELECT id FROM import_publish_version WHERE activity_id=?) LIMIT ?
+              """,id,id,batchSize);
+        }
+        if(unlinked==0){
+          rows=jdbc.update("DELETE FROM "+step.table()+" WHERE "+step.predicate()+" LIMIT ?",id,batchSize);
+          advance=rows==0;
+        }
       }else if(stage==FILES){
         // Storage is outside MySQL: retrying a missing object is intentionally successful.
         var manifest=jdbc.queryForList("SELECT file_id,bucket_name,object_key FROM activity_deletion_file WHERE task_id=? ORDER BY file_id LIMIT 1",task);

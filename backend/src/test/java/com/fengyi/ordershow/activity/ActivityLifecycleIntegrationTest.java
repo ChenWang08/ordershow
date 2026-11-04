@@ -88,6 +88,7 @@ class ActivityLifecycleIntegrationTest {
   }
   @Test void boundedCleanupResumesWithNewWorkerCleansAllRelationshipsAndKeepsOtherActivity(){
     long id=activity("FINISHED"), other=activity("FINISHED");seed(id,1201);seed(other,2);
+    attendanceImports(id,5);attendanceImports(other,2);
     var before=tableCounts(other);var created=delete(id);
     assertThatThrownBy(()->activities.byId(id)).isInstanceOf(DomainException.class);
     assertThatThrownBy(()->policy.readableCode("ACT"+id)).isInstanceOf(DomainException.class);
@@ -107,6 +108,58 @@ class ActivityLifecycleIntegrationTest {
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM admin_user WHERE id=1",Long.class)).isEqualTo(1);
     verify(storage).removeWithVariants(argThat(f->f.id()==id*1000));
     assertThat(tx.execute(s->management.delete(id,0,"ACT"+id,"再次请求",root)).id()).isEqualTo(created.id());
+  }
+  @Test void failedPublishVersionStageRetriesUnlinksInBoundedBatchesAndResumesAfterRestart(){
+    long id=activity("FINISHED"),other=activity("FINISHED");seed(id,1);seed(other,1);
+    attendanceImports(id,5);attendanceImports(other,2);
+    var otherImports=jdbc.queryForList("SELECT * FROM import_task WHERE activity_id=? ORDER BY id",other);
+    var otherCounts=tableCounts(other);
+    assertThat(ActivityDeletionWorker.STEPS.get(30).table()).isEqualTo("import_publish_version");
+    delete(id);var w=worker(2);
+    for(int i=0;i<150&&task(id).stage()<31;i++){tick(w);assertThat(task(id).lastError()).isNull();}
+    assertThat(task(id).stage()).isEqualTo(31);
+    assertThatThrownBy(()->jdbc.update("DELETE FROM import_publish_version WHERE activity_id=? AND id=? LIMIT ?",id,id*1000+1,2))
+        .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+        .hasMessageContaining("fk_import_task_match_base_version");
+    jdbc.update("UPDATE activity_deletion_task SET status='FAILED',retry_count=5,last_error='previous batch failed' WHERE activity_id=?",id);
+    long deleted=task(id).deletedRows();
+    long versions=jdbc.queryForObject("SELECT COUNT(*) FROM import_publish_version WHERE activity_id=?",Long.class,id);
+    var retried=tx.execute(s->management.retry(task(id).id(),root));
+    assertThat(retried.stage()).isEqualTo(31);assertThat(retried.lastError()).isNull();
+    for(long remaining:new long[]{3,1,0}){
+      // Each tick uses a fresh worker: committed unlink progress must survive a restart.
+      var resumed=worker(2);
+      try{tick(resumed);}finally{resumed.close();}
+      assertThat(task(id).stage()).isEqualTo(31);
+      assertThat(task(id).lastError()).isNull();
+      assertThat(task(id).deletedRows()).isEqualTo(deleted);
+      assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM import_task WHERE activity_id=? AND match_base_version_id IS NOT NULL",Long.class,id)).isEqualTo(remaining);
+      assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM import_publish_version WHERE activity_id=?",Long.class,id)).isEqualTo(versions);
+    }
+    finish(id,w);w.close();
+    assertThat(tableCounts(id).values()).allMatch(n->n==0);
+    assertThat(task(id).deletedFiles()).isEqualTo(1);
+    assertThat(tableCounts(other)).isEqualTo(otherCounts);
+    assertThat(jdbc.queryForList("SELECT * FROM import_task WHERE activity_id=? ORDER BY id",other)).usingRecursiveComparison().isEqualTo(otherImports);
+  }
+  @Test void publishVersionCleanupPreservesOtherActivityReferencesAndFailsSafely(){
+    long id=activity("FINISHED"),other=activity("FINISHED");seed(id,1);seed(other,1);
+    attendanceImports(id,1);attendanceImports(other,1);
+    jdbc.update("UPDATE import_task SET match_base_version_id=? WHERE id=?",id*1000+1,other*1000+2);
+    var otherImports=jdbc.queryForList("SELECT * FROM import_task WHERE activity_id=? ORDER BY id",other);
+    var otherCounts=tableCounts(other);
+    delete(id);var w=worker(2);
+    for(int i=0;i<150&&!task(id).status().equals("FAILED");i++){
+      jdbc.update("UPDATE activity_deletion_task SET next_attempt_at=UTC_TIMESTAMP(3) WHERE activity_id=?",id);tick(w);
+    }
+    assertThat(task(id).status()).isEqualTo("FAILED");assertThat(task(id).stage()).isEqualTo(31);
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM import_publish_version WHERE id=?",Long.class,id*1000+1)).isEqualTo(1);
+    assertThat(jdbc.queryForList("SELECT * FROM import_task WHERE activity_id=? ORDER BY id",other)).usingRecursiveComparison().isEqualTo(otherImports);
+    assertThat(tableCounts(other)).isEqualTo(otherCounts);
+    verify(storage,never()).removeWithVariants(any());
+    jdbc.update("UPDATE import_task SET match_base_version_id=? WHERE id=?",other*1000+1,other*1000+2);
+    tx.execute(s->management.retry(task(id).id(),root));finish(id,w);w.close();
+    assertThat(tableCounts(id).values()).allMatch(n->n==0);
   }
   @Test void fileFailureKeepsManifestAndRetryContinuesWithoutRestoringPartialData(){
     long id=activity("DRAFT");file(id);delete(id);
@@ -307,6 +360,18 @@ class ActivityLifecycleIntegrationTest {
   }
   void sql(String query,long id){jdbc.execute(query.replace("$a",Long.toString(id)).replace("$b",Long.toString(id*1000)));}
   void file(long id){sql("INSERT INTO stored_file(id,activity_id,storage_provider,bucket_name,object_key,original_filename,content_type,size_bytes,sha256,file_purpose) VALUES($b,$a,'MINIO','test','activity/$a/test.png','test.png','image/png',1,UNHEX(SHA2('test',256)),'PRODUCT_IMAGE')",id);}
+  void attendanceImports(long id,int count){
+    sql("INSERT INTO import_task(id,activity_id,import_type,source_file_id,file_sha256,created_by,status) VALUES($b+1,$a,'WHITELIST',$b,UNHEX(SHA2('whitelist',256)),1,'COMPLETED')",id);
+    sql("INSERT INTO import_publish_version(id,activity_id,data_type,version_no,source_import_task_id,created_by,status) VALUES($b+1,$a,'WHITELIST',1,$b+1,1,'PUBLISHED')",id);
+    sql("INSERT INTO activity_data_binding(activity_id,data_type,current_version_id,updated_by) VALUES($a,'WHITELIST',$b+1,1)",id);
+    for(int i=0;i<count;i++){
+      long taskId=id*1000+2+i;
+      jdbc.update("INSERT INTO import_task(id,activity_id,import_type,source_file_id,file_sha256,created_by,status,match_base_version_id) VALUES(?,?,'ATTENDANCE',?,UNHEX(SHA2('attendance',256)),1,'COMPLETED',?)",taskId,id,id*1000,id*1000+1);
+      jdbc.update("INSERT INTO import_publish_version(id,activity_id,data_type,version_no,source_import_task_id,created_by,status) VALUES(?,?,'ATTENDANCE',?,?,1,'PUBLISHED')",taskId,id,i+1,taskId);
+    }
+    sql("UPDATE activity_customer SET source_import_task_id=$b+1,data_version_id=$b+1 WHERE activity_id=$a",id);
+    jdbc.update("UPDATE activity_attendee SET source_import_task_id=?,data_version_id=? WHERE activity_id=?",id*1000+1+count,id*1000+1+count,id);
+  }
   void seed(long id,int items){
     file(id);
     sql("INSERT INTO import_task(id,activity_id,import_type,source_file_id,file_sha256,created_by,status) VALUES($b,$a,'PRODUCT',$b,UNHEX(SHA2('test',256)),1,'COMPLETED')",id);
