@@ -88,7 +88,7 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 
 仅 DRAFT、FINISHED、ARCHIVED 可删除；归档或删除前须处理完待审批改单和未结束导入、导出。删除受理即从所有活动列表隐藏并封禁后续活动及文件请求，包括条件缓存请求；后台清理完成后才物理删除活动主记录。任务状态为 QUEUED、RUNNING、FAILED、COMPLETED，返回 stageName、deletedRows、deletedFiles、lastError 等字段。无自动备份、无回收站。版本过期返回 ACTIVITY_VERSION_CONFLICT；归档业务写返回 ACTIVITY_ARCHIVED_READ_ONLY；未处理业务返回 ACTIVITY_UNSETTLED_TASKS。
 
-`GET /admin/activities` 及 summary=true 均包含已归档活动并排除已受理删除的活动；前端原活动菜单负责筛选全部、未归档、已归档，底部提供删除进度入口。
+`GET /admin/activities` 及 summary=true 均包含已归档活动并排除已受理删除的活动；前端原活动菜单默认显示权限内全部活动，仅保留部门筛选；仅FINISHED/ARCHIVED在名称旁显示未归档/已归档，右侧均显示活动已结束。删除进度移至公共顶栏操作日志左侧，仅超级管理员可见；加载中、加载失败及无活动时也可进入。按钮本身不读取任务，抽屉打开且页面可见时读取，当前页有QUEUED/RUNNING才约3秒继续；关闭或隐藏时取消读取，恢复可见时重读。接口与每页20条契约不变。
 
 ## 4. 认证和会话
 

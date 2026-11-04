@@ -403,7 +403,13 @@
 .deletion-task h3 span { color: #8b3025; }
 .deletion-task small { color: #786b62; }
 .deletion-task-drawer [role="alert"], .activity-management-actions [role="alert"] { color: #a92321; }
-.activity-switcher-menu > button > em.archived { background: #e9e8ed; color: #655d7d; }
+.activity-switcher-menu > button { gap: 10px; }
+.activity-switcher-menu > button > span { min-width: 0; flex: 1; }
+.activity-menu-title { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; min-width: 0; }
+.activity-menu-title > b { min-width: 0; overflow-wrap: anywhere; }
+.activity-switcher-menu .activity-archive-badge { flex: 0 0 auto; padding: 2px 5px; border-radius: 4px; color: #7e6b62; background: #eee9e5; font-size: 8px; font-weight: 400; }
+.activity-switcher-menu .activity-archive-badge.archived { color: #655d7d; background: #eeebf7; }
+.activity-switcher-menu > button > em { flex: 0 0 auto; white-space: nowrap; }
 .activity-switcher-menu > p { padding: 10px; font-size: 13px; color: #786b62; }
 .activity-switcher-menu .activity-department-filter { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 4px; font-size: 12px; }
 .activity-switcher-menu .activity-department-filter select { max-width: 220px; padding: 5px 8px; border: 1px solid #ded4cd; border-radius: 5px; background: #fff; }

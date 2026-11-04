@@ -5,6 +5,9 @@
   .ranking-layout { grid-template-columns: 1fr; }.branch-rank { border-left: 0; }
   .report-content.dual { gap: 15px; padding-right: 25px; padding-left: 25px; }
   .admin-app { grid-template-columns: 175px 1fr; }
+  .admin-main > header { height: auto; min-height: 70px; flex-wrap: wrap; gap: 12px; padding-top: 12px; padding-bottom: 12px; }
+  .admin-main > header > div.admin-heading { flex: 1 0 100%; flex-wrap: wrap; }
+  .admin-main > header > div.admin-actions { flex-wrap: wrap; }
   .order-dashboard-kpis { grid-template-columns: repeat(3, minmax(0,1fr)); }
   .order-dashboard-region-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
 }
@@ -37,6 +40,10 @@
   .admin-app { display: block; }.admin-sidebar { min-height: auto; padding: 8px; }.admin-logo, .admin-user { display: none; }
   .admin-sidebar nav { display: flex; overflow-x: auto; }.admin-sidebar nav button { flex: 0 0 auto; }
   .admin-main { padding: 0 10px 25px; }.admin-main > header { margin: 0 -10px 12px; padding: 0 12px; }
+  .admin-main > header { padding-top: 12px; padding-bottom: 12px; }
+  .activity-switcher { max-width: 100%; min-width: 0; }
+  .activity-switcher > button { width: min(240px, calc(100vw - 24px)); min-width: 0; }
+  .activity-switcher-menu { width: min(350px, calc(100vw - 24px)); }
   .admin-actions { gap: 6px; }.admin-actions > span { display: none; }.admin-identity-summary { padding-left: 6px; }.admin-identity-summary > div { display: none; }.admin-actions .admin-logout-button { padding: 6px 8px; }
   .admin-stats { grid-template-columns: repeat(2, 1fr); }.admin-grid { grid-template-columns: 1fr; }.activity-entry-header { align-items: stretch; flex-direction: column; }.activity-entry-summary { min-width: 0; align-items: flex-start; text-align: left; }.activity-entry-note { align-items: flex-start; flex-direction: column; }.activity-entry-note span { text-align: left; }
   .lottery-overview { grid-template-columns: repeat(2, 1fr); }.lottery-config-grid { grid-template-columns: 1fr; }.candidate-scope, .condition-grid { grid-template-columns: 1fr; }.candidate-funnel { grid-template-columns: repeat(2, 1fr); }.candidate-table > div { grid-template-columns: 30px 1fr 40px; }.candidate-table small { grid-column: 2 / -1; text-align: left; overflow-wrap: anywhere; }

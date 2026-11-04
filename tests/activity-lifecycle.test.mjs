@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { hookHarness } from "./helpers/hook-harness.mjs";
+import { loadModule } from "./helpers/load-ts-module.mjs";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
 function nodes(x) { return Array.isArray(x) ? x.flatMap(nodes) : x && typeof x === "object" ? [x, ...nodes(x.props?.children)] : []; }
 function text(x) { return Array.isArray(x) ? x.map(text).join("") : x && typeof x === "object" ? text(x.props?.children) : x == null || typeof x === "boolean" ? "" : String(x); }
@@ -55,19 +58,35 @@ test("failed deletion preserves the confirmation and does not navigate", async (
   nodes(h.model).find(n => n.type === "input" && n.props.type === "checkbox").props.onChange({ target: { checked: true } });
   await h.flush(); await h.submit(); assert.match(text(h.model), /暂时失败/); assert.equal(h.calls.some(c => c[0] === "navigate"), false);
 });
-test("existing switcher defaults to unarchived, filters archived/all, and supports an all-archived account", async () => {
-  const items = [{ ...activity, status: "FINISHED" }, { ...activity, id: 8, code: "ACT8", status: "ARCHIVED" }];
+test("activity menu includes archived activities by default, retains department filtering and supports all-archived accounts", async () => {
+  const items = [{ ...activity, departmentId: 1, status: "FINISHED" }, { ...activity, departmentId: 2, id: 8, code: "ACT8", status: "ARCHIVED" }];
   const mocks = {
     "../../admin-context": { useAdminIdentity: () => ({ roleCode: "SUPER_ADMIN" }) },
     "../../api": { loadAdminActivities: async () => items },
   };
   const globals = { sessionStorage: { getItem: () => null } };
   const h = hookHarness("app/features/admin/useAdminActivities.ts", "useAdminActivities", [{ activityId: "7", activityCode: "ACT7", initialActivities: items, setActionNotice() {} }], mocks, globals);
-  await h.flush(); assert.equal(h.model.visibleActivities.length, 1); assert.equal(h.model.visibleActivities[0].id, 7);
-  h.model.setActivityArchiveFilter("archived"); await h.flush(); assert.equal(h.model.visibleActivities[0].id, 8);
-  h.model.setActivityArchiveFilter("all"); await h.flush(); assert.equal(h.model.visibleActivities.length, 2); h.unmount();
+  await h.flush(); assert.equal(h.model.visibleActivities.length, 2);
+  h.model.setActivityDepartmentFilter("2"); await h.flush(); assert.equal(h.model.visibleActivities[0].id, 8);
+  h.model.setActivityDepartmentFilter(""); await h.flush(); assert.equal(h.model.visibleActivities.length, 2); h.unmount();
   const a = hookHarness("app/features/admin/useAdminActivities.ts", "useAdminActivities", [{ activityId: "", activityCode: "", initialActivities: [items[1]], setActionNotice() {} }], mocks, globals);
-  assert.equal(a.model.activityArchiveFilter, "archived"); assert.equal(a.model.visibleActivities.length, 1); a.unmount();
+  assert.equal(a.model.visibleActivities.length, 1); a.unmount();
+});
+
+test("switcher restores business status colors and shows archive badges only for finished activities", () => {
+  const { ActivitySwitcher } = loadModule("app/features/admin/ActivitySwitcher.tsx", {
+    "../../admin-context": { useAdminIdentity: () => ({ roleCode: "SUPER_ADMIN" }) },
+    "../../api": { setPreferredAdminActivityCode() {} },
+  });
+  const statuses = ["DRAFT", "SCHEDULED", "ACTIVE", "CLOSED", "FINISHED", "ARCHIVED"];
+  const html = renderToStaticMarkup(React.createElement(ActivitySwitcher, { activities: {
+    activityMenuOpen: true, departments: [], activityDepartmentFilter: "",
+    visibleActivities: statuses.map((status, id) => ({ ...activity, id, status, name: status })),
+  } }));
+  for (const [css, label] of [["draft", "草稿"], ["scheduled", "待开始"], ["running", "订货中"], ["ended", "订货已截止"], ["finished", "活动已结束"]]) assert.ok(html.includes(`<em class="${css}">${label}</em>`));
+  assert.equal((html.match(/activity-archive-badge/g) || []).length, 2);
+  assert.match(html, /unarchived">未归档/); assert.match(html, /archived">已归档/);
+  assert.doesNotMatch(html, /活动范围|删除进度/); assert.match(html, /按部门筛选/);
 });
 test("archived order controls disable mutation while export and filters remain available", async () => {
   const model = { readOnly: true, activityStarted: true, activityClosed: true, activityFinished: true, canExport: true, exports: { busy: false }, orderCounts: {}, orderFilter: "全部", customerType: "全部", search: "", setOrderFilter() {}, setCustomerType() {}, setSearch() {}, setPage() {} };
@@ -83,7 +102,7 @@ test("progress pauses while hidden, refreshes on return and stops after completi
     "../shared/time":{formatBeijingTime:v=>v},
   },{AbortController,document:{get visibilityState(){return visibilityState;},addEventListener:(n,f)=>listeners.set(n,f),removeEventListener:n=>listeners.delete(n)}});
   await h.flush();assert.equal(calls,1);assert.equal(h.timers.size,1);
-  visibilityState="hidden";await h.runTimers();assert.equal(calls,1);assert.equal(h.timers.size,0);
+  visibilityState="hidden";listeners.get("visibilitychange")();await h.flush();assert.equal(signal.aborted,true);assert.equal(calls,1);assert.equal(h.timers.size,0);
   visibilityState="visible";listeners.get("visibilitychange")();await h.flush();assert.equal(calls,2);
   status="COMPLETED";await h.runTimers();assert.equal(h.timers.size,0);assert.match(text(h.model),/数据和文件清理完成/);
   h.unmount();assert.equal(signal.aborted,true);assert.equal(listeners.size,0);assert.equal(h.timers.size,0);
@@ -97,4 +116,39 @@ test("failed cleanup exposes manual retry and then resumes live progress", async
   },{AbortController,document:{visibilityState:"visible",addEventListener(){},removeEventListener(){}}});
   await h.flush();assert.equal(h.timers.size,0);assert.match(text(h.model),/暂时失败/);
   await button(h,"继续清理").props.onClick();await h.flush();assert.equal(retries,1);assert.match(text(h.model),/清理中/);assert.equal(h.timers.size,1);h.unmount();
+});
+
+test("hidden or replaced progress reads are aborted and cannot overwrite the visible page", async () => {
+  let visibilityState = "visible";
+  const listeners = new Map(), reads = [];
+  const h = hookHarness("app/features/admin/ActivityDeletionTasks.tsx", "ActivityDeletionTasks", [{ onClose() {} }], {
+    "../../api": { loadActivityDeletionTasks: (page, signal) => new Promise(resolve => reads.push({ page, signal, resolve })) },
+    "../shared/time": { formatBeijingTime: v => v },
+  }, { AbortController, document: { get visibilityState() { return visibilityState; }, addEventListener: (n, f) => listeners.set(n, f), removeEventListener: n => listeners.delete(n) } });
+  const changeVisibility = async value => { visibilityState = value; listeners.get("visibilitychange")(); await h.flush(); };
+  const task = name => ({ id: 1, activityName: name, status: "RUNNING", deletedRows: 0, deletedFiles: 0 });
+  await changeVisibility("hidden"); assert.equal(reads[0].signal.aborted, true);
+  await changeVisibility("visible"); assert.equal(reads.length, 2);
+  reads[1].resolve([task("最新任务")]); await h.flush();
+  reads[0].resolve([task("过期任务")]); await h.flush();
+  assert.match(text(h.model), /最新任务/); assert.doesNotMatch(text(h.model), /过期任务/); assert.equal(h.timers.size, 1);
+  button(h, "刷新进度").props.onClick(); await h.flush(); assert.equal(h.timers.size, 0);
+  const last = reads.at(-1); h.unmount(); assert.equal(last.signal.aborted, true);
+  const writes = h.writes; last.resolve([task("关闭后的任务")]); await h.flush(); assert.equal(h.writes, writes);
+});
+
+test("progress pagination reads only the selected page and stops polling a completed page", async () => {
+  const calls = [], signals = [];
+  const h = hookHarness("app/features/admin/ActivityDeletionTasks.tsx", "ActivityDeletionTasks", [{ onClose() {} }], {
+    "../../api": { loadActivityDeletionTasks: async (page, signal) => {
+      calls.push(page); signals.push(signal);
+      return Array.from({ length: page === 1 ? 20 : 1 }, (_, i) => ({ id: page * 100 + i, activityName: `第${page}页任务`, status: page === 1 ? "QUEUED" : "COMPLETED", deletedRows: 0, deletedFiles: 0 }));
+    } }, "../shared/time": { formatBeijingTime: v => v },
+  }, { AbortController, document: { visibilityState: "visible", addEventListener() {}, removeEventListener() {} } });
+  await h.flush(); assert.deepEqual(calls, [1]); assert.equal(button(h, "下一页").props.disabled, false);
+  button(h, "下一页").props.onClick(); await h.flush(); assert.deepEqual(calls, [1, 2]);
+  assert.equal(signals[0].aborted, true); assert.equal(h.timers.size, 0); assert.equal(button(h, "下一页").props.disabled, true);
+  await h.runTimers(); assert.deepEqual(calls, [1, 2]);
+  button(h, "上一页").props.onClick(); await h.flush(); assert.deepEqual(calls, [1, 2, 1]); assert.equal(h.timers.size, 1);
+  h.unmount(); assert.equal(signals.at(-1).aborted, true); assert.equal(h.timers.size, 0);
 });

@@ -29,6 +29,13 @@
 
 ## 后台组件
 
+### 活动菜单与公共删除进度（2026-11-04）
+
+- `useAdminActivities` 仅按部门收窄服务端授权列表，不默认排除归档活动；`ActivitySwitcher` 映射六种业务状态颜色，仅 FINISHED/ARCHIVED 显示名称旁归档标记，不挂载删除进度。
+- `AdminEntry` 在认证通过后、活动加载工作区之外挂载一份 `ActivityDeletionProgressProvider`，按超级管理员账号持有抽屉状态；正常顶栏和空/加载/错误顶栏通过共享按钮打开同一抽屉。按钮放在操作日志左侧，未打开时不读取任务，不依赖当前活动。
+- `ActivityDeletionTasks` 仅挂载时读取当前页；可见且本页含QUEUED/RUNNING时约3秒继续。关闭、隐藏、换页或离开后台取消旧读取和定时器，迟到结果不能写回；返回可见时重新读取，完成/失败停止，失败继续后恢复更新。删除受理后的sessionStorage标记仅由公共层消费。
+- 不增加侧边栏、页面或接口；验证范围见[本轮记录](../testing/activity-menu-progress-2026-11-04.md)。
+
 ### 订单与变更审核（2026-11-04）
 
 - `OrderManagement` 按活动重建工作台，继续受外层账号/权限工作区隔离。`useOrderList` 只读取当前页、保留250ms请求防抖、取消及迟到结果保护，以服务器筛选结果为准；`useOrderChangeRequests` 只读取申请摘要分页，取消全活动待审核编号读取。

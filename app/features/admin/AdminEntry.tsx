@@ -13,13 +13,14 @@ import { ActivitySwitcher } from "./ActivitySwitcher";
 import { NewActivityDrawer } from "./NewActivityDrawer";
 import { useAdminActivities } from "./useAdminActivities";
 import { AdminLayout, AdminAccountSummary } from "./AdminLayout";
+import { ActivityDeletionProgressProvider } from "./ActivityDeletionProgress";
 
 type AdminWorkspaceLoadState =
   | { requestKey: string; status: "ready"; activity: RuntimeActivity | null; activities: AdminActivitySummary[] }
   | { requestKey: string; status: "error"; message: string };
 
 export function AdminEntry() {
-  return <AdminGateway><AuthorizedWorkspace /></AdminGateway>;
+  return <AdminGateway><ActivityDeletionProgressProvider><AuthorizedWorkspace /></ActivityDeletionProgressProvider></AdminGateway>;
 }
 
 export function AuthorizedWorkspace() {

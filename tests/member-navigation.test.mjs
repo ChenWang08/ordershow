@@ -7,6 +7,7 @@ import { loadModule } from './helpers/load-ts-module.mjs';
 function render(identity, hasActivity = true) {
   const { AdminLayout } = loadModule('app/features/admin/AdminLayout.tsx', {
     '../../admin-context': { useAdminIdentity: () => identity, useAdminSession: () => null },
+    './ActivityDeletionProgress': { ActivityDeletionProgressButton: () => null },
   });
   return renderToStaticMarkup(React.createElement(AdminLayout, { tab: '订单管理', onTabChange() {}, hasActivity, header: null }, null));
 }

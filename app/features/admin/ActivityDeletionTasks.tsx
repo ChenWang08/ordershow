@@ -16,20 +16,31 @@ export function ActivityDeletionTasks({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     let active = true;
     let timer: number | undefined;
-    const controller = new AbortController();
+    let controller: AbortController | undefined;
+    const cancelRead = () => {
+      window.clearTimeout(timer);
+      timer = undefined;
+      controller?.abort();
+    };
     const load = async () => {
-      if (document.visibilityState === "hidden") return;
+      cancelRead();
+      if (!active || document.visibilityState === "hidden") return;
+      const request = new AbortController();
+      controller = request;
       try {
-        const result = await loadActivityDeletionTasks(page, controller.signal);
-        if (!active) return;
+        const result = await loadActivityDeletionTasks(page, request.signal);
+        if (!active || request.signal.aborted) return;
         setTasks(result); setError("");
         if (result.some(task => task.status === "QUEUED" || task.status === "RUNNING")) timer = window.setTimeout(() => void load(), 3000);
-      } catch (e) { if (active) setError(e instanceof Error ? e.message : "进度加载失败，请刷新重试"); }
-      finally { if (active) setLoading(false); }
+      } catch (e) { if (active && !request.signal.aborted) setError(e instanceof Error ? e.message : "进度加载失败，请刷新重试"); }
+      finally { if (active && !request.signal.aborted) setLoading(false); }
     };
-    const visible = () => { if (document.visibilityState === "visible") { window.clearTimeout(timer); void load(); } };
+    const visible = () => {
+      cancelRead();
+      if (document.visibilityState === "visible") void load();
+    };
     void load(); document.addEventListener("visibilitychange", visible);
-    return () => { active = false; controller.abort(); window.clearTimeout(timer); document.removeEventListener("visibilitychange", visible); };
+    return () => { active = false; cancelRead(); document.removeEventListener("visibilitychange", visible); };
   }, [page, revision]);
   const retry = async (id: number) => {
     if (retrying !== null) return;
