@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["../app/features/screens/RankingBoard.tsx"],
+  "exclude": ["../node_modules", "../work", "../outputs"]
+}

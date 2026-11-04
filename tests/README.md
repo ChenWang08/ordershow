@@ -2,6 +2,8 @@
 
 ## 测试分工
 
+- 订货排行布局（2026-11-04）：仅运行排行组件/刷新22项和筛选联动4项，共26项通过；`scripts/test-ranking-filters-browser.mjs`验证四层布局、原字号、1920×1080/2560×1440/1366×768下90名完整显示及相关筛选、刷新、失败恢复、弹层和滚动访问。无后端改动、整站构建或镜像部署，见[定向验证记录](../docs/testing/ranking-layout-2026-11-04.md)。
+
 - 后台订单/审核加载（2026-11-04）：`order-loading.test.mjs` 及订单、审核、手动刷新、导出、活动只读相关测试共58项通过；`scripts/test-order-loading-browser.mjs` 通过真实组件与合成HTTP核对1440/440宽度的分页、失败独立恢复、审核入口、通过/驳回及新增/调整/作废后的请求次数。后端订单/权限相关43项和隔离MySQL的3项查询测试通过；类型检查使用 `tests/order-loading.tsconfig.json`。测试数据库通过 `docker compose -p order-query-test -f tests/order-query.compose.yml up --abort-on-container-exit --exit-code-from test` 启动，用完执行同项目前缀的 `down`；无业务数据库或业务服务部署，详见[完整记录](../docs/testing/order-list-loading-2026-11-04.md)。
 
 - 导入防重复点击（2026-11-04）：运行`node --test tests/import-busy.test.mjs tests/admin-products.test.mjs tests/admin-customers.test.mjs`，58项通过，其中新增11项验证快速连点、解析/上传/发布/正式列表读取期间的互斥、失败后恢复，以及真实组件静态渲染中的按钮和文件输入禁用。使用可控异步请求和Hook状态适配器，不代表真实浏览器或数据库写入验收；本次未构建或部署镜像，详情见[定向验证记录](../docs/testing/import-busy-2026-11-04.md)。
