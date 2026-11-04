@@ -51,6 +51,7 @@ export type OrderVersion = {
 
 export type OrderRecord = {
   id?: number;
+  pendingChangeRequestId?: number | null;
   activityCustomerId?: number;
   no: string;
   dealer: string;
@@ -167,6 +168,7 @@ export function toOrderRecord(order: AdminOrderSummary | RuntimeOrder): OrderRec
   const status: OrderStatus = order.status === "WITHDRAWN" ? "已撤回" : order.status === "VOIDED" ? "已作废" : "已提交";
   return {
     id: order.id,
+    pendingChangeRequestId: "pendingChangeRequestId" in order ? order.pendingChangeRequestId : undefined,
     activityCustomerId: detail.activityCustomerId,
     no: order.orderNo,
     dealer: order.dealerFullName,

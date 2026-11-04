@@ -1,6 +1,10 @@
 import { createIdempotencyKey } from "./idempotency-key";
 import { api } from "./client";
-import type { AdminOrderPreview, AdminOrderSummary, Envelope, OrderChangeRequest, PageEnvelope, RuntimeOrder } from "./types";
+import type { AdminOrderCounts, AdminOrderPreview, AdminOrderSummary, Envelope, OrderChangeRequest, PageEnvelope, RuntimeOrder } from "./types";
+
+export async function loadAdminOrderCounts(activityId: number, signal?: AbortSignal) {
+  return (await api<Envelope<AdminOrderCounts>>(`/admin/activities/${activityId}/orders/summary`, { signal })).data;
+}
 
 export async function loadAdminOrders(activityId: number, filters: { status?: string; customerType?: string; keyword?: string; page?: number; size?: number } = {}, signal?: AbortSignal) {
   const query = new URLSearchParams();

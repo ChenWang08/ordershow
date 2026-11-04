@@ -4,6 +4,7 @@ import { formatBeijingTime } from "../../features/shared/time";
 
 import { confirmDrawerClose } from "../useDrawerClose";
 import type { OrderManagementModel } from "./OrderManagement";
+import { OrderPagination } from "./OrderPagination";
 
 const money=(v?:number)=>v==null?"—":`¥${Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const tons=(v?:number)=>`${Number(v ?? 0).toFixed(3)} 吨`;
@@ -18,7 +19,7 @@ export function OrderChangeRequestPanel({model,detailOnly=false}:{model:OrderMan
   const base=s?.originalOrder || old?.versions.find(v=>v.version===s?.baseVersion);
   const before=base?.items || old?.items || [];
   const ids=new Set([...before.map(i=>i.productId),...(s?.items||[]).map(i=>i.productId)]);
-  const pages=Math.max(1,Math.ceil(r.total/r.filters.size));
+  const pages=Math.max(1,Math.ceil(r.total/50));
   return <>
     {!detailOnly&&<section className="review-workbench">
       <h2>订单变更审核</h2><p>查看商品变更后逐条审核，审核通过后更新正式订单。</p>
@@ -27,14 +28,14 @@ export function OrderChangeRequestPanel({model,detailOnly=false}:{model:OrderMan
         <select aria-label="申请类型" value={r.filters.type} onChange={e=>r.setFilters({...r.filters,type:e.target.value,page:1})}><option value="ALL">全部类型</option><option value="MODIFY">修改订单</option><option value="WITHDRAW">撤回订单</option></select>
         <input aria-label="搜索申请" placeholder="搜索订单号、经销商或电话" value={r.filters.keyword} onChange={e=>r.setFilters({...r.filters,keyword:e.target.value,page:1})}/>
         <select aria-label="申请时间排序" value={String(r.filters.newest)} onChange={e=>r.setFilters({...r.filters,newest:e.target.value==="true",page:1})}><option value="false">最早申请优先</option><option value="true">最新申请优先</option></select>
-        <button onClick={()=>void r.reload()} disabled={r.loading}>刷新审核</button>
+        <button onClick={model.refreshReview} disabled={r.loading || model.summary?.loading}>刷新审核</button>
       </div>
       {r.error&&<p role="alert" className="verify-error">{r.error}</p>}
       <div className="review-table-scroll"><table className="review-table"><thead><tr>{["申请时间","订单 / 经销商","类型 / 版本","当前金额","申请金额","种类 / 箱数 / 吨数","状态","操作"].map(t=><th key={t}>{t}</th>)}</tr></thead><tbody>
         {r.requests.map(q=><tr key={q.id}><td>{date(q.requestedAt)}</td><td><button className="review-link" onClick={()=>void r.open(q.id)}>{q.orderNo}</button><div>{q.dealerName}</div><small>{q.phone}</small></td><td>{q.requestType==="WITHDRAW"?"撤回订单":"修改订单"}<small>基于 V{q.baseVersion} · 当前 V{q.currentVersion}</small></td><td>{money(q.currentTotalAmount)}</td><td>{q.requestType==="WITHDRAW"?"撤回全部":money(q.requestedTotalAmount)}</td><td>{q.requestType==="WITHDRAW"?"—":<>{q.itemCount} 种 · {q.requestedTotalQuantity} 箱<small>{tons(q.requestedTotalTons)}</small></>}</td><td>{labels[q.status]}</td><td><button onClick={()=>void r.open(q.id)}>查看{q.status==="PENDING"?"并审核":"详情"}</button></td></tr>)}
         {!r.requests.length&&<tr><td colSpan={8}>{r.loading?"正在加载…":"暂无符合条件的申请"}</td></tr>}
       </tbody></table></div>
-      <div className="order-pagination"><span>共 {r.total} 条 · 第 {r.filters.page} / {pages} 页</span><div><select aria-label="每页数量" value={r.filters.size} onChange={e=>r.setFilters({...r.filters,size:Number(e.target.value),page:1})}><option value={20}>20 条/页</option><option value={50}>50 条/页</option></select><button disabled={r.filters.page<=1||r.loading} onClick={()=>r.setFilters({...r.filters,page:r.filters.page-1})}>上一页</button><button disabled={r.filters.page>=pages||r.loading} onClick={()=>r.setFilters({...r.filters,page:r.filters.page+1})}>下一页</button></div></div>
+      <OrderPagination page={r.filters.page} totalPages={pages} total={r.total} loading={r.loading} onPage={page=>r.setFilters(current=>({...current,page}))} />
     </section>}
     {s&&old&&<div className="drawer-backdrop"><aside className="review-drawer" role="dialog" aria-modal="true" aria-label="变更申请详情" onClick={e=>e.stopPropagation()}>
       <header><div><h2>{s.requestType==="WITHDRAW"?"撤回订单申请":"修改订单申请"} · {labels[s.status]}</h2><p>{s.orderNo} · {s.dealerName}</p></div><button disabled={r.busyId!==null} onClick={requestClose}>关闭</button></header>

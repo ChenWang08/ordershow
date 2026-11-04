@@ -70,6 +70,11 @@ public class OrderController {
     return ApiResponse.of(service.withdraw(activityCode, auth.requireH5(request), body.expectedVersion(), idempotencyKey, TraceFilter.id(request), includeHistory), TraceFilter.id(request));
   }
 
+  @GetMapping("/admin/activities/{activityId}/orders/summary")
+  ApiResponse<OrderQueryService.OrderCounts> summary(@PathVariable long activityId, HttpServletRequest request) {
+    return ApiResponse.of(service.adminOrderCounts(activityId), TraceFilter.id(request));
+  }
+
   @GetMapping("/admin/activities/{activityId}/orders")
   PageResponse<OrderService.OrderSummary> orders(@PathVariable long activityId, @RequestParam(required = false) String status,
       @RequestParam(required = false) String customerType, @RequestParam(required = false) String keyword,

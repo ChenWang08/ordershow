@@ -122,7 +122,8 @@ export type AttendanceMatchPreview = {
     matchedDealerName?: string; lotteryEligible: boolean }>;
 };
 
-export type AdminOrderSummary = Omit<RuntimeOrder, "activityCustomerId" | "items" | "versions" | "operations" | "dealerShortName" | "withdrawnAt" | "withdrawnReason" | "voidedAt" | "voidedReason">;
+export type AdminOrderSummary = Omit<RuntimeOrder, "activityCustomerId" | "items" | "versions" | "operations" | "dealerShortName" | "withdrawnAt" | "withdrawnReason" | "voidedAt" | "voidedReason"> & { pendingChangeRequestId?: number | null };
+export type AdminOrderCounts = { all: number; submitted: number; withdrawn: number; voided: number; pending: number };
 
 export type ActivityOverviewData = {
   totals: DashboardData["totals"]; submittedByType: Record<string, number>;

@@ -178,9 +178,16 @@ H5 商品展示按当前可见商品目录动态处理返利页签：只有同�
 - 普通列表搜索先标准化输入；后台客户手机号完整 11 位直接按明文字段精确匹配，同时保留 HMAC 索引校验，迁移窗口内对旧密文记录提供只读兼容查询，不把手机号写入日志；
 - 所有活动资源 API 都从路径取得 `activityId`，不得只在查询参数中传活动 ID。
 
+### 5.1 后台订单与审核工作台（2026-11-04）
+
+- 工作台固定使用 `page` 和 `size=50`，上一页、选页码、下一页只读取目标页，搜索/筛选/排序回第一页；接口仍兼容原分页范围和默认值。
+- 新增 `GET /admin/activities/{activityId}/orders/summary`，需要原部门/活动访问资格与 ORDER 权限，响应 `data={all,submitted,withdrawn,voided,pending}`。前四项按活动与原客户关联口径一次条件聚合，待审核单独索引计数；不返回订单行或待审核编号，不接受搜索及客户类型条件。
+- `GET .../orders` 的每条摘要新增可空 `pendingChangeRequestId`。通过 `uk_order_change_pending(pending_order_id)` 唯一索引关联，保持总数和每页行数不变，复用V034已有结构；无申请时可能因NON_NULL配置省略该字段。
+- 首次进入/返回、手动刷新和相关操作后读取汇总，普通翻页/筛选不读取；无空闲轮询。列表与汇总为独立请求和快照，并发业务更新时可能短暂不一致，手动刷新可重新读取。
+
 ## 6. 幂等和并发
 
-审核工作台新增管理员 GET `order-change-requests/page`（status/type/keyword/page/size/newest）、`order-change-requests/pending`（待审核申请 ID 与订单 ID，供数量和订单标记使用）、`order-change-requests/{requestId}`（完整申请及原订单快照）。路径均以 `/admin/activities/{activityId}/` 开头并校验部门范围及 ORDER 权限；分页摘要不包含商品明细。H5 创建申请同时原子替代已有待审核申请，重复幂等键返回原申请。审核通过接口遇到订单版本变化返回成功响应中的 REJECTED 状态，前端必须检查结果状态。
+审核工作台使用管理员 GET `order-change-requests/page`（status/type/keyword/page/size/newest）与 `order-change-requests/{requestId}`（完整申请及原订单快照）。旧 `order-change-requests/pending` 保留兼容旧客户端，新工作台通过订单汇总及当页订单的申请编号替代其读取。路径均以 `/admin/activities/{activityId}/` 开头并校验部门范围及 ORDER 权限；分页摘要不包含商品明细。H5 创建申请同时原子替代已有待审核申请，重复幂等键返回原申请。审核通过接口遇到订单版本变化返回成功响应中的 REJECTED 状态，前端必须检查结果状态。
 
 ### 6.1 幂等键
 

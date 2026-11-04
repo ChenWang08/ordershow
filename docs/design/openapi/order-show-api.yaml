@@ -2247,6 +2247,22 @@ paths:
       responses:
         '200':
           description: 已从当前到场名单删除
+  /admin/activities/{activityId}/orders/summary:
+    get:
+      operationId: getActivityOrderSummary
+      tags: [Orders]
+      summary: 当前活动订单状态及待审核数量
+      description: 需部门/活动访问资格及ORDER权限。前四项按活动聚合，不受列表搜索、状态或客户类型筛选影响；pending为当前活动待审核数量。仅返回数量，普通翻页不调用。
+      security: [{adminCookie: []}]
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 当前活动数量快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOrderCountsResponse'
   /admin/activities/{activityId}/orders:
     get:
       operationId: listActivityOrders
@@ -2257,7 +2273,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ActivityId'
         - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
+        - {name: size, in: query, description: 工作台固定传50；接口保留原兼容范围, schema: {type: integer, minimum: 1, maximum: 200, default: 20}}
         - name: status
           in: query
           schema:
@@ -2266,17 +2282,9 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/CustomerType'
-        - name: regionCode
-          in: query
-          schema:
-            $ref: '#/components/schemas/RegionCode'
-        - name: branchName
-          in: query
-          schema:
-            type: string
         - name: keyword
           in: query
-          description: 经销商名称模糊查询、完整手机号精确查询或手机号后四位查询，不支持订单号搜索
+          description: 订单号、经销商名称或手机号查询；支持完整手机号及手机号后四位
           schema:
             type: string
       responses:
@@ -2500,7 +2508,7 @@ paths:
     get:
       operationId: pageOrderChangeRequests
       tags: [Orders]
-      summary: 分页查询申请摘要，不包含商品明细
+      summary: 分页查询申请摘要，不包含商品明细；当前工作台固定使用size=50
       security: [{adminCookie: []}]
       parameters:
         - $ref: '#/components/parameters/ActivityId'
@@ -2517,7 +2525,7 @@ paths:
     get:
       operationId: pendingOrderChangeRequests
       tags: [Orders]
-      summary: 查询待审核申请与订单的对应关系，供待审核数量和订单标记使用
+      summary: 兼容旧客户端的全活动待审核编号清单，新工作台不再调用
       security: [{adminCookie: []}]
       parameters:
         - $ref: '#/components/parameters/ActivityId'
@@ -4907,6 +4915,48 @@ components:
           $ref: '#/components/schemas/AttendanceMatchPreview'
         traceId:
           type: string
+    AdminOrderCountsResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          type: object
+          required: [all, submitted, withdrawn, voided, pending]
+          properties:
+            all: {type: integer, format: int64, minimum: 0}
+            submitted: {type: integer, format: int64, minimum: 0}
+            withdrawn: {type: integer, format: int64, minimum: 0}
+            voided: {type: integer, format: int64, minimum: 0}
+            pending: {type: integer, format: int64, minimum: 0}
+        traceId: {type: string}
+    AdminOrderSummary:
+      type: object
+      description: 后台订单分页摘要，不包含items、versions及operations
+      required: [id, orderNo, status, currentVersion, lockVersion, totalQuantity, totalAmount]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        orderNo: {type: string}
+        status: {$ref: '#/components/schemas/OrderStatus'}
+        createdSource: {type: string, enum: [H5, ADMIN]}
+        lastModifiedSource: {type: string, enum: [H5, ADMIN, SYSTEM]}
+        customerType: {$ref: '#/components/schemas/CustomerType'}
+        regionCode: {type: [string, 'null']}
+        branchName: {type: [string, 'null']}
+        dealerFullName: {type: string}
+        phone: {type: [string, 'null']}
+        phoneMasked: {type: [string, 'null']}
+        currentVersion: {type: integer}
+        lockVersion: {type: integer}
+        totalQuantity: {type: integer, format: int64}
+        totalTons: {type: [number, 'null']}
+        totalAmount: {$ref: '#/components/schemas/Decimal'}
+        firstSubmittedAt: {type: string, format: date-time}
+        lastSubmittedAt: {type: string, format: date-time}
+        lastModifiedAt: {type: string, format: date-time}
+        pendingChangeRequestId:
+          type: [integer, 'null']
+          format: int64
+          description: 当前订单对应的待审核申请编号；不存在时可省略或为null
     OrderPageResponse:
       type: object
       required: [data, page, traceId]
@@ -4914,7 +4964,7 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/CurrentOrder'
+            $ref: '#/components/schemas/AdminOrderSummary'
         page:
           $ref: '#/components/schemas/PageMeta'
         traceId:

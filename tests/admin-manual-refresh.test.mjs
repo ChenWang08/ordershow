@@ -120,8 +120,8 @@ test("review queries only start on entry/filter/manual refresh and re-read after
   const onChanged = () => { changed++; };
   const h = hookHarness("app/components/orders/useOrderChangeRequests.ts", "useOrderChangeRequests", [1, onChanged, false], {
     "../../api": { ApiError,
-      loadOrderChangePage: async () => { reads++; return { data: [], page: { totalElements: 1 } }; },
-      loadPendingOrderChanges: async () => [{ id: 3, orderId: 4 }],
+      loadOrderChangePage: async (_id, filters) => { reads++; return { data: [], page: { number: filters.page, size: 50, totalElements: 100, totalPages: 2 } }; },
+      loadPendingOrderChanges: async () => { throw new Error("full pending IDs must not be read"); },
       approveAdminOrderChangeRequest: async () => ({ id: 3, status: "APPROVED" }),
     },
   });

@@ -476,6 +476,10 @@ public class OrderService {
     return queries.adminOrders(activityId, status, customerType, keyword, page, size, traceId);
   }
 
+  public OrderQueryService.OrderCounts adminOrderCounts(long activityId) {
+    return queries.adminOrderCounts(activityId);
+  }
+
 
 
   private Map<Long, Long> quantities(List<SubmitItem> items) {
@@ -661,7 +665,7 @@ public class OrderService {
                              String customerType, String regionCode, String branchName, String dealerFullName,
                              String phone, String phoneMasked, int currentVersion, int lockVersion, long totalQuantity,
                              BigDecimal totalTons, BigDecimal totalAmount, Instant firstSubmittedAt,
-                             Instant lastSubmittedAt, Instant lastModifiedAt) {}
+                             Instant lastSubmittedAt, Instant lastModifiedAt, Long pendingChangeRequestId) {}
   public record AdminOrderView(long id, long activityId, long activityCustomerId, String orderNo, String status,
                                String createdSource, String lastModifiedSource, int lockVersion, String customerType,
                                String regionCode, String branchName, String dealerShortName, String dealerFullName,

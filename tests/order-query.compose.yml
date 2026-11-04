@@ -1,0 +1,35 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: query_root_test_only
+      MYSQL_DATABASE: order_query_test
+      MYSQL_USER: order_query_test
+      MYSQL_PASSWORD: query_test_only
+    tmpfs:
+      - /var/lib/mysql
+    healthcheck:
+      test: [CMD-SHELL, "mysqladmin ping -h localhost -uorder_query_test -pquery_test_only --silent"]
+      interval: 2s
+      timeout: 2s
+      retries: 40
+    networks: [query-test]
+  test:
+    image: maven:3.9.11-eclipse-temurin-21
+    working_dir: /workspace
+    depends_on:
+      mysql: {condition: service_healthy}
+    environment:
+      ORDER_QUERY_TEST: order-query-test
+    volumes:
+      - ../:/workspace
+      - maven-cache:/root/.m2
+    command: [mvn, -o, -B, -ntp, -f, backend/pom.xml, "-DargLine=-Xmx512m", "-Dtest=OrderListQueryDatabaseTest", test]
+    networks: [query-test]
+networks:
+  query-test:
+    internal: true
+volumes:
+  maven-cache:
+    external: true
+    name: order-show-m2

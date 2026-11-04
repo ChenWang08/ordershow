@@ -24,6 +24,26 @@ public class OrderQueryService {
     this.crypto = crypto;
   }
 
+  /** Activity-wide counts; list search and customer-type filters intentionally do not apply. */
+  public OrderCounts adminOrderCounts(long activityId) {
+    var counts = jdbc.queryForObject("""
+        SELECT COUNT(*) total,
+          COALESCE(SUM(o.status = 'SUBMITTED'), 0) submitted,
+          COALESCE(SUM(o.status = 'WITHDRAWN'), 0) withdrawn,
+          COALESCE(SUM(o.status = 'VOIDED'), 0) voided
+        FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
+        WHERE o.activity_id = ?
+        """, (rs, row) -> new OrderCounts(rs.getLong("total"), rs.getLong("submitted"),
+            rs.getLong("withdrawn"), rs.getLong("voided"), 0), activityId);
+    Long pending = jdbc.queryForObject(
+        "SELECT COUNT(*) FROM order_change_request WHERE activity_id = ? AND status = 'PENDING'",
+        Long.class, activityId);
+    return new OrderCounts(counts.all(), counts.submitted(), counts.withdrawn(), counts.voided(),
+        pending == null ? 0 : pending);
+  }
+
+  public record OrderCounts(long all, long submitted, long withdrawn, long voided, long pending) {}
+
   public PageResponse<OrderSummary> adminOrders(long activityId, String status, String customerType, String keyword,
                                                  int page, int size, String traceId) {
     int safePage = Math.max(page, 1), safeSize = Math.min(Math.max(size, 1), 200), offset = (safePage - 1) * safeSize;
@@ -32,7 +52,9 @@ public class OrderQueryService {
     Long total = jdbc.queryForObject("SELECT COUNT(*) FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id" + where, Long.class, args);
     List<Object> pagedArgs = new ArrayList<>(java.util.Arrays.asList(args)); pagedArgs.add(safeSize); pagedArgs.add(offset);
     List<OrderSummary> data = jdbc.query("""
-        SELECT o.*, c.phone, c.phone_masked FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
+        SELECT o.*, c.phone, c.phone_masked, r.id pending_change_request_id
+        FROM customer_order o JOIN activity_customer c ON c.id = o.activity_customer_id
+        LEFT JOIN order_change_request r ON r.pending_order_id = o.id AND r.activity_id = o.activity_id
         """ + where + " ORDER BY o.last_modified_at DESC, o.id DESC LIMIT ? OFFSET ?", this::mapSummary, pagedArgs.toArray());
     return PageResponse.of(data, safePage, safeSize, total == null ? 0 : total, traceId);
   }
@@ -52,5 +74,5 @@ public class OrderQueryService {
         normalizedKeyword, normalizedKeyword, normalizedKeyword, normalizedKeyword, digits.isEmpty() ? normalizedKeyword : digits, phoneHash, phoneSuffix};
   }
 
-  private OrderSummary mapSummary(ResultSet rs, int rowNum) throws SQLException { return new OrderSummary(rs.getLong("id"), rs.getString("order_no"), rs.getString("status"), rs.getString("created_source"), rs.getString("last_modified_source"), rs.getString("customer_type"), rs.getString("region_code"), rs.getString("branch_name_snapshot"), rs.getString("dealer_full_name_snapshot"), rs.getString("phone"), rs.getString("phone_masked"), rs.getInt("current_version_no"), rs.getInt("lock_version"), rs.getLong("total_quantity"), rs.getBigDecimal("total_tons"), rs.getBigDecimal("total_amount"), UtcTime.read(rs, "first_submitted_at"), UtcTime.read(rs, "last_submitted_at"), UtcTime.read(rs, "last_modified_at")); }
+  private OrderSummary mapSummary(ResultSet rs, int rowNum) throws SQLException { return new OrderSummary(rs.getLong("id"), rs.getString("order_no"), rs.getString("status"), rs.getString("created_source"), rs.getString("last_modified_source"), rs.getString("customer_type"), rs.getString("region_code"), rs.getString("branch_name_snapshot"), rs.getString("dealer_full_name_snapshot"), rs.getString("phone"), rs.getString("phone_masked"), rs.getInt("current_version_no"), rs.getInt("lock_version"), rs.getLong("total_quantity"), rs.getBigDecimal("total_tons"), rs.getBigDecimal("total_amount"), UtcTime.read(rs, "first_submitted_at"), UtcTime.read(rs, "last_submitted_at"), UtcTime.read(rs, "last_modified_at"), rs.getObject("pending_change_request_id", Long.class)); }
 }

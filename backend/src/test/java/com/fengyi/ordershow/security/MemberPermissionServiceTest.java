@@ -40,6 +40,14 @@ class MemberPermissionServiceTest {
     for(var actor:List.of(member(),member(AdminPermission.WHITELIST),member(AdminPermission.ORDER)))
       assertThatThrownBy(() -> check(actor,"GET",path)).isInstanceOf(DomainException.class);
   }
+  @Test void orderSummaryAndReviewRoutesRequireOrderPermission() {
+    for (String resource : List.of("orders/summary", "orders", "order-change-requests/page", "order-change-requests/42")) {
+      String path = "/admin/activities/7/" + resource;
+      check(member(AdminPermission.ORDER), "GET", path);
+      for (var actor : List.of(member(), member(AdminPermission.PRODUCT), member(AdminPermission.WHITELIST)))
+        assertThatThrownBy(() -> check(actor, "GET", path)).isInstanceOf(DomainException.class);
+    }
+  }
   @Test void fullPermissionsNeverGrantActivityOrAccountAdministration() {
     var actor = member(AdminPermission.values());
     for (String path : List.of("/admin/activities", "/admin/activities/1", "/admin/activities/1/publish",
