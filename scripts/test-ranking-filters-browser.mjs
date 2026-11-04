@@ -184,6 +184,8 @@ try {
       const canvas = document.querySelector(".prototype-canvas");
       return {
         switch: rect(".ranking-metric-switch"), filters: rect(".ranking-filters"), totals: rect(".ranking-totals"), ranking: rect(".ranking-layout"),
+        firstFilter: rect(".ranking-filters > label"), amount: rect(".ranking-totals .screen-metric:first-child"), tons: rect(".ranking-totals .screen-metric:last-child"),
+        totalAlignment: [...document.querySelectorAll(".ranking-totals .screen-metric")].map(el => getComputedStyle(el).textAlign),
         reset: rect(".ranking-filters > button:last-of-type"), refresh: rect(".ranking-refresh-controls button"), time: rect(".ranking-refresh-controls small"),
         fonts: Object.fromEntries([".ranking-metric-switch button", ".ranking-filters > label", ".ranking-filters select", ".ranking-confirm", ".screen-metric span", ".screen-metric strong", ".screen-metric strong small", ".rank-column h2", ".rank-column h2 small", ".rank-row b", ".rank-row strong", ".branch-row b", ".branch-row strong", ".ranking-refresh-controls small"].map(selector => [selector, styles(selector)])),
         rows: [...document.querySelectorAll(".rank-row, .branch-row")].map(el => {
@@ -196,7 +198,13 @@ try {
       };
     });
     assert.ok(layout.switch.bottom <= layout.filters.y, "Metric switch has its own first row");
-    assert.ok(Math.abs(layout.switch.x + layout.switch.width / 2 - width / 2) <= 1, "Metric switch is centered");
+    assert.ok(Math.abs(layout.switch.right - layout.filters.right) <= 1, "Metric switch aligns with the toolbar right edge");
+    assert.ok(Math.abs(layout.time.right - layout.filters.right) <= 1, "Filter toolbar aligns to the right");
+    assert.ok(layout.firstFilter.x > width / 4, "Toolbar leaves the left side open");
+    assert.ok(Math.abs((layout.amount.x + layout.tons.right) / 2 - width / 2) <= 1, "Amount and tonnage are centered as a pair across the full page");
+    assert.ok(Math.abs(layout.amount.y - layout.tons.y) <= 1, "Totals stay side by side");
+    assert.ok(layout.amount.right < layout.tons.x, "Centered totals have a visible gap");
+    assert.deepEqual(layout.totalAlignment, ["center", "center"], "Both totals use centered text");
     assert.ok(layout.filters.bottom <= layout.totals.y, "Filters are above totals");
     assert.ok(layout.totals.bottom <= layout.ranking.y, "Totals are above rankings");
     assert.ok(layout.refresh.x >= layout.reset.right, "Refresh follows reset");
@@ -276,7 +284,7 @@ try {
   }
   const beforeIdle=stats().length; await page.waitForTimeout(1100); assert.equal(stats().length,beforeIdle);
   assert.deepEqual(errors,[]);
-  console.log("PASS ranking React/HTTP: cascade, confirm/reset/manual refresh, failure recovery and retained results; four-layer layout and all 90+30 rows at 1920x1080/2560x1440/1366x768, both metrics, original font sizes, expanded header, no historical label, empty results, branch overflow, short-window scrolling; dropdown at 1920/1440/768/440; no initial or idle stats, no page errors");
+  console.log("PASS ranking React/HTTP: cascade, confirm/reset/manual refresh, failure recovery and retained results; right-aligned switch/filter toolbar, centered amount/tonnage pair and all 90+30 rows at 1920x1080/2560x1440/1366x768, both metrics, original font sizes, expanded header, no historical label, empty results, branch overflow, short-window scrolling; dropdown at 1920/1440/768/440; no initial or idle stats, no page errors");
 } catch(error) {
   if(page) { await writeFile(new URL("failure.html",output),await page.content()); await page.screenshot({path:fileURLToPath(new URL("failure.png",output)),fullPage:true}); }
   throw error;

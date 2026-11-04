@@ -27,12 +27,13 @@
 .ranking-board .screen-title { flex: 0 0 auto; grid-template-columns: minmax(0,1fr); padding: 6px 28px; }
 .ranking-board .screen-title { z-index: 3; }
 .ranking-board .ranking-heading { align-items: stretch; gap: 6px; }
-.ranking-board .ranking-metric-switch { align-self: center; }
+.ranking-board .ranking-metric-switch { align-self: flex-end; }
 .ranking-board .screen-title .screen-metric { display: flex; width: auto; min-height: 0; }
-.ranking-totals { display: flex; justify-content: space-between; gap: 16px; }
+.ranking-totals { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px clamp(24px, 6vw, 120px); }
+.ranking-board .ranking-totals .screen-metric { text-align: center; }
 .ranking-notices:empty { display: none; }
 .ranking-notices { display: grid; gap: 3px; }
-.ranking-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; width: 100%; }
+.ranking-filters { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; width: 100%; }
 .ranking-filters > label { flex-direction: column; align-items: stretch; gap: 3px; text-align: left; font-size: 11px; }
 .ranking-filters select { min-width: 112px; max-width: 180px; min-height: 32px; font-size: 12px; }
 .ranking-filters button,.ranking-varieties summary { min-height: 32px; padding: 6px 10px; border: 1px solid rgba(236,196,121,.5); border-radius: 6px; background: #6e1718; color: #fff2ce; font-size: 12px; cursor: pointer; }
