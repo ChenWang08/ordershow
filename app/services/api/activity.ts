@@ -5,8 +5,10 @@ import type { AdminActivitySummary, Envelope, RuntimeActivity } from "./types";
 export type ActivityDeletionPreview = { activityId: number; code: string; name: string; departmentName: string; version: number;
   orders: number; products: number; customers: number; winners: number; files: number };
 export type ActivityDeletionTask = { id: number; activityId: number; activityCode: string; activityName: string;
-  departmentName: string; requestedByName: string; reason: string; status: "QUEUED" | "RUNNING" | "FAILED" | "COMPLETED";
-  stage: number; stageName: string; deletedRows: number; deletedFiles: number; lastError?: string; createdAt: string; updatedAt: string; completedAt?: string };
+  departmentName: string; requestedByName: string; reason: string; status: "QUEUED" | "RUNNING" | "PAUSED" | "FAILED" | "COMPLETED";
+  stage: number; stageName: string; stageDetail: string; totalStages: number; deletedRows: number; deletedFiles: number;
+  retryCount: number; maxRetries: number; nextAttemptAt: string; lastProgressAt: string;
+  lastError?: string; createdAt: string; updatedAt: string; completedAt?: string };
 
 export async function changeActivityArchive(activity: RuntimeActivity, archive: boolean, reason: string) {
   return (await api<Envelope<RuntimeActivity>>(`/admin/activities/${activity.id}/${archive ? "archive" : "unarchive"}`, {
@@ -26,6 +28,12 @@ export async function loadActivityDeletionTasks(page: number, signal?: AbortSign
 }
 export async function retryActivityDeletionTask(id: number) {
   return (await api<Envelope<ActivityDeletionTask>>(`/admin/activity-deletion-tasks/${id}/retry`, { method: "POST" }, "admin")).data;
+}
+export async function pauseActivityDeletionTask(id: number) {
+  return (await api<Envelope<ActivityDeletionTask>>(`/admin/activity-deletion-tasks/${id}/pause`, { method: "POST" }, "admin")).data;
+}
+export async function resumeActivityDeletionTask(id: number) {
+  return (await api<Envelope<ActivityDeletionTask>>(`/admin/activity-deletion-tasks/${id}/resume`, { method: "POST" }, "admin")).data;
 }
 
 export async function loadCurrentActivity() {

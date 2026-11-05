@@ -49,6 +49,16 @@ public class ActivityManagementController {
     var result=management.retry(taskId,auth.requireAdmin(request)); recorded(request);
     return ApiResponse.of(result,TraceFilter.id(request));
   }
+  @PostMapping("/admin/activity-deletion-tasks/{taskId}/pause")
+  ApiResponse<ActivityLifecycleManagement.DeletionTask> pause(@PathVariable long taskId,HttpServletRequest request){
+    var result=management.pause(taskId,auth.requireAdmin(request)); recorded(request);
+    return ApiResponse.of(result,TraceFilter.id(request));
+  }
+  @PostMapping("/admin/activity-deletion-tasks/{taskId}/resume")
+  ApiResponse<ActivityLifecycleManagement.DeletionTask> resume(@PathVariable long taskId,HttpServletRequest request){
+    var result=management.resume(taskId,auth.requireAdmin(request)); recorded(request);
+    return ApiResponse.of(result,TraceFilter.id(request));
+  }
   private static void recorded(HttpServletRequest request){request.setAttribute(AuditService.RECORDED_REQUEST_ATTRIBUTE,true);}
   public record Reason(@NotBlank @Size(max=500) String reason){}
   public record Delete(@NotBlank String code,@NotBlank @Size(max=500) String reason){}

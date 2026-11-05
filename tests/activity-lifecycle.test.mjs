@@ -118,6 +118,48 @@ test("failed cleanup exposes manual retry and then resumes live progress", async
   await button(h,"继续清理").props.onClick();await h.flush();assert.equal(retries,1);assert.match(text(h.model),/清理中/);assert.equal(h.timers.size,1);h.unmount();
 });
 
+test("cleanup can pause after a batch, stops polling and resumes the saved progress", async () => {
+  let status="RUNNING",pauses=0,resumes=0;
+  const h=hookHarness("app/features/admin/ActivityDeletionTasks.tsx","ActivityDeletionTasks",[{onClose(){}}],{
+    "../../api":{
+      loadActivityDeletionTasks:async()=>[{id:1,activityName:"测试",status,stage:10,totalStages:43,stageDetail:"清理订单明细",deletedRows:415282,deletedFiles:0,lastProgressAt:"2026-11-05T11:00:00Z"}],
+      pauseActivityDeletionTask:async id=>{assert.equal(id,1);pauses++;status="PAUSED";},
+      resumeActivityDeletionTask:async id=>{assert.equal(id,1);resumes++;status="QUEUED";},
+    },"../shared/time":{formatBeijingTime:v=>v},
+  },{AbortController,document:{visibilityState:"visible",addEventListener(){},removeEventListener(){}}});
+  await h.flush();assert.match(text(h.model),/清理订单明细（步骤 10\/43）/);assert.match(text(h.model),/最近推进/);
+  assert.match(text(h.model),/暂停期间活动仍不可用/);
+  await button(h,"暂停清理").props.onClick();await h.flush();assert.equal(pauses,1);assert.match(text(h.model),/已暂停/);
+  assert.equal(h.timers.size,0);assert.match(text(h.model),/415,282/);
+  await button(h,"继续清理").props.onClick();await h.flush();assert.equal(resumes,1);assert.match(text(h.model),/排队中/);assert.equal(h.timers.size,1);
+  h.unmount();
+});
+
+test("automatic retry shows attempts and next attempt without a terminal failure alert", async () => {
+  let status="RUNNING";
+  const h=hookHarness("app/features/admin/ActivityDeletionTasks.tsx","ActivityDeletionTasks",[{onClose(){}}],{
+    "../../api":{loadActivityDeletionTasks:async()=>[{id:1,status,activityName:"测试",stageName:"清理关联业务数据",deletedRows:500,deletedFiles:0,retryCount:status==="RUNNING"?2:5,maxRetries:5,nextAttemptAt:"下一次时间",lastError:"本批数据库操作超时"}]},
+    "../shared/time":{formatBeijingTime:v=>v},
+  },{AbortController,document:{visibilityState:"visible",addEventListener(){},removeEventListener(){}}});
+  await h.flush();assert.match(text(h.model),/等待自动重试/);assert.match(text(h.model),/2\/5/);assert.match(text(h.model),/下次尝试：下一次时间/);
+  assert.equal(nodes(h.model).filter(n=>n.props?.role==="alert").length,0);
+  status="FAILED";await h.runTimers();assert.match(text(h.model),/5\/5 次，已停止自动重试/);
+  assert.equal(nodes(h.model).filter(n=>n.props?.role==="alert").length,1);assert.equal(h.timers.size,0);h.unmount();
+});
+
+test("pause waits visibly, prevents duplicate submissions and preserves running state on failure", async () => {
+  let rejectPause,pauses=0;
+  const h=hookHarness("app/features/admin/ActivityDeletionTasks.tsx","ActivityDeletionTasks",[{onClose(){}}],{
+    "../../api":{loadActivityDeletionTasks:async()=>[{id:1,status:"RUNNING",deletedRows:0,deletedFiles:0}],
+      pauseActivityDeletionTask:()=>{pauses++;return new Promise((resolve,reject)=>{rejectPause=reject;});}},
+    "../shared/time":{formatBeijingTime:v=>v},
+  },{Error,AbortController,document:{visibilityState:"visible",addEventListener(){},removeEventListener(){}}});
+  await h.flush();const click=button(h,"暂停清理").props.onClick;click();click();await h.flush();
+  assert.equal(pauses,1);assert.equal(button(h,"正在等待当前批次结束…").props.disabled,true);
+  rejectPause(new Error("请求未成功，请刷新确认"));await h.flush();assert.match(text(h.model),/请求未成功，请刷新确认/);
+  assert.equal(button(h,"暂停清理").props.disabled,false);assert.match(text(h.model),/清理中/);h.unmount();
+});
+
 test("hidden or replaced progress reads are aborted and cannot overwrite the visible page", async () => {
   let visibilityState = "visible";
   const listeners = new Map(), reads = [];

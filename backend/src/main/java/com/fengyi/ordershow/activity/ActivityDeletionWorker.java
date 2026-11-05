@@ -13,23 +13,76 @@ import org.springframework.transaction.support.TransactionTemplate;
 @Service
 public class ActivityDeletionWorker {
   private static final org.slf4j.Logger log=org.slf4j.LoggerFactory.getLogger(ActivityDeletionWorker.class);
-  record Step(String table,String predicate) {}
-  static Step direct(String table){return new Step(table,"activity_id=?");}
-  static Step child(String table,String column,String parent){return new Step(table,column+" IN (SELECT id FROM "+parent+" WHERE activity_id=?)");}
+  record Step(String table,String column,String parent,List<String> keys) {
+    String predicate(){return parent==null?"activity_id=?":column+" IN (SELECT id FROM "+parent+" WHERE activity_id=?)";}
+    String selectionSql(){
+      return "SELECT "+keys.stream().map(k->"c."+k).collect(java.util.stream.Collectors.joining(","))
+          +" FROM "+parent+" p STRAIGHT_JOIN "+table+" c ON c."+column+"=p.id WHERE p.activity_id=? LIMIT ?";
+    }
+  }
+  static Step direct(String table){return new Step(table,null,null,List.of());}
+  static Step child(String table,String column,String parent,String... keys){return new Step(table,column,parent,keys.length==0?List.of("id"):List.of(keys));}
   static final List<Step> STEPS=List.of(
       direct("lottery_winner"),direct("lottery_candidate_snapshot"),direct("lottery_draw_attempt"),direct("lottery_round"),direct("lottery_rule"),
       direct("order_change_request"),child("order_version_item","order_version_id","order_version"),direct("order_version"),direct("order_operation"),
-      child("order_item","order_id","customer_order"),child("order_dashboard_product_line_stat","order_id","customer_order"),child("order_dashboard_stat","order_id","customer_order"),
+      child("order_item","order_id","customer_order"),child("order_dashboard_product_line_stat","order_id","customer_order"),child("order_dashboard_stat","order_id","customer_order","order_id"),
       direct("activity_ranking_product_snapshot"),direct("activity_ranking_order_snapshot"),direct("activity_ranking_snapshot"),
       direct("customer_order"),direct("h5_order_draft"),direct("h5_session"),direct("activity_attendee"),direct("visit_event"),
       direct("product_image_review_candidate"),child("product_image","activity_product_id","activity_product"),
-      child("activity_product_dealer_member","activity_product_id","activity_product"),child("activity_product_dealer_scope","activity_product_id","activity_product"),
+      child("activity_product_dealer_member","activity_product_id","activity_product","activity_product_id","normalized_branch_name","customer_id"),child("activity_product_dealer_scope","activity_product_id","activity_product","activity_product_id","normalized_branch_name"),
       child("activity_product_branch_scope","activity_product_id","activity_product"),child("activity_product_price_tier","activity_product_id","activity_product"),
       direct("product_scope_change_log"),direct("activity_product"),direct("activity_customer"),direct("activity_data_binding"),direct("import_publish_version"),
       child("import_error","import_task_id","import_task"),child("import_staging_row","import_task_id","import_task"),direct("import_task"),direct("export_task"),
       direct("activity_region"),direct("activity_dashboard_snapshot"),direct("price_sync_batch"),direct("api_idempotency"),direct("audit_log"),direct("domain_event_outbox"));
   static final int FILES=STEPS.size()+1, FINISH=FILES+1;
   static String stageName(int stage){return stage==0?"准备文件清理清单":stage<FILES?"清理关联业务数据":stage==FILES?"清理上传文件及图片衍生版本":"最终核验与清理活动记录";}
+  static String stageDetail(int stage){
+    if(stage<1||stage>STEPS.size()) return stageName(stage);
+    return switch(STEPS.get(stage-1).table()){
+      case "lottery_winner" -> "清理中奖名单";
+      case "lottery_candidate_snapshot" -> "清理抽奖候选快照";
+      case "lottery_draw_attempt" -> "清理抽奖历史";
+      case "lottery_round" -> "清理抽奖轮次";
+      case "lottery_rule" -> "清理抽奖规则";
+      case "order_change_request" -> "清理改单申请";
+      case "order_version_item" -> "清理订单历史明细";
+      case "order_version" -> "清理订单历史版本";
+      case "order_operation" -> "清理订单操作记录";
+      case "order_item" -> "清理订单明细";
+      case "order_dashboard_product_line_stat" -> "清理订单产品线汇总";
+      case "order_dashboard_stat" -> "清理订单汇总";
+      case "activity_ranking_product_snapshot" -> "清理商品排行快照";
+      case "activity_ranking_order_snapshot" -> "清理订单排行快照";
+      case "activity_ranking_snapshot" -> "清理排行配置快照";
+      case "customer_order" -> "清理订单记录";
+      case "h5_order_draft" -> "清理订货草稿";
+      case "h5_session" -> "清理客户登录会话";
+      case "activity_attendee" -> "清理到场名单";
+      case "visit_event" -> "清理访问记录";
+      case "product_image_review_candidate" -> "清理待审核商品图片记录";
+      case "product_image" -> "清理商品图片关联";
+      case "activity_product_dealer_member" -> "清理商品经销商成员范围";
+      case "activity_product_dealer_scope" -> "清理商品经销商范围";
+      case "activity_product_branch_scope" -> "清理商品分公司范围";
+      case "activity_product_price_tier" -> "清理商品价格档";
+      case "product_scope_change_log" -> "清理商品范围变更记录";
+      case "activity_product" -> "清理活动商品";
+      case "activity_customer" -> "清理活动客户";
+      case "activity_data_binding" -> "清理导入版本绑定";
+      case "import_publish_version" -> "解除导入版本引用并清理版本";
+      case "import_error" -> "清理导入校验记录";
+      case "import_staging_row" -> "清理导入预览数据";
+      case "import_task" -> "清理导入任务记录";
+      case "export_task" -> "清理导出任务记录";
+      case "activity_region" -> "清理活动区域";
+      case "activity_dashboard_snapshot" -> "清理看板快照";
+      case "price_sync_batch" -> "清理价格同步记录";
+      case "api_idempotency" -> "清理重复请求保护记录";
+      case "audit_log" -> "清理活动审计记录";
+      case "domain_event_outbox" -> "清理待发通知记录";
+      default -> stageName(stage);
+    };
+  }
   private final JdbcTemplate jdbc;
   private final TransactionTemplate tx;
   private final StorageService storage;
@@ -99,7 +152,7 @@ public class ActivityDeletionWorker {
               """,id,id,batchSize);
         }
         if(unlinked==0){
-          rows=jdbc.update("DELETE FROM "+step.table()+" WHERE "+step.predicate()+" LIMIT ?",id,batchSize);
+          rows=deleteBatch(step,id);
           advance=rows==0;
         }
       }else if(stage==FILES){
@@ -117,22 +170,35 @@ public class ActivityDeletionWorker {
         if(rows==0){
           // FK checks stay enabled. An omitted relationship fails safely and remains retryable.
           jdbc.update("DELETE FROM activity WHERE id=? AND deletion_requested_at IS NOT NULL",id);
-          jdbc.update("UPDATE activity_deletion_task SET status='COMPLETED',completed_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3),last_error=NULL,revision=revision+1 WHERE id=?",task);
+          jdbc.update("UPDATE activity_deletion_task SET status='COMPLETED',completed_at=UTC_TIMESTAMP(3),last_progress_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3),last_error=NULL,retry_count=0,revision=revision+1 WHERE id=?",task);
           return;
         }
       }else throw new IllegalStateException("未知的删除阶段");
       jdbc.update("""
           UPDATE activity_deletion_task SET status='RUNNING',stage=stage+?,deleted_rows=deleted_rows+?,deleted_files=deleted_files+?,
-            retry_count=0,last_error=NULL,revision=revision+1,updated_at=UTC_TIMESTAMP(3) WHERE id=?
+            retry_count=0,last_error=NULL,revision=revision+1,last_progress_at=UTC_TIMESTAMP(3),updated_at=UTC_TIMESTAMP(3) WHERE id=?
           """,advance?1:0,rows,files,task);
     });}catch(RuntimeException error){
       log.warn("Activity deletion batch failed for task {}",active[0],error);
       if(active[0]!=0) jdbc.update("""
-          UPDATE activity_deletion_task SET status=IF(retry_count+1>=?,'FAILED','RUNNING'),retry_count=retry_count+1,
-            next_attempt_at=TIMESTAMPADD(SECOND,LEAST(60,POW(2,retry_count)),UTC_TIMESTAMP(3)),
-            last_error=?,revision=revision+1,updated_at=UTC_TIMESTAMP(3) WHERE id=? AND revision=? AND status<>'COMPLETED'
+          UPDATE activity_deletion_task SET status=IF(retry_count+1>=?,'FAILED','RUNNING'),
+            next_attempt_at=TIMESTAMPADD(SECOND,LEAST(60,POW(2,retry_count+1)),UTC_TIMESTAMP(3)),retry_count=retry_count+1,
+            last_error=?,revision=revision+1,updated_at=UTC_TIMESTAMP(3) WHERE id=? AND revision=? AND status IN ('QUEUED','RUNNING')
           """,maxRetries,safeError(error),active[0],active[1]);
     }
+  }
+
+  private int deleteBatch(Step step,long activityId){
+    if(step.parent()==null) return jdbc.update("DELETE FROM "+step.table()+" WHERE activity_id=? LIMIT ?",activityId,batchSize);
+    // A limited DELETE with an IN subquery scans the entire child table on MySQL.
+    // Drive this read from the activity's parents, then delete only the selected primary keys.
+    var selected=jdbc.queryForList(step.selectionSql(),activityId,batchSize);
+    if(selected.isEmpty()) return 0;
+    String key="("+String.join(",",step.keys())+")";
+    String tuple="("+String.join(",",java.util.Collections.nCopies(step.keys().size(),"?"))+")";
+    var args=new java.util.ArrayList<Object>();
+    for(var row:selected) for(String column:step.keys()) args.add(row.get(column));
+    return jdbc.update("DELETE FROM "+step.table()+" WHERE "+key+" IN ("+String.join(",",java.util.Collections.nCopies(selected.size(),tuple))+")",args.toArray());
   }
 
   private void requireUnsharedFile(long fileId,long activityId){
@@ -151,7 +217,10 @@ public class ActivityDeletionWorker {
   }
   private static String safeError(RuntimeException error){
     // Do not expose SQL, credentials, object keys or stack traces to task readers.
-    return error instanceof IllegalStateException && error.getMessage()!=null && error.getMessage().startsWith("文件仍被")
-        ?error.getMessage():"清理暂未完成，请重试；持续失败时请检查数据库关联或文件存储服务";
+    if(error instanceof IllegalStateException && error.getMessage()!=null && error.getMessage().startsWith("文件仍被")) return "文件仍被其他活动引用，请核对关联数据后继续";
+    if(error instanceof org.springframework.dao.QueryTimeoutException) return "本批数据库操作超时";
+    if(error instanceof org.springframework.dao.PessimisticLockingFailureException) return "本批数据库操作遇到锁冲突或锁等待超时";
+    if(error instanceof org.springframework.dao.DataIntegrityViolationException) return "数据库约束阻止了本批清理，请检查关联数据";
+    return "本批清理未完成；持续失败时请检查数据库或文件存储服务";
   }
 }

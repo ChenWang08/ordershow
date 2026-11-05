@@ -211,10 +211,14 @@
       "sha256": "9ff496701971aba1b3d071985636847fd0c004b960d6510775ccc0efa2bdd130"
     },
     {
+      "file": "V054__activity_deletion_pause_and_progress.sql",
+      "sha256": "81baf96dbf9997de5866b7309297e4dcf502d5a460740747ad3daac4a29b60ea"
+    },
+    {
       "file": "V037__unify_product_completeness.java",
       "action": "EMPTY_DATABASE_NO_OP",
       "sha256": "059c82a580cf0f64e6603360b3f68340f19dc5a1552bedef3e9f0b42922906c1"
     }
   ],
-  "bundleSha256": "03237b48a6fd237b3f3ed025b4d663203fdd5bb3d416254204da4f3724d3220e"
+  "bundleSha256": "9a91bf7db6e87140070bacbc3dee5cdd4110ebdfb12c0079fe0ed10816e7b40f"
 }

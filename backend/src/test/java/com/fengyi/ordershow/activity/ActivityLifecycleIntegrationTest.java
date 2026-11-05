@@ -41,7 +41,7 @@ class ActivityLifecycleIntegrationTest {
     activities=new ActivityService(jdbc,ignored->{},new DepartmentAccessService(jdbc));
     var dashboard=new DashboardService(jdbc,activities,new ObjectMapper().findAndRegisterModules());
     dashboard.setRankingStore(new RankingStore(jdbc,new ObjectMapper().findAndRegisterModules()));
-    management=new ActivityLifecycleManagement(jdbc,activities,new DepartmentAccessService(jdbc),dashboard);
+    management=new ActivityLifecycleManagement(jdbc,activities,new DepartmentAccessService(jdbc),dashboard,5);
     policy=new ActivityAccessPolicy(jdbc); storage=mock(StorageService.class);
   }
   long activity(String status){
@@ -173,6 +173,102 @@ class ActivityLifecycleIntegrationTest {
     assertThatThrownBy(()->activities.byId(id)).isInstanceOf(DomainException.class);
     doNothing().when(storage).removeWithVariants(any());tx.execute(s->management.retry(task(id).id(),root));finish(id,worker(50));
   }
+  @Test void pausedTaskSurvivesWorkersAllowsOtherTasksAndResumesOriginalProgress(){
+    long id=activity("FINISHED"),other=activity("DRAFT");seed(id,7);
+    delete(id);var w=worker(2);tick(w);
+    var before=task(id);
+    var paused=tx.execute(s->management.pause(before.id(),root));
+    assertThat(paused.status()).isEqualTo("PAUSED");
+    assertThat(paused.stage()).isEqualTo(before.stage());
+    assertThat(paused.lastProgressAt()).isEqualTo(before.lastProgressAt());
+    assertThat(tx.execute(s->management.pause(before.id(),root)).status()).isEqualTo("PAUSED");
+    assertThatThrownBy(()->activities.byId(id)).isInstanceOf(DomainException.class);
+    assertThatThrownBy(()->policy.readableFile(id*1000)).isInstanceOf(DomainException.class);
+    assertThatThrownBy(()->tx.execute(s->{policy.lockWrite(id,false,false,false,true);return null;})).isInstanceOf(DomainException.class);
+    delete(other);finish(other,w);
+    for(int i=0;i<3;i++){var restarted=worker(2);try{tick(restarted);}finally{restarted.close();}}
+    assertThat(task(id)).isEqualTo(paused);
+    var resumed=tx.execute(s->management.resume(paused.id(),root));
+    assertThat(resumed.status()).isEqualTo("QUEUED");
+    assertThat(resumed.stage()).isEqualTo(before.stage());
+    assertThat(resumed.deletedRows()).isEqualTo(before.deletedRows());
+    assertThat(resumed.lastProgressAt()).isEqualTo(before.lastProgressAt());
+    finish(id,w);
+    assertThatThrownBy(()->tx.execute(s->management.pause(paused.id(),root))).isInstanceOf(DomainException.class);
+    assertThatThrownBy(()->tx.execute(s->management.resume(paused.id(),root))).isInstanceOf(DomainException.class);
+  }
+  @Test void pauseWaitsForInflightBatchAndPreventsAnotherReplicaFromContinuing()throws Exception{
+    long id=activity("DRAFT");file(id);delete(id);var w=worker(10);
+    for(int i=0;i<100&&task(id).stage()!=ActivityDeletionWorker.FILES;i++)tick(w);
+    assertThat(task(id).stage()).isEqualTo(ActivityDeletionWorker.FILES);
+    var entered=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+    doAnswer(call->{entered.countDown();assertThat(release.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();return null;}).when(storage).removeWithVariants(any());
+    try(var pool=java.util.concurrent.Executors.newFixedThreadPool(2)){
+      var batch=pool.submit(()->tick(w));
+      assertThat(entered.await(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+      var pause=pool.submit(()->tx.execute(s->management.pause(task(id).id(),root)));
+      try{assertThatThrownBy(()->pause.get(150,java.util.concurrent.TimeUnit.MILLISECONDS)).isInstanceOf(java.util.concurrent.TimeoutException.class);}
+      finally{release.countDown();}
+      batch.get(5,java.util.concurrent.TimeUnit.SECONDS);
+      var paused=pause.get(5,java.util.concurrent.TimeUnit.SECONDS);
+      assertThat(paused.status()).isEqualTo("PAUSED");assertThat(paused.deletedFiles()).isEqualTo(1);
+      var replica=worker(10);try{tick(replica);}finally{replica.close();}
+      assertThat(task(id)).isEqualTo(paused);
+      tx.execute(s->management.resume(paused.id(),root));finish(id,w);
+      verify(storage,times(1)).removeWithVariants(any());
+    }finally{release.countDown();}
+  }
+  @Test void childBatchesUseIndexesAndIgnoreAnotherActivitysLockedDetail()throws Exception{
+    long other=activity("FINISHED"),id=activity("FINISHED");seed(other,2);seed(id,3);
+    for(var step:ActivityDeletionWorker.STEPS){
+      if(step.parent()==null)continue;
+      var plan=jdbc.queryForList("EXPLAIN "+step.selectionSql(),id,2);
+      var childPlan=plan.stream().filter(row->"c".equals(row.get("table"))).findFirst().orElseThrow();
+      assertThat(childPlan.get("type")).as(step.table()).isNotIn("ALL","index");
+      assertThat(childPlan.get("key")).as(step.table()).isNotNull();
+    }
+    var otherCounts=tableCounts(other);delete(id);
+    jdbc.update("UPDATE activity_deletion_task SET stage=10 WHERE activity_id=?",id);
+    var locked=new java.util.concurrent.CountDownLatch(1);var release=new java.util.concurrent.CountDownLatch(1);
+    try(var pool=java.util.concurrent.Executors.newFixedThreadPool(2)){
+      var writer=pool.submit(()->tx.executeWithoutResult(s->{
+        jdbc.queryForList("SELECT id FROM order_item WHERE order_id=? LIMIT 1 FOR UPDATE",other*1000);locked.countDown();
+        try{assertThat(release.await(10,java.util.concurrent.TimeUnit.SECONDS)).isTrue();}catch(InterruptedException e){throw new RuntimeException(e);}
+      }));
+      assertThat(locked.await(5,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+      var w=worker(2);
+      try{
+        pool.submit(()->tick(w)).get(3,java.util.concurrent.TimeUnit.SECONDS);
+        assertThat(task(id).stage()).isEqualTo(10);assertThat(task(id).deletedRows()).isEqualTo(2);assertThat(task(id).lastError()).isNull();
+        assertThat(tableCounts(other)).isEqualTo(otherCounts);
+      }finally{release.countDown();w.close();}
+      writer.get(5,java.util.concurrent.TimeUnit.SECONDS);
+    }finally{release.countDown();}
+    // Return to the original sequence to clean relationships intentionally skipped above.
+    jdbc.update("UPDATE activity_deletion_task SET stage=0 WHERE activity_id=?",id);finish(id,worker(20));
+    assertThat(tableCounts(other)).isEqualTo(otherCounts);
+  }
+  @Test void retryMetadataTracksFailuresWithoutClaimingProgressAndStopsAtLimit(){
+    long id=activity("DRAFT");file(id);delete(id);var w=worker(10);
+    for(int i=0;i<100&&task(id).stage()!=ActivityDeletionWorker.FILES;i++)tick(w);
+    var before=task(id);
+    doThrow(new org.springframework.dao.QueryTimeoutException("private SQL must not be exposed")).when(storage).removeWithVariants(any());
+    for(int attempt=1;attempt<=2;attempt++){
+      jdbc.update("UPDATE activity_deletion_task SET next_attempt_at=UTC_TIMESTAMP(3) WHERE activity_id=?",id);tick(w);
+      var failed=task(id);
+      assertThat(failed.retryCount()).isEqualTo(attempt);
+      assertThat(failed.status()).isEqualTo(attempt==2?"FAILED":"RUNNING");
+      assertThat(failed.nextAttemptAt()).isAfter(failed.updatedAt());
+      assertThat(failed.lastProgressAt()).isEqualTo(before.lastProgressAt());
+      assertThat(failed.lastError()).isEqualTo("本批数据库操作超时");
+    }
+    var stopped=task(id);tick(w);assertThat(task(id)).isEqualTo(stopped);
+    assertThatThrownBy(()->tx.execute(s->management.resume(stopped.id(),root))).isInstanceOf(DomainException.class);
+    assertThatThrownBy(()->tx.execute(s->management.pause(stopped.id(),root))).isInstanceOf(DomainException.class);
+    doNothing().when(storage).removeWithVariants(any());
+    tx.execute(s->management.retry(stopped.id(),root));finish(id,w);
+    assertThat(task(id).retryCount()).isZero();assertThat(task(id).lastProgressAt()).isAfterOrEqualTo(before.lastProgressAt());
+  }
   @Test void auditAfterDeletionDoesNotRecreateActivityReferences(){
     long id=activity("DRAFT");delete(id);finish(id,worker(20));
     var writer=new AuditBatchWriter(jdbc,manager);
@@ -192,6 +288,8 @@ class ActivityLifecycleIntegrationTest {
     assertThatThrownBy(()->tx.execute(s->management.delete(id,0,"ACT"+id,"无权限",department))).isInstanceOf(DomainException.class);
     assertThatThrownBy(()->management.tasks(department,1)).isInstanceOf(DomainException.class);
     assertThatThrownBy(()->tx.execute(s->management.retry(1,department))).isInstanceOf(DomainException.class);
+    assertThatThrownBy(()->tx.execute(s->management.pause(1,department))).isInstanceOf(DomainException.class);
+    assertThatThrownBy(()->tx.execute(s->management.resume(1,department))).isInstanceOf(DomainException.class);
     assertThat(management.tasks(root,Integer.MAX_VALUE)).isEmpty();
   }
   @Test void mvcRejectsDeletedActivityBeforeConditionalAndCachedFileResponses()throws Exception{
@@ -387,8 +485,8 @@ class ActivityLifecycleIntegrationTest {
     sql("INSERT INTO activity_product(id,activity_id,customer_type,rebate_status,business_key,material_name,case_price,source_import_task_id,data_version_id) VALUES($b,$a,'ALL','ALL','test','测试商品',10,$b,$b)",id);
     sql("INSERT INTO activity_product_price_tier(activity_product_id,min_quantity,case_price) VALUES($b,2,9)",id);
     sql("INSERT INTO activity_product_branch_scope(activity_product_id,branch_name,normalized_branch_name) VALUES($b,'分公司','branch')",id);
-    sql("INSERT INTO activity_product_dealer_scope(activity_product_id,branch_name,normalized_branch_name) VALUES($b,'分公司','branch')",id);
-    sql("INSERT INTO activity_product_dealer_member(activity_product_id,normalized_branch_name,customer_id,customer_type,normalized_dealer_full_name,dealer_full_name) VALUES($b,'branch',$b,'GENERAL','customer$a','客户$a')",id);
+    sql("INSERT INTO activity_product_dealer_scope(activity_product_id,branch_name,normalized_branch_name) VALUES($b,'分公司','branch'),($b,'分公司二','branch2')",id);
+    sql("INSERT INTO activity_product_dealer_member(activity_product_id,normalized_branch_name,customer_id,customer_type,normalized_dealer_full_name,dealer_full_name) VALUES($b,'branch',$b,'GENERAL','customer$a','客户$a'),($b,'branch2',$b,'GENERAL','customer$a','客户$a')",id);
     sql("INSERT INTO product_scope_change_log(activity_id,activity_product_id,admin_user_id,before_json,after_json,reason) VALUES($a,$b,1,'{}','{}','测试')",id);
     sql("INSERT INTO product_image(activity_product_id,stored_file_id,source_type) VALUES($b,$b,'MANUAL')",id);
     sql("INSERT INTO product_image_review_candidate(activity_id,data_version_id,import_task_id,stored_file_id,archive_path,material_code,normalized_material_code,material_name,normalized_material_name) VALUES($a,$b,$b,$b,'test.png','test','test','测试商品','test')",id);

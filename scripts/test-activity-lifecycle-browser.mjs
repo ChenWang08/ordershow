@@ -47,9 +47,9 @@ try {
   for (const width of [1440, 440, 320]) {
     const page = await browser.newPage({ viewport: { width, height: 960 } }), requests = [], errors = [];
     await page.clock.install();
-    let state = 'FINISHED', deleted = false, failed = false, completed = false;
+    let state = 'FINISHED', deleted = false, failed = false, completed = false, paused = false, autoRetry = false;
     page.on('pageerror', e => errors.push(e.message));
-    const task = () => ({ id: 10, activityId: 7, activityCode: 'ACT7', activityName: '历史订货活动', departmentName: '测试部门', requestedByName: '测试超管', reason: '清理历史', status: completed ? 'COMPLETED' : failed ? 'FAILED' : 'RUNNING', stage: 2, stageName: '清理关联业务数据', deletedRows: 1000, deletedFiles: 0, lastError: failed ? '文件服务暂不可用' : null, createdAt: '2026-11-03T01:00:00Z' });
+    const task = () => ({ id: 10, activityId: 7, activityCode: 'ACT7', activityName: '历史订货活动', departmentName: '测试部门', requestedByName: '测试超管', reason: '清理历史', status: completed ? 'COMPLETED' : failed ? 'FAILED' : paused ? 'PAUSED' : 'RUNNING', stage: 10, totalStages: 43, stageName: '清理关联业务数据', stageDetail: '清理订单明细', deletedRows: 415282, deletedFiles: 0, retryCount: failed ? 5 : autoRetry ? 2 : 0, maxRetries: 5, nextAttemptAt: '2026-11-05T11:01:03Z', lastProgressAt: '2026-11-05T11:00:00Z', lastError: failed ? '文件服务暂不可用' : autoRetry ? '本批数据库操作超时' : null, createdAt: '2026-11-05T10:52:18Z' });
     await page.route('**/api/v1/**', async route => {
       const req = route.request(), path = new URL(req.url()).pathname; requests.push({ path, method: req.method() }); let data;
       if (path.endsWith('/departments')) data = [{ id: 1, name: '测试部门', code: 'TEST', status: 'ACTIVE' }, { id: 2, name: '另一部门', code: 'OTHER', status: 'ACTIVE' }];
@@ -65,6 +65,8 @@ try {
         assert.deepEqual(req.postDataJSON(), { code: 'ACT7', reason: '清理历史' }); assert.equal(req.headers()['if-match'], '3'); deleted = true;
         await page.evaluate(() => localStorage.setItem('test-deleted', 'yes')); data = task();
       } else if (path.endsWith('/retry')) { failed = false; data = task(); }
+      else if (path.endsWith('/pause')) { paused = true; data = task(); }
+      else if (path.endsWith('/resume')) { paused = false; data = task(); }
       else if (path === '/api/v1/admin/activity-deletion-tasks') data = [task()];
       else throw new Error('Unexpected request: ' + path);
       await route.fulfill({ status: path.endsWith('/permanent-deletion') ? 202 : 200, json: { data } });
@@ -113,6 +115,16 @@ try {
     await dialog.getByRole('button', { name: '确认永久删除' }).click();
     await page.getByRole('dialog', { name: '删除进度', exact: true }).waitFor(); await page.getByText('清理中', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: '永久删除', exact: true }).count(), 0);
+    await page.getByRole('button', { name: '暂停清理', exact: true }).click(); await page.getByText('已暂停', { exact: true }).waitFor();
+    const pausedCount = count(); await page.clock.fastForward(15000); assert.equal(count(), pausedCount);
+    assert.match(await page.getByRole('dialog', { name: '删除进度', exact: true }).textContent(), /415,282/);
+    await noOverflow(page); await page.screenshot({ path: fileURLToPath(new URL(width + '-paused.png', output)), fullPage: true });
+    await page.getByRole('button', { name: '继续清理', exact: true }).click(); await page.getByText('清理中', { exact: true }).waitFor();
+    autoRetry = true; await page.getByRole('button', { name: '刷新进度', exact: true }).click(); await page.getByText('等待自动重试', { exact: true }).waitFor();
+    assert.match(await page.getByRole('dialog', { name: '删除进度', exact: true }).textContent(), /2\/5 次/);
+    assert.equal(await page.getByRole('alert').count(), 0); await noOverflow(page);
+    await page.screenshot({ path: fileURLToPath(new URL(width + '-retrying.png', output)), fullPage: true });
+    autoRetry = false;
     failed = true; await page.getByRole('button', { name: '刷新进度', exact: true }).click(); await page.getByRole('button', { name: '继续清理' }).waitFor();
     const failedCount = count(); await page.clock.fastForward(15000); assert.equal(count(), failedCount);
     await page.screenshot({ path: fileURLToPath(new URL(width + '-progress.png', output)), fullPage: true });
@@ -122,7 +134,7 @@ try {
     await page.getByRole('button', { name: '关闭删除进度' }).click(); await page.clock.fastForward(20000); assert.equal(count(), done);
     await page.getByRole('button', { name: '删除进度', exact: true }).click(); await page.getByRole('dialog', { name: '删除进度', exact: true }).waitFor();
     await noOverflow(page); assert.deepEqual(errors, []);
-    report.push({ width, requests, errors, checks: ['六种业务状态及颜色', '结束活动归档标记', '部门筛选', '全部模块唯一入口及默认不查询', '单实例轮询', '归档及解除归档', '三项删除确认', '删最后活动自动打开进度', '失败继续', '完成及关闭停止查询', '长名称及窄屏布局'] });
+    report.push({ width, requests, errors, checks: ['六种业务状态及颜色', '结束活动归档标记', '部门筛选', '全部模块唯一入口及默认不查询', '单实例轮询', '归档及解除归档', '三项删除确认', '删最后活动自动打开进度', '暂停及原进度继续', '自动重试详情', '失败继续', '完成及关闭停止查询', '长名称及窄屏布局'] });
     await page.close();
   }
   for (const role of ['DEPARTMENT_ADMIN', 'DEPARTMENT_MEMBER']) {

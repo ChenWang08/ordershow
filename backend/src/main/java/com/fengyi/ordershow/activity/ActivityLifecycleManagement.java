@@ -17,12 +17,14 @@ public class ActivityLifecycleManagement {
   private final ActivityService activities;
   private final DepartmentAccessService access;
   private final DashboardService dashboards;
+  private final int maxRetries;
 
   public ActivityLifecycleManagement(JdbcTemplate jdbc, ActivityService activities,
-      DepartmentAccessService access, DashboardService dashboards) {
+      DepartmentAccessService access, DashboardService dashboards,
+      @org.springframework.beans.factory.annotation.Value("${order-show.activity-deletion.max-retries:5}") int maxRetries) {
     this.jdbc=new JdbcTemplate(java.util.Objects.requireNonNull(jdbc.getDataSource()));
     this.jdbc.setQueryTimeout(15);
-    this.activities=activities; this.access=access; this.dashboards=dashboards;
+    this.activities=activities; this.access=access; this.dashboards=dashboards; this.maxRetries=Math.clamp(maxRetries,1,20);
   }
 
   @Transactional
@@ -61,7 +63,7 @@ public class ActivityLifecycleManagement {
   public DeletionTask delete(long id,int version,String code,String reason,AdminPrincipal admin) {
     access.requireSuperAdmin(admin); requireReason(reason);
     jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE",Long.class,id);
-    var existing=jdbc.query("SELECT * FROM activity_deletion_task WHERE activity_id=?",ActivityLifecycleManagement::mapTask,id);
+    var existing=jdbc.query("SELECT * FROM activity_deletion_task WHERE activity_id=?",this::mapConfiguredTask,id);
     if (!existing.isEmpty()) {
       if (!existing.getFirst().activityCode().equals(code)) throw DomainException.badRequest("ACTIVITY_CODE_MISMATCH","请输入正确的活动编号");
       return existing.getFirst();
@@ -76,24 +78,53 @@ public class ActivityLifecycleManagement {
     jdbc.update("UPDATE activity SET deletion_requested_at=UTC_TIMESTAMP(3),version=version+1,public_info_version=public_info_version+1 WHERE id=?",id);
     jdbc.update("UPDATE h5_session SET revoked_at=UTC_TIMESTAMP(3) WHERE activity_id=? AND revoked_at IS NULL",id);
     audit(null,admin,"ACTIVITY_DELETE_REQUESTED",a.code()+"："+reason);
-    return jdbc.query("SELECT * FROM activity_deletion_task WHERE activity_id=?",ActivityLifecycleManagement::mapTask,id).getFirst();
+    return jdbc.query("SELECT * FROM activity_deletion_task WHERE activity_id=?",this::mapConfiguredTask,id).getFirst();
   }
 
   public List<DeletionTask> tasks(AdminPrincipal admin,int page) {
     access.requireSuperAdmin(admin);
-    return jdbc.query("SELECT * FROM activity_deletion_task ORDER BY id DESC LIMIT 20 OFFSET ?",ActivityLifecycleManagement::mapTask,(Math.max(1L,page)-1)*20);
+    return jdbc.query("SELECT * FROM activity_deletion_task ORDER BY id DESC LIMIT 20 OFFSET ?",this::mapConfiguredTask,(Math.max(1L,page)-1)*20);
   }
 
   @Transactional
   public DeletionTask retry(long taskId,AdminPrincipal admin) {
     access.requireSuperAdmin(admin);
-    var rows=jdbc.query("SELECT * FROM activity_deletion_task WHERE id=? FOR UPDATE",ActivityLifecycleManagement::mapTask,taskId);
-    if(rows.isEmpty()) throw DomainException.notFound("DELETION_TASK_NOT_FOUND","删除任务不存在");
-    if(!"FAILED".equals(rows.getFirst().status())) throw DomainException.conflict("DELETION_RETRY_INVALID","只有失败任务可以重试");
+    var task=lockTask(taskId);
+    if(!"FAILED".equals(task.status())) throw DomainException.conflict("DELETION_RETRY_INVALID","只有失败任务可以重试");
     jdbc.update("UPDATE activity_deletion_task SET status='QUEUED',retry_count=0,last_error=NULL,next_attempt_at=UTC_TIMESTAMP(3),revision=revision+1,updated_at=UTC_TIMESTAMP(3) WHERE id=?",taskId);
-    audit(null,admin,"ACTIVITY_DELETE_RETRY",rows.getFirst().activityCode());
-    return jdbc.query("SELECT * FROM activity_deletion_task WHERE id=?",ActivityLifecycleManagement::mapTask,taskId).getFirst();
+    audit(null,admin,"ACTIVITY_DELETE_RETRY",task.activityCode());
+    return readTask(taskId);
   }
+
+  @Transactional
+  public DeletionTask pause(long taskId,AdminPrincipal admin) {
+    access.requireSuperAdmin(admin);
+    // The worker holds this row for the whole batch: pause takes effect after that batch commits.
+    var task=lockTask(taskId);
+    if("PAUSED".equals(task.status())) return task;
+    if(!List.of("QUEUED","RUNNING").contains(task.status())) throw DomainException.conflict("DELETION_PAUSE_INVALID","只有排队或清理中的任务可以暂停");
+    jdbc.update("UPDATE activity_deletion_task SET status='PAUSED',revision=revision+1,updated_at=UTC_TIMESTAMP(3) WHERE id=?",taskId);
+    audit(null,admin,"ACTIVITY_DELETE_PAUSE",task.activityCode());
+    return readTask(taskId);
+  }
+
+  @Transactional
+  public DeletionTask resume(long taskId,AdminPrincipal admin) {
+    access.requireSuperAdmin(admin);
+    var task=lockTask(taskId);
+    if(!"PAUSED".equals(task.status())) throw DomainException.conflict("DELETION_RESUME_INVALID","只有已暂停任务可以继续");
+    jdbc.update("UPDATE activity_deletion_task SET status='QUEUED',retry_count=0,last_error=NULL,next_attempt_at=UTC_TIMESTAMP(3),revision=revision+1,updated_at=UTC_TIMESTAMP(3) WHERE id=?",taskId);
+    audit(null,admin,"ACTIVITY_DELETE_RESUME",task.activityCode());
+    return readTask(taskId);
+  }
+
+  private DeletionTask lockTask(long taskId) {
+    var rows=jdbc.query("SELECT * FROM activity_deletion_task WHERE id=? FOR UPDATE",this::mapConfiguredTask,taskId);
+    if(rows.isEmpty()) throw DomainException.notFound("DELETION_TASK_NOT_FOUND","删除任务不存在");
+    return rows.getFirst();
+  }
+  private DeletionTask readTask(long taskId){return jdbc.query("SELECT * FROM activity_deletion_task WHERE id=?",this::mapConfiguredTask,taskId).getFirst();}
+  private DeletionTask mapConfiguredTask(java.sql.ResultSet r,int n)throws java.sql.SQLException{return mapTask(r,n,maxRetries);}
 
   private void lock(long id) {
     if(jdbc.queryForList("SELECT id FROM activity WHERE id=? AND deletion_requested_at IS NULL FOR UPDATE",Long.class,id).isEmpty()) throw ActivityAccessPolicy.missing();
@@ -123,10 +154,14 @@ public class ActivityLifecycleManagement {
         """,id,admin.id(),admin.displayName(),admin.roleCode(),action,id==null?null:Long.toString(id),reason.substring(0,Math.min(500,reason.length())),java.util.UUID.randomUUID().toString());
   }
   static DeletionTask mapTask(java.sql.ResultSet r,int n)throws java.sql.SQLException {
+    return mapTask(r,n,5);
+  }
+  private static DeletionTask mapTask(java.sql.ResultSet r,int n,int maxRetries)throws java.sql.SQLException {
     return new DeletionTask(r.getLong("id"),r.getLong("activity_id"),r.getString("activity_code"),r.getString("activity_name"),r.getString("department_name"),
         r.getString("requested_by_name"),r.getString("reason"),r.getString("status"),r.getInt("stage"),r.getLong("deleted_rows"),r.getLong("deleted_files"),r.getString("last_error"),
-        UtcTime.read(r,"created_at"),UtcTime.read(r,"updated_at"),UtcTime.read(r,"completed_at"),ActivityDeletionWorker.stageName(r.getInt("stage")));
+        UtcTime.read(r,"created_at"),UtcTime.read(r,"updated_at"),UtcTime.read(r,"completed_at"),ActivityDeletionWorker.stageName(r.getInt("stage")),
+        r.getInt("retry_count"),maxRetries,UtcTime.read(r,"next_attempt_at"),UtcTime.read(r,"last_progress_at"),ActivityDeletionWorker.stageDetail(r.getInt("stage")),ActivityDeletionWorker.FINISH);
   }
   public record DeletionPreview(long activityId,String code,String name,String departmentName,int version,long orders,long products,long customers,long winners,long files) {}
-  public record DeletionTask(long id,long activityId,String activityCode,String activityName,String departmentName,String requestedByName,String reason,String status,int stage,long deletedRows,long deletedFiles,String lastError,Instant createdAt,Instant updatedAt,Instant completedAt,String stageName) {}
+  public record DeletionTask(long id,long activityId,String activityCode,String activityName,String departmentName,String requestedByName,String reason,String status,int stage,long deletedRows,long deletedFiles,String lastError,Instant createdAt,Instant updatedAt,Instant completedAt,String stageName,int retryCount,int maxRetries,Instant nextAttemptAt,Instant lastProgressAt,String stageDetail,int totalStages) {}
 }

@@ -1,0 +1,12 @@
+{
+  "scope": "existing V053 database only",
+  "from": "V053",
+  "to": "V054",
+  "migrations": [
+    {
+      "file": "V054__activity_deletion_pause_and_progress.sql",
+      "sha256": "81baf96dbf9997de5866b7309297e4dcf502d5a460740747ad3daac4a29b60ea"
+    }
+  ],
+  "bundleSha256": "75f52bf5f00fba7f8f4b18d01b48da3e09b853a4d5f9b3e157cea8fe4c7b1f0e"
+}

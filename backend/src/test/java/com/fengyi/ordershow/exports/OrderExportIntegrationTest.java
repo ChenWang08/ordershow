@@ -245,7 +245,7 @@ class OrderExportIntegrationTest {
     assertThatThrownBy(()->policy.requireTask(completed)).isInstanceOf(DomainException.class);
     jdbc.update("UPDATE activity SET status='FINISHED',ends_at=UTC_TIMESTAMP(3),event_ends_at=UTC_TIMESTAMP(3) WHERE id=?",id);
     assertThatThrownBy(()->policy.requireTask(completed)).isInstanceOf(DomainException.class);
-    var lifecycle=new ActivityLifecycleManagement(jdbc,activities,access,mock(DashboardService.class));
+    var lifecycle=new ActivityLifecycleManagement(jdbc,activities,access,mock(DashboardService.class),5);
     assertThatThrownBy(()->tx.execute(s->lifecycle.delete(id,1,"EXP"+id,"删除测试",ROOT))).isInstanceOf(DomainException.class);
     tasks.fail(claim,"EXPORT_CANCELLED","已停止");tasks.release(claim);
     assertThat(tx.execute(s->lifecycle.delete(id,1,"EXP"+id,"删除测试",ROOT)).status()).isEqualTo("QUEUED");
