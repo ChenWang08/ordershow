@@ -553,12 +553,13 @@ class IsolatedApiE2ETest {
     assertEquals(200, publishedRule.statusCode(), publishedRule.body());
     assertEquals("READY", data(publishedRule).path("rounds").get(0).path("status").asText());
 
+    ObjectNode drawRequest = JSON.createObjectNode().put("expectedRevision", data(publishedRule).path("revision").asLong());
     List<CompletableFuture<HttpResponse<String>>> draws = new ArrayList<>();
     for (int index = 0; index < 10; index++) {
       draws.add(CompletableFuture.supplyAsync(() -> {
         try {
           return send(admin, "POST", "/admin/activities/" + activityId + "/lottery/rounds/" + roundId + "/draw",
-              null, adminCsrf, null);
+              drawRequest, adminCsrf, null);
         } catch (Exception exception) {
           throw new RuntimeException(exception);
         }
@@ -566,7 +567,10 @@ class IsolatedApiE2ETest {
     }
     List<HttpResponse<String>> drawResponses = draws.stream().map(CompletableFuture::join).toList();
     assertEquals(1, drawResponses.stream().filter(response -> response.statusCode() == 200).count());
-    assertEquals(9, drawResponses.stream().filter(response -> response.statusCode() == 409).count());
+    assertEquals(9, drawResponses.stream().filter(response -> response.statusCode() == 409 || response.statusCode() == 503).count());
+    for (var response : drawResponses) {
+      if (response.statusCode() == 503) assertEquals("LOTTERY_BUSY", json(response).path("code").asText());
+    }
     JsonNode draw = data(drawResponses.stream().filter(response -> response.statusCode() == 200).findFirst().orElseThrow());
     assertEquals(4, draw.path("candidateCount").asInt());
     assertEquals(1, draw.path("actualWinnerCount").asInt());
@@ -647,9 +651,9 @@ class IsolatedApiE2ETest {
     assertEquals(1, generalRegions.get(0).path("productLines").size());
 
     HttpResponse<String> export = send(admin, "GET", "/admin/activities/" + activityId + "/orders/export", null, null, null);
-    assertEquals(200, export.statusCode());
-    assertTrue(export.headers().firstValue("Content-Type").orElse("").contains("spreadsheetml"));
-    assertTrue(export.body().length() > 1000);
+    assertEquals(410, export.statusCode());
+    assertEquals(409, send(admin, "POST", "/admin/activities/" + activityId + "/exports",
+        JSON.createObjectNode().put("exportType", "ORDER_PACKAGE"), adminCsrf, null, UUID.randomUUID().toString()).statusCode());
 
     JsonNode latestActivity = data(send(admin, "GET", "/admin/activities/" + activityId, null, null, null));
     ObjectNode closeBody = JSON.createObjectNode().put("reason", "AUTOTEST 验证截止只读");
@@ -731,6 +735,29 @@ class IsolatedApiE2ETest {
         adminCsrf, Integer.toString(data(closed).path("version").asInt()));
     assertEquals(200, finished.statusCode(), finished.body());
     assertEquals("FINISHED", data(finished).path("status").asText());
+
+    var exportCreated = send(admin, "POST", "/admin/activities/" + activityId + "/exports",
+        JSON.createObjectNode().put("exportType", "ORDER_PACKAGE"), adminCsrf, null, UUID.randomUUID().toString());
+    assertEquals(202, exportCreated.statusCode(), exportCreated.body());
+    long exportTaskId = data(exportCreated).path("id").asLong();
+    JsonNode exportTask = data(exportCreated);
+    for (int attempt = 0; attempt < 60 && !"COMPLETED".equals(exportTask.path("status").asText()); attempt++) {
+      Thread.sleep(500);
+      exportTask = data(send(admin, "GET", "/admin/activities/" + activityId + "/exports/" + exportTaskId, null, null, null));
+      assertFalse("FAILED".equals(exportTask.path("status").asText()), exportTask.toString());
+    }
+    assertEquals("COMPLETED", exportTask.path("status").asText());
+    var download = admin.send(HttpRequest.newBuilder(URI.create(baseUrl + "/admin/activities/" + activityId
+        + "/exports/" + exportTaskId + "/download")).GET().build(), HttpResponse.BodyHandlers.ofByteArray());
+    assertEquals(200, download.statusCode());
+    var exportedNames = new java.util.HashSet<String>();
+    try (var zip = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(download.body()), StandardCharsets.UTF_8)) {
+      for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+        exportedNames.add(entry.getName());
+        assertTrue(zip.readAllBytes().length > 3);
+      }
+    }
+    assertEquals(java.util.Set.of("订单汇总.csv", "订单商品明细.csv", "有效商品汇总.csv", "有效分公司汇总.csv"), exportedNames);
 
     HttpResponse<String> historyDashboard = send(client(), "GET", "/screen/activities/" + activityCode + "/ranking", null, null, null);
     assertEquals(2, data(historyDashboard).path("totals").path("order_count").asInt());
@@ -885,8 +912,10 @@ class IsolatedApiE2ETest {
 
     ObjectNode missingRegion = JSON.createObjectNode().put("customerType", "GENERAL")
         .putNull("regionCode").put("phone", "13900000002");
-    assertEquals(404, send(client(), "POST", "/public/activities/" + activityCode + "/verify-phone",
-        missingRegion, null, null).statusCode());
+    var automaticallyIdentified = send(client(), "POST", "/public/activities/" + activityCode + "/verify-phone",
+        missingRegion, null, null);
+    assertEquals(200, automaticallyIdentified.statusCode(), automaticallyIdentified.body());
+    assertEquals(data(unassignedVerified).path("customer").path("id"), data(automaticallyIdentified).path("customer").path("id"));
   }
 
   private long upload(String importType, String filename, byte[] content) throws Exception {

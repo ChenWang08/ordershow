@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/immutability -- This browser fixture exposes controls to Playwright. */
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { ProductArt } from "/app/features/h5/ProductArt.tsx";

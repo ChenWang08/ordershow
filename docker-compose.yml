@@ -82,6 +82,8 @@ services:
     restart: unless-stopped
 
   backend:
+    image: order-show-backend:latest
+    pull_policy: never
     build:
       context: .
       dockerfile: backend/Dockerfile
@@ -132,14 +134,15 @@ services:
     restart: unless-stopped
 
   export-worker:
-    build:
-      context: .
-      dockerfile: backend/Dockerfile
+    # The backend build produces this image; only the startup command differs.
+    image: order-show-backend:latest
+    pull_policy: never
     command: ["--export-worker"]
     environment:
       <<: *backend-environment
       JAVA_TOOL_OPTIONS: -Xms64m -Xmx256m -XX:ActiveProcessorCount=1
       SPRING_FLYWAY_ENABLED: "false"
+      SPRING_MAIN_KEEP_ALIVE: "true"
       ORDER_SHOW_EXPORT_TEMP_DIR: /tmp/order-exports
       ORDER_SHOW_EXPORT_MAX_TEMP_BYTES: "1073741824"
     cpus: 0.5

@@ -1,6 +1,6 @@
 # 订购会系统项目说明
 
-> 实施状态（2026-11-01）：本地前后端固定镜像为 `local-http-20261101.1`，基于 `main e3cacc3` 加本轮未提交工作区改动构建，`latest` 已同步；数据库 V049、汇总继续开启。活动资料恢复普通 HTTP 和可见时约 30 秒条件检查，新前端不使用活动 SSE；统计按页面加载及手动刷新。详情见[本次部署记录](docs/deployment/2026-11-01-activity-http-local.md)。下文“待部署源码/尚未部署”保留历史记录；此前 SSE 和删除普通 GET 的说明已被本次实现替代。源码/镜像未推送，ACK 与公网 WAF 尚待验收。本文项目说明对应 React 正式前端、Spring Boot 后端、MySQL、Redis、MinIO 和 Docker Compose 实现。此前标注“仅前端内存/正式系统待接入”的段落属于原型阶段历史说明；当前运行与验收方式以根目录 `README.md`、Flyway 迁移、OpenAPI 契约和 `docs/design/07-department-account-and-activity-isolation-plan.md` 为准。商品价格保存后自动同步当前活动有效订单，订单当前明细和看板使用最新金额；订单历史版本保留原提交数据。订单综合看板的完整模块、统计口径、交互和验收规则见 `docs/design/06-order-dashboard-plan.md`。
+> 实施状态（2026-11-05）：本地 Docker 前后端已更新至 `27bf427d2765108809822ae127406e304d469b16`，固定镜像标签均为 `local-27bf427-20261105`，`latest` 已同步；数据库 V053、汇总继续开启，独立导出进程已运行。入口为 [http://localhost:3000/admin](http://localhost:3000/admin)。本次启用活动配置复用、归档与永久删除、异步 CSV ZIP 导出、抽奖轮次排序和后台列表优化；原订单及历史核心数据校验一致，原数据服务容器、挂载和实际 `.env` 保留。备份恢复、隔离接口及浏览器验证已完成，详见[本次部署与测试边界](docs/deployment/2026-11-05-main-local.md)。下文“待部署源码/尚未部署”及旧“当前本地部署”保留历史记录；已纳入上述提交的功能现已部署，当前运行版本以本段为准。活动资料继续普通 HTTP 条件检查，新前端不使用活动 SSE；后台概览统计仅手动刷新，其他统计按各页面规则读取。源码/镜像未推送，本轮未修改 ACK 或云端资源。本文项目说明对应 React 正式前端、Spring Boot 后端、MySQL、Redis、MinIO 和 Docker Compose 实现。此前标注“仅前端内存/正式系统待接入”的段落属于原型阶段历史说明；当前运行与验收方式以根目录 `README.md`、Flyway 迁移、OpenAPI 契约和 `docs/design/07-department-account-and-activity-isolation-plan.md` 为准。商品价格保存后自动同步当前活动有效订单，订单当前明细和看板使用最新金额；订单历史版本保留原提交数据。订单综合看板的完整模块、统计口径、交互和验收规则见 `docs/design/06-order-dashboard-plan.md`。
 
 ## 1. 文档目的
 

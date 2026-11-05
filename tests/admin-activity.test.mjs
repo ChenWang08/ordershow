@@ -4,7 +4,7 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { loadModule } from "./helpers/load-ts-module.mjs";
 
-const { ActivityOverview } = loadModule("app/features/admin/ActivityOverview.tsx", { "./ActivityBackgroundCard": { ActivityBackgroundCard: () => null }, "./ActivityLiveRoomCard": { ActivityLiveRoomCard: () => null }, "../../admin-context": { useAdminIdentity: () => ({ roleCode: "DEPARTMENT_ADMIN" }) } });
+const { ActivityOverview } = loadModule("app/features/admin/ActivityOverview.tsx", { "./ActivityBackgroundCard": { ActivityBackgroundCard: () => null }, "./ActivityLiveRoomCard": { ActivityLiveRoomCard: () => null }, "./ActivityManagementActions": { ActivityManagementActions: () => null }, "../../admin-context": { useAdminIdentity: () => ({ roleCode: "DEPARTMENT_ADMIN" }) } });
 const noop = () => {};
 
 test("new activities request the designed 90-company and 30-branch ranking limits", async () => {
@@ -147,6 +147,7 @@ test('member overview never exposes activity lifecycle controls even with all pe
   const { ActivityOverview: MemberOverview } = loadModule('app/features/admin/ActivityOverview.tsx', {
     './ActivityBackgroundCard': { ActivityBackgroundCard: () => null },
     './ActivityLiveRoomCard': { ActivityLiveRoomCard: () => null },
+    './ActivityManagementActions': { ActivityManagementActions: () => null },
     '../../admin-context': { useAdminIdentity: () => ({ roleCode: 'DEPARTMENT_MEMBER', permissions: ['OVERVIEW','PRODUCT','WHITELIST','ATTENDANCE','ORDER','LOTTERY'] }) },
   });
   for (const activityStatus of ['draft','scheduled','running','closed','finished']) {
