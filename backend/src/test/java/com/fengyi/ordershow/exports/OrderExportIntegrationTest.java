@@ -85,8 +85,8 @@ class OrderExportIntegrationTest {
       jdbc.batchUpdate("INSERT INTO customer_order(id,activity_id,activity_customer_id,order_no,status,customer_type,region_code,branch_name_snapshot,dealer_full_name_snapshot,current_version_no,total_quantity,total_amount,total_tons,first_submitted_at,last_submitted_at,last_modified_at,created_source,last_modified_source) VALUES(?,?,?,?,'SUBMITTED','GENERAL','EAST','测试分公司',?,1,?,?,?,'2020-01-01 01:00:00','2020-01-02 02:00:00','2020-01-02 03:00:00','H5','H5')",orderRows);
     }
     jdbc.update("""
-        INSERT INTO order_item(order_id,activity_product_id,line_no,material_code,material_name,product_line,specification,case_pack,rebate_status,is_gift_box,quantity,case_price,line_amount,ton_case_factor,line_tons)
-        SELECT o.id,p.id,CAST(p.material_code AS UNSIGNED),p.material_code,p.material_name,'项目组','规格','箱规','ALL',FALSE,1,10,10,1,1
+        INSERT INTO order_item(order_id,activity_product_id,line_no,material_code,material_name,product_line,variety_name,specification,case_pack,rebate_status,is_gift_box,quantity,case_price,base_case_price,line_amount,ton_case_factor,line_tons)
+        SELECT o.id,p.id,CAST(p.material_code AS UNSIGNED),p.material_code,p.material_name,'项目组','品种','规格','箱规','ALL',FALSE,1,10,10,10,1,1
         FROM customer_order o JOIN activity_product p ON p.activity_id=o.activity_id WHERE o.activity_id=?
         """,id);
   }
@@ -135,16 +135,17 @@ class OrderExportIntegrationTest {
     jdbc.update("UPDATE customer_order SET customer_type='SPECIAL' WHERE id=?",base+3);
     Task task=create(id,new Filters(null,"GENERAL",null));var changed=new java.util.concurrent.atomic.AtomicBoolean();
     Result result=generator(1,1000000).generate(task,directory,(stage,o,d)->{
-      if(o==2 && changed.compareAndSet(false,true))jdbc.update("UPDATE order_item SET line_amount=99 WHERE order_id=?",base+1);
+      if(o==2 && changed.compareAndSet(false,true))jdbc.update("UPDATE order_item SET line_amount=99,variety_name='快照后品种',specification='快照后规格',base_case_price=999.9876,applied_tier_min_quantity=10 WHERE order_id=?",base+1);
     });
     assertThat(result.counts()).containsExactly(2L,4L,2L,1L);assertThat(result.snapshotAt()).isNotNull();
     try(var zip=new ZipFile(result.zip().toFile(),StandardCharsets.UTF_8)) {
       assertThat(zip.stream().map(e->e.getName()).toList()).containsExactly(CsvExportGenerator.NAMES);
       String summary=read(zip,0),details=read(zip,1),products=read(zip,2);
       assertThat(summary).contains("13900000001","2020-01-01 09:00:00").doesNotContain("客户"+id+"_3");
-      assertThat(details).contains("\"10.00\"").doesNotContain("\"99.00\"");
+      assertThat(details).contains("\"10.00\"","\"品种\",\"规格\",\"项目组\",\"1\",\"10.0000\",\"否\"")
+          .doesNotContain("\"99.00\"","快照后品种","快照后规格","999.9876","\"是\"");
       assertThat(products).contains("\"10.00\"");
-      assertThat(details.split("\r\n")[0].split(",")).hasSize(17);
+      assertThat(details.split("\r\n")[0].split(",")).hasSize(21);
     }
     Result withdrawn=generator(1,1000000).generate(create(id,new Filters("WITHDRAWN","GENERAL",null)),directory.resolve("withdrawn"),(s,o,d)->{});
     assertThat(withdrawn.counts()).containsExactly(1L,2L,2L,1L);
@@ -154,6 +155,53 @@ class OrderExportIntegrationTest {
     assertThat(empty.counts()).containsExactly(0L,0L,0L,0L);
     assertThatThrownBy(()->generator(1,100).generate(task,directory.resolve("limit"),(s,o,d)->{})).isInstanceOf(IOException.class).hasMessage("EXPORT_TEMP_LIMIT");
   }
+  @Test void detailColumnsUseStoredSnapshotsAndActualTierHits()throws Exception {
+    long id=activity("FINISHED");seed(id,1,7);long orderId=id*10000+1;
+    jdbc.update("UPDATE activity_product SET variety_name='当前商品品种',specification='当前商品规格',case_price=9999 WHERE activity_id=?",id);
+    String incremental="""
+        {"tiers":[{"minQuantity":1,"casePrice":100},{"minQuantity":10,"casePrice":90},{"minQuantity":20,"casePrice":80}],
+         "segments":[{"minQuantity":1,"maxQuantity":9,"quantity":9,"casePrice":100,"amount":900},
+                     {"minQuantity":10,"maxQuantity":19,"quantity":10,"casePrice":90,"amount":900},
+                     {"minQuantity":20,"maxQuantity":null,"quantity":6,"casePrice":80,"amount":480}]}
+        """;
+    String firstTierOnly="""
+        {"tiers":[{"minQuantity":1,"casePrice":70.1234}],
+         "segments":[{"minQuantity":1,"maxQuantity":null,"quantity":5,"casePrice":70.1234,"amount":350.62}]}
+        """;
+    jdbc.batchUpdate("""
+        UPDATE order_item SET variety_name=?,specification=?,quantity=?,case_price=?,base_case_price=?,base_price_quantity=?,
+          tier_case_price=?,tier_min_quantity=?,tier_price_quantity=?,applied_tier_min_quantity=?,pricing_mode=?,line_amount=?,pricing_details=?
+        WHERE order_id=? AND line_no=?
+        """,List.of(
+        new Object[]{"普通品种","500mL",3,"10.1234","10.1234",3,null,null,0,null,null,"30.37",null,orderId,1},
+        new Object[]{"未达门槛","500mL",9,"100","100",9,"90",10,0,null,"WHOLE_ORDER","900",null,orderId,2},
+        new Object[]{"整批优惠","500mL",10,"90","100",0,"90",10,10,10,"WHOLE_ORDER","900",null,orderId,3},
+        new Object[]{"多档分段","500mL",25,"100","100",9,"80",20,16,20,"INCREMENTAL","2280",incremental,orderId,4},
+        new Object[]{"独立第一档","500mL",5,"70.1234","70.1234",5,null,null,0,null,"INCREMENTAL","350.62",firstTierOnly,orderId,5},
+        new Object[]{null,null,1,"123.4567",null,null,null,null,null,null,null,"123.46",null,orderId,6},
+        new Object[]{"品种,\"A\"\r\n第二行","=SUM(1,2)",3,"0.1234","0.1234",3,null,null,0,null,null,"0.37",null,orderId,7}));
+    jdbc.update("""
+        UPDATE customer_order SET total_quantity=(SELECT SUM(quantity) FROM order_item WHERE order_id=?),
+          total_amount=(SELECT SUM(line_amount) FROM order_item WHERE order_id=?) WHERE id=?
+        """,orderId,orderId,orderId);
+    Result result=generator(2,1000000).generate(create(id,ALL),directory,(s,o,d)->{});
+    assertThat(result.counts()).containsExactly(1L,7L,7L,1L);
+    try(var zip=new ZipFile(result.zip().toFile(),StandardCharsets.UTF_8)) {
+      assertThat(zip.stream().map(e->e.getName()).toList()).containsExactly(CsvExportGenerator.NAMES);
+      String details=read(zip,1);
+      String header="\ufeff"+String.join(",",Arrays.stream(CsvExportGenerator.HEADERS[1]).map(h->"\""+h+"\"").toList())+"\r\n";
+      String prefix="\"000"+orderId+"\",\"SUBMITTED\",\"客户\",\"GENERAL\",\"EAST\",\"测试分公司\",\"客户"+id+"_1\",\"13900000001\",\"1\",";
+      String suffix=",\"1.000000\",\"2020-01-02 10:00:00\"\r\n";
+      assertThat(details).isEqualTo(header
+          +prefix+"\"1\",\"001\",\"测试商品1\",\"普通品种\",\"500mL\",\"项目组\",\"3\",\"10.1234\",\"否\",\"30.37\""+suffix
+          +prefix+"\"2\",\"002\",\"测试商品2\",\"未达门槛\",\"500mL\",\"项目组\",\"9\",\"100.0000\",\"否\",\"900.00\""+suffix
+          +prefix+"\"3\",\"003\",\"测试商品3\",\"整批优惠\",\"500mL\",\"项目组\",\"10\",\"100.0000\",\"是\",\"900.00\""+suffix
+          +prefix+"\"4\",\"004\",\"测试商品4\",\"多档分段\",\"500mL\",\"项目组\",\"25\",\"100.0000\",\"是\",\"2280.00\""+suffix
+          +prefix+"\"5\",\"005\",\"测试商品5\",\"独立第一档\",\"500mL\",\"项目组\",\"5\",\"70.1234\",\"否\",\"350.62\""+suffix
+          +prefix+"\"6\",\"006\",\"测试商品6\",\"\",\"\",\"项目组\",\"1\",\"\",\"否\",\"123.46\""+suffix
+          +prefix+"\"7\",\"007\",\"测试商品7\",\"品种,\"\"A\"\"\r\n第二行\",\"'=SUM(1,2)\",\"项目组\",\"3\",\"0.1234\",\"否\",\"0.37\""+suffix);
+    }
+  }
   static String read(ZipFile zip,int index)throws IOException {try(var input=zip.getInputStream(zip.getEntry(CsvExportGenerator.NAMES[index]))){return new String(input.readAllBytes(),StandardCharsets.UTF_8);}}
   @Test void fourThousandOrdersWithFiftyItemsStreamToZip()throws Exception {
     long id=activity("FINISHED");seed(id,4000,50);Task task=create(id,ALL);long start=System.nanoTime();
@@ -161,7 +209,8 @@ class OrderExportIntegrationTest {
     assertThat(result.counts()).containsExactly(4000L,200000L,50L,1L);
     try(var zip=new ZipFile(result.zip().toFile(),StandardCharsets.UTF_8)) {
       for(int i=0;i<4;i++)try(var reader=new BufferedReader(new InputStreamReader(zip.getInputStream(zip.getEntry(CsvExportGenerator.NAMES[i])),StandardCharsets.UTF_8))) {
-        assertThat(reader.readLine()).startsWith("\ufeff");long count=0;while(reader.readLine()!=null)count++;
+        assertThat(reader.readLine()).startsWith("\ufeff");long count=0;String row;
+        while((row=reader.readLine())!=null) {if(count==0 && i==1)assertThat(row.split(",")).hasSize(21);count++;}
         assertThat(count).isEqualTo(result.counts().get(i));
       }
     }

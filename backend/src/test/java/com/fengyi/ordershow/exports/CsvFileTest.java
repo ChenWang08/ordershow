@@ -30,9 +30,9 @@ class CsvFileTest {
       assertThatThrownBy(()->second.row("1234567890123456789")).isInstanceOf(java.io.IOException.class).hasMessage("EXPORT_TEMP_LIMIT");
     }
   }
-  @Test void detailHeadersMatchAgreedSeventeenColumns() {
+  @Test void detailHeadersMatchAgreedTwentyOneColumns() {
     assertThat(CsvExportGenerator.NAMES).containsExactly("订单汇总.csv","订单商品明细.csv","有效商品汇总.csv","有效分公司汇总.csv");
-    assertThat(CsvExportGenerator.HEADERS[1]).containsExactly("订单编号","状态","来源","客户类型","大区","分公司","经销商","电话","订单版本","行号","物料代码","物料名称","项目组","订货箱数","金额","吨数","最后提交（北京时间）");
-    assertThat(java.util.Arrays.stream(CsvExportGenerator.HEADERS).mapToInt(h->h.length).toArray()).containsExactly(15,17,9,6);
+    assertThat(CsvExportGenerator.HEADERS[1]).containsExactly("订单编号","状态","来源","客户类型","大区","分公司","经销商","电话","订单版本","行号","物料代码","物料名称","品种","规格","项目组","订货箱数","基础箱价（元/箱）","是否命中阶梯","金额","吨数","最后提交（北京时间）");
+    assertThat(java.util.Arrays.stream(CsvExportGenerator.HEADERS).mapToInt(h->h.length).toArray()).containsExactly(15,21,9,6);
   }
 }

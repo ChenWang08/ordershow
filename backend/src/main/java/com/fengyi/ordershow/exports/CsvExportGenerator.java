@@ -24,7 +24,7 @@ public class CsvExportGenerator {
   public static final String[] NAMES={"订单汇总.csv","订单商品明细.csv","有效商品汇总.csv","有效分公司汇总.csv"};
   public static final String[][] HEADERS={
     {"订单编号","状态","来源","客户类型","大区","分公司","经销商","电话","版本","订货箱数","订货吨数","订单金额","首次提交（北京时间）","最后提交（北京时间）","最后修改（北京时间）"},
-    {"订单编号","状态","来源","客户类型","大区","分公司","经销商","电话","订单版本","行号","物料代码","物料名称","项目组","订货箱数","金额","吨数","最后提交（北京时间）"},
+    {"订单编号","状态","来源","客户类型","大区","分公司","经销商","电话","订单版本","行号","物料代码","物料名称","品种","规格","项目组","订货箱数","基础箱价（元/箱）","是否命中阶梯","金额","吨数","最后提交（北京时间）"},
     {"物料代码","物料名称","项目组","规格","箱规","订货箱数","订货金额","订货吨数","下单客户数"},
     {"大区","分公司","有效订单数","订货箱数","订货吨数","订单金额"}
   };
@@ -111,13 +111,14 @@ public class CsvExportGenerator {
           // Keep sorting and range access entirely on uk_order_item_line. Joining all items and sorting
           // across o.id/i.line_no would rescan the remaining event on every page in MySQL.
           var rows=jdbc.queryForList("""
-              SELECT order_id,line_no,material_code,material_name,product_line,quantity,line_amount,line_tons
+              SELECT order_id,line_no,material_code,material_name,variety_name,specification,product_line,quantity,
+                base_case_price,applied_tier_min_quantity,line_amount,line_tons
               FROM order_item WHERE order_id IN (
               """+placeholders+") AND (order_id>? OR (order_id=? AND line_no>?)) ORDER BY order_id,line_no LIMIT ?",parameters.toArray());
           for(var item:rows) {
             order=((Number)item.get("order_id")).longValue();line=((Number)item.get("line_no")).longValue();
             var r=byId.get(order);
-            csv.row(r.get("order_no"),r.get("status"),source(r.get("created_source")),r.get("customer_type"),r.get("region_code"),r.get("branch_name_snapshot"),r.get("dealer_full_name_snapshot"),r.get("phone"),r.get("current_version_no"),item.get("line_no"),item.get("material_code"),item.get("material_name"),item.get("product_line"),item.get("quantity"),item.get("line_amount"),item.get("line_tons"),UtcTime.beijing(r.get("last_submitted_at")));
+            csv.row(r.get("order_no"),r.get("status"),source(r.get("created_source")),r.get("customer_type"),r.get("region_code"),r.get("branch_name_snapshot"),r.get("dealer_full_name_snapshot"),r.get("phone"),r.get("current_version_no"),item.get("line_no"),item.get("material_code"),item.get("material_name"),item.get("variety_name"),item.get("specification"),item.get("product_line"),item.get("quantity"),item.get("base_case_price"),item.get("applied_tier_min_quantity")==null?"否":"是",item.get("line_amount"),item.get("line_tons"),UtcTime.beijing(r.get("last_submitted_at")));
             counts.set(1,counts.get(1)+1);
           }
           progress.update("READING",counts.get(0),counts.get(1));
