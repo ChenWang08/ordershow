@@ -7,7 +7,7 @@ import { loadModule } from './helpers/load-ts-module.mjs';
 function harness() {
   let selected=null;
   const {H5SubmittedPage:Page}=loadModule('app/features/h5/H5SubmittedPage.tsx',{
-    react:{...React,useState:()=>[selected,v=>{selected=v;}]},
+    react:{...React,useState:()=>[selected,v=>{selected=v;}],useEffect:()=>{}},
     '../../api':{apiAssetUrl:url=>url},
     './ProductArt':{ProductArt:()=>null},
   });

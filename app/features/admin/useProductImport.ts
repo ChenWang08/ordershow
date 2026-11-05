@@ -21,6 +21,7 @@ type ProductImportOptions = ProductModuleOptions & {
   productImportHasRun: boolean;
   setProductImportCompleted: (completed: boolean) => void;
   onProductImportCommitted: () => void;
+  onReadbackFailed?: () => void;
   setServerImportTasks: Dispatch<SetStateAction<ImportTaskIds>>;
   setServerImportBlocking: Dispatch<SetStateAction<ImportTaskIds>>;
   serverImportBlocking: ImportTaskIds;
@@ -30,9 +31,11 @@ type ProductImportOptions = ProductModuleOptions & {
 export function useProductImport({
   activityId, activityStatus, productRows, setProductRows, productImportHasRun, setProductImportCompleted, onProductImportCommitted,
   serverImportTasks, setServerImportTasks, serverImportBlocking, setServerImportBlocking,
-  setActionNotice, recordOperation, importWaitOptions,
+  setActionNotice, recordOperation, importWaitOptions, onReadbackFailed,
 }: ProductImportOptions) {
   const activityPublished = activityStatus !== "draft";
+  const [productImportStage, setProductImportStage] = useState<"preview" | "images" | "publishing" | "cancelling" | null>(null);
+  const productImportBusyRef = useRef(false);
   const [productFileName, setProductFileName] = useState("");
   const [productImportWarnings, setProductImportWarnings] = useState<string[]>([]);
   const [productImportError, setProductImportError] = useState("");
@@ -66,6 +69,7 @@ export function useProductImport({
   );
   const [productImageError, setProductImageError] = useState("");
   const beginProductImport = () => {
+    if (productImportBusyRef.current) return;
     if (activityPublished) {
       setActionNotice("活动发布后商品 Excel 已锁定，请先撤回发布。");
       return;
@@ -84,34 +88,43 @@ export function useProductImport({
     setProductImageUploadFile(null);
   };
   const cancelProductImport = async () => {
-    const taskId = serverImportTasks.PRODUCT;
-    if (taskId && Number.isFinite(Number(activityId))) {
-      try {
-        await cancelImport(Number(activityId), taskId);
-      } catch (error) {
-        setActionNotice(error instanceof ApiError ? error.message : "取消商品导入失败，请稍后重试。");
-        return;
+    if (productImportBusyRef.current) return;
+    productImportBusyRef.current = true;
+    setProductImportStage("cancelling");
+    try {
+      const taskId = serverImportTasks.PRODUCT;
+      if (taskId && Number.isFinite(Number(activityId))) {
+        try {
+          await cancelImport(Number(activityId), taskId);
+        } catch (error) {
+          setActionNotice(error instanceof ApiError ? error.message : "取消商品导入失败，请稍后重试。");
+          return;
+        }
+        setServerImportTasks((current) => ({ ...current, PRODUCT: undefined }));
+        setServerImportBlocking((current) => ({ ...current, PRODUCT: 0 }));
       }
-      setServerImportTasks((current) => ({ ...current, PRODUCT: undefined }));
-      setServerImportBlocking((current) => ({ ...current, PRODUCT: 0 }));
+      const hadConfirmedImport = productImportHasRun;
+      if (pendingProductRollbackRows) setProductRows(cloneProductRows(pendingProductRollbackRows));
+      setPendingProductRollbackRows(null);
+      revokeProductImageAssets(productImageAssets);
+      setProductImageAssets([]);
+      setProductImageFileName("");
+      setProductImageAttemptName("");
+      setProductImageUploadFile(null);
+      setProductFileName("");
+      setProductSheetCounts([]);
+      setProductImportWarnings([]);
+      setProductImportError("");
+      setProductImportInputCount(0);
+      setProductImportCompleted(hadConfirmedImport);
+      setActionNotice("已取消本次商品替换，当前商品目录保持不变。" );
+    } finally {
+      productImportBusyRef.current = false;
+      setProductImportStage(null);
     }
-    const hadConfirmedImport = productImportHasRun;
-    if (pendingProductRollbackRows) setProductRows(cloneProductRows(pendingProductRollbackRows));
-    setPendingProductRollbackRows(null);
-    revokeProductImageAssets(productImageAssets);
-    setProductImageAssets([]);
-    setProductImageFileName("");
-    setProductImageAttemptName("");
-    setProductImageUploadFile(null);
-    setProductFileName("");
-    setProductSheetCounts([]);
-    setProductImportWarnings([]);
-    setProductImportError("");
-    setProductImportInputCount(0);
-    setProductImportCompleted(hadConfirmedImport);
-    setActionNotice("已取消本次商品替换，当前商品目录保持不变。" );
   };
   const confirmProductImport = async () => {
+    if (productImportBusyRef.current) return;
     if (activityPublished) {
       setActionNotice("活动发布后禁止确认商品 Excel 导入，请先撤回发布。");
       return;
@@ -127,36 +140,52 @@ export function useProductImport({
     const notInherited = previousRestricted.filter(row => !newIdentities.has(identity(row)));
     if (notInherited.length && !window.confirm(`有 ${notInherited.length} 个原商品的经销商限制无法按商品身份继承：${notInherited.slice(0,5).map(row => row.materialName).join("、")}。新商品以本次 Excel 分公司限制为准，需在确认导入后重新设置经销商限制。是否继续？`)) return;
     if (imageWarningCount > 0 && !window.confirm(`本批次有 ${productImageStats.pendingProducts} 个商品图片待确认、${productImageStats.unmatchedProducts} 个商品图片未匹配。发布后这些商品将使用默认图片，是否继续？`)) return;
-    const taskId = serverImportTasks.PRODUCT;
-    let publishedRows: ProductImportRow[] | null = null;
-    if (taskId) {
-      try {
-        await confirmImport(Number(activityId), taskId, productImageUploadFile ?? undefined,
-          buildProductImageDecisions(productRows, resolvedProductImageAssets));
-        await waitForImport(Number(activityId), taskId, importWaitOptions?.());
-        const [products, imageReviews] = await Promise.all([
-          loadAdminProducts(Number(activityId)), loadProductImageReviews(Number(activityId)),
-        ]);
-        publishedRows = mergeProductImageReviews(products.map(runtimeProductToImportRow), imageReviews);
-      } catch (error) {
-        setActionNotice(error instanceof ApiError ? error.message : "商品导入发布失败，请检查后重试。");
-        return;
+    productImportBusyRef.current = true;
+    setProductImportStage("publishing");
+    try {
+      const taskId = serverImportTasks.PRODUCT;
+      let publishedRows: ProductImportRow[] | null = null;
+      let readbackError = false;
+      if (taskId) {
+        try {
+          await confirmImport(Number(activityId), taskId, productImageUploadFile ?? undefined,
+            buildProductImageDecisions(productRows, resolvedProductImageAssets));
+          await waitForImport(Number(activityId), taskId, importWaitOptions?.());
+        } catch (error) {
+          setActionNotice(error instanceof ApiError ? error.message : "商品导入发布失败，请检查后重试。");
+          return;
+        }
+        try {
+          const [products, imageReviews] = await Promise.all([
+            loadAdminProducts(Number(activityId)), loadProductImageReviews(Number(activityId)),
+          ]);
+          publishedRows = mergeProductImageReviews(products.map(runtimeProductToImportRow), imageReviews);
+        } catch { readbackError = true; publishedRows = []; }
+        setServerImportTasks(current => ({ ...current, PRODUCT: undefined }));
+        setServerImportBlocking(current => ({ ...current, PRODUCT: 0 }));
       }
+      const cleanRows = publishedRows ?? productRows;
+      setProductRows(cleanRows);
+      setPendingProductRollbackRows(null);
+      setProductImportCompleted(true);
+      onProductImportCommitted();
+      recordOperation("替换商品 Excel", productFileName || "商品信息 Excel", `共 ${productImportStats.total} 条；有效 ${productImportStats.valid} 条，待完善 ${productImportStats.incomplete} 条。`);
+      if (readbackError) onReadbackFailed?.();
+      setActionNotice(readbackError ? "商品目录已替换成功，但最新列表读取失败。请点击刷新列表核对，请勿重复确认导入。" : `商品目录已替换：共 ${productImportStats.total} 条，有效 ${productImportStats.valid} 条、待完善 ${productImportStats.incomplete} 条${productImageUploadFile ? "，本批次图片已同步" : "，未匹配商品使用默认图片"}。`);
+    } finally {
+      productImportBusyRef.current = false;
+      setProductImportStage(null);
     }
-    const cleanRows = publishedRows ?? productRows;
-    setProductRows(cleanRows);
-    setPendingProductRollbackRows(null);
-    setProductImportCompleted(true);
-    onProductImportCommitted();
-    recordOperation("替换商品 Excel", productFileName || "商品信息 Excel", `共 ${productImportStats.total} 条；有效 ${productImportStats.valid} 条，待完善 ${productImportStats.incomplete} 条。`);
-    setActionNotice(`商品目录已替换：共 ${productImportStats.total} 条，有效 ${productImportStats.valid} 条、待完善 ${productImportStats.incomplete} 条${productImageUploadFile ? "，本批次图片已同步" : "，未匹配商品使用默认图片"}。`);
   };
   const handleProductFile = async (file: File) => {
+    if (productImportBusyRef.current) return;
     if (activityPublished) {
       setProductImportError("活动发布后商品 Excel 已锁定，请先撤回发布。");
       setActionNotice("活动发布后商品 Excel 已锁定，请先撤回发布。");
       return;
     }
+    productImportBusyRef.current = true;
+    setProductImportStage("preview");
     setProductImportError("");
     try {
       const result = await parseProductWorkbook(file);
@@ -190,14 +219,20 @@ export function useProductImport({
       setProductImportWarnings([]);
       setProductImportError(error instanceof Error ? error.message : "文件解析失败，请检查 Excel 格式。");
       setProductImportCompleted(false);
+    } finally {
+      productImportBusyRef.current = false;
+      setProductImportStage(null);
     }
   };
   const handleProductImageFile = async (file: File) => {
+    if (productImportBusyRef.current) return;
     if (activityPublished) {
       setProductImageError("活动发布后禁止批量导入商品图片，请先撤回发布。");
       setActionNotice("活动发布后禁止批量导入商品图片，请先撤回发布。");
       return;
     }
+    productImportBusyRef.current = true;
+    setProductImportStage("images");
     setProductImageError("");
     setProductImageAttemptName(file.name);
     try {
@@ -211,9 +246,13 @@ export function useProductImport({
       setActionNotice(`已读取 ${assets.length} 张图片：已匹配 ${imageResult.stats.matchedProducts} 个商品、待确认 ${imageResult.stats.pendingProducts} 个商品、未匹配 ${imageResult.stats.unmatchedProducts} 个商品。`);
     } catch (error) {
       setProductImageError(error instanceof Error ? error.message : "图片 ZIP 解析失败，请检查文件。");
+    } finally {
+      productImportBusyRef.current = false;
+      setProductImportStage(null);
     }
   };
   const removeProductImages = () => {
+    if (productImportBusyRef.current) return;
     if (activityPublished) {
       setActionNotice("活动发布后禁止批量移除商品图片，请先撤回发布。");
       return;
@@ -228,6 +267,10 @@ export function useProductImport({
     setActionNotice("已移除本批次 ZIP，全部商品恢复为未匹配；当前已发布目录不受影响。");
   };
   return {
+    productImportBusy: productImportStage !== null,
+    productPreviewLoading: productImportStage === "preview",
+    productImageLoading: productImportStage === "images",
+    productPublishing: productImportStage === "publishing",
     productFileName,
     setProductFileName,
     productImportWarnings,

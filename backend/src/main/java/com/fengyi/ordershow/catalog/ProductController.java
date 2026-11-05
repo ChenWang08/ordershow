@@ -77,6 +77,18 @@ public class ProductController {
     return ApiResponse.of(service.create(activityId, body), TraceFilter.id(request));
   }
 
+  @GetMapping("/admin/activities/{activityId}/products/{productId}/editor-state")
+  @org.springframework.transaction.annotation.Transactional(readOnly = true)
+  ApiResponse<EditorState> editorState(@PathVariable long activityId, @PathVariable long productId,
+      @RequestParam org.springframework.util.MultiValueMap<String, String> parameters, HttpServletRequest request) {
+    auth.requireAdmin(request);
+    var products = service.editorProducts(activityId, productId, parameters.getOrDefault("imageGroupNames", List.of()));
+    return ApiResponse.of(new EditorState(products, scopes.summaries(activityId, products), service.editorReviews(activityId, products)), TraceFilter.id(request));
+  }
+
+  public record EditorState(List<ProductService.ProductView> products,
+      java.util.Map<Long, ProductDealerScopeService.ScopeSummary> scopes, List<ProductService.ImageReviewView> reviews) {}
+
   @PatchMapping("/admin/activities/{activityId}/products/{productId}")
   @org.springframework.transaction.annotation.Transactional
   ApiResponse<ProductService.ProductView> update(@PathVariable long activityId, @PathVariable long productId,

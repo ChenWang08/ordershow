@@ -34,17 +34,15 @@ public class OrderService {
   private final DashboardService dashboards;
   private final ObjectMapper json;
   private final OrderQueryService queries;
-  private final OrderExportService exports;
   private final OrderChangeRequestRepository changeRequests;
 
   public OrderService(OrderRepository repository, ActivityService activities, DashboardService dashboards, ObjectMapper json,
-                      OrderQueryService queries, OrderExportService exports, OrderChangeRequestRepository changeRequests) {
+                      OrderQueryService queries, OrderChangeRequestRepository changeRequests) {
     this.repository = repository;
     this.activities = activities;
     this.dashboards = dashboards;
     this.json = json;
     this.queries = queries;
-    this.exports = exports;
     this.changeRequests = changeRequests;
   }
 
@@ -478,9 +476,10 @@ public class OrderService {
     return queries.adminOrders(activityId, status, customerType, keyword, page, size, traceId);
   }
 
-  public byte[] export(long activityId, String status, String customerType, String keyword) {
-    return exports.export(activityId, status, customerType, keyword);
+  public OrderQueryService.OrderCounts adminOrderCounts(long activityId) {
+    return queries.adminOrderCounts(activityId);
   }
+
 
 
   private Map<Long, Long> quantities(List<SubmitItem> items) {
@@ -536,7 +535,8 @@ public class OrderService {
 
   private ActivityService.ActivityView requireAdminOrderWritable(long activityId) {
     ActivityService.ActivityView activity = activities.byId(activityId);
-    if (!List.of("ACTIVE", "CLOSED", "FINISHED", "ARCHIVED").contains(activity.status())) {
+    if ("ARCHIVED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_ARCHIVED_READ_ONLY", "活动已归档，请先解除归档后维护订单");
+    if (!List.of("ACTIVE", "CLOSED", "FINISHED").contains(activity.status())) {
       throw DomainException.conflict("ADMIN_ORDER_ACTIVITY_NOT_READY", "活动开始后才可以维护正式订单");
     }
     return activity;
@@ -665,7 +665,7 @@ public class OrderService {
                              String customerType, String regionCode, String branchName, String dealerFullName,
                              String phone, String phoneMasked, int currentVersion, int lockVersion, long totalQuantity,
                              BigDecimal totalTons, BigDecimal totalAmount, Instant firstSubmittedAt,
-                             Instant lastSubmittedAt, Instant lastModifiedAt) {}
+                             Instant lastSubmittedAt, Instant lastModifiedAt, Long pendingChangeRequestId) {}
   public record AdminOrderView(long id, long activityId, long activityCustomerId, String orderNo, String status,
                                String createdSource, String lastModifiedSource, int lockVersion, String customerType,
                                String regionCode, String branchName, String dealerShortName, String dealerFullName,

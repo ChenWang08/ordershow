@@ -54,8 +54,8 @@ await fs.writeFile(path.join(destination,'upgrade-v039-v041.manifest.json'),JSON
 console.log('Generated upgrade-v039-v041.sql and manifest; no database was accessed.');
 
 // Existing V041 databases receive only V042-V049; the empty installation bundle is never used here.
-const v041Files=files.filter(f=>Number(f.match(/^V(\d+)/)[1])>41);
-if(latestVersion!=='V049'||v041Files.length!==8)throw new Error('Review incremental package range before changing it');
+const v041Files=files.filter(f=>Number(f.match(/^V(\d+)/)[1])>41 && Number(f.match(/^V(\d+)/)[1])<=49);
+if(latestVersion!=='V053'||v041Files.length!==8)throw new Error('Review incremental package range before changing it');
 let v041Sql='-- EXISTING V041 DATABASE ONLY. DBA: stop all writers, verify version and back up first.\n'
  +'-- Apply in order; stop on first error. DDL may implicitly commit. Never use --force.\n'
  +'-- V048 inserts first-price tiers and invalidates catalog metadata; original orders/history are preserved.\n'
@@ -67,3 +67,18 @@ for(const file of v041Files){
 await fs.writeFile(path.join(destination,'upgrade-v041-v049.sql'),v041Sql);
 await fs.writeFile(path.join(destination,'upgrade-v041-v049.manifest.json'),JSON.stringify({scope:'existing V041 database only',from:'V041',to:'V049',migrations:manifest.filter(i=>v041Files.includes(i.file)),bundleSha256:crypto.createHash('sha256').update(v041Sql).digest('hex')},null,2)+'\n');
 console.log('Generated V041-V049 incremental package; no database accessed.');
+
+// Existing V049 databases: preserve V001-V049 data; add only V050-V053.
+const v049Files=files.filter(f=>Number(f.match(/^V(\d+)/)[1])>49);
+if(latestVersion!=='V053'||v049Files.length!==4)throw new Error('Review V049-V053 package range');
+let v049Sql='-- EXISTING V049 DATABASE ONLY. DBA: verify target, stop all writers/workers, back up first.\n'
+ +'-- Apply V050-V053 in order; stop on first error. MySQL DDL may implicitly commit.\n'
+ +'-- Never use mysql --force. Never run the fresh-install bundle on an existing database.\n'
+ +'SET NAMES utf8mb4;\nSET time_zone = "+00:00";\n';
+for(const file of v049Files){
+ const content=(await fs.readFile(path.join(root,'db/migrations',file),'utf8')).replace(/\r\n/g,'\n');
+ v049Sql+='\n-- BEGIN '+file+'\n'+content+'\n-- END '+file+'\nINSERT INTO deployment_schema_history(version,description) VALUES (\''+file.split('__')[0]+'\',\'DBA incremental '+file+'\');\n';
+}
+await fs.writeFile(path.join(destination,'upgrade-v049-v053.sql'),v049Sql);
+await fs.writeFile(path.join(destination,'upgrade-v049-v053.manifest.json'),JSON.stringify({scope:'existing V049 database only',from:'V049',to:'V053',migrations:manifest.filter(i=>v049Files.includes(i.file)),bundleSha256:crypto.createHash('sha256').update(v049Sql).digest('hex')},null,2)+'\n');
+console.log('Generated V049-V053 incremental package; no database accessed.');

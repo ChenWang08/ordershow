@@ -3,7 +3,7 @@
 import { formatBeijingTime } from "../shared/time";
 
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { H5OrderModel } from "./useH5OrderFlow";
 import { ProductArt } from "./ProductArt";
 import { money } from "../shared/utils";
@@ -11,6 +11,20 @@ import { groupByProductLine, unitPriceText } from "./h5-domain";
 
 export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
   const [formalRequestId, setFormalRequestId] = useState<number | null>(null);
+  const [refreshNow, setRefreshNow] = useState(Date.now);
+  const refreshDeadline = model.orderRefreshCooldownUntil ?? 0;
+  useEffect(() => {
+    if (model.visibleStep !== "submitted") return;
+    let timer: number | undefined;
+    const tick = () => {
+      const now = Date.now();
+      setRefreshNow(now);
+      if (now < refreshDeadline) timer = window.setTimeout(tick, Math.min(1000, refreshDeadline - now));
+    };
+    tick();
+    return () => window.clearTimeout(timer);
+  }, [refreshDeadline, model.visibleStep]);
+  const refreshSeconds = Math.max(0, Math.ceil((refreshDeadline - refreshNow) / 1000));
   const { pendingChangeRequest: request, runtimeOrder: order, activityClosed, orderStatus, customerOrderReadOnly } = model;
   const pending = request?.status === "PENDING";
   const rejected = request?.status === "REJECTED";
@@ -31,7 +45,14 @@ export function H5SubmittedPage({ model }: { model: H5OrderModel }) {
     <header className="simple-header"><button disabled={model.runtimeBusy} onClick={() => model.setStep("verify")}>‹</button><b>我的订单</b><span /></header>
     {model.runtimeMessage && <div className="verify-error" role="alert">{model.runtimeMessage}</div>}
     <div className={`submitted-state-card ${rejected || orderStatus === "withdrawn" || orderStatus === "voided" ? "withdrawn" : ""}`}>
-      <span className="submitted-status">{pending ? "待审核" : rejected ? "已驳回" : orderStatus === "withdrawn" ? "已撤回" : orderStatus === "voided" ? "已作废" : "已提交"}</span>
+      <div className="submitted-state-top">
+        <span className="submitted-status">{pending ? "待审核" : rejected ? "已驳回" : orderStatus === "withdrawn" ? "已撤回" : orderStatus === "voided" ? "已作废" : "已提交"}</span>
+        <button className="submitted-refresh" type="button" aria-label="刷新订单状态" aria-busy={model.orderSyncBusy}
+          disabled={model.runtimeBusy || model.orderSyncBusy || model.pendingSubmission || model.orderNeedsRefresh || refreshSeconds > 0}
+          onClick={() => void model.refreshOrderStatus()}>
+          <span className="submitted-refresh-face"><span aria-hidden="true">↻</span>{model.orderSyncBusy ? "刷新中…" : refreshSeconds > 0 ? `${refreshSeconds}s 后刷新` : "刷新状态"}</span>
+        </button>
+      </div>
       <h2>{state}</h2><p>{note}</p>
     </div>
     {model.draftMessage && <div className="h5-draft-status" role="status">{model.draftMessage}</div>}

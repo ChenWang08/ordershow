@@ -14,8 +14,12 @@ public class MemberPermissionService {
   public MemberPermissionService(JdbcTemplate jdbc) { this.jdbc = jdbc; }
 
   public void requireAccess(AdminPrincipal admin, HttpServletRequest request) {
-    if (admin.isManager()) return;
     String path = request.getRequestURI().substring(request.getContextPath().length());
+    if(path.matches("/admin/activities/[0-9]+/(exports(?:/.*)?|orders/export)")) {
+      com.fengyi.ordershow.exports.ExportPolicy.requireAdmin(admin);
+      return;
+    }
+    if (admin.isManager()) return;
     boolean read = List.of("GET", "HEAD").contains(request.getMethod());
     if (path.equals("/admin/me") && read || path.equals("/admin/auth/logout")) return;
     if (read && (path.equals("/admin/activities") || path.matches("/admin/activities/\\d+"))) return;

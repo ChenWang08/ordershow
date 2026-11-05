@@ -1,11 +1,12 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ImportTemplateDownload, ImportTemplateHint } from "../ImportTemplateDownload";
 
 import { type AttendanceImportDraft, type AttendanceRow, type WhitelistCustomerTypeMode } from "../../../domain/import-domain";
 import { AttendanceTable } from "../attendance/AttendanceTable";
 
-export function AttendancePage({ rows, fileName, warnings, sheetCounts, error, activityStarted, activityClosed, pendingImport, importAttemptName, blockingCount, previewLoading, previewReady, publishing, onRetryPreview, onFile, onAdd, onEdit, onDelete, onConfirmImport, onCancelImport, customerTypeMode = "TYPED" }: { rows: AttendanceRow[]; fileName: string; warnings: string[]; sheetCounts: Array<{ name: string; count: number }>; error: string; activityStarted: boolean; activityClosed: boolean; pendingImport: AttendanceImportDraft | null; importAttemptName: string; blockingCount: number; previewLoading: boolean; previewReady: boolean; onRetryPreview: () => void | Promise<void>; publishing: boolean; onFile: (file: File) => void | Promise<void>; onAdd: () => void; onEdit: (row: AttendanceRow) => void; onDelete: (ids: string[]) => void; onConfirmImport: () => void; onCancelImport: () => void; customerTypeMode?: WhitelistCustomerTypeMode }) {
+export function AttendancePage({ rows, fileName, warnings, sheetCounts, error, activityStarted, activityClosed, pendingImport, importAttemptName, blockingCount, previewLoading, previewReady, publishing, onRetryPreview, onFile, onAdd, onEdit, onDelete, onConfirmImport, onCancelImport, customerTypeMode = "TYPED", refreshAction }: { rows: AttendanceRow[]; fileName: string; warnings: string[]; sheetCounts: Array<{ name: string; count: number }>; error: string; activityStarted: boolean; activityClosed: boolean; pendingImport: AttendanceImportDraft | null; importAttemptName: string; blockingCount: number; previewLoading: boolean; previewReady: boolean; onRetryPreview: () => void | Promise<void>; publishing: boolean; onFile: (file: File) => void | Promise<void>; onAdd: () => void; onEdit: (row: AttendanceRow) => void; onDelete: (ids: string[]) => void; onConfirmImport: () => void; onCancelImport: () => void; customerTypeMode?: WhitelistCustomerTypeMode; refreshAction?: ReactNode }) {
   const previewRows = pendingImport?.rows ?? rows;
   const displayWarnings = pendingImport?.warnings ?? warnings;
   const displaySheetCounts = pendingImport?.sheetCounts ?? sheetCounts;
@@ -26,7 +27,7 @@ export function AttendancePage({ rows, fileName, warnings, sheetCounts, error, a
   const unspecifiedCustomerType = customerTypeMode === "UNSPECIFIED";
   return (
     <div className="admin-panel attendance-panel">
-      <div className="panel-title"><div><h2>现场到场客户</h2><p>按现场参会名单模板导入；抽奖选择现场到场客户时，现场大屏显示经销商名称。</p></div><div className="panel-actions"><ImportTemplateDownload kind="attendance" /><button className="secondary-button" disabled={activityClosed || busy} onClick={onAdd}>＋ 手动添加到场客户</button></div></div>
+      <div className="panel-title"><div><h2>现场到场客户</h2><p>按现场参会名单模板导入；抽奖选择现场到场客户时，现场大屏显示经销商名称。</p></div><div className="panel-actions">{refreshAction}<ImportTemplateDownload kind="attendance" /><button className="secondary-button" disabled={activityClosed || busy} onClick={onAdd}>＋ 手动添加到场客户</button></div></div>
       <div className="import-rule-hint"><b>{isPending ? "待确认导入" : activityClosed ? "活动已截止" : activityStarted ? "现场名单维护中" : "导入规则"}</b><span>{isPending ? "Excel 已解析，下面显示的是待导入预览；确认后才会替换当前名单并更新抽奖候选池，可先编辑或删除异常记录。" : activityClosed ? "活动已截止，现场到场名单只读。" : activityStarted ? "订货进行中仍可维护现场到场名单，确认替换后会更新抽奖候选池。" : "现场到场名单独立于订货基础数据，可在活动开始前或进行中导入；确认后更新抽奖候选池。"}</span></div>
       <ImportTemplateHint />
       <div className="attendance-upload-grid">

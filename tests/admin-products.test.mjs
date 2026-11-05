@@ -81,6 +81,8 @@ function productHarness(overrides = {}, apiOverrides = {}) {
     "../../api": api, "../api": api,
     react: {
       useMemo: (calculate) => calculate(),
+      useEffect: () => {},
+      useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
       useState(initial) {
         const index = cursor++;
         if (!(index in slots)) slots[index] = initial;
@@ -88,7 +90,7 @@ function productHarness(overrides = {}, apiOverrides = {}) {
       },
     },
   };
-  const globals = { window: { confirm: () => true }, URL };
+  const globals = { Error, window: { confirm: () => true }, URL };
   const { useProductImport } = loadModule("app/features/admin/useProductImport.ts", mocks, globals);
   const { useProductEditor } = loadModule("app/features/admin/useProductEditor.ts", mocks, globals);
   return {
@@ -190,7 +192,7 @@ test("a failed product deletion keeps the local row", async () => {
   const rows = harness.options.productRows;
   await harness.render().productEditor.deleteProductRows(["42"]);
   assert.equal(harness.options.productRows, rows);
-  assert.match(harness.notices.at(-1), /商品移除失败/);
+  assert.match(harness.notices.at(-1), /未确认删除/);
 });
 
 test("adding products during an import preview is rejected", async () => {
@@ -205,7 +207,7 @@ test("adding products during an import preview is rejected", async () => {
 test("a created product survives image failure and blocks repeating the create", async () => {
   let creates = 0;
   const harness = productHarness({ productImportCompleted: true }, {
-    createAdminProduct: async () => { creates++; return { id: 81, version: 2, sortNo: 99, dataStatus: "ACTIVE" }; },
+    createAdminProduct: async () => { creates++; return { id: 81, version: 2, sortNo: 99, dataStatus: "ACTIVE", images: [] }; },
     addAdminProductImage: async () => { throw new Error("upload lost"); },
   });
   const row = { ...productRow("new"), images: [{ id: "local-image", file: {} }] };
@@ -219,11 +221,11 @@ test("a created product survives image failure and blocks repeating the create",
 test("saved product edits preserve the new version when catalog refresh fails", async () => {
   const row = { ...productRow("42"), serverVersion: 1 };
   const harness = productHarness({ productImportCompleted: true, productRows: [row] }, {
-    updateAdminProduct: async () => ({ id: 42, version: 2, dataStatus: "ACTIVE" }),
-    loadAdminProducts: async () => { throw new Error("refresh lost"); },
+    updateAdminProduct: async () => ({ id: 42, version: 2, dataStatus: "ACTIVE", images: [] }),
+    loadAdminProductEditorState: async () => { throw new Error("refresh lost"); },
   });
   harness.render().productEditor.setEditingProductRow(row);
-  const result = await harness.render().productEditor.saveProductRow(row);
+  const result = await harness.render().productEditor.saveProductRow({ ...row, branchScope: "新分公司" });
   assert.equal(result.requiresReload, true); assert.match(result.message, /商品资料已保存/);
   assert.equal(harness.options.productRows[0].serverVersion, 2);
 });
@@ -233,4 +235,59 @@ test("uncertain product creates do not append a fake local row", async () => {
   const result = await harness.render().productEditor.saveProductRow(productRow("new"));
   assert.equal(result.requiresReload, true); assert.match(result.message, /新增结果尚未确认/);
   assert.equal(harness.options.productRows.length, 1);
+});
+
+
+const runtime = (id, extra = {}) => ({ id, materialName: "测试商品", materialCode: "SKU-1", customerType: "GENERAL", rebateStatus: "PARTICIPATING", casePrice: 100, tonCaseFactor: 50, images: [], version: 2, sortNo: 7, ...extra });
+test("plain product saves merge authoritative row without directory or unchanged image requests", async()=>{
+  const image={id:"5",url:"/api/v1/public/files/9",relationStatus:"CONFIRMED"};
+  const original={...productRow("42"), serverVersion:1, images:[image]};
+  const keep={...productRow("43"),serverVersion:3}; let writes=0;
+  const h=productHarness({productImportCompleted:true, productRows:[original,keep]}, {
+    updateAdminProduct:async()=>runtime(42,{description:"服务端标准化说明",version:6}),
+    updateAdminProductImage:async()=>{writes++;},
+  });
+  h.render().productEditor.setEditingProductRow(original);
+  assert.equal((await h.render().productEditor.saveProductRow({...original,casePrice:"120"})).ok,true);
+  assert.deepEqual(h.calls,[]); assert.equal(writes,0); assert.equal(h.options.productRows[1],keep);
+  assert.equal(h.options.productRows[0].serverVersion,6); assert.equal(h.options.productRows[0].description,"服务端标准化说明");
+});
+test("scope changes read only the target and same-name image changes merge every affected row", async()=>{
+  for (const imagesChanged of [false,true]) {
+    const original={...productRow("42"), serverVersion:1}; const keep=productRow("99","别的商品");
+    let reads=0, uploads=0;
+    const h=productHarness({productImportCompleted:true, productRows:[original,productRow("43"),keep]}, {
+      updateAdminProduct:async()=>runtime(42), addAdminProductImage:async()=>{uploads++;return {id:11};},
+      updateAdminProductImage:async()=>{},
+      loadAdminProductEditorState:async(_a,id,names)=>{reads++;assert.equal(id,42); if(imagesChanged) assert.ok(names.includes("测试商品")); return {products:[runtime(42,{effectiveDealerCount:5}),...(imagesChanged?[runtime(43,{version:8})]:[])], reviews:[]};},
+    });
+    h.render().productEditor.setEditingProductRow(original);
+    const next=imagesChanged?{...original,images:[{id:"new",file:{},url:"local-image:fixture",relationStatus:"CONFIRMED"}]}:{...original,branchScope:"A"};
+    assert.equal((await h.render().productEditor.saveProductRow(next)).ok,true);
+    assert.equal(reads,1); assert.equal(uploads,imagesChanged?1:0); assert.deepEqual(h.calls,[]);
+    assert.equal(h.options.productRows[0].effectiveDealerCount,5); assert.equal(h.options.productRows[2],keep);
+    if(imagesChanged) assert.equal(h.options.productRows[1].serverVersion,8);
+  }
+});
+test("bulk product deletion keeps unconfirmed rows after a later failure", async()=>{
+  const rows=[1,2,3].map(id=>({...productRow(String(id)),serverVersion:id})); const removed=[];
+  const h=productHarness({productImportCompleted:true,productRows:rows},{deleteAdminProduct:async(_a,id)=>{if(id===2)throw new Error("conflict"); removed.push(id);}});
+  await h.render().productEditor.deleteProductRows(["1","1","2","3"]);
+  assert.deepEqual(removed,[1]); assert.deepEqual(h.options.productRows.map(r=>r.id),["2","3"]);
+  assert.match(h.notices.at(-1),/已删除 1 条/);
+});
+test("published import readback failure clears retired IDs and cannot remain a repeatable preview", async()=>{
+  let errors=0;
+  const h=productHarness({onReadbackFailed:()=>errors++}, {loadAdminProducts:async()=>{throw new Error("offline");}});
+  await h.render().productImport.confirmProductImport();
+  assert.equal(h.options.productImportCompleted,true); assert.equal(h.options.serverImportTasks.PRODUCT,undefined);
+  assert.equal(h.options.productRows.length,0); assert.equal(errors,1); assert.match(h.notices.at(-1),/已替换成功.*勿重复/);
+});
+test("running activity product create appends real identity without reading the directory",async()=>{
+  const keep=productRow("42"); const h=productHarness({activityStatus:"running",productImportCompleted:true,productRows:[keep]},{
+    createAdminProduct:async()=>runtime(81), loadAdminProductEditorState:async()=>({products:[runtime(81)],reviews:[]}),
+  });
+  assert.equal((await h.render().productEditor.saveProductRow(productRow("new"),"现场补录")).ok,true);
+  assert.equal(h.options.productRows[0],keep); assert.equal(h.options.productRows[1].id,"81");
+  assert.deepEqual(h.calls,[]);
 });

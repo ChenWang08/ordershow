@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { loadDealerCandidates, loadScopeHistory, type DealerCandidate, type DealerScope } from "../../../api";
 import type { ProductImportRow } from "../../../domain/import-domain";
+import type { DealerCandidateCache } from "../dealer-candidate-cache";
 
 const key = (value: string) => value.trim().toLowerCase().replace(/[\s　_\-（）()\[\]【】{}：:，,。·/\\]+/g, "");
 const split = (value: string) => value.split(/[，,、]/).map(item => item.trim()).filter(Boolean);
@@ -15,11 +16,12 @@ function describeSnapshot(value: unknown) {
   }
 }
 
-export function ProductScopeEditor({ activityId, form, enabled, onChange }: {
+export function ProductScopeEditor({ activityId, form, enabled, onChange, candidateCache }: {
   activityId: number;
   form: ProductImportRow;
   enabled: boolean;
   onChange: (branchScope: string, dealerScope: DealerScope[]) => void;
+  candidateCache?: DealerCandidateCache;
 }) {
   const [candidates, setCandidates] = useState<DealerCandidate[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -34,7 +36,7 @@ export function ProductScopeEditor({ activityId, form, enabled, onChange }: {
       return;
     }
     let active = true;
-    loadDealerCandidates(activityId).then(rows => {
+    (candidateCache ? candidateCache.read() : loadDealerCandidates(activityId)).then(rows => {
       if (active) {
         setCandidates(rows);
         setLoaded(true);
@@ -46,7 +48,7 @@ export function ProductScopeEditor({ activityId, form, enabled, onChange }: {
       }
     });
     return () => { active = false; };
-  }, [activityId, enabled]);
+  }, [activityId, enabled, candidateCache]);
 
   const customerType = form.customerType === "综合" ? "GENERAL" : form.customerType === "特渠" ? "SPECIAL" : "ALL";
   const eligible = candidates.filter(candidate => customerType === "ALL" || candidate.customerType === customerType);

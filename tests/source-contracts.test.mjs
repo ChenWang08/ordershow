@@ -36,6 +36,7 @@ const frontendSourceFiles = [
   "../app/features/admin/useActivityOverview.ts",
   "../app/features/admin/useProductImport.ts",
   "../app/features/admin/useProductEditor.ts",
+  "../app/features/admin/product-editor-images.ts",
   "../app/features/admin/ProductImportPage.tsx",
   "../app/features/admin/useWhitelistImport.ts",
   "../app/features/admin/useWhitelistEditor.ts",
@@ -45,6 +46,7 @@ const frontendSourceFiles = [
   "../app/features/admin/useAdminActivities.ts",
   "../app/features/admin/useAdminInitialization.ts",
   "../app/features/admin/AdminHeader.tsx",
+  "../app/features/admin/ActivitySwitcher.tsx",
   "../app/features/admin/NewActivityDrawer.tsx",
   "../app/features/admin/shared/DeleteConfirmDialog.tsx",
   "../app/features/admin/products/ProductImageEditor.tsx",
@@ -205,7 +207,7 @@ test("supports whole-order and incremental volume pricing configured outside Exc
       "../backend/src/main/java/com/fengyi/ordershow/order/OrderPricingCalculator.java",
       "../backend/src/main/java/com/fengyi/ordershow/order/OrderRepository.java",
       "../backend/src/main/java/com/fengyi/ordershow/order/OrderQueryService.java",
-      "../backend/src/main/java/com/fengyi/ordershow/order/OrderExportService.java",
+      "../backend/src/main/java/com/fengyi/ordershow/exports/CsvExportGenerator.java",
     ]),
     readFile(new URL("../db/migrations/V013__product_volume_price_tier.sql", import.meta.url), "utf8"),
     readFile(new URL("../db/migrations/V016__incremental_product_volume_pricing.sql", import.meta.url), "utf8"),
@@ -255,7 +257,7 @@ test("keeps admin order management scoped and wires the formal runtime APIs", as
   assert.match(api, /loadOrderDashboard/);
   assert.match(api, /regionProductLines/);
   assert.match(api, /generalRegions/);
-  assert.match(prototype, /await drawLotteryRound\(activityId, currentRound\.id\)/);
+  assert.match(prototype, /await drawLotteryRound\(activityId, currentRound\.id, currentRound\.ruleRevision \?\? 0\)/);
   assert.match(orderController, /\/h5\/activities\/\{activityCode\}\/order\/withdraw/);
   assert.doesNotMatch(orderController, /\/admin\/.*withdraw/);
   assert.doesNotMatch(openapi, /\/admin\/activities\/\{activityId\}\/orders\/\{orderId\}\/withdraw/);
@@ -355,6 +357,7 @@ test("supports one admin entry, current H5 resolution, paging, and fulfillment e
       "../app/components/orders/useOrderEditor.ts",
       "../app/components/orders/OrderFilterBar.tsx",
       "../app/components/orders/OrderListTable.tsx",
+      "../app/components/orders/OrderPagination.tsx",
       "../app/components/orders/OrderDetailDrawer.tsx",
       "../app/components/orders/OrderEditorDrawer.tsx",
     ]),
@@ -362,7 +365,7 @@ test("supports one admin entry, current H5 resolution, paging, and fulfillment e
       "../backend/src/main/java/com/fengyi/ordershow/order/OrderService.java",
       "../backend/src/main/java/com/fengyi/ordershow/order/OrderPricingCalculator.java",
       "../backend/src/main/java/com/fengyi/ordershow/order/OrderQueryService.java",
-      "../backend/src/main/java/com/fengyi/ordershow/order/OrderExportService.java",
+      "../backend/src/main/java/com/fengyi/ordershow/exports/CsvExportGenerator.java",
     ]),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/security/AuthService.java", import.meta.url), "utf8"),
     readFile(new URL("../backend/src/main/java/com/fengyi/ordershow/activity/ActivityService.java", import.meta.url), "utf8"),
@@ -396,7 +399,7 @@ test("supports one admin entry, current H5 resolution, paging, and fulfillment e
   assert.match(styles, /order-table \{ overflow-x: auto/);
   assert.match(orders, /admin-panel order-management-panel/);
   assert.match(orders, /size: 50/);
-  assert.match(orders, /第 \{page\} \/ \{totalPages\} 页/);
+  assert.match(orders, /第 \{page\} \/ \{Math\.max\(1, totalPages\)\} 页/);
   assert.match(orderService, /订单商品明细/);
   assert.match(orderService, /有效商品汇总/);
   assert.match(orderService, /有效分公司汇总/);

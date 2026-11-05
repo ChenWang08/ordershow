@@ -1,6 +1,8 @@
 package com.fengyi.ordershow.lottery;
 
 import com.fengyi.ordershow.activity.ActivityService;
+import com.fengyi.ordershow.audit.AuditService;
+import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.common.ApiResponse;
 import com.fengyi.ordershow.common.TraceFilter;
 import com.fengyi.ordershow.security.AuthService;
@@ -62,6 +64,21 @@ public class LotteryController {
     return ApiResponse.of(service.publish(activityId, ruleId, auth.requireAdmin(request)), TraceFilter.id(request));
   }
 
+  @GetMapping("/admin/activities/{activityId}/lottery/rules/{ruleId}/round-order")
+  ApiResponse<LotteryService.RoundOrderView> roundOrder(@PathVariable long activityId, @PathVariable long ruleId,
+      HttpServletRequest request) {
+    auth.requireAdmin(request);
+    return ApiResponse.of(service.roundOrder(activityId, ruleId), TraceFilter.id(request));
+  }
+
+  @PutMapping("/admin/activities/{activityId}/lottery/rules/{ruleId}/round-order")
+  ApiResponse<LotteryService.RoundOrderView> reorder(@PathVariable long activityId, @PathVariable long ruleId,
+      @RequestBody LotteryService.RoundOrderWrite body, HttpServletRequest request) {
+    var result = service.reorder(activityId, ruleId, body, auth.requireAdmin(request), TraceFilter.id(request));
+    request.setAttribute(AuditService.RECORDED_REQUEST_ATTRIBUTE, true);
+    return ApiResponse.of(result, TraceFilter.id(request));
+  }
+
   @PostMapping("/admin/activities/{activityId}/lottery/candidates/preview")
   ApiResponse<LotteryService.CandidatePreview> preview(@PathVariable long activityId,
       @RequestBody LotteryService.PreviewRequest body, HttpServletRequest request) {
@@ -83,8 +100,9 @@ public class LotteryController {
 
   @PostMapping("/admin/activities/{activityId}/lottery/rounds/{roundId}/draw")
   ApiResponse<LotteryService.DrawResult> draw(@PathVariable long activityId, @PathVariable long roundId,
-      HttpServletRequest request) {
-    return ApiResponse.of(service.draw(activityId, roundId, auth.requireAdmin(request)), TraceFilter.id(request));
+      @RequestBody DrawRequest body, HttpServletRequest request) {
+    if (body.expectedRevision() == null) throw DomainException.conflict("LOTTERY_RULE_CHANGED", "请重新加载并确认轮次后开始抽奖");
+    return ApiResponse.of(service.draw(activityId, roundId, auth.requireAdmin(request), body.expectedRevision()), TraceFilter.id(request));
   }
 
   @PostMapping("/admin/activities/{activityId}/lottery/rounds/{roundId}/complete")
@@ -108,5 +126,6 @@ public class LotteryController {
   }
 
   public record ResetRequest(String reason) {}
+  public record DrawRequest(Long expectedRevision) {}
   public record PublicLottery(List<LotteryService.RuleView> rules, List<LotteryService.WinnerView> winners) {}
 }

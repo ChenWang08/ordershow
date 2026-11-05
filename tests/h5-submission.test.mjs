@@ -153,3 +153,36 @@ test("increment and restoration retries retain the expected order lock version",
   assert.equal(h.calls[0].body.expectedLockVersion, 8);
   assert.deepEqual(h.calls[0], h.calls.at(-1));
 });
+
+test("a fresh rate-limited command is not auto-retried and releases pending recovery for editing", async () => {
+  let limited = true;
+  const h = harness(async () => {
+    if (limited) throw new ApiError(429,"H5_WRITE_RATE_LIMITED","操作太频繁，请稍后再试",undefined,8000);
+    return result;
+  });
+  const manager = h.create();
+  await assert.rejects(manager.submit(scope,body), error => error.code === "H5_WRITE_RATE_LIMITED");
+  assert.equal(h.calls.length,1); assert.equal(h.delays.length,0);
+  assert.equal(manager.read(scope),undefined); assert.equal(h.data.size,0);
+  limited = false;
+  await manager.submit(scope,{...body, items: [{productId: 1, quantity: 5}]});
+  assert.equal(h.calls[1].key,"key-2");
+});
+
+test("rate limiting after a lost response keeps the original command across reloads", async () => {
+  let count = 0;
+  const h = harness(async () => {
+    if (++count === 1) throw new TypeError("response lost after commit");
+    if (count <= 3) throw new ApiError(429,"H5_WRITE_RATE_LIMITED","wait",undefined,60_000);
+    return result;
+  });
+  const manager = h.create();
+  await assert.rejects(manager.submit(scope,body));
+  assert.ok(manager.read(scope)); assert.equal(h.calls.length,2);
+  const reloaded = h.create();
+  await assert.rejects(reloaded.recover(scope));
+  assert.ok(reloaded.read(scope));
+  assert.equal(await reloaded.recover(scope),result);
+  assert.deepEqual(h.calls[0],h.calls[3]); assert.equal(h.data.size,0);
+  assert.deepEqual(h.delays,[1000],"Long Retry-After must not cause an automatic retry loop");
+});

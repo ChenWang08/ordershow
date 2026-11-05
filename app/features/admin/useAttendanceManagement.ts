@@ -1,5 +1,6 @@
 "use client";
 
+import { deleteConfirmedRows } from "./delete-confirmed-rows";
 import { saveFailure, saveRequestFailure, type DrawerSaveResult } from "../../components/drawer-save-result";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
@@ -11,6 +12,7 @@ import type { CustomerImportOptions } from "./customer-module-types";
 type AttendanceManagementOptions = CustomerImportOptions & {
   setAttendanceRows: Dispatch<SetStateAction<AttendanceRow[]>>;
   attendanceImportError: string;
+  onReadbackFailed?: () => void;
   onAttendanceFileNameChange: (name: string) => void;
   onAttendanceWarningsChange: (warnings: string[]) => void;
   onAttendanceSheetCountsChange: (counts: Array<{ name: string; count: number }>) => void;
@@ -21,7 +23,7 @@ export function useAttendanceManagement({
   activityId, activityStatus, setAttendanceRows, attendanceImportError,
   onAttendanceFileNameChange, onAttendanceWarningsChange, onAttendanceSheetCountsChange, onAttendanceImportErrorChange,
   serverImportTasks, serverImportBlocking, setServerImportTasks, setServerImportBlocking,
-  setActionNotice, recordOperation, refreshServerImportPreview, importWaitOptions,
+  setActionNotice, recordOperation, refreshServerImportPreview, importWaitOptions, onReadbackFailed,
 }: AttendanceManagementOptions) {
   const activityStarted = activityStatus === "running" || activityStatus === "closed" || activityStatus === "finished";
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
@@ -135,7 +137,13 @@ export function useAttendanceManagement({
         await waitForImport(Number(activityId), taskId, importWaitOptions?.());
       }
       const imported = pendingAttendanceImport;
-      const publishedRows = taskId ? mapAdminAttendanceRows(await loadAdminAttendees(Number(activityId))) : cloneAttendanceRows(imported.rows);
+      let publishedRows = cloneAttendanceRows(imported.rows), readbackError = false;
+      if (taskId) {
+        try { publishedRows = mapAdminAttendanceRows(await loadAdminAttendees(Number(activityId))); }
+        catch { readbackError = true; publishedRows = []; }
+        setServerImportTasks(current => ({ ...current, ATTENDANCE: undefined }));
+        setServerImportBlocking(current => ({ ...current, ATTENDANCE: 0 }));
+      }
       setAttendanceRows(publishedRows);
       onAttendanceFileNameChange(imported.fileName);
       onAttendanceWarningsChange(imported.warnings);
@@ -148,7 +156,8 @@ export function useAttendanceManagement({
       setEditingAttendanceRow(null);
       const linkedCount = publishedRows.filter((row) => row.lotteryEligible).length;
       recordOperation("替换现场到场 Excel", imported.fileName, `确认导入 ${publishedRows.length} 名现场到场客户；重新关联当前白名单，${linkedCount} 名具备抽奖资格。`);
-      setActionNotice(`现场到场 Excel 导入完成：${publishedRows.length} 名，已关联 ${linkedCount} 名。`);
+      if (readbackError) onReadbackFailed?.();
+      setActionNotice(readbackError ? "现场到场名单已替换成功，但最新列表读取失败。请点击刷新列表核对，请勿重复确认导入。" : `现场到场 Excel 导入完成：${publishedRows.length} 名，已关联 ${linkedCount} 名。`);
     } catch (error) {
       setActionNotice(error instanceof ApiError ? error.message : "现场到场名单发布失败，请处理异常数据后重试。");
     } finally {
@@ -224,12 +233,12 @@ export function useAttendanceManagement({
       setActionNotice(`已从待导入结果移除 ${ids.length} 名到场客户，确认导入后生效。`);
       return;
     }
-    try { for (const id of ids) await deleteAdminAttendee(Number(activityId), Number(id)); }
-    catch (error) { setActionNotice(error instanceof ApiError ? error.message : "到场客户删除失败"); return; }
-    setAttendanceRows((current) => current.filter((row) => !ids.includes(row.id)));
-    setEditingAttendanceRow((current) => current && ids.includes(current.id) ? null : current);
-    recordOperation("删除现场到场客户", `${ids.length} 名客户`, "从当前现场到场名单移除，并同步从抽奖候选池移除；原 Excel 文件不受影响。" );
-    setActionNotice(`已删除 ${ids.length} 名现场到场客户，抽奖候选池已同步更新。`);
+    const result = await deleteConfirmedRows(ids, id => deleteAdminAttendee(Number(activityId), Number(id)));
+    if (result.deleted.length) setAttendanceRows(current => current.filter(row => !result.deleted.includes(row.id)));
+    setEditingAttendanceRow(current => current && result.deleted.includes(current.id) ? null : current);
+    if (result.deleted.length) recordOperation("删除现场到场客户", result.deleted.length + " 名客户", "服务器确认删除的记录已同步移除，抽奖候选池已更新。");
+    setActionNotice(result.error ? "已删除 " + result.deleted.length + " 名，其余记录未确认删除：" + result.error
+      : "已删除 " + result.deleted.length + " 名现场到场客户，抽奖候选池已同步更新。");
   };
   return {
     attendanceFormOpen,

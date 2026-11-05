@@ -210,6 +210,13 @@ public class ProductService {
 
   public ProductView product(long activityId, long productId) { return catalog.product(activityId, productId); }
 
+  public List<ProductView> editorProducts(long activityId, long productId, List<String> imageGroupNames) {
+    return catalog.editorProducts(activityId, productId, imageGroupNames);
+  }
+  public List<ImageReviewView> editorReviews(long activityId, List<ProductView> products) {
+    return images.pendingImageReviews(activityId, products.stream().map(ProductView::materialName).toList());
+  }
+
 
 
 

@@ -20,6 +20,7 @@ function harness(items, detail = async (id) => items.find(a => a.id === id)) {
     './AdminGateway': { AdminGateway: marker }, './AdminWorkspace': { AdminWorkspace: marker },
     './DepartmentAdminPanel': { DepartmentAdminPanel: marker }, './NewActivityDrawer': { NewActivityDrawer: marker },
     './useAdminActivities': { useAdminActivities: () => ({}) },
+    './ActivityDeletionProgress': { ActivityDeletionProgressProvider: marker, ActivityDeletionProgressButton: marker },
   }, { URLSearchParams, window: { location: { search: '' }, addEventListener() {}, removeEventListener() {} } });
   return { calls, render() { cursor = 0; return AuthorizedWorkspace(); }, mount() { this.render(); mounted = true; return effects.map(f => f()); } };
 }

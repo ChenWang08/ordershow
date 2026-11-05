@@ -1,0 +1,24 @@
+{
+  "scope": "existing V049 database only",
+  "from": "V049",
+  "to": "V053",
+  "migrations": [
+    {
+      "file": "V050__lottery_rule_revision.sql",
+      "sha256": "2f3205e9f3828b40e50e840f4834f4635880fedddc37cc4700331474cf506634"
+    },
+    {
+      "file": "V051__activity_archive_and_deletion.sql",
+      "sha256": "2b8267e3dca100e93a5b5bf99274464c13f6cb820b6c47d73b3e4ed84f085819"
+    },
+    {
+      "file": "V052__async_order_exports.sql",
+      "sha256": "b76618942c8e14a4ea5029bcf8fca7eec8397f513499c77ff0126db93449e2d1"
+    },
+    {
+      "file": "V053__activity_configuration_copy.sql",
+      "sha256": "9ff496701971aba1b3d071985636847fd0c004b960d6510775ccc0efa2bdd130"
+    }
+  ],
+  "bundleSha256": "a7d78b2573e6953ae4c778b8370248ba6c7c8d47f981d837b3f95870ba426672"
+}

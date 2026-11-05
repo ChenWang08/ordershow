@@ -18,7 +18,7 @@ class OssObjectStorageTest {
     byte[] bytes = new byte[]{0, 1, -1, 34};
     storage.initialize();
     verifyNoInteractions(client);
-    storage.put("bucket", "activity/key.png", bytes, "image/png");
+    storage.put("bucket", "activity/key.png", new ByteArrayInputStream(bytes), bytes.length, "image/png");
     var input = ArgumentCaptor.forClass(InputStream.class);
     var metadata = ArgumentCaptor.forClass(ObjectMetadata.class);
     verify(client).putObject(eq("bucket"), eq("activity/key.png"), input.capture(), metadata.capture());

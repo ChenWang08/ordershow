@@ -811,6 +811,7 @@ CREATE TABLE lottery_rule (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   activity_id BIGINT UNSIGNED NOT NULL,
   name VARCHAR(200) NOT NULL,
+  revision BIGINT UNSIGNED NOT NULL DEFAULT 0,
   status VARCHAR(20) NOT NULL DEFAULT 'DRAFT',
   created_by BIGINT UNSIGNED NOT NULL,
   updated_by BIGINT UNSIGNED NOT NULL,
@@ -1146,3 +1147,100 @@ CREATE TABLE activity_ranking_product_snapshot (
   KEY idx_ranking_snapshot_variety (activity_id, order_id, variety_name),
   CONSTRAINT fk_ranking_snapshot_product_activity FOREIGN KEY (activity_id) REFERENCES activity_ranking_snapshot(activity_id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- Activity archive and permanent deletion (V051)
+ALTER TABLE activity ADD COLUMN deletion_requested_at DATETIME(3) NULL,
+  ADD KEY idx_activity_deletion (deletion_requested_at, id);
+ALTER TABLE stored_file ADD KEY idx_stored_file_activity_id (activity_id,id);
+
+-- Deliberately independent of activity: progress and the receipt survive physical deletion.
+CREATE TABLE activity_deletion_task (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  activity_id BIGINT UNSIGNED NOT NULL,
+  activity_code VARCHAR(64) NOT NULL,
+  activity_name VARCHAR(200) NOT NULL,
+  department_id BIGINT UNSIGNED NOT NULL,
+  department_name VARCHAR(100) NOT NULL,
+  requested_by BIGINT UNSIGNED NOT NULL,
+  requested_by_name VARCHAR(200) NOT NULL,
+  reason VARCHAR(500) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'QUEUED',
+  stage INT NOT NULL DEFAULT 0,
+  file_cursor BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  deleted_rows BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  deleted_files BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  retry_count INT NOT NULL DEFAULT 0,
+  revision BIGINT NOT NULL DEFAULT 0,
+  next_attempt_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  last_error VARCHAR(1000) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  completed_at DATETIME(3) NULL,
+  UNIQUE KEY uk_deletion_activity (activity_id),
+  UNIQUE KEY uk_deletion_code (activity_code),
+  KEY idx_deletion_queue (status, next_attempt_at, id),
+  CONSTRAINT ck_deletion_status CHECK (status IN ('QUEUED','RUNNING','FAILED','COMPLETED'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE activity_deletion_file (
+  task_id BIGINT UNSIGNED NOT NULL,
+  file_id BIGINT UNSIGNED NOT NULL,
+  bucket_name VARCHAR(255) NOT NULL,
+  object_key VARCHAR(1000) NOT NULL,
+  PRIMARY KEY (task_id, file_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+-- One short batch transaction at a time across all application instances.
+CREATE TABLE activity_deletion_worker (
+  id INT NOT NULL PRIMARY KEY,
+  next_run_at DATETIME(3) NOT NULL
+) ENGINE=InnoDB;
+INSERT INTO activity_deletion_worker(id,next_run_at) VALUES (1,UTC_TIMESTAMP(3));
+
+-- Historical activity configuration reuse (V053)
+-- Configuration copies are private until the final transaction makes them READY.
+ALTER TABLE activity ADD COLUMN configuration_state VARCHAR(12) NOT NULL DEFAULT 'READY';
+
+CREATE TABLE activity_copy_task (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  source_activity_id BIGINT UNSIGNED NOT NULL,
+  target_activity_id BIGINT UNSIGNED NULL,
+  department_id BIGINT UNSIGNED NOT NULL,
+  created_by BIGINT UNSIGNED NOT NULL,
+  request_key VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+  input_hash CHAR(64) NOT NULL,
+  status VARCHAR(16) NOT NULL DEFAULT 'QUEUED',
+  stage VARCHAR(32) NOT NULL DEFAULT 'QUEUED',
+  snapshot_json LONGTEXT NULL,
+  copied_files INT NOT NULL DEFAULT 0,
+  total_files INT NOT NULL DEFAULT 0,
+  attempt_count INT NOT NULL DEFAULT 0,
+  lease_token VARCHAR(64) NULL,
+  failure_message VARCHAR(300) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  UNIQUE KEY uk_activity_copy_request(created_by,request_key),
+  KEY idx_activity_copy_queue(status,id),
+  KEY idx_activity_copy_source(source_activity_id,status),
+  CONSTRAINT fk_activity_copy_target FOREIGN KEY(target_activity_id) REFERENCES activity(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+CREATE TABLE activity_copy_file (
+  task_id BIGINT UNSIGNED NOT NULL,
+  source_file_id BIGINT UNSIGNED NOT NULL,
+  target_file_id BIGINT UNSIGNED NULL,
+  copied BOOLEAN NOT NULL DEFAULT FALSE,
+  PRIMARY KEY(task_id,source_file_id),
+  KEY idx_activity_copy_source_file(source_file_id,task_id),
+  CONSTRAINT fk_activity_copy_file_task FOREIGN KEY(task_id) REFERENCES activity_copy_task(id) ON DELETE CASCADE,
+  CONSTRAINT fk_activity_copy_file_target FOREIGN KEY(target_file_id) REFERENCES stored_file(id) ON DELETE SET NULL
+) ENGINE=InnoDB;
+
+-- One lease for the whole deployment, including all ACK replicas.
+CREATE TABLE activity_copy_worker (
+  id INT NOT NULL PRIMARY KEY,
+  task_id BIGINT UNSIGNED NULL,
+  lease_token VARCHAR(64) NULL,
+  lease_expires_at DATETIME(3) NULL
+) ENGINE=InnoDB;
+INSERT INTO activity_copy_worker(id) VALUES(1);

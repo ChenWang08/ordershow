@@ -986,7 +986,7 @@ paths:
             enum: [true]
       responses:
         '200':
-          description: 当前账号可访问的未归档活动；data 为数组
+          description: 当前账号可访问的活动（含已归档，排除已受理删除）；data 为数组
           content:
             application/json:
               schema:
@@ -1210,6 +1210,313 @@ paths:
           $ref: '#/components/responses/Problem'
         '409':
           $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/archive:
+    post:
+      operationId: archiveActivity
+      tags: [Activities]
+      summary: 超级管理员手动归档已结束活动
+      description: 刷新最终快照后进入 ARCHIVED；全部业务数据只读，查看和导出沿用现有部门和功能权限。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityLifecycleReason'
+      responses:
+        '200':
+          description: 归档成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/unarchive:
+    post:
+      operationId: unarchiveActivity
+      tags: [Activities]
+      summary: 超级管理员解除归档
+      description: 仅恢复 FINISHED，不自动开放下单。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityLifecycleReason'
+      responses:
+        '200':
+          description: 已恢复为已结束
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityResponse'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/deletion-preview:
+    get:
+      operationId: previewActivityDeletion
+      tags: [Activities]
+      summary: 超级管理员核对永久删除范围
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 活动当前版本和关联数量
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ActivityDeletionPreview'
+                  traceId: { type: string }
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activities/{activityId}/permanent-deletion:
+    post:
+      operationId: permanentlyDeleteActivity
+      tags: [Activities]
+      summary: 超级管理员异步永久删除活动
+      description: 仅 DRAFT、FINISHED、ARCHIVED；须处理完待审批改单及未结束导入、导出。无自动备份、无回收站；受理后立即隐藏和封禁活动访问，后台分批清理全部关联数据和文件。相同活动重复请求返回原任务。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/ActivityLifecycleReason'
+                - type: object
+                  required: [code]
+                  properties:
+                    code:
+                      type: string
+                      description: 精确输入活动编号确认
+      responses:
+        '202':
+          description: 已受理或已存在相同活动的删除任务
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityDeletionTaskResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activity-deletion-tasks:
+    get:
+      operationId: listActivityDeletionTasks
+      tags: [Activities]
+      summary: 超级管理员查看删除进度与凭证
+      security:
+        - adminCookie: []
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+      responses:
+        '200':
+          description: 按任务编号倒序，每页 20 条
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ActivityDeletionTask'
+                  traceId: { type: string }
+        '403':
+          $ref: '#/components/responses/Problem'
+  /admin/activity-deletion-tasks/{taskId}/retry:
+    post:
+      operationId: retryActivityDeletion
+      tags: [Activities]
+      summary: 超级管理员继续失败的清理任务
+      description: 仅 FAILED 可操作，保留已提交的清理进度；已清理的数据不会恢复。
+      security:
+        - adminCookie: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已重新排队
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivityDeletionTaskResponse'
+        '403':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
+  /admin/activity-copy-sources:
+    get:
+      operationId: listActivityCopySources
+      tags: [Activities]
+      summary: 查询同部门可复用的历史活动摘要（含已归档）
+      security: [{ adminCookie: [] }]
+      parameters:
+        - name: departmentId
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 仅管理账号可用；不预加载商品、客户或轮次明细
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer, format: int64 }
+                        code: { type: string }
+                        name: { type: string }
+                        status: { $ref: '#/components/schemas/ActivityStatus' }
+                  traceId: { type: string }
+  /admin/activities/{activityId}/copy-preview:
+    get:
+      operationId: previewActivityCopy
+      tags: [Activities]
+      summary: 读取所选来源的可复制数量与配置校验标记
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: departmentId
+          in: query
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 商品与客户为当前有效版本数量；抽奖优先已发布方案，否则最近保存的草稿
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      sourceId: { type: integer, format: int64 }
+                      sourceName: { type: string }
+                      stamp: { type: string }
+                      products: { type: integer }
+                      customers: { type: integer }
+                      rounds: { type: integer }
+                  traceId: { type: string }
+  /admin/activity-copies:
+    post:
+      operationId: createActivityCopy
+      tags: [Activities]
+      summary: 新建独立草稿并在后台复用历史活动配置
+      description: 仅同部门管理员可用。requestKey 按创建人去重，相同请求返回原任务，载荷变化返回409。复制完成前新活动隐藏；到场、订单、候选快照和中奖历史不复制。
+      security: [{ adminCookie: [] }]
+      parameters:
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivityCopyRequest'
+      responses:
+        '200':
+          description: 已受理或返回相同请求的原任务；不代表后台复制已经完成
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityCopyTaskResponse' }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/activity-copies/{taskId}:
+    get:
+      operationId: getActivityCopyTask
+      tags: [Activities]
+      summary: 读取本部门配置复用进度
+      security: [{ adminCookie: [] }]
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: 不返回客户资料或复制快照；只有完成且活动仍存在时才返回可进入的活动编号
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityCopyTaskResponse' }
+  /admin/activity-copies/{taskId}/retry:
+    post:
+      operationId: retryActivityCopy
+      tags: [Activities]
+      summary: 继续失败的配置复用任务
+      description: 仅FAILED可重试，保留创建时的配置快照和已复制图片，不重新创建活动。
+      security: [{ adminCookie: [] }]
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 已重新排队
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ActivityCopyTaskResponse' }
+        '409': { $ref: '#/components/responses/Problem' }
+  /admin/activity-copies/{taskId}/discard:
+    post:
+      operationId: discardActivityCopy
+      tags: [Activities]
+      summary: 放弃失败的配置复用并排队清理隐藏草稿
+      security: [{ adminCookie: [] }]
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: integer, format: int64 }
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 清理已排队，返回data=true；既有删除工作器负责实际清理
+        '409': { $ref: '#/components/responses/Problem' }
   /admin/activities/{activityId}/imports:
     get:
       operationId: listImportTasks
@@ -1673,6 +1980,41 @@ paths:
       responses:
         '200':
           description: 已从当前商品目录删除；历史订单不受影响
+  /admin/activities/{activityId}/products/{productId}/editor-state:
+    get:
+      operationId: getProductEditorState
+      tags: [Catalog]
+      summary: 读取当前商品及受图片操作影响的同名商品状态
+      description: 需要商品管理权限与活动访问权限。只返回当前商品版本中的可见商品、这些商品的经销商范围摘要和待确认图片；不返回整份目录。不传图片分组时只返回当前商品。名称比较沿用图片匹配的标准化规则。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: productId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - name: imageGroupNames
+          in: query
+          description: 图片操作涉及的旧名称和新名称；每个名称单独传一个同名参数，名称内的逗号保留原样。
+          style: form
+          explode: true
+          schema:
+            type: array
+            maxItems: 12
+            items:
+              type: string
+              maxLength: 512
+      responses:
+        '200':
+          description: data 包含 products、以商品编号为键的 scopes、reviews；字段结构与原商品、范围摘要和图片候选接口一致。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+        '404':
+          description: 当前商品不存在、已不可见或商品目录已经替换，需要重新读取列表。
   /admin/activities/{activityId}/products/{productId}/images:
     post:
       operationId: addProductImage
@@ -2041,6 +2383,22 @@ paths:
       responses:
         '200':
           description: 已从当前到场名单删除
+  /admin/activities/{activityId}/orders/summary:
+    get:
+      operationId: getActivityOrderSummary
+      tags: [Orders]
+      summary: 当前活动订单状态及待审核数量
+      description: 需部门/活动访问资格及ORDER权限。前四项按活动聚合，不受列表搜索、状态或客户类型筛选影响；pending为当前活动待审核数量。仅返回数量，普通翻页不调用。
+      security: [{adminCookie: []}]
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 当前活动数量快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminOrderCountsResponse'
   /admin/activities/{activityId}/orders:
     get:
       operationId: listActivityOrders
@@ -2051,7 +2409,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ActivityId'
         - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
+        - {name: size, in: query, description: 工作台固定传50；接口保留原兼容范围, schema: {type: integer, minimum: 1, maximum: 200, default: 20}}
         - name: status
           in: query
           schema:
@@ -2060,17 +2418,9 @@ paths:
           in: query
           schema:
             $ref: '#/components/schemas/CustomerType'
-        - name: regionCode
-          in: query
-          schema:
-            $ref: '#/components/schemas/RegionCode'
-        - name: branchName
-          in: query
-          schema:
-            type: string
         - name: keyword
           in: query
-          description: 经销商名称模糊查询、完整手机号精确查询或手机号后四位查询，不支持订单号搜索
+          description: 订单号、经销商名称或手机号查询；支持完整手机号及手机号后四位
           schema:
             type: string
       responses:
@@ -2133,7 +2483,8 @@ paths:
     get:
       operationId: exportActivityOrders
       tags: [Orders]
-      summary: 按当前筛选条件导出订单 Excel
+      summary: 已停用的同步 Excel 导出接口
+      deprecated: true
       security:
         - adminCookie: []
       parameters:
@@ -2151,17 +2502,8 @@ paths:
           schema:
             type: string
       responses:
-        '200':
-          description: 订单 Excel 文件
-          headers:
-            Content-Disposition:
-              schema:
-                type: string
-          content:
-            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
-              schema:
-                type: string
-                format: binary
+        '410':
+          description: EXPORT_ENDPOINT_RETIRED，请使用异步 ORDER_PACKAGE 导出
   /admin/activities/{activityId}/orders/{orderId}:
     get:
       operationId: getActivityOrder
@@ -2302,7 +2644,7 @@ paths:
     get:
       operationId: pageOrderChangeRequests
       tags: [Orders]
-      summary: 分页查询申请摘要，不包含商品明细
+      summary: 分页查询申请摘要，不包含商品明细；当前工作台固定使用size=50
       security: [{adminCookie: []}]
       parameters:
         - $ref: '#/components/parameters/ActivityId'
@@ -2319,7 +2661,7 @@ paths:
     get:
       operationId: pendingOrderChangeRequests
       tags: [Orders]
-      summary: 查询待审核申请与订单的对应关系，供待审核数量和订单标记使用
+      summary: 兼容旧客户端的全活动待审核编号清单，新工作台不再调用
       security: [{adminCookie: []}]
       parameters:
         - $ref: '#/components/parameters/ActivityId'
@@ -2456,7 +2798,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
   /admin/activities/{activityId}/lottery/rules/{ruleId}:
-    patch:
+    put:
       operationId: updateLotteryRule
       tags: [Lottery]
       summary: 修改未归档抽奖规则组
@@ -2476,11 +2818,25 @@ paths:
           application/json:
             schema:
               type: object
-              required: [name]
+              required: [name, rounds, expectedRevision, roundIds]
               properties:
                 name:
                   type: string
                   maxLength: 200
+                expectedRevision:
+                  type: integer
+                  minimum: 0
+                  description: 规则列表返回的 revision；版本过期返回409，不覆盖新顺序
+                roundIds:
+                  type: array
+                  description: 与 rounds 一一对应；既有轮次填原ID，新增轮次填null，排序须使用独立接口
+                  items:
+                    type: [integer, 'null']
+                rounds:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
       responses:
         '200':
           description: 修改成功
@@ -2488,6 +2844,69 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SingleObjectResponse'
+  /admin/activities/{activityId}/lottery/rules/{ruleId}/round-order:
+    get:
+      operationId: getLotteryRoundOrder
+      tags: [Lottery]
+      summary: 按需读取当前规则的轻量轮次顺序
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: ruleId、revision、规则状态和轮次id/roundNo/status/currentAttemptNo；不含候选或中奖名单
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+    put:
+      operationId: reorderLotteryRounds
+      tags: [Lottery]
+      summary: 调整未开始轮次的执行顺序，不改变配置、身份或历史结果
+      description: 固定所有已开始轮次及其之前的位置；从未开奖的DRAFT/READY后缀可重排。版本一致的同序重放不重复写入；版本过期或锁忙立即409；不触发候选试算、统计查询或全活动通知。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - name: ruleId
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Id'
+        - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedRevision, roundIds]
+              properties:
+                expectedRevision:
+                  type: integer
+                  minimum: 0
+                roundIds:
+                  type: array
+                  description: 当前规则全部轮次ID，包含位置不变的固定前缀，不得遗漏或重复
+                  items:
+                    $ref: '#/components/schemas/Id'
+      responses:
+        '200':
+          description: 已保存的最新轻量顺序和revision；相同顺序直接返回，不重复记录成功审计
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SingleObjectResponse'
+        '400':
+          $ref: '#/components/responses/Problem'
+        '409':
+          $ref: '#/components/responses/Problem'
   /admin/activities/{activityId}/lottery/rules/{ruleId}/rounds:
     post:
       operationId: createLotteryRound
@@ -2639,9 +3058,21 @@ paths:
         - $ref: '#/components/parameters/RoundId'
         - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/CsrfToken'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedRevision]
+              properties:
+                expectedRevision:
+                  type: integer
+                  minimum: 0
+                  description: 页面当前规则revision；过期时409且不开奖，需读取最新轮次并由工作人员再次确认
       responses:
         '200':
-          description: 已持久化的结果；现场页可开始动画后揭晓
+          description: 已持久化的结果及最新ruleRevision；现场页可开始动画后揭晓
           content:
             application/json:
               schema:
@@ -2699,10 +3130,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/LotteryRoundResponse'
   /admin/activities/{activityId}/exports:
+    get:
+      operationId: listOrderExportTasks
+      tags: [Exports]
+      summary: 系统管理员查询本活动最近 20 条订单导出任务
+      description: 仅整场活动已结束或已归档且未删除时可查询。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: 最近的导出任务
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  traceId: { type: string }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/OrderExportTask' }
     post:
       operationId: createExportTask
       tags: [Exports]
-      summary: 创建异步导出任务
+      summary: 系统管理员创建异步订单 CSV ZIP 任务
+      description: 仅 FINISHED、ARCHIVED 或按现有规则整场活动时间已结束且未删除的活动可创建。CLOSED 本身不足以开放导出。相同筛选和活动代次的未完成任务复用；请求键可重试。全局最多一个执行任务，队列默认最多 10 个未完成任务。四份 CSV 来自同一读取快照，文件保留 24 小时。
       security:
         - adminCookie: []
       parameters:
@@ -2717,16 +3170,22 @@ paths:
               $ref: '#/components/schemas/CreateExportRequest'
       responses:
         '202':
-          description: 已创建任务
+          description: 已创建或复用任务
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExportTaskResponse'
+        '403':
+          description: SUPER_ADMIN_REQUIRED
+        '409':
+          description: 活动未结束或幂等请求参数冲突
+        '429':
+          description: EXPORT_QUEUE_FULL
   /admin/activities/{activityId}/exports/{taskId}:
     get:
       operationId: getExportTask
       tags: [Exports]
-      summary: 查询导出任务和下载地址
+      summary: 系统管理员查询订单导出进度
       security:
         - adminCookie: []
       parameters:
@@ -2739,6 +3198,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExportTaskResponse'
+  /admin/activities/{activityId}/exports/{taskId}/cancel:
+    post:
+      operationId: cancelOrderExportTask
+      tags: [Exports]
+      summary: 系统管理员取消未完成的导出任务
+      description: 取消运行中的任务后会等待文件操作停止，停止前仍阻止活动删除。允许在活动重新开放后取消。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+        - $ref: '#/components/parameters/CsrfToken'
+      responses:
+        '200':
+          description: 当前任务状态
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportTaskResponse'
+  /admin/activities/{activityId}/exports/{taskId}/download:
+    get:
+      operationId: downloadOrderExportPackage
+      tags: [Exports]
+      summary: 系统管理员下载已完成且未过期的订单 ZIP
+      description: 校验当前管理员身份、活动结束状态、删除标记及活动重新开放代次。响应从对象存储流式读取；通用 public/files 路径不能读取导出文件。
+      security:
+        - adminCookie: []
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/TaskId'
+      responses:
+        '200':
+          description: 包含订单汇总、订单商品明细、有效商品汇总、有效分公司汇总四份 CSV，没有说明 TXT
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        '409':
+          description: 文件未完成、已过期或活动曾重新开放
   /admin/audit-logs:
     get:
       operationId: listAuditLogs
@@ -3191,7 +3691,90 @@ components:
     ActivityStatus:
       type: string
       enum: [DRAFT, SCHEDULED, ACTIVE, CLOSED, FINISHED, ARCHIVED]
-      description: 正常活动生命周期到 FINISHED 结束；ARCHIVED 仅为历史兼容状态，当前不提供活动归档接口。
+      description: FINISHED 表示整场活动已结束；超级管理员可手动归档到 ARCHIVED，全部业务写入冻结，解除归档仅恢复 FINISHED。
+    ActivityLifecycleReason:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 500 }
+    ActivityDeletionPreview:
+      type: object
+      required: [activityId, code, name, departmentName, version, orders, products, customers, winners, files]
+      properties:
+        activityId: { type: integer, format: int64 }
+        code: { type: string }
+        name: { type: string }
+        departmentName: { type: string }
+        version: { type: integer }
+        orders: { type: integer, format: int64 }
+        products: { type: integer, format: int64 }
+        customers: { type: integer, format: int64 }
+        winners: { type: integer, format: int64 }
+        files: { type: integer, format: int64 }
+    ActivityCopyRequest:
+      type: object
+      required: [name, startsAt, endsAt, eventEndsAt, sourceId, sourceStamp, selection, requestKey]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 200 }
+        startsAt: { type: string, format: date-time }
+        endsAt: { type: string, format: date-time }
+        eventEndsAt: { type: string, format: date-time }
+        departmentId: { type: integer, format: int64, description: 超级管理员必填，部门管理员使用自身部门 }
+        sourceId: { type: integer, format: int64, minimum: 1 }
+        sourceStamp: { type: string, minLength: 1 }
+        selection:
+          type: object
+          description: 至少选择一项；所选模块在来源中必须有有效配置
+          properties:
+            products: { type: boolean, default: false }
+            whitelist: { type: boolean, default: false }
+            lottery: { type: boolean, default: false }
+        requestKey: { type: string, pattern: '^[A-Za-z0-9_-]{8,64}$' }
+    ActivityCopyTask:
+      type: object
+      required: [id, status, stage, copiedFiles, totalFiles]
+      properties:
+        id: { type: integer, format: int64 }
+        status: { type: string, enum: [QUEUED, RUNNING, COMPLETED, FAILED, CANCELLED] }
+        stage: { type: string, enum: [QUEUED, IMAGES, CONFIGURATION, COMPLETED] }
+        copiedFiles: { type: integer }
+        totalFiles: { type: integer }
+        failureMessage: { type: string }
+        activityId: { type: integer, format: int64 }
+        activityCode: { type: string }
+    ActivityCopyTaskResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data: { $ref: '#/components/schemas/ActivityCopyTask' }
+        traceId: { type: string }
+    ActivityDeletionTask:
+      type: object
+      required: [id, activityId, activityCode, activityName, departmentName, requestedByName, reason, status, stage, stageName, deletedRows, deletedFiles, createdAt, updatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        activityId: { type: integer, format: int64 }
+        activityCode: { type: string }
+        activityName: { type: string }
+        departmentName: { type: string }
+        requestedByName: { type: string }
+        reason: { type: string }
+        status: { type: string, enum: [QUEUED, RUNNING, FAILED, COMPLETED] }
+        stage: { type: integer }
+        stageName: { type: string }
+        deletedRows: { type: integer, format: int64 }
+        deletedFiles: { type: integer, format: int64 }
+        lastError: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+    ActivityDeletionTaskResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          $ref: '#/components/schemas/ActivityDeletionTask'
+        traceId: { type: string }
     OrderStatus:
       type: string
       enum: [SUBMITTED, WITHDRAWN, VOIDED]
@@ -4505,6 +5088,48 @@ components:
           $ref: '#/components/schemas/AttendanceMatchPreview'
         traceId:
           type: string
+    AdminOrderCountsResponse:
+      type: object
+      required: [data, traceId]
+      properties:
+        data:
+          type: object
+          required: [all, submitted, withdrawn, voided, pending]
+          properties:
+            all: {type: integer, format: int64, minimum: 0}
+            submitted: {type: integer, format: int64, minimum: 0}
+            withdrawn: {type: integer, format: int64, minimum: 0}
+            voided: {type: integer, format: int64, minimum: 0}
+            pending: {type: integer, format: int64, minimum: 0}
+        traceId: {type: string}
+    AdminOrderSummary:
+      type: object
+      description: 后台订单分页摘要，不包含items、versions及operations
+      required: [id, orderNo, status, currentVersion, lockVersion, totalQuantity, totalAmount]
+      properties:
+        id: {$ref: '#/components/schemas/Id'}
+        orderNo: {type: string}
+        status: {$ref: '#/components/schemas/OrderStatus'}
+        createdSource: {type: string, enum: [H5, ADMIN]}
+        lastModifiedSource: {type: string, enum: [H5, ADMIN, SYSTEM]}
+        customerType: {$ref: '#/components/schemas/CustomerType'}
+        regionCode: {type: [string, 'null']}
+        branchName: {type: [string, 'null']}
+        dealerFullName: {type: string}
+        phone: {type: [string, 'null']}
+        phoneMasked: {type: [string, 'null']}
+        currentVersion: {type: integer}
+        lockVersion: {type: integer}
+        totalQuantity: {type: integer, format: int64}
+        totalTons: {type: [number, 'null']}
+        totalAmount: {$ref: '#/components/schemas/Decimal'}
+        firstSubmittedAt: {type: string, format: date-time}
+        lastSubmittedAt: {type: string, format: date-time}
+        lastModifiedAt: {type: string, format: date-time}
+        pendingChangeRequestId:
+          type: [integer, 'null']
+          format: int64
+          description: 当前订单对应的待审核申请编号；不存在时可省略或为null
     OrderPageResponse:
       type: object
       required: [data, page, traceId]
@@ -4512,7 +5137,7 @@ components:
         data:
           type: array
           items:
-            $ref: '#/components/schemas/CurrentOrder'
+            $ref: '#/components/schemas/AdminOrderSummary'
         page:
           $ref: '#/components/schemas/PageMeta'
         traceId:
@@ -4555,38 +5180,52 @@ components:
       properties:
         exportType:
           type: string
-          enum: [ORDER_SUMMARY, ORDER_ITEMS, ORDER_VERSIONS, VISIT_FUNNEL, LOTTERY_WINNERS, IMPORT_ERRORS]
+          enum: [ORDER_PACKAGE]
         filters:
-          type: object
-          additionalProperties: true
+          $ref: '#/components/schemas/OrderExportFilters'
+    OrderExportFilters:
+      type: object
+      properties:
+        status:
+          type: [string, 'null']
+          enum: [SUBMITTED, WITHDRAWN, VOIDED, null]
+        customerType:
+          type: [string, 'null']
+          enum: [GENERAL, SPECIAL, ALL, null]
+        keyword:
+          type: [string, 'null']
+          maxLength: 200
+      description: 订单汇总和商品明细使用全部筛选；两份有效汇总固定 SUBMITTED，仍使用客户类型及关键词筛选。
     ExportTaskResponse:
       type: object
       required: [data, traceId]
       properties:
         data:
-          type: object
-          required: [id, exportType, status, createdAt]
-          properties:
-            id:
-              $ref: '#/components/schemas/Id'
-            exportType:
-              type: string
-            status:
-              type: string
-              enum: [PENDING, RUNNING, COMPLETED, FAILED, EXPIRED]
-            rowCount:
-              type: [integer, 'null']
-            downloadUrl:
-              type: [string, 'null']
-              format: uri
-            expiresAt:
-              type: [string, 'null']
-              format: date-time
-            createdAt:
-              type: string
-              format: date-time
+          $ref: '#/components/schemas/OrderExportTask'
         traceId:
           type: string
+    OrderExportTask:
+      type: object
+      required: [id, activityId, status, stage, filters, orderCount, detailCount, sheetCounts, createdAt, cancelRequested]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        activityId: { $ref: '#/components/schemas/Id' }
+        status: { type: string, enum: [PENDING, RUNNING, COMPLETED, FAILED, EXPIRED] }
+        stage: { type: string, enum: [QUEUED, READING, COMPRESSING, UPLOADING, COMPLETED, FAILED, EXPIRED] }
+        filters: { $ref: '#/components/schemas/OrderExportFilters' }
+        orderCount: { type: integer, format: int64 }
+        detailCount: { type: integer, format: int64 }
+        sheetCounts:
+          type: array
+          items: { type: integer, format: int64 }
+          description: 完成后依次为订单汇总、订单商品明细、有效商品汇总、有效分公司汇总的数据行数；处理中为空数组。
+        snapshotAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        completedAt: { type: string, format: date-time }
+        expiresAt: { type: string, format: date-time }
+        failureCode: { type: string }
+        failureMessage: { type: string }
+        cancelRequested: { type: boolean }
     ActivityOverviewResponse:
       type: object
       required: [data, traceId]

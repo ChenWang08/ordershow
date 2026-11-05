@@ -1,8 +1,18 @@
 import { api } from "./client";
 import type { Envelope, ProductImageReview, RuntimeProduct, DealerCandidate, DealerScopeSummary } from "./types";
 
-export async function loadDealerCandidates(activityId: number) {
-  return (await api<Envelope<DealerCandidate[]>>(`/admin/activities/${activityId}/product-dealer-candidates`)).data;
+export async function loadDealerCandidates(activityId: number, signal?: AbortSignal) {
+  return (await api<Envelope<DealerCandidate[]>>(`/admin/activities/${activityId}/product-dealer-candidates`, { signal })).data;
+}
+export async function loadAdminProductEditorState(activityId: number, productId: number, imageGroupNames: string[] = []) {
+  const query = new URLSearchParams();
+  imageGroupNames.forEach(name => query.append("imageGroupNames", name));
+  const state = (await api<Envelope<{ products: RuntimeProduct[]; scopes: Record<string, DealerScopeSummary>; reviews: ProductImageReview[] }>>(
+    `/admin/activities/${activityId}/products/${productId}/editor-state?${query}`)).data;
+  return { products: state.products.map(product => {
+    const scope = state.scopes[String(product.id)];
+    return { ...product, dealerScope: scope?.scopes ?? [], effectiveDealerCount: scope?.effectiveCount, dealerScopeRestricted: scope?.restricted };
+  }), reviews: state.reviews };
 }
 export async function loadScopeHistory(activityId: number, productId: number) {
   return (await api<Envelope<Array<{ before_json: string; after_json: string; reason: string; created_at: string; display_name: string }>>>(`/admin/activities/${activityId}/products/${productId}/scope-history`)).data;

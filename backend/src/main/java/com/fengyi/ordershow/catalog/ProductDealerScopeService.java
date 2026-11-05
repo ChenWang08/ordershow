@@ -65,6 +65,21 @@ public class ProductDealerScopeService {
         JOIN activity_product p ON p.id=s.activity_product_id JOIN activity_data_binding b ON b.activity_id=p.activity_id
           AND b.data_type='PRODUCT' AND b.current_version_id=p.data_version_id WHERE p.activity_id=?
         """, (org.springframework.jdbc.core.RowCallbackHandler) rs -> branchScopes.computeIfAbsent(rs.getLong(1),k -> new HashSet<>()).add(rs.getString(2)), activityId);
+    return summarize(activityId, ids, scopes, types, branchScopes);
+  }
+  public Map<Long,ScopeSummary> summaries(long activityId, List<ProductService.ProductView> products) {
+    var ids = products.stream().map(ProductService.ProductView::id).toList();
+    if (ids.isEmpty()) return Map.of();
+    Map<Long,String> types = new HashMap<>();
+    Map<Long,Set<String>> branches = new HashMap<>();
+    for (var product : products) {
+      types.put(product.id(), product.customerType());
+      branches.put(product.id(), product.branchScope().stream().map(TextNormalizer::normalize).collect(java.util.stream.Collectors.toSet()));
+    }
+    return summarize(activityId, ids, read(activityId, ids), types, branches);
+  }
+  private Map<Long,ScopeSummary> summarize(long activityId, List<Long> ids, Map<Long,List<Scope>> scopes,
+      Map<Long,String> types, Map<Long,Set<String>> branchScopes) {
     Map<String,Candidate> candidates = new HashMap<>();
     candidates(activityId).forEach(c -> candidates.put(c.customerId()+":"+TextNormalizer.normalize(c.branchName()),c));
     Map<Long,ScopeSummary> result = new LinkedHashMap<>();

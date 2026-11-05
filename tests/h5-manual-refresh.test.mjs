@@ -62,7 +62,9 @@ async function harness(initialOrder = order(), initialRequest = null, options = 
   const h = hookHarness("app/features/h5/useH5OrderFlow.ts", "useH5OrderFlow",
     [{ activityStatus: options.activityStatus ?? "running", runtimeActivity: activity }], {
       "../../api": api,
-      "./h5-submission": { createH5SubmissionManager: ({ send }) => ({ recover: async () => {
+      "./h5-submission": options.realSubmissionManager ? loadModule("app/features/h5/h5-submission.ts", {
+        "../../services/api/client": { ApiError },
+      }, { setTimeout, clearTimeout, AbortController, crypto: webcrypto }) : { createH5SubmissionManager: ({ send }) => ({ recover: async () => {
         if (state.recoveryError) throw state.recoveryError;
         return state.recovered;
       }, submit: (scope, body) => send({ scope, body, key: "synthetic-key" }), read: () => state.pending, clear() {} }) },
@@ -321,6 +323,20 @@ test("returning to formal quantities removes the draft; failed submission/reload
   await h.model.submitOrder(); await h.flush(); await h.advance(800);
   assert.equal(h.model.step, "success"); assert.equal(h.storage.getItem(key), null);
   await h.event("pagehide"); h.unmount(); assert.equal(h.storage.getItem(key), null, "Old snapshots cannot resurrect after success");
+});
+
+test("a fresh backend rate rejection preserves the cart and allows editing without pending-result recovery", async () => {
+  const h = await harness(null, null, {realSubmissionManager: true});
+  h.model.setQuantities({1: 13}); await h.flush();
+  h.state.writeError = new ApiError(429,"H5_WRITE_RATE_LIMITED","操作太频繁，请稍后再试",undefined,8000);
+  await h.model.submitOrder(); await h.flush();
+  assert.equal(h.model.quantities[1],13); assert.equal(h.model.step,"order");
+  assert.equal(h.model.pendingSubmission,false); assert.equal(h.model.orderNeedsRefresh,false);
+  assert.match(h.model.runtimeMessage,/操作太频繁/); assert.equal(h.writes.length,1);
+  assert.notEqual(h.storage.getItem(h5LocalDraftKey(draftContext(null))),null);
+  h.model.changeQty("1",1); await h.flush(); assert.equal(h.model.quantities[1],14);
+  h.state.writeError = null;
+  await h.model.submitOrder(); await h.flush(); assert.equal(h.model.step,"success"); h.unmount();
 });
 
 test("review and withdrawal success clear the local draft but permit further pending-application edits", async () => {

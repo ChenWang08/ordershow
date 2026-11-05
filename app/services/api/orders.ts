@@ -1,7 +1,10 @@
-import { beijingDateStamp } from "../../features/shared/time";
 import { createIdempotencyKey } from "./idempotency-key";
-import { api, apiBase, ApiError, notifyAdminAccessFailure } from "./client";
-import type { AdminOrderPreview, AdminOrderSummary, Envelope, OrderChangeRequest, PageEnvelope, RuntimeOrder } from "./types";
+import { api } from "./client";
+import type { AdminOrderCounts, AdminOrderPreview, AdminOrderSummary, Envelope, OrderChangeRequest, PageEnvelope, RuntimeOrder } from "./types";
+
+export async function loadAdminOrderCounts(activityId: number, signal?: AbortSignal) {
+  return (await api<Envelope<AdminOrderCounts>>(`/admin/activities/${activityId}/orders/summary`, { signal })).data;
+}
 
 export async function loadAdminOrders(activityId: number, filters: { status?: string; customerType?: string; keyword?: string; page?: number; size?: number } = {}, signal?: AbortSignal) {
   const query = new URLSearchParams();
@@ -69,21 +72,4 @@ export async function rejectAdminOrderChangeRequest(activityId: number, requestI
   return (await api<Envelope<OrderChangeRequest>>(`/admin/activities/${activityId}/order-change-requests/${requestId}/reject`, {
     method: "POST", headers: { "Idempotency-Key": createIdempotencyKey() }, body: JSON.stringify({ reason }),
   }, "admin")).data;
-}
-
-export async function exportAdminOrders(activityId: number, filters: { status?: string; customerType?: string; keyword?: string } = {}, activityName = "活动") {
-  const query = new URLSearchParams();
-  Object.entries(filters).forEach(([key, value]) => { if (value) query.set(key, value); });
-  const response = await fetch(`${apiBase()}/admin/activities/${activityId}/orders/export?${query.toString()}`, { credentials: "include" });
-  if (!response.ok) {
-    const path = `/admin/activities/${activityId}/orders/export`;
-    if (response.status === 401) notifyAdminAccessFailure(path, response.status);
-    const error = await response.json().catch(() => null) as { code?: string; detail?: string } | null;
-    if (response.status !== 401) notifyAdminAccessFailure(path, response.status, error?.code);
-    throw new ApiError(response.status, error?.code || "EXPORT_FAILED", error?.detail || "订单导出失败");
-  }
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob); const link = document.createElement("a");
-  const safeName = activityName.replace(/[\\/:*?"<>|]/g, "-");
-  link.href = url; link.download = `${safeName}_订单数据_${beijingDateStamp()}.xlsx`; link.click(); URL.revokeObjectURL(url);
 }

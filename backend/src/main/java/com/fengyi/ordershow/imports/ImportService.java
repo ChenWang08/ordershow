@@ -61,16 +61,18 @@ public class ImportService {
     if (!filename.toLowerCase(Locale.ROOT).endsWith(".xlsx") && !filename.toLowerCase(Locale.ROOT).endsWith(".xls")) {
       throw DomainException.badRequest("IMPORT_FILE_INVALID", "请选择 Excel 文件");
     }
-    StorageService.StoredFile stored = storage.save(activityId, file, "IMPORT_SOURCE", adminId);
-    long taskId = Objects.requireNonNull(transactions.execute(status -> {
-      jdbc.queryForObject("SELECT id FROM activity WHERE id = ? FOR UPDATE", Long.class, activityId);
+    record UploadReservation(long taskId,StorageService.StoredFile file) {}
+    var reservation = Objects.requireNonNull(transactions.execute(status -> {
+      new com.fengyi.ordershow.activity.ActivityAccessPolicy(jdbc).lockWrite(activityId,false,false,false,false);
+      StorageService.StoredFile stored = storage.save(activityId, file, "IMPORT_SOURCE", adminId);
       taskRepository.cancelReplaceableTasks(activityId, importType, Long.MAX_VALUE);
-      return insertTask(activityId, importType, stored, adminId);
+      return new UploadReservation(insertTask(activityId, importType, stored, adminId),stored);
     }));
+    long taskId=reservation.taskId();
     try {
       int parsing = jdbc.update("UPDATE import_task SET status = 'PARSING', started_at = UTC_TIMESTAMP(3) WHERE id = ? AND status = 'UPLOADED'", taskId);
       if (parsing != 1) throw DomainException.conflict("IMPORT_REPLACED", "本次导入已被更新的文件替换");
-      byte[] bytes = storage.read(stored.id());
+      byte[] bytes = storage.read(reservation.file().id());
       ImportWorkbookProcessor.ParseSummary summary = transactions.execute(status -> workbookProcessor.parse(taskId, importType, bytes));
       int previewReady = jdbc.update("""
           UPDATE import_task SET status = 'PREVIEW_READY', input_count = ?, added_count = ?, warning_count = ?, error_count = ?,

@@ -2,6 +2,20 @@
 
 ## 测试分工
 
+- 活动删除到场导入引用（2026-11-04）：`ActivityLifecycleIntegrationTest` 补充白名单/到场导入真实外键、既有第31阶段FAILED任务重试、分批解除引用、工作器重启续跑及跨活动引用保护；配合 `StorageDeletionTest` 验证后续文件清理。使用固定33326端口临时库，须显式设置 `ORDER_SHOW_ACTIVITY_TEST=activity-lifecycle-only` 并核对Skipped为0，不能将环境条件跳过视为通过。执行结果与发布后恢复方式见[修复验证记录](../docs/testing/activity-deletion-import-reference-2026-11-04.md)。
+
+- 订货排行布局（2026-11-04）：仅运行排行组件/刷新22项和筛选联动4项，共26项通过；`scripts/test-ranking-filters-browser.mjs`验证四层布局、原字号、1920×1080/2560×1440/1366×768下90名完整显示及相关筛选、刷新、失败恢复、弹层和滚动访问。无后端改动、整站构建或镜像部署，见[定向验证记录](../docs/testing/ranking-layout-2026-11-04.md)。
+
+- 后台订单/审核加载（2026-11-04）：`order-loading.test.mjs` 及订单、审核、手动刷新、导出、活动只读相关测试共58项通过；`scripts/test-order-loading-browser.mjs` 通过真实组件与合成HTTP核对1440/440宽度的分页、失败独立恢复、审核入口、通过/驳回及新增/调整/作废后的请求次数。后端订单/权限相关43项和隔离MySQL的3项查询测试通过；类型检查使用 `tests/order-loading.tsconfig.json`。测试数据库通过 `docker compose -p order-query-test -f tests/order-query.compose.yml up --abort-on-container-exit --exit-code-from test` 启动，用完执行同项目前缀的 `down`；无业务数据库或业务服务部署，详见[完整记录](../docs/testing/order-list-loading-2026-11-04.md)。
+
+- 导入防重复点击（2026-11-04）：运行`node --test tests/import-busy.test.mjs tests/admin-products.test.mjs tests/admin-customers.test.mjs`，58项通过，其中新增11项验证快速连点、解析/上传/发布/正式列表读取期间的互斥、失败后恢复，以及真实组件静态渲染中的按钮和文件输入禁用。使用可控异步请求和Hook状态适配器，不代表真实浏览器或数据库写入验收；本次未构建或部署镜像，详情见[定向验证记录](../docs/testing/import-busy-2026-11-04.md)。
+
+- 后台三份列表加载（2026-11-04）：`admin-list-cache.test.mjs`、`admin-product-images.test.mjs`、`admin-lazy-loading.test.mjs`、`admin-products.test.mjs`、`admin-customers.test.mjs` 和 `drawer-interactions.test.mjs` 共77项通过；`scripts/test-admin-list-loading-browser.mjs` 通过真实组件与合成接口验证保存/取消不整表重读、分页筛选保留、手动刷新、返回加载和候选缓存失效。`ProductEditorStateTest` 与权限/图片专项覆盖局部读取和边界；完整结果、原有失败及未部署范围见[验证记录](../docs/testing/admin-list-loading-2026-11-04.md)。
+
+- 活动写入保护启动顺序：`ActivityWriteStartupTest` 在同一33326端口临时库验证正式配置、Spring Boot连接池/Flyway/监控初始化、完整Bean处理及两组连接池参数。配合活动写入保护、H5路径回滚、草稿/导入事务及订单提交专项复测；修复前后证据、复跑命令及未部署边界见[启动顺序修复记录](../docs/testing/activity-write-startup-2026-11-03.md)。沿用 `ORDER_SHOW_ACTIVITY_TEST=activity-lifecycle-only` 开关，禁止与使用同库的生命周期测试并行运行。
+
+- 活动归档与永久删除：`npm run test:activity-lifecycle`、`npm run typecheck:activity-lifecycle` 和 `scripts/test-activity-lifecycle-browser.mjs` 验证原活动菜单的部门筛选、六状态颜色及结束活动归档标记、超管操作、归档订单只读和公共顶栏删除进度；页面加载失败、无活动及所有后台模块均有超管入口。2026-11-04调整及44项相关行为测试、1440/440/320宽度浏览器结果见[前端定向验证](../docs/testing/activity-menu-progress-2026-11-04.md)。`ActivityLifecycleIntegrationTest` 使用固定33326端口临时库，只有 `ORDER_SHOW_ACTIVITY_TEST=activity-lifecycle-only` 才启用，覆盖真实迁移、关联数据分批清理、续跑、失败重试、锁、缓存隔离及草稿/导入事务兼容；`StorageDeletionTest` 验证文件及衍生版本清理。运行方式、证据与边界见[活动生命周期验证](../docs/testing/activity-lifecycle-2026-11-03.md)。只验证相关模块，不部署业务应用或访问业务库。
+
 - 排行联动与空值：`ranking-filters.test.mjs`、`screens-manual-refresh.test.mjs` 覆盖上游重置、项目组收窄品种、缺失字段/空值、取消迟到请求、失败重试及最后成功条件刷新；`scripts/test-ranking-filters-browser.mjs` 用真实 React 和合成 HTTP 验证交互及 1920/1440/768/440 布局。`RankingFiltersIntegrationTest` 用隔离 MySQL 验证实际条件、适用且未下单的配置、分公司/经销商范围、新历史冻结与空格空值一致；`PageStatisticsControllerTest` 验证真实 MVC 参数和全局 NON_NULL 下仍输出 null 选项字段。运行与结果见[联动与空值验证](../docs/testing/ranking-cascade-2026-11-01.md)。
 
 - 活动 HTTP 恢复（2026-11-01）：`ActivityInfoHttpServiceTest` 验证 304 跳过完整读取、短缓存、并发合并、时间派生状态、资源上限和独立副本缓存；`ActivityRoutesTest`/`ActivityInfoIntegrationTest` 验证真实 JSON/304/404 和共享数据库版本。`activity-info-http.test.mjs` 与合成浏览器验证检查周期、10 秒超时、隐藏/恢复、重试、活动隔离和无活动 SSE；公开资料脚本改读普通 HTTP。旧 SSE 保留兼容测试；旧 GET 删除记录为历史状态。详情见[本轮验证](../docs/testing/activity-info-http-2026-11-01.md)。
@@ -9,6 +23,10 @@
 - 抽奖三种加权：`lottery-settings.test.mjs`验证指标与门槛联动、0门槛、名单复用和旧规则兼容；`LotteryWeightingTest`与`LotteryIntegrationTest`验证金额/箱数/吨数实际小计、零权重排除、真实开奖和审计对账。千人在线、200单/分钟的同流量对照见[加权验证记录](../docs/testing/lottery-weighting-2026-10-31.md)。测试不构建或部署业务镜像。
 
 - H5 本机草稿与抽奖按页面加载：`h5-local-draft.test.mjs` 验证浏览器持久化、隔离、损坏/过期和存储失败；`h5-manual-refresh.test.mjs` 验证完整草稿生命周期及后台更新后的失效、提交成功清理/失败保留。`activity-info-http.test.mjs` 与 `lottery-board.test.mjs` 分别保证公共/H5 初始化不查询抽奖，以及抽奖页独立读取正常。浏览器验证无后台草稿请求、购物车保留和 HTTP 活动同步；本轮补充抽奖仅在页面打开且活动资料就绪后挂载。历史草稿验证见[记录](../docs/testing/h5-local-draft-2026-10-31.md)。
+
+- 抽奖轮次排序：`npm run test:lottery-order`、`npm run typecheck:lottery-order` 及 `scripts/test-lottery-order-browser.mjs` 仅验证相关组件、排序保存和请求行为。后端 `LotteryOrderTest` 验证锁定边界、版本、位移写入及审计；`LotteryIntegrationTest#reordering*` 的4个真实MySQL用例及 `LotteryOrderHttpTest` 的12/100轮排序耗时、冲突/回滚验证已通过。HTTP专项沿用 `ORDER_SHOW_LOTTERY_TEST=order-show-lottery-test` 和33316固定隔离库，仅注册必要组件，管理员身份使用替身，不启动完整应用；禁止与同库测试并行。结果、复跑和性能边界见[本次记录](../docs/testing/lottery-round-order-2026-11-03.md)。不运行整体回归或部署镜像。
+
+- 抽奖大屏图片与名单展示：运行 `node --test tests/lottery-board.test.mjs` 和 `node scripts/test-lottery-display-browser.mjs`。后者用真实组件与模拟 HTTP 检查 1920×1080、1366×768、390×844 下的 1/2/3/4/5/9/10/30/60 家名单，图片两倍尺寸及横图/竖图/方图/小图/无图、长名称换行、大名单滚动、滚动/揭晓/回看与展开顶部栏。截图和测量结果位于 `outputs/lottery-display/`；只启动本地测试页面，不构建或部署镜像。Playwright 可通过 `ORDER_SHOW_PLAYWRIGHT_MODULE` 指定，浏览器可通过 `ORDER_SHOW_BROWSER_PATH` 指定。
 
 - 手机端订单按需刷新：`h5-manual-refresh.test.mjs` 覆盖无轮询、15 秒冷却、共享查询、修改/撤回检查、审核及后台直接修改、草稿版本和迟到响应隔离；`scripts/test-h5-manual-refresh-browser.mjs` 使用真实 H5 组件及合成 HTTP，在手机/桌面验证静置无订单请求、最新购物车和失败恢复，见[验证记录](../docs/testing/h5-manual-refresh-2026-10-30.md)。
 

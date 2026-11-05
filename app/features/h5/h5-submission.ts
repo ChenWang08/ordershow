@@ -58,9 +58,10 @@ export function createH5SubmissionManager(options: Options) {
     memory.set(id,pending);
     try { options.storage()?.setItem(id,JSON.stringify(pending)); } catch { /* Private browsing may deny storage. */ }
   }
-  async function execute(pending: PendingSubmission) {
+  async function execute(pending: PendingSubmission, fresh: boolean) {
     if (now() - pending.createdAt > RECOVERY_MS || pending.createdAt > now())
       throw new ApiError(409,"SUBMISSION_RECOVERY_EXPIRED","上次提交已超过自动恢复时间，请加载最新订单核对");
+    let mayHaveBeenAccepted = !fresh;
     for (let attempt = 0; ; attempt++) {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(),20_000);
@@ -69,7 +70,11 @@ export function createH5SubmissionManager(options: Options) {
         clear(pending.scope);
         return order;
       } catch (error) {
-        const uncertain = submissionNeedsRecovery(error);
+        const rateLimited = error instanceof ApiError && error.status === 429 && error.code === "H5_WRITE_RATE_LIMITED";
+        // A fresh command rejected before writing can be edited again. A previous lost response
+        // still needs the original key, even if a later attempt encounters the rate limit.
+        const uncertain = submissionNeedsRecovery(error) && !(rateLimited && !mayHaveBeenAccepted);
+        if (uncertain && !rateLimited) mayHaveBeenAccepted = true;
         if (!uncertain && (!(error instanceof ApiError) || ![401,403].includes(error.status))) clear(pending.scope);
         const delay = error instanceof ApiError ? Math.max(1000,error.retryAfterMs ?? 1000) : 1000;
         if (!uncertain || attempt >= 1 || delay > 10_000) throw error;
@@ -78,11 +83,11 @@ export function createH5SubmissionManager(options: Options) {
       } finally { clearTimeout(timer); }
     }
   }
-  function run(pending: PendingSubmission) {
+  function run(pending: PendingSubmission, fresh = false) {
     const id = storageKey(pending.scope);
     const existing = running.get(id);
     if (existing) return existing;
-    const result = execute(pending).finally(() => running.delete(id));
+    const result = execute(pending, fresh).finally(() => running.delete(id));
     running.set(id,result);
     return result;
   }
@@ -95,13 +100,14 @@ export function createH5SubmissionManager(options: Options) {
     submit(scope: SubmissionScope, request: SubmissionBody) {
       const body = normalized(request);
       let pending = read(scope);
+      const fresh = !pending;
       if (pending && JSON.stringify(pending.body) !== JSON.stringify(body))
         throw new ApiError(409,"SUBMISSION_PENDING","请先确认上次提交结果，再修改订单");
       if (!pending) {
         pending = { format: 1, key: (options.uuid ?? createIdempotencyKey)(), createdAt: now(), scope: { ...scope }, body };
         save(pending);
       }
-      return run(pending);
+      return run(pending, fresh);
     },
   };
 }

@@ -7,6 +7,7 @@ import { isUnspecifiedCustomerTypeActivity } from "./dashboard-domain";
 import { MetricTable } from "./ReportMetricTable";
 import { useManualScreenData } from "./useManualScreenData";
 import { ScreenRefreshControls } from "./ScreenRefreshControls";
+import { useManualRefresh } from "../shared/useManualRefresh";
 
 const reports = [
   "特渠专业客户 TOP5",
@@ -27,6 +28,7 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
     activity?.id ?? null, loadDashboardReport, "总战绩", "战报数据加载失败", !unspecifiedCustomerType,
   );
   const status = data?.dashboard.status ?? activity?.status;
+  const manual = useManualRefresh(activity ? String(activity.id) : null, refreshing || unspecifiedCustomerType, () => refresh(report));
   const historical = status === "FINISHED" || status === "ARCHIVED";
   const isTop = report.includes("TOP5");
   const isTotal = report === "总战绩";
@@ -61,7 +63,7 @@ export function ReportBoard({ activity }: { activity: RuntimeActivity | null }) 
             {reports.map((item) => <option key={item}>{item}</option>)}
           </select>
         </label>
-        <ScreenRefreshControls refreshing={refreshing} refreshedAt={refreshedAt} historical={historical} disabled={!activity || unspecifiedCustomerType} onRefresh={() => void refresh(report)} /></div>
+        <ScreenRefreshControls refreshing={refreshing} refreshedAt={refreshedAt} historical={historical} disabled={!activity || unspecifiedCustomerType || manual.coolingDown} onRefresh={() => void manual.refresh()} /></div>
       </header>
       {error && !unspecifiedCustomerType && <div className="warning-box" role="alert"><b>战报刷新失败</b><span>{error}。{data ? "当前显示上次成功加载的数据，请点击手动刷新重试。" : "请点击手动刷新重试。"}</span></div>}
       {unspecifiedCustomerType ? <div className="screen-data-unavailable" role="status"><strong>当前活动未区分客户类型</strong><span>白名单客户类型全部为空，暂不展示专题战报数据。</span></div> : <div className={`report-content ${isDual ? "dual" : ""}`}>

@@ -165,6 +165,11 @@ public class AuthService {
     byte[] tokenHash = crypto.sha256(token);
     String cacheKey = cacheKey(tokenHash);
     CachedH5Session cached = cachedH5Session(cacheKey);
+    if (cached != null && !Boolean.TRUE.equals(jdbc.queryForObject(
+        "SELECT EXISTS(SELECT 1 FROM activity WHERE id=? AND deletion_requested_at IS NULL AND status IN ('SCHEDULED','ACTIVE','CLOSED') AND (event_ends_at IS NULL OR event_ends_at>UTC_TIMESTAMP(3)))", Boolean.class, cached.principal().activityId()))) {
+      h5Sessions.remove(cacheKey);
+      cached = null;
+    }
     if (cached != null) {
       request.setAttribute(H5_REQUEST_ATTRIBUTE, cached.principal());
       request.setAttribute(H5_CSRF_HASH_ATTRIBUTE, cached.csrfHash());
@@ -181,7 +186,7 @@ public class AuthService {
         JOIN activity_customer c ON c.id = s.activity_customer_id
         LEFT JOIN activity_data_binding b ON b.activity_id = c.activity_id AND b.data_type = 'WHITELIST'
         WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > UTC_TIMESTAMP(3)
-          AND a.status IN ('SCHEDULED', 'ACTIVE', 'CLOSED')
+          AND a.deletion_requested_at IS NULL AND a.status IN ('SCHEDULED', 'ACTIVE', 'CLOSED')
           AND (a.event_ends_at IS NULL OR a.event_ends_at > UTC_TIMESTAMP(3))
           AND c.is_active = TRUE AND (b.current_version_id IS NULL OR c.data_version_id = b.current_version_id)
         """, (rs, rowNum) -> {

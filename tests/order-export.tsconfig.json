@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["../app/components/orders/OrderManagement.tsx", "../app/features/admin/AdminWorkspace.tsx", "../app/services/api/order-exports.ts"],
+  "exclude": ["../node_modules", "../work", "../dist", "../build", "../.vinext"]
+}

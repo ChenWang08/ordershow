@@ -21,7 +21,7 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 1000 } });
     const requests = [], requestUrls = [], finishedRequests = [], errors = [], unexpected = [];
     let rankingFailure = false, detailFailure = false, identityFailure = false, productFailure = false;
-    let productPrice = 100, productName = "测试商品";
+    let productPrice = 100, productName = "测试商品", releaseOverview;
     const activity = { id: 987, code: "ADMIN_REFRESH_TEST", name: "手动刷新测试活动", status: "DRAFT", version: 1,
       startsAt: "2099-01-01T00:00:00Z", endsAt: "2099-01-02T00:00:00Z", eventEndsAt: "2099-01-03T00:00:00Z",
       departmentId: 1, departmentName: "测试部门", regions: [], companyRankingTopN: 90, branchRankingTopN: 30 };
@@ -54,11 +54,15 @@ try {
       if (path === "/admin/users" || path === "/admin/members") return reply([]);
       if (path === "/admin/activities/987") return detailFailure ? route.fulfill({ status: 503, json: { message: "服务繁忙" } }) : reply(activity);
       if (path === "/admin/activities/988") return reply({ ...activity, id: 988, code: "SECOND", name: "另一个活动" });
-      if (path.endsWith("/overview")) return rankingFailure ? route.fulfill({ status: 503, json: { message: "统计繁忙" } }) : reply({
+      if (path.endsWith("/overview")) {
+        if (releaseOverview) await new Promise(resolve => { releaseOverview = resolve; });
+        return rankingFailure ? route.fulfill({ status: 503, json: { message: "统计繁忙" } }) : reply({
         totals: { order_count: 10, total_amount: 12345, total_quantity: 120, total_tons: 2.5 },
         submittedByType: { GENERAL: 8, SPECIAL: 2 }, customerCount: 20,
         customersByType: { GENERAL: 15, SPECIAL: 5 }, customerTypeMode: "TYPED" });
+      }
       if (path.endsWith("/module-context")) return reply({ customerCount: 20, customersByType: { GENERAL: 15, SPECIAL: 5 }, customerTypeMode: "TYPED", attendeeCount: 4, whitelistPublished: true });
+      if (path.endsWith("/orders/summary")) return reply({ all: 0, submitted: 0, withdrawn: 0, voided: 0, pending: 0 });
       if (/\/(customers|attendees|orders|order-change-requests\/page)$/.test(path)) return route.fulfill({ json: { data: [], page: { totalPages: 1, totalElements: 0 } } });
       if (path.endsWith("/product-dealer-scopes")) return reply({});
       if (path.endsWith("/products")) return productFailure ? route.fulfill({ status: 503, json: { message: "商品暂时无法读取" } }) : reply([1, 2].map(id => ({ id, materialName: `${productName}${id}`, materialCode: `SKU${id}`, images: [], sortNo: id, customerType: "GENERAL", rebateStatus: "YES", casePrice: productPrice, tonConversionFactor: 50, version: 1, status: "ACTIVE" })));
@@ -75,6 +79,7 @@ try {
     const dialogs = [];
     page.on("dialog", async dialog => { dialogs.push(dialog.message()); await dialog.dismiss(); });
     await page.clock.install();
+    await page.clock.pauseAt(new Date());
     await page.goto("http://127.0.0.1:4186/tests/fixtures/admin-refresh.html");
     await page.getByRole("button", { name: "刷新统计", exact: true }).waitFor();
     await page.waitForLoadState("networkidle");
@@ -111,6 +116,25 @@ try {
     await page.getByRole("button", { name: "刷新统计", exact: true }).click();
     await page.getByText("¥12,345.00", { exact: true }).waitFor();
     await assertRequestCount("/overview", 1); await assertRequestCount("/ranking", 0); await assertRequestCount("/module-context", 0);
+    const statisticsRefresh = page.getByRole("button", { name: /^(刷新统计|正在刷新…)$/ });
+    assert.equal(await statisticsRefresh.isDisabled(), true, "fast response must retain cooldown");
+    await statisticsRefresh.evaluate(button => { button.click(); button.click(); });
+    await page.clock.runFor(9_999);
+    assert.equal(await statisticsRefresh.isDisabled(), true);
+    await assertRequestCount("/overview", 1);
+    await page.clock.runFor(1);
+    assert.equal(await statisticsRefresh.isEnabled(), true);
+    await assertRequestCount("/overview", 1, "cooldown expiry must not refresh automatically");
+    releaseOverview = true;
+    await statisticsRefresh.click();
+    await assertRequestCount("/overview", 2);
+    await page.clock.runFor(10_000);
+    assert.equal(await statisticsRefresh.isDisabled(), true, "slow request remains disabled beyond 10s");
+    assert.ok(await page.getByText("¥12,345.00", { exact: true }).isVisible(), "slow refresh preserves old results");
+    releaseOverview(); releaseOverview = undefined;
+    await page.getByRole("button", { name: "刷新统计", exact: true }).waitFor();
+    await page.waitForLoadState("networkidle");
+    assert.equal(await statisticsRefresh.isEnabled(), true);
     const nav = page.getByRole("navigation", { name: "后台导航" });
     await nav.getByRole("button", { name: /白名单/ }).click();
     await page.getByRole("heading", { name: "客户白名单导入", exact: true }).waitFor();
@@ -229,17 +253,18 @@ try {
         await new Promise(resolve => setTimeout(resolve, 25));
       }
       await assertRequestCount("/orders", expected, JSON.stringify({ errors, recentRequests: requestUrls.slice(-12) }));
-      await page.getByRole("button", { name: "刷新订单", exact: true }).click({ trial: true });
+      await page.waitForLoadState("networkidle");
     };
     await nav.getByRole("button", { name: /订单管理/ }).click();
     await page.getByRole("button", { name: "订单列表", exact: true }).waitFor();
-    await waitForOrders(5);
+    await waitForOrders(1);
     await assertRequestCount("/order-change-requests/page", 0);
     await page.getByRole("button", { name: "刷新订单", exact: true }).click();
-    await waitForOrders(10);
+    await waitForOrders(2);
+    assert.equal(await page.getByRole("button", { name: "刷新订单", exact: true }).isDisabled(), true);
     await nav.getByRole("button", { name: /白名单/ }).click(); await page.waitForLoadState("networkidle");
     await nav.getByRole("button", { name: /订单管理/ }).click();
-    await waitForOrders(15);
+    await waitForOrders(3);
     const reviewLoaded = page.waitForResponse(response => response.url().includes("/order-change-requests/page"));
     await page.getByRole("button", { name: /变更审核/ }).click();
     await page.getByRole("heading", { name: "订单变更审核" }).waitFor();
@@ -253,6 +278,7 @@ try {
     await page.getByRole("button", { name: "刷新审核", exact: true }).click();
     await page.waitForLoadState("networkidle");
     await assertRequestCount("/order-change-requests/page", 2);
+    assert.equal(await page.getByRole("button", { name: "刷新审核", exact: true }).isDisabled(), true);
     await page.getByRole("button", { name: "订单列表", exact: true }).click(); await page.waitForLoadState("networkidle");
     await page.getByRole("button", { name: /变更审核/ }).click(); await page.waitForLoadState("networkidle");
     await assertRequestCount("/order-change-requests/page", 3);

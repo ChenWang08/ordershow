@@ -3,6 +3,7 @@
 import { adminNavigation, isManager, roleLabel } from "./permissions";
 import type { ReactNode } from "react";
 import { useAdminIdentity, useAdminSession } from "../../admin-context";
+import { ActivityDeletionProgressButton } from "./ActivityDeletionProgress";
 
 export function AdminLayout({ tab, onTabChange, hasActivity = true, header, children }: {
   tab: string; onTabChange: (tab: string) => void; hasActivity?: boolean;
@@ -30,7 +31,7 @@ export function AdminLayout({ tab, onTabChange, hasActivity = true, header, chil
 export function AdminAccountSummary() {
   const identity = useAdminIdentity();
   const session = useAdminSession();
-  return <div className="admin-actions"><div className="admin-identity-summary">
+  return <div className="admin-actions"><ActivityDeletionProgressButton /><div className="admin-identity-summary">
     <div><b>{identity?.displayName || identity?.username || "管理员"}</b><small>{identity?.roleCode === "SUPER_ADMIN" ? "超级管理员 · 全部部门" : `${roleLabel(identity)} · ${identity?.departmentName || ""}`}</small></div>
     <button type="button" className="admin-logout-button" disabled={session?.busy} onClick={() => void session?.logout()}>退出登录</button>
   </div>{session?.error && <span className="admin-logout-error" role="alert">{session.error}</span>}</div>;

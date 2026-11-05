@@ -22,13 +22,15 @@ function text(element) {
 // Exercise the actual component handlers and effect cleanup, including out-of-order responses.
 function harness(statuses, options = {}) {
   const calls = [];
+  let serverRevision = 4;
+  const versions = [];
   const serverRounds = statuses.map((status, index) => ({
     id: index + 1, name: `第${index + 1}轮`, status, prizeName: `奖品${index + 1}`,
     winnerCount: 1, customerType: "ALL", candidateScope: "ALL", minimumOrderAmount: 0,
   }));
   let winners = serverRounds.filter((round) => ["DRAWN", "COMPLETED"].includes(round.status))
     .map((round) => ({ roundId: round.id, position: 1, dealerDisplayName: `客户${round.id}` }));
-  const response = () => structuredClone({ rules: [{ id: 1, status: "PUBLISHED", rounds: serverRounds }], winners });
+  const response = () => structuredClone({ rules: [{ id: 1, status: "PUBLISHED", revision: serverRevision, rounds: serverRounds }], winners });
   const slots = [], pendingEffects = [];
   let cursor = 0, tree;
   const react = {
@@ -46,19 +48,23 @@ function harness(statuses, options = {}) {
     },
   };
   const api = {
-    ApiError: class ApiError extends Error {}, apiAssetUrl: (url) => url,
+    ApiError: class ApiError extends Error { constructor(code,message){super(message);this.code=code;} }, apiAssetUrl: (url) => url,
     loadPublicLottery: async () => { calls.push(["load"]); return options.load ? options.load(response) : response(); },
-    drawLotteryRound: async (_activity, id) => {
+    drawLotteryRound: async (_activity, id, revision) => {
       calls.push(["draw", id]);
+      versions.push(revision);
+      if (revision !== serverRevision) throw new api.ApiError("LOTTERY_RULE_CHANGED","轮次顺序已更新，请确认后操作");
       if (options.draw) await options.draw();
       serverRounds.find((round) => round.id === id).status = "DRAWN";
       const result = [{ roundId: id, position: 1, dealerDisplayName: `客户${id}` }];
       winners = [...winners.filter((winner) => winner.roundId !== id), ...result];
-      return { winners: result };
+      serverRevision++;
+      return { winners: result, ruleRevision: serverRevision };
     },
     completeLotteryRound: async (_activity, id) => {
       calls.push(["complete", id]);
       serverRounds.find((round) => round.id === id).status = "COMPLETED";
+      serverRevision++;
     },
   };
   const { LotteryBoard, mapLotteryRule } = loadModule("app/features/lottery/Lottery.tsx", {
@@ -74,7 +80,8 @@ function harness(statuses, options = {}) {
   const select = () => find((node) => node.type === "select");
   const action = () => find((node) => node.props?.className?.startsWith("lottery-action"));
   return {
-    calls, props, serverRounds, options, render, select, action, text: () => text(tree),
+    calls, versions, props, serverRounds, options, render, select, action, text: () => text(tree),
+    reorder(ids) { const mapped=ids.map(id=>serverRounds.find(r=>r.id===id));serverRounds.splice(0,serverRounds.length,...mapped);serverRevision++; },
     async flush() { for (let i = 0; i < 3; i++) { render(); await settle(); } render(); },
     choose(id) { select().props.onChange({ target: { value: String(id) } }); render(); },
     async click() { await action().props.onClick(); render(); },
@@ -221,4 +228,18 @@ test("finished events with unplayed rounds default to the latest result and keep
   await h.click();
   assert.equal(h.calls.every(([kind]) => kind === "load"), true);
   h.unmount();
+});
+
+test("a stale board confirms the latest order before a second click can draw",async()=>{
+  const h=harness(["COMPLETED","PUBLISHED","PUBLISHED"]);await h.flush();assert.equal(h.select().props.value,"2");
+  h.reorder([1,3,2]);await h.click();await h.flush();
+  assert.equal(h.serverRounds.find(r=>r.id===2).status,"PUBLISHED");assert.equal(h.select().props.value,"3");
+  assert.match(h.text(),/轮次顺序已更新/);assert.match(h.text(),/奖品3/);assert.equal(h.calls.filter(c=>c[0]==="draw").length,1);
+  await h.click();assert.equal(h.serverRounds.find(r=>r.id===3).status,"DRAWN");assert.deepEqual(h.versions,[4,5]);h.unmount();
+});
+test("completion reads the latest future order once and never automatically draws the next round",async()=>{
+  const h=harness(["COMPLETED","PUBLISHED","PUBLISHED","PUBLISHED"]);await h.flush();await h.click();await h.click();
+  h.reorder([1,2,4,3]);const reads=h.calls.filter(c=>c[0]==="load").length;
+  await h.click();await h.flush();assert.equal(h.select().props.value,"4");
+  assert.equal(h.calls.filter(c=>c[0]==="load").length,reads+1);assert.equal(h.calls.filter(c=>c[0]==="draw").length,1);h.unmount();
 });

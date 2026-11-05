@@ -17,7 +17,9 @@ class StorageVariantPortabilityTest {
   StorageService storage() {
     var properties = mock(OrderShowProperties.class);
     when(properties.storage()).thenReturn(new OrderShowProperties.Storage("", "", "", "shared"));
-    return new StorageService(properties, mock(JdbcTemplate.class), objects);
+    var jdbc = mock(JdbcTemplate.class);
+    when(jdbc.queryForList(anyString(), eq(Long.class), anyLong())).thenReturn(java.util.List.of(1L));
+    return new StorageService(properties, jdbc, objects);
   }
 
   @Test void separateReplicasReuseDerivativesThroughTheSharedStoragePort() throws Exception {
@@ -26,8 +28,8 @@ class StorageVariantPortabilityTest {
       byte[] bytes = saved.get(call.getArgument(1, String.class));
       return bytes == null ? null : new ByteArrayInputStream(bytes);
     });
-    doAnswer(call -> { saved.put(call.getArgument(1), call.getArgument(2)); return null; })
-        .when(objects).put(eq("shared"), anyString(), any(), anyString());
+    doAnswer(call -> { saved.put(call.getArgument(1), ((java.io.InputStream)call.getArgument(2)).readAllBytes()); return null; })
+        .when(objects).put(eq("shared"), anyString(), any(java.io.InputStream.class), anyLong(), anyString());
     for (boolean alpha : new boolean[]{false, true}) {
       var source = new ByteArrayOutputStream();
       ImageIO.write(new BufferedImage(640, 320, alpha ? BufferedImage.TYPE_INT_ARGB : BufferedImage.TYPE_INT_RGB), "png", source);
@@ -50,6 +52,6 @@ class StorageVariantPortabilityTest {
     assertThatThrownBy(() -> new ImageVariantService(storage()).read(meta, ImageVariants.Kind.THUMBNAIL))
         .isInstanceOfSatisfying(DomainException.class, error -> assertThat(error.code()).isEqualTo("IMAGE_PREVIEW_BUSY"));
     verify(objects, never()).read(anyString(), anyString());
-    verify(objects, never()).put(anyString(), anyString(), any(), anyString());
+    verify(objects, never()).put(anyString(), anyString(), any(java.io.InputStream.class), anyLong(), anyString());
   }
 }

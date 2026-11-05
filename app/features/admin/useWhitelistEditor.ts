@@ -1,5 +1,8 @@
 "use client";
 
+import { mapAdminWhitelistRows } from "./whitelist-utils";
+import { deleteConfirmedRows } from "./delete-confirmed-rows";
+
 import { saveFailure, saveRequestFailure, type DrawerSaveResult } from "../../components/drawer-save-result";
 
 import { useState, type Dispatch, type SetStateAction } from "react";
@@ -20,6 +23,7 @@ export function useWhitelistEditor({
   activityId, activityStatus, whitelistRows, setWhitelistRows, whitelistImportCompleted,
   regionCodesByName, serverImportTasks, setActionNotice, recordOperation, refreshServerImportPreview, whitelistImport,
 }: WhitelistEditorOptions) {
+  const regions = new Map(Object.entries(regionCodesByName).map(([name, code]) => [code, name]));
   const activityStarted = activityStatus === "running" || activityStatus === "closed" || activityStatus === "finished";
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
   const activityPublished = activityStatus !== "draft";
@@ -70,15 +74,14 @@ export function useWhitelistEditor({
           await updateImportRow(Number(activityId), taskId, editingWhitelistRow.serverRowId, previewChanges);
         } catch (error) { return saveFailure(error instanceof ApiError ? error.message : "白名单预览修改失败"); }
       }
-      let savedRow = { ...nextRow, manuallyEdited: true };
+      let savedRow: WhitelistRow = { ...nextRow, manuallyEdited: true };
       if (whitelistImportCompleted) {
         if (editingWhitelistRow.serverVersion === undefined) {
           return saveFailure("当前白名单记录缺少后端版本信息，请刷新页面后重试。");
         }
         try {
           const saved = await updateAdminCustomer(Number(activityId), Number(editingWhitelistRow.id), customerBody);
-          savedRow = { ...savedRow, id: String(saved.id), serverVersion: saved.lockVersion, dealerPhone: saved.phone || saved.phoneMasked,
-            confirmerPhone: saved.confirmerPhone || saved.confirmerPhoneMasked || nextRow.confirmerPhone, status: saved.active ? "有效" : "待处理" };
+          savedRow = { ...mapAdminWhitelistRows([saved], regions)[0], sequence: saved.excelSequence ?? nextRow.sequence, manuallyEdited: true };
         } catch (error) { return saveFailure(error instanceof ApiError ? error.message : "白名单保存失败"); }
       }
       setWhitelistRows((current) => current.map((item) => item.id === nextRow.id ? savedRow : item));
@@ -98,9 +101,7 @@ export function useWhitelistEditor({
     if (whitelistImportCompleted) {
       try {
         const saved = await createAdminCustomer(Number(activityId), customerBody);
-        manualRow = { ...manualRow, id: String(saved.id), serverVersion: saved.lockVersion, sequence: saved.excelSequence ?? nextRow.sequence,
-          dealerPhone: saved.phone || saved.phoneMasked, confirmerPhone: saved.confirmerPhone || saved.confirmerPhoneMasked || nextRow.confirmerPhone,
-          status: saved.active ? "有效" : "待处理" };
+        manualRow = { ...mapAdminWhitelistRows([saved], regions)[0], sequence: saved.excelSequence ?? nextRow.sequence, source: "manual", manuallyEdited: true };
       } catch (error) { return saveRequestFailure(error, "白名单新增失败，请检查网络连接", true); }
     }
     setWhitelistRows((current) => [...current, manualRow]);
@@ -122,10 +123,17 @@ export function useWhitelistEditor({
         if (targets.length > 0) await deleteImportRows(Number(activityId), serverImportTasks.WHITELIST, targets.map((row) => row.serverRowId!));
       } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "白名单预览删除失败"); return; }
     } else if (whitelistImportCompleted) {
-      const targets = whitelistRows.filter((row) => ids.includes(row.id) && row.serverVersion !== undefined);
-      try {
-        for (const row of targets) await deleteAdminCustomer(Number(activityId), Number(row.id), row.serverVersion!);
-      } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "白名单删除失败"); return; }
+      const result = await deleteConfirmedRows(ids, async id => {
+        const row = whitelistRows.find(item => item.id === id);
+        if (!row || row.serverVersion === undefined) throw new Error("记录版本缺失，请刷新列表核对。");
+        await deleteAdminCustomer(Number(activityId), Number(id), row.serverVersion);
+      });
+      if (result.deleted.length) setWhitelistRows(current => current.filter(row => !result.deleted.includes(row.id)));
+      setEditingWhitelistRow(current => current && result.deleted.includes(current.id) ? null : current);
+      if (result.deleted.length) recordOperation("删除白名单", result.deleted.length + " 条", "已同步移除服务器确认删除的记录。");
+      setActionNotice(result.error ? "已删除 " + result.deleted.length + " 条，其余记录未确认删除：" + result.error
+        : "已删除 " + result.deleted.length + " 条白名单，已有订单不会被删除。");
+      return;
     }
     setWhitelistRows((current) => {
       const nextRows = current.filter((row) => !ids.includes(row.id));

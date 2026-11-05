@@ -106,6 +106,10 @@ class LotteryIntegrationTest {
       if(legacy)jdbc.update("UPDATE lottery_round SET probability_mode='ORDER_AMOUNT_WEIGHTED' WHERE lottery_rule_id=?",rule.id());
       return service.publish(activity,rule.id(),admin);});
   }
+  LotteryService.RuleWrite revisionWrite(long ruleId, String name, List<LotteryService.RoundWrite> rounds) {
+    var current = service.rule(activity,ruleId);
+    return new LotteryService.RuleWrite(name,rounds,current.revision(),current.rounds().stream().map(LotteryService.RoundView::id).toList());
+  }
   @Test void sameItemIntersectionAndLiteralCommaNamesAndCustomerTypes() {
     var result=service.preview(activity,preview("AMOUNT","100","ALL","项目A",List.of("品种A"),"ORDER_AMOUNT_WEIGHTED"));
     assertThat(result.candidates()).extracting(LotteryService.CandidatePreviewItem::activityCustomerId).containsExactly(base+1);
@@ -173,7 +177,7 @@ class LotteryIntegrationTest {
     assertThat(audit.get("totalCandidateWeight").decimalValue()).isEqualByComparingTo(boxes?"5":"0.5");
     assertThat(audit.get("totalCandidateOrderAmount").decimalValue()).isEqualByComparingTo("50");
     assertThat(audit.get("resultHashVersion").asInt()).isEqualTo(2);
-    assertThatThrownBy(()->tx.execute(status->service.update(activity,rule.id(),new LotteryService.RuleWrite("变更",List.of(round(metric,"0","项目A",List.of(),mode))),admin))).isInstanceOf(DomainException.class);
+    assertThatThrownBy(()->tx.execute(status->service.update(activity,rule.id(),revisionWrite(rule.id(),"变更",List.of(round(metric,"0","项目A",List.of(),mode))),admin))).isInstanceOf(DomainException.class);
   }
   @Test void zeroTonnageDoesNotFallbackToEqualAndMismatchedNewMetricsAreRejected() {
     jdbc.update("UPDATE order_item SET line_tons=0,ton_case_factor=NULL WHERE order_id IN (SELECT id FROM customer_order WHERE activity_id=?)",activity);
@@ -190,7 +194,7 @@ class LotteryIntegrationTest {
     assertThat(rule.rounds().getFirst().minimumOrderTons()).isEqualByComparingTo("0.1");
     assertThat(rule.rounds().getFirst().varieties()).containsExactly("品种,B","品种A");
     assertThat(rule.rounds().getFirst().candidateCount()).isNull();
-    var retained=tx.execute(status->service.update(activity,rule.id(),new LotteryService.RuleWrite("原位保存",List.of(round("TONS","0.1","项目A",List.of("品种,B","品种A")))),admin));
+    var retained=tx.execute(status->service.update(activity,rule.id(),revisionWrite(rule.id(),"原位保存",List.of(round("TONS","0.1","项目A",List.of("品种,B","品种A")))),admin));
     assertThat(retained.rounds().getFirst().probabilityMode()).isEqualTo("ORDER_AMOUNT_WEIGHTED");
     assertThat(retained.rounds().getFirst().qualificationMetric()).isEqualTo("TONS");
     assertThat(service.productOptions(activity)).contains(new LotteryService.ProductOption("项目A","品种,B"));
@@ -208,8 +212,79 @@ class LotteryIntegrationTest {
     assertThat(jdbc.queryForObject("SELECT qualifying_order_tons FROM lottery_candidate_snapshot WHERE draw_attempt_id=?",BigDecimal.class,result.attemptId())).isEqualByComparingTo("0.5");
     assertThat(jdbc.queryForObject("SELECT CAST(rule_snapshot_json AS CHAR) FROM lottery_draw_attempt WHERE id=?",String.class,result.attemptId())).contains("项目A","minimumOrderTons");
     assertThatThrownBy(()->tx.execute(status->service.draw(activity,round,admin))).isInstanceOf(DomainException.class);
-    assertThatThrownBy(()->tx.execute(status->service.update(activity,rule.id(),new LotteryService.RuleWrite("变更",List.of(round("TONS","0.2","项目A",List.of()))),admin))).isInstanceOf(DomainException.class);
+    assertThatThrownBy(()->tx.execute(status->service.update(activity,rule.id(),revisionWrite(rule.id(),"变更",List.of(round("TONS","0.2","项目A",List.of()))),admin))).isInstanceOf(DomainException.class);
   }
+  @Test void reorderingPreservesResultsAndEnforcesTheNewExecutionOrder() {
+    var config = round("AMOUNT","0",null,List.of(),"EQUAL");
+    var rule = tx.execute(s -> {
+      var created=service.create(activity,new LotteryService.RuleWrite("排序",List.of(config,config,config)),admin);
+      return service.publish(activity,created.id(),admin);
+    });
+    long first=rule.rounds().get(0).id(), second=rule.rounds().get(1).id(), third=rule.rounds().get(2).id();
+    var draw=tx.execute(s -> service.draw(activity,first,admin,rule.revision()));
+    tx.execute(s -> service.complete(activity,first));
+    var before=service.rule(activity,rule.id());
+    var winnerIds=jdbc.queryForList("SELECT id FROM lottery_winner WHERE round_id=? ORDER BY id",Long.class,first);
+    var order=tx.execute(s -> service.reorder(activity,rule.id(),new LotteryService.RoundOrderWrite(before.revision(),List.of(first,third,second)),admin,"order-integration"));
+    assertThat(order.rounds()).extracting(LotteryService.RoundPosition::id).containsExactly(first,third,second);
+    assertThat(service.round(activity,first).resultHash()).isEqualToIgnoringCase(draw.resultHash());
+    assertThat(jdbc.queryForList("SELECT id FROM lottery_winner WHERE round_id=? ORDER BY id",Long.class,first)).isEqualTo(winnerIds);
+    assertThatThrownBy(() -> tx.execute(s -> service.draw(activity,second,admin,order.revision())))
+        .isInstanceOfSatisfying(DomainException.class,e -> assertThat(e.code()).isEqualTo("LOTTERY_ROUND_OUT_OF_ORDER"));
+    assertThatThrownBy(() -> tx.execute(s -> service.draw(activity,third,admin,before.revision())))
+        .isInstanceOfSatisfying(DomainException.class,e -> assertThat(e.code()).isEqualTo("LOTTERY_RULE_CHANGED"));
+    var next=tx.execute(s -> service.draw(activity,third,admin,order.revision()));
+    assertThat(next.roundId()).isEqualTo(third);
+  }
+
+  @Test void reorderingRollsBackBothOrderAndRevisionIfItsAuditFails() {
+    var config=round("AMOUNT","0",null,List.of(),"EQUAL");
+    var rule=tx.execute(s -> service.create(activity,new LotteryService.RuleWrite("排序回滚",List.of(config,config)),admin));
+    var ids=rule.rounds().stream().map(LotteryService.RoundView::id).toList();
+    jdbc.execute("CREATE TRIGGER fail_order_audit BEFORE INSERT ON audit_log FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='synthetic order audit failure'");
+    try {
+      assertThatThrownBy(() -> tx.execute(s -> service.reorder(activity,rule.id(),new LotteryService.RoundOrderWrite(rule.revision(),List.of(ids.get(1),ids.get(0))),admin,"order-rollback"))).isInstanceOf(RuntimeException.class);
+    } finally { jdbc.execute("DROP TRIGGER fail_order_audit"); }
+    var after=service.roundOrder(activity,rule.id());
+    assertThat(after.revision()).isEqualTo(rule.revision());
+    assertThat(after.rounds()).extracting(LotteryService.RoundPosition::id).containsExactlyElementsOf(ids);
+  }
+
+  @Test void reorderingAndDeletingKeepPublishedConfigurationAttachedToItsIdentity() {
+    var config=round("AMOUNT","0",null,List.of(),"EQUAL");
+    var rule=tx.execute(s -> {
+      var created=service.create(activity,new LotteryService.RuleWrite("配置身份",List.of(config,config,config)),admin);
+      return service.publish(activity,created.id(),admin);
+    });
+    var ids=rule.rounds().stream().map(LotteryService.RoundView::id).toList();
+    var reordered=tx.execute(s -> service.reorder(activity,rule.id(),new LotteryService.RoundOrderWrite(rule.revision(),List.of(ids.get(2),ids.get(0),ids.get(1))),admin,"identity-test"));
+    var write=new LotteryService.RuleWrite("删除中间一轮",List.of(config,config),reordered.revision(),List.of(ids.get(2),ids.get(1)));
+    var saved=tx.execute(s -> service.update(activity,rule.id(),write,admin));
+    assertThat(saved.rounds()).extracting(LotteryService.RoundView::id).containsExactly(ids.get(2),ids.get(1));
+    assertThatThrownBy(() -> tx.execute(s -> service.update(activity,rule.id(),write,admin)))
+        .isInstanceOfSatisfying(DomainException.class,e -> assertThat(e.code()).isEqualTo("LOTTERY_RULE_CHANGED"));
+  }
+
+  @Test void reorderingRejectsAConcurrentRuleLockWithoutWaiting() throws Exception {
+    var config=round("AMOUNT","0",null,List.of(),"EQUAL");
+    var rule=tx.execute(s -> service.create(activity,new LotteryService.RuleWrite("排序竞争",List.of(config,config)),admin));
+    var locked=new java.util.concurrent.CountDownLatch(1); var release=new java.util.concurrent.CountDownLatch(1);
+    try (var executor=java.util.concurrent.Executors.newSingleThreadExecutor()) {
+      var holder=executor.submit(() -> tx.execute(s -> {
+        jdbc.queryForObject("SELECT revision FROM lottery_rule WHERE id=? FOR UPDATE",Long.class,rule.id()); locked.countDown();
+        try { if (!release.await(5,java.util.concurrent.TimeUnit.SECONDS)) throw new AssertionError("lock test timed out"); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new AssertionError(e); }
+        return null;
+      }));
+      try {
+        assertThat(locked.await(2,java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        assertThatThrownBy(() -> tx.execute(s -> service.reorder(activity,rule.id(),new LotteryService.RoundOrderWrite(rule.revision(),List.of(rule.rounds().get(1).id(),rule.rounds().get(0).id())),admin,"order-lock")))
+            .isInstanceOfSatisfying(DomainException.class,e -> assertThat(e.code()).isEqualTo("LOTTERY_RULE_BUSY"));
+      } finally { release.countDown(); }
+      holder.get(2,java.util.concurrent.TimeUnit.SECONDS);
+    }
+  }
+
   @Test void snapshotsCrossBatchBoundaryAndWinnerFailureRollsEverythingBack() {
     for(int i=5;i<=510;i++) {
       long id=base*1000+i;

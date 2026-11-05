@@ -17,9 +17,6 @@
 }
 .collapsible-screen .screen-board,
 .collapsible-screen .order-dashboard { min-height: 100cqh; }
-.collapsible-screen .rank-row,
-.collapsible-screen .branch-rank > div { min-height: clamp(22px, calc((100cqh - 151px) / 30), 29px); }
-.collapsible-screen .branch-rank.branch-rank-scrollable { max-height: calc(100cqh - 115px); }
 .screen-header { height: 0; min-width: 0; transition: height 180ms ease; }
 .screen-header[data-open="true"] { height: var(--screen-header-height); }
 .screen-header-panel { height: 100%; overflow: hidden; visibility: hidden; }

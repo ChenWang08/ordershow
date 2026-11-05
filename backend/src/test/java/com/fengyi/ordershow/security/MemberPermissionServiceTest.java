@@ -34,6 +34,20 @@ class MemberPermissionServiceTest {
       assertThatThrownBy(() -> check(member(), "GET", path)).isInstanceOf(DomainException.class);
     }
   }
+  @Test void editorStateRequiresProductPermission() {
+    String path="/admin/activities/1/products/42/editor-state";
+    check(member(AdminPermission.PRODUCT),"GET",path);
+    for(var actor:List.of(member(),member(AdminPermission.WHITELIST),member(AdminPermission.ORDER)))
+      assertThatThrownBy(() -> check(actor,"GET",path)).isInstanceOf(DomainException.class);
+  }
+  @Test void orderSummaryAndReviewRoutesRequireOrderPermission() {
+    for (String resource : List.of("orders/summary", "orders", "order-change-requests/page", "order-change-requests/42")) {
+      String path = "/admin/activities/7/" + resource;
+      check(member(AdminPermission.ORDER), "GET", path);
+      for (var actor : List.of(member(), member(AdminPermission.PRODUCT), member(AdminPermission.WHITELIST)))
+        assertThatThrownBy(() -> check(actor, "GET", path)).isInstanceOf(DomainException.class);
+    }
+  }
   @Test void fullPermissionsNeverGrantActivityOrAccountAdministration() {
     var actor = member(AdminPermission.values());
     for (String path : List.of("/admin/activities", "/admin/activities/1", "/admin/activities/1/publish",
@@ -74,5 +88,16 @@ class MemberPermissionServiceTest {
     check(new AdminPrincipal(1,"admin","管理员","DEPARTMENT_ADMIN",1L,"部门",false), "POST", "/admin/activities/1/publish");
     assertThatThrownBy(() -> check(new AdminPrincipal(3,"unknown","未知","UNKNOWN",1L,"部门",false), "POST", "/admin/users"))
         .isInstanceOf(DomainException.class);
+  }
+  @Test void exportsAlwaysRequireSuperAdminIncludingDepartmentManagersAndOrderMembers() {
+    var root=new AdminPrincipal(1,"root","系统管理员","SUPER_ADMIN",null,null,false);
+    var department=new AdminPrincipal(3,"dept","部门管理员","DEPARTMENT_ADMIN",1L,"部门",false);
+    for(String resource:List.of("exports","exports/3","exports/3/download","exports/3/cancel","orders/export")) {
+      String path="/admin/activities/1/"+resource;
+      check(root,"GET",path);
+      for(var denied:List.of(department,member(AdminPermission.ORDER)))
+        assertThatThrownBy(()->check(denied,"GET",path)).isInstanceOf(DomainException.class)
+            .extracting(e->((DomainException)e).code()).isEqualTo("SUPER_ADMIN_REQUIRED");
+    }
   }
 }

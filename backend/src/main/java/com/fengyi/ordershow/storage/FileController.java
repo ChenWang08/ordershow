@@ -30,6 +30,10 @@ public class FileController {
     if (files.isEmpty()) throw com.fengyi.ordershow.common.DomainException.notFound("FILE_NOT_FOUND", "文件不存在");
     var file = files.getFirst();
     String purpose = file.get("file_purpose").toString();
+    if ("EXPORT_RESULT".equals(purpose)) {
+      // Export artifacts are available only through the task route, which also validates expiry and activity generation.
+      throw com.fengyi.ordershow.common.DomainException.notFound("FILE_NOT_FOUND", "请从订单导出记录下载文件");
+    }
     // Product/prize images remain public assets used by H5 and screens. Source sheets are private.
     if (!java.util.List.of("PRODUCT_IMAGE", "LOTTERY_PRIZE_IMAGE", "ACTIVITY_BACKGROUND").contains(purpose)) {
       var admin = auth.requireAdmin(request);

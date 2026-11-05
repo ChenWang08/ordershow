@@ -117,6 +117,7 @@ public class AuditService {
     if (uri.contains("/activities")) return "ACTIVITY"; return "SESSION";
   }
   private static String action(String method, String uri) {
+    if (uri.endsWith("/round-order")) return "LOTTERY_ROUNDS_REORDERED";
     if (uri.endsWith("/reopen")) return "ACTIVITY_REOPEN";
     if (uri.endsWith("/finish")) return "ACTIVITY_FINISH";
     if (uri.endsWith("/admin/members")) return "MEMBER_CREATED";

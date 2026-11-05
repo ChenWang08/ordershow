@@ -9,16 +9,18 @@ import { ActivityWorkspaceProvider } from "../workspace/ActivityWorkspace";
 import { AdminGateway } from "./AdminGateway";
 import { AdminWorkspace } from "./AdminWorkspace";
 import { DepartmentAdminPanel } from "./DepartmentAdminPanel";
+import { ActivitySwitcher } from "./ActivitySwitcher";
 import { NewActivityDrawer } from "./NewActivityDrawer";
 import { useAdminActivities } from "./useAdminActivities";
 import { AdminLayout, AdminAccountSummary } from "./AdminLayout";
+import { ActivityDeletionProgressProvider } from "./ActivityDeletionProgress";
 
 type AdminWorkspaceLoadState =
   | { requestKey: string; status: "ready"; activity: RuntimeActivity | null; activities: AdminActivitySummary[] }
   | { requestKey: string; status: "error"; message: string };
 
 export function AdminEntry() {
-  return <AdminGateway><AuthorizedWorkspace /></AdminGateway>;
+  return <AdminGateway><ActivityDeletionProgressProvider><AuthorizedWorkspace /></ActivityDeletionProgressProvider></AdminGateway>;
 }
 
 export function AuthorizedWorkspace() {
@@ -75,7 +77,7 @@ export function EmptyAdminWorkspace({ activities: initialActivities }: { activit
   return <>
     <AdminLayout tab={tab} onTabChange={selectTab} hasActivity={false} header={
       <header className="admin-empty-header"><div className="admin-heading">
-        <div className="admin-no-activity"><span>当前活动</span><b>暂无活动</b></div><strong>{tab}</strong>
+        <ActivitySwitcher activities={activities} /><strong>{tab}</strong>
         {isManager(identity) && <button type="button" className="admin-primary" onClick={activities.openNewActivity}>＋ 新建活动</button>}
       </div><AdminAccountSummary /></header>
     }>

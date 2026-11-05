@@ -8,13 +8,13 @@ import { DashboardTrendChart } from "./DashboardTrendChart";
 import { ScreenRefreshControls } from "./ScreenRefreshControls";
 
 export function OrderDashboard({ activity }: { activity: RuntimeActivity | null }) {
-  const { data, error, refreshing, refreshedAt, historical, refresh } = useOrderDashboard(activity);
+  const { data, error, refreshing, coolingDown, refreshedAt, historical, refresh } = useOrderDashboard(activity);
   const { amount, generalAmount, specialAmount, generalShare, generalRegions, regions, trend, productLineRows, specialChannelProductRows, generalChannelProductRows, regionProductCards, regionProductMax, branchRankingRows, dealerRankingRows, activityTimeZone, cards, unspecifiedCustomerType, hasGeneralCustomerType, hasSpecialCustomerType, showChannelComparison } = dashboardMetrics(data, activity);
   const showGeneralRegions = hasGeneralCustomerType && generalRegions.length > 0;
   const singleChannel = !showChannelComparison;
   const singleTypeLabel = unspecifiedCustomerType ? "全部客户" : hasGeneralCustomerType ? "综合客户" : "特渠专业客户";
   return <section className="order-dashboard">
-    <header className="order-dashboard-header"><div><h1><span>▦</span> 订货会订单数据可视化看板</h1><p>{activity?.name ?? "订货会"} · 点击刷新更新有效订单统计，撤回订单不计入</p></div><div className="order-dashboard-live"><ScreenRefreshControls refreshing={refreshing} refreshedAt={refreshedAt} historical={historical} disabled={!activity} onRefresh={() => void refresh()} /></div></header>
+    <header className="order-dashboard-header"><div><h1><span>▦</span> 订货会订单数据可视化看板</h1><p>{activity?.name ?? "订货会"} · 点击刷新更新有效订单统计，撤回订单不计入</p></div><div className="order-dashboard-live"><ScreenRefreshControls refreshing={refreshing} refreshedAt={refreshedAt} historical={historical} disabled={!activity || coolingDown} onRefresh={() => void refresh()} /></div></header>
     {error && <div className="order-dashboard-error" role="alert">{error}。{data ? "当前显示上次成功加载的数据，请点击手动刷新重试。" : "请点击手动刷新重试。"}</div>}
     <div className="order-dashboard-kpis">{cards.map((card) => <article className={card.tone} key={card.label}><span>{card.icon}</span><div><small>{card.label}</small><strong>{card.value}<i>{card.unit}</i></strong></div></article>)}</div>
     <div className="order-dashboard-grid order-dashboard-rankings">

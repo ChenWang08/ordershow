@@ -4,11 +4,13 @@ import { useCallback } from "react";
 import { loadActivityOverview } from "../../api";
 import { money } from "../shared/utils";
 import { useAdminQuery } from "./useAdminQuery";
+import { useManualRefresh } from "../shared/useManualRefresh";
 
 // Statistics are read only on request; keep the snapshot between module visits.
 export function useActivityOverview(activityId: string, enabled = true) {
   const loader = useCallback((key: string, signal: AbortSignal) => loadActivityOverview(Number(key), signal), []);
   const query = useAdminQuery(enabled ? activityId : null, loader);
+  const manual = useManualRefresh(enabled ? activityId : null, query.loading, () => query.refresh());
   const { data } = query;
   const context = data;
   const overviewTotals = data?.totals;
@@ -29,5 +31,5 @@ export function useActivityOverview(activityId: string, enabled = true) {
     ["订货总箱数", Number(overviewTotals?.total_quantity ?? 0).toLocaleString("zh-CN"), "当前有效已提交订单"],
     ["订货总吨数", overviewTotals?.total_tons == null ? "—" : Number(overviewTotals.total_tons).toLocaleString("zh-CN", { minimumFractionDigits: 1, maximumFractionDigits: 3 }), overviewTotals?.total_tons == null ? "部分商品缺少吨箱系数" : "当前有效已提交订单"],
   ].map(([label, value, hint]) => [label, data ? value : "—", data ? hint : "尚未加载"]);
-  return { ...query, loaded: Boolean(data), adminStats, progressRows };
+  return { ...query, manualRefresh: manual.refresh, coolingDown: manual.coolingDown, loaded: Boolean(data), adminStats, progressRows };
 }

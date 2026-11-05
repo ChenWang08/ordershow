@@ -11,7 +11,7 @@ data:
   DB_POOL_SIZE: "20"
   DB_POOL_MIN_IDLE: "2"
   H5_SESSION_CACHE_TTL_MS: "0"
-  # Existing databases require DBA migration to V049 and summary, repair and check before this is enabled.
+  # Existing databases require DBA migration to V053 and summary, repair and check before this is enabled.
   DASHBOARD_SUMMARY_ENABLED: "true"
   DASHBOARD_SUMMARY_ACTIVITIES: ""
   REDIS_HOST: "REPLACE_ME"
@@ -25,7 +25,7 @@ data:
   PUBLIC_ORIGIN: "https://REPLACE_ME"
   REALTIME_CHANNEL: "order-show:test:events"
   H5_WARMUP_ENABLED: "true"
-  H5_WRITE_CONCURRENCY: "12"
+  H5_WRITE_CONCURRENCY: "36"
   HTTP_MAX_THREADS: "40"
   JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=70"
   ACTIVITY_INFO_CHANNEL: "order-show:test:events:activity-info:v1"
@@ -49,3 +49,13 @@ data:
   ACTIVITY_HTTP_MAX_LOADS: "2"
   ACTIVITY_HTTP_MAX_WAITERS: "128"
   ACTIVITY_HTTP_WAIT_MS: "3000"
+
+  # Shared across all API replicas through the existing Redis key space.
+  H5_WRITE_MAX_WAITERS: "50"
+  H5_WRITE_WAIT_TIMEOUT_MS: "12000"
+  H5_CUSTOMER_WRITE_RATE_LIMIT_ENABLED: "true"
+  H5_CUSTOMER_WRITE_WINDOW_MS: "10000"
+  H5_CUSTOMER_WRITE_MAX_OPERATIONS: "3"
+  H5_CUSTOMER_WRITE_MAX_REQUESTS: "20"
+  H5_CUSTOMER_WRITE_REDIS_BUDGET_MS: "200"
+  H5_CUSTOMER_WRITE_REDIS_RECOVERY_MS: "5000"

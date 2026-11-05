@@ -44,6 +44,7 @@ function customerHarness(overrides = {}, apiOverrides = {}, domainOverrides = {}
     cancelImport: async (...args) => calls.push(["cancel", ...args]),
     confirmImport: async (...args) => calls.push(["confirm", ...args]),
     waitForImport: async () => calls.push("wait"),
+    loadAdminCustomers: async () => { calls.push("customers"); return [{ id: 52, lockVersion: 3, dealerFullName: "正式客户", customerType: "GENERAL", active: true, phoneMasked: "138****0000" }]; },
     loadAdminAttendees: async () => { calls.push("attendees"); return [{ id: 42, participantName: "参会人", matchStatus: "MATCHED", lotteryEligible: true, activityCustomerId: 12 }]; },
     updateImportRow: async (...args) => calls.push(["update-staging", ...args]),
     deleteImportRows: async (...args) => calls.push(["delete-staging", ...args]),
@@ -62,6 +63,7 @@ function customerHarness(overrides = {}, apiOverrides = {}, domainOverrides = {}
     },
     react: {
       useMemo: (calculate) => calculate(),
+      useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
       useState(initial) {
         const index = cursor++;
         if (!(index in slots)) slots[index] = initial;
@@ -99,7 +101,7 @@ test("whitelist publication preserves attendance drafts without reading the hidd
   const harness = customerHarness();
   harness.render().attendance.setPendingAttendanceImport(draft());
   await harness.render().whitelist.confirmWhitelistImport();
-  assert.deepEqual(harness.calls, [["confirm", 1, 7], "wait", "committed"]);
+  assert.deepEqual(harness.calls, [["confirm", 1, 7], "wait", "customers", "committed"]);
   assert.equal(harness.options.attendanceRows[0].id, "published");
 });
 
@@ -375,4 +377,37 @@ test("successful customer and attendee creates use server identities and version
   assert.equal(added.id, "81"); assert.equal(added.serverVersion, 2); assert.equal(added.sequence, 99);
   assert.equal((await harness.render().attendance.saveAttendanceRow(attendee("new"))).ok, true);
   assert.equal(harness.options.attendanceRows.at(-1).id, "82");
+});
+
+
+test("whitelist and attendance readback errors clear retired records after successful publication",async()=>{
+  for(const type of ["whitelist","attendance"]){
+    let errors=0;
+    const h=customerHarness({onReadbackFailed:()=>errors++}, {loadAdminCustomers:async()=>{throw new Error("offline");},loadAdminAttendees:async()=>{throw new Error("offline");}});
+    if(type==="whitelist") await h.render().whitelist.confirmWhitelistImport();
+    else { h.render().attendance.setPendingAttendanceImport(draft()); h.render().attendance.setAttendanceMatchPreview({whitelistVersionId:17}); await h.render().attendance.confirmAttendanceImport(); }
+    assert.equal(h.options.serverImportTasks[type==="whitelist"?"WHITELIST":"ATTENDANCE"],undefined);
+    assert.equal(h.options[type==="whitelist"?"whitelistRows":"attendanceRows"].length,0);
+    if(type==="whitelist") assert.equal(h.options.whitelistImportCompleted,true);
+    else assert.equal(h.render().attendance.pendingAttendanceImport,null);
+    assert.equal(errors,1); assert.match(h.notices.at(-1),/已替换成功.*勿重复/);
+  }
+});
+test("whitelist and attendance batch failures remove only confirmed deletions",async()=>{
+  for(const type of ["whitelist","attendance"]){
+    const rows=[1,2,3].map(id=>({...customer(String(id)),...attendee(String(id)),serverVersion:id})); const calls=[];
+    const remove=async(_a,id)=>{calls.push(id);if(id===2)throw new Error("conflict");};
+    const h=customerHarness({whitelistImportCompleted:true,whitelistRows:rows,attendanceRows:rows},{deleteAdminCustomer:remove,deleteAdminAttendee:remove});
+    if(type==="whitelist") await h.render().editor.deleteWhitelistRows(["1","1","2","3"]);
+    else await h.render().attendance.deleteAttendanceRows(["1","1","2","3"]);
+    assert.deepEqual(calls,[1,2]); assert.deepEqual(h.options[type==="whitelist"?"whitelistRows":"attendanceRows"].map(r=>r.id),["2","3"]);
+    assert.match(h.notices.at(-1),/已删除 1 [条名]/);
+  }
+});
+test("running whitelist edits map authoritative server fields and preserve unrelated rows",async()=>{
+  const original={...customer("42"),serverVersion:1}, keep=customer("43");
+  const h=customerHarness({activityStatus:"running",whitelistImportCompleted:true,whitelistRows:[original,keep]},{updateAdminCustomer:async()=>({id:42,lockVersion:5,excelSequence:9,customerType:"GENERAL",regionCode:"EAST",dealerFullName:"标准名称",branchName:"新分公司",active:true,phoneMasked:"139****1234"})});
+  h.render().editor.setEditingWhitelistRow(original); assert.equal((await h.render().editor.saveWhitelistRow(original,"更正")).ok,true);
+  assert.equal(h.options.whitelistRows[0].dealerFull,"标准名称"); assert.equal(h.options.whitelistRows[0].serverVersion,5);
+  assert.equal(h.options.whitelistRows[0].region,"华东"); assert.equal(h.options.whitelistRows[1],keep); assert.deepEqual(h.calls,[]);
 });

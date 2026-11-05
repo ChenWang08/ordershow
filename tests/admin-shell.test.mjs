@@ -13,6 +13,7 @@ function activitiesHarness({ items = [], saved = "", role = "SUPER_ADMIN", apiOv
   let mounted = false;
   let cleanups = [];
   const { useAdminActivities } = loadModule("app/features/admin/useAdminActivities.ts", {
+    "./useActivityCopy": { useActivityCopy: () => ({ enabled: false, task: null, reset() {} }) },
     "../../api": {
       ApiError: class ApiError extends Error {},
       loadAdminActivities: async () => items,
@@ -24,6 +25,7 @@ function activitiesHarness({ items = [], saved = "", role = "SUPER_ADMIN", apiOv
     },
     "../../admin-context": { useAdminIdentity: () => ({ roleCode: role }) },
     react: {
+      useRef(initial) { const index = cursor++; return slots[index] ??= { current: initial }; },
       useMemo: (compute) => compute(),
       useEffect: (effect) => { if (!mounted) effects.push(effect); },
       useState(initial) {
@@ -32,7 +34,7 @@ function activitiesHarness({ items = [], saved = "", role = "SUPER_ADMIN", apiOv
         return [slots[index], (value) => { slots[index] = typeof value === "function" ? value(slots[index]) : value; }];
       },
     },
-  }, { window: {
+  }, { sessionStorage: { getItem: () => null }, window: {
     location: { replace: (url) => calls.push(["replace", url]), assign: (url) => calls.push(["assign", url]) },
     setInterval: (_callback, delay) => { calls.push(["timer", delay]); return 1; },
     clearInterval: (id) => calls.push(["clearTimer", id]),

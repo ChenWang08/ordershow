@@ -544,6 +544,20 @@ public class OrderRepository {
     return beginIdempotency(activityId, "H5_CUSTOMER", actorId, endpoint, key, hash);
   }
 
+  boolean matchesH5Receipt(long activityId, long customerId, String endpoint, String key, byte[] fingerprint, byte[] legacyHash) {
+    var rows = jdbc.queryForList("""
+        SELECT request_hash, COALESCE(JSON_UNQUOTE(JSON_EXTRACT(response_json,'$.format')),'1') receipt_format
+        FROM api_idempotency WHERE activity_id=? AND actor_type='H5_CUSTOMER' AND actor_id=?
+          AND endpoint_code=? AND idempotency_key=?
+        """, activityId, customerId, endpoint, key);
+    if (rows.isEmpty()) return false;
+    byte[] expected = "ORDER_SUBMIT".equals(endpoint) && "2".equals(String.valueOf(rows.getFirst().get("receipt_format")))
+        ? fingerprint : legacyHash;
+    if (!MessageDigest.isEqual((byte[]) rows.getFirst().get("request_hash"), expected))
+      throw DomainException.conflict("IDEMPOTENCY_KEY_REUSED", "同一幂等键不能用于不同请求");
+    return true;
+  }
+
   /** Caller holds the activity/customer locks in the order shared by all order writers. */
   OrderView beginH5Submission(long activityId, long customerId, String key, byte[] fingerprint, byte[] legacyHash,
                              boolean includeHistory) {

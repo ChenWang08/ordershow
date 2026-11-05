@@ -73,6 +73,23 @@ H5 会话绑定 `activityId`、`activityCustomerId`、`customerType`、过期时
 
 不得把数据库异常、堆栈、对象存储内部地址或密钥返回给客户端。手机号明文只允许在已鉴权的白名单、现场到场和订单管理接口中按权限返回；公开接口、H5、排行、战报、抽奖大屏和错误响应只能返回脱敏值或不返回。
 
+## 活动归档与永久删除
+
+以下写操作仅限超级管理员，并沿用管理员会话、CSRF 和操作审计；归档活动的读取与导出沿用现有部门与功能权限。
+
+| 接口 | 用途 |
+| --- | --- |
+| `POST /admin/activities/{activityId}/archive` | 已结束活动手动归档，`If-Match` 加 `{reason}` |
+| `POST /admin/activities/{activityId}/unarchive` | 解除归档到 FINISHED，不开放下单，`If-Match` 加 `{reason}` |
+| `GET /admin/activities/{activityId}/deletion-preview` | 超管查看活动、版本及订单、商品、客户、中奖记录、文件数量 |
+| `POST /admin/activities/{activityId}/permanent-deletion` | `If-Match` 加 `{code,reason}`，202 返回独立删除任务；重复请求返回原任务 |
+| `GET /admin/activity-deletion-tasks?page=1` | 超管分页查看进度，每页 20 条，响应为 data 数组 |
+| `POST /admin/activity-deletion-tasks/{taskId}/retry` | 超管继续 FAILED 任务，从已提交阶段恢复 |
+
+仅 DRAFT、FINISHED、ARCHIVED 可删除；归档或删除前须处理完待审批改单和未结束导入、导出。删除受理即从所有活动列表隐藏并封禁后续活动及文件请求，包括条件缓存请求；后台清理完成后才物理删除活动主记录。任务状态为 QUEUED、RUNNING、FAILED、COMPLETED，返回 stageName、deletedRows、deletedFiles、lastError 等字段。无自动备份、无回收站。版本过期返回 ACTIVITY_VERSION_CONFLICT；归档业务写返回 ACTIVITY_ARCHIVED_READ_ONLY；未处理业务返回 ACTIVITY_UNSETTLED_TASKS。
+
+`GET /admin/activities` 及 summary=true 均包含已归档活动并排除已受理删除的活动；前端原活动菜单默认显示权限内全部活动，仅保留部门筛选；仅FINISHED/ARCHIVED在名称旁显示未归档/已归档，右侧均显示活动已结束。删除进度移至公共顶栏操作日志左侧，仅超级管理员可见；加载中、加载失败及无活动时也可进入。按钮本身不读取任务，抽屉打开且页面可见时读取，当前页有QUEUED/RUNNING才约3秒继续；关闭或隐藏时取消读取，恢复可见时重读。接口与每页20条契约不变。
+
 ## 4. 认证和会话
 
 ### 4.1 管理员
@@ -161,9 +178,16 @@ H5 商品展示按当前可见商品目录动态处理返利页签：只有同�
 - 普通列表搜索先标准化输入；后台客户手机号完整 11 位直接按明文字段精确匹配，同时保留 HMAC 索引校验，迁移窗口内对旧密文记录提供只读兼容查询，不把手机号写入日志；
 - 所有活动资源 API 都从路径取得 `activityId`，不得只在查询参数中传活动 ID。
 
+### 5.1 后台订单与审核工作台（2026-11-04）
+
+- 工作台固定使用 `page` 和 `size=50`，上一页、选页码、下一页只读取目标页，搜索/筛选/排序回第一页；接口仍兼容原分页范围和默认值。
+- 新增 `GET /admin/activities/{activityId}/orders/summary`，需要原部门/活动访问资格与 ORDER 权限，响应 `data={all,submitted,withdrawn,voided,pending}`。前四项按活动与原客户关联口径一次条件聚合，待审核单独索引计数；不返回订单行或待审核编号，不接受搜索及客户类型条件。
+- `GET .../orders` 的每条摘要新增可空 `pendingChangeRequestId`。通过 `uk_order_change_pending(pending_order_id)` 唯一索引关联，保持总数和每页行数不变，复用V034已有结构；无申请时可能因NON_NULL配置省略该字段。
+- 首次进入/返回、手动刷新和相关操作后读取汇总，普通翻页/筛选不读取；无空闲轮询。列表与汇总为独立请求和快照，并发业务更新时可能短暂不一致，手动刷新可重新读取。
+
 ## 6. 幂等和并发
 
-审核工作台新增管理员 GET `order-change-requests/page`（status/type/keyword/page/size/newest）、`order-change-requests/pending`（待审核申请 ID 与订单 ID，供数量和订单标记使用）、`order-change-requests/{requestId}`（完整申请及原订单快照）。路径均以 `/admin/activities/{activityId}/` 开头并校验部门范围及 ORDER 权限；分页摘要不包含商品明细。H5 创建申请同时原子替代已有待审核申请，重复幂等键返回原申请。审核通过接口遇到订单版本变化返回成功响应中的 REJECTED 状态，前端必须检查结果状态。
+审核工作台使用管理员 GET `order-change-requests/page`（status/type/keyword/page/size/newest）与 `order-change-requests/{requestId}`（完整申请及原订单快照）。旧 `order-change-requests/pending` 保留兼容旧客户端，新工作台通过订单汇总及当页订单的申请编号替代其读取。路径均以 `/admin/activities/{activityId}/` 开头并校验部门范围及 ORDER 权限；分页摘要不包含商品明细。H5 创建申请同时原子替代已有待审核申请，重复幂等键返回原申请。审核通过接口遇到订单版本变化返回成功响应中的 REJECTED 状态，前端必须检查结果状态。
 
 ### 6.1 幂等键
 
@@ -180,7 +204,7 @@ H5 商品展示按当前可见商品目录动态处理返利页签：只有同�
 - 同一调用者、接口和幂等键重复请求，载荷一致时返回第一次结果；
 - 幂等键相同但载荷不同，返回 409 `IDEMPOTENCY_KEY_REUSED`；
 - `PROCESSING` 状态重复请求返回 409/202 并携带可重试提示；
-- 订单和抽奖的幂等记录至少保留到活动结束后 30 天；当前不依赖活动归档作为正常生命周期节点。
+- 订单和抽奖的幂等记录默认至少保留到活动结束后 30 天；超级管理员明确永久删除整场活动时，关联幂等记录随任务一起清理。
 
 关键幂等记录、请求指纹、任务 ID 和可重放响应摘要最终保存于 MySQL 的 `api_idempotency`。Redis 可以在命中时加速重复请求和互斥，但缓存丢失、过期或重启后必须回到 MySQL，不得因此重新执行订单版本、导入发布或抽奖结果。
 
@@ -203,6 +227,12 @@ H5当前订单GET、提交PUT和撤回POST支持可选查询参数`includeHistor
 H5写操作按活动共享锁、客户独占锁、幂等/订单记录的顺序执行。不同客户并行，同客户首次提交及草稿/订单竞争被串行化。
 商品调价和管理员订单维护保留活动独占锁，截止UPDATE也与共享锁互斥；写事务等待锁后按READ_COMMITTED重查活动状态。
 活动状态判断只查询所需状态和时间字段，不在每次下单时组装地区和白名单类型信息。公开活动接口的完整信息不变。
+
+### 6.4 后台商品局部状态读取（2026-11-04）
+
+`GET /admin/activities/{activityId}/products/{productId}/editor-state` 需要管理员、商品管理权限及活动访问权限，返回 `data.products`、按商品编号索引的 `data.scopes` 和 `data.reviews`。仅返回当前商品版本中的可见商品，失效编号返回404。未传 `imageGroupNames` 时只读取当前商品；图片操作可通过重复同名查询参数传入旧/新名称分组，最多12个、每个512字符，名称中的逗号不拆分，使用原图片匹配标准化规则读取相关同名商品。
+
+后台单条保存后合并正式返回及必要的局部状态，不再整表重读；整批导入完成后仍读取一次正式清单取得新编号和版本。经销商候选缓存只属于后台工作区，H5商品读取和手机号校验继续使用服务器规则。详细参数见OpenAPI，验证及部署边界见[本次记录](../testing/admin-list-loading-2026-11-04.md)。
 
 ## 7. 文件导入
 
@@ -274,7 +304,7 @@ H5 只提交商品 ID 和箱数：
 
 多级规则在商品导入成功后的编辑页手动设置，不扩展 Excel。商品 POST/PATCH 使用顶层 `priceTiers: [{minQuantity:1,casePrice:298},{minQuantity:100,casePrice:290},…]` 和 `priceTierPricingMode`；第一档固定 1 箱起，价格独立于普通 `casePrice`，仅要求大于零、最多四位小数；后续最多 100 个优惠档，箱数 2～999999 递增，箱价逐档降低。PATCH 省略数组保留规则，空数组清除并恢复普通箱价；传入数组会完整替换。旧单档字段及不含第一档的旧数组保持兼容，保存时用本次普通箱价补足第一档；数组优先。`WHOLE_ORDER` 全部箱数用最高已达价；`INCREMENTAL` 逐段计价，起始箱包含在新档内。
 
-商品响应 `casePrice` 保留普通箱价，`priceTier.tiers` 返回包含独立第一档的完整规则，旧 minQuantity/casePrice 表示第一优惠档（仅有第一档时返回该档）。订单和历史明细的 `baseCasePrice` 保存实际第一档价，`pricingDetails` 返回自身规则及实际计费段；旧快照仍按其原基础箱价计算。显示、试算与导出应使用全部段。H5 不增加价格轮询和确认接口，已打开页面沿用已加载价格试算，成功提交显示服务器最终金额。导出末列追加各档明细，多档分段时原单档价/门槛列标明“多档，见计费明细”。
+商品响应 `casePrice` 保留普通箱价，`priceTier.tiers` 返回包含独立第一档的完整规则，旧 minQuantity/casePrice 表示第一优惠档（仅有第一档时返回该档）。订单和历史明细的 `baseCasePrice` 保存实际第一档价，`pricingDetails` 返回自身规则及实际计费段；旧快照仍按其原基础箱价计算。价格显示与试算应使用全部段。H5 不增加价格轮询和确认接口，已打开页面沿用已加载价格试算，成功提交显示服务器最终金额。订单 CSV ZIP 的商品明细直接读取订单自身保存的品种、规格、基础箱价、实际命中门槛和最终金额；命中优惠档填“是否命中阶梯＝是”，未达门槛或仅使用独立第一档基础价填“否”，不展开阶梯档位或导出各档计费明细。
 
 商品吨箱转换系数发生变化时，商品 PATCH 成功保存后自动执行当前订单吨数同步：只处理当前活动中状态为 `SUBMITTED` 的订单，按当前明细箱数除以新吨箱系数重算 `order_item.line_tons`，并重新汇总 `customer_order.total_tons`，同时保存新的 `order_item.ton_case_factor`。系数为空时对应明细吨数为空；任一明细无法换算时整单总吨数为空。该同步不改变金额、数量、订单状态、订单版本、订单操作记录和历史 `order_version_item`，不需要额外的预览、确认或同步请求。
 
@@ -374,6 +404,7 @@ ACK 各副本订阅同一 Redis 通道，事务行锁避免正常并发时重复
 
 - 三类后台账号统一登录、退出、当前身份及权限；仅超级管理员自行改密；部门与账号管理、成员创建/授权/重置密码/启停；
 - 活动列表、创建、编辑、状态迁移和二维码；
+- 新建活动可通过 `/admin/activity-copy-sources`、`/admin/activities/{activityId}/copy-preview` 选择同部门来源，再向 `/admin/activity-copies` 提交新名称、时间、所选模块、配置标记及去重请求编号。任务详情、失败重试、放弃分别为 `/admin/activity-copies/{taskId}`、`/retry`、`/discard`。仅复制当前有效商品、白名单及抽奖配置和独立图片；不复制到场与业务历史。任务完成前新草稿隐藏，完成后恢复原活动读取路径，接口不跨活动读取来源数据。客户端只在进度面板打开且页面可见、任务未结束时查询进度；提交结果不确定时使用原请求编号和原载荷确认结果。
 - 商品、白名单、到场名单列表与单条紧急编辑；
 - 导入上传、预览、错误、确认和取消；
 - 订单列表、详情、版本、操作记录、搜索、筛选和导出；活动开始后管理员可创建、调整、恢复或逻辑作废订单，写操作必须携带幂等键并填写原因；

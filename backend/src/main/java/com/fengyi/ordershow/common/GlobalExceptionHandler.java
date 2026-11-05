@@ -46,6 +46,13 @@ public class GlobalExceptionHandler {
     return problem(exception.status(), exception.code(), exception.getMessage(), request, null);
   }
 
+  @ExceptionHandler(com.fengyi.ordershow.order.H5WriteRateLimitException.class)
+  ResponseEntity<ProblemDetail> h5WriteRateLimit(com.fengyi.ordershow.order.H5WriteRateLimitException exception, HttpServletRequest request) {
+    var response = problem(exception.status(), exception.code(), exception.getMessage(), request, null);
+    return ResponseEntity.status(response.getStatusCode()).header("Retry-After", String.valueOf(exception.retryAfterSeconds()))
+        .header("Cache-Control", "no-store").body(response.getBody());
+  }
+
   @ExceptionHandler({MethodArgumentNotValidException.class, BindException.class, ConstraintViolationException.class,
       HttpMessageNotReadableException.class})
   ResponseEntity<ProblemDetail> validation(Exception exception, HttpServletRequest request) {

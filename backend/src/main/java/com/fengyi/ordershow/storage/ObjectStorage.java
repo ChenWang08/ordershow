@@ -2,12 +2,14 @@ package com.fengyi.ordershow.storage;
 
 import java.io.InputStream;
 
-/** Object bytes only; database metadata and access control stay in StorageService. */
+/** Object operations only. File ownership and authorization remain in StorageService. */
 public interface ObjectStorage {
   String provider();
   void initialize() throws Exception;
-  void put(String bucket, String key, byte[] content, String contentType) throws Exception;
+  void put(String bucket, String key, InputStream input, long length, String contentType) throws Exception;
   InputStream read(String bucket, String key) throws Exception;
-  /** Null only for a missing object; authorization, bucket and network errors still propagate. */
   InputStream readIfPresent(String bucket, String key) throws Exception;
+  void copy(String sourceBucket, String sourceKey, String targetBucket, String targetKey) throws Exception;
+  boolean copyIfPresent(String sourceBucket, String sourceKey, String targetBucket, String targetKey) throws Exception;
+  void remove(String bucket, String key) throws Exception;
 }

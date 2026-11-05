@@ -17,7 +17,7 @@ try {
   await server.listen();
   const { chromium } = await import(process.env.ORDER_SHOW_PLAYWRIGHT_MODULE || "playwright");
   browser = await chromium.launch({ headless: true, ...(process.env.ORDER_SHOW_BROWSER_PATH ? { executablePath: process.env.ORDER_SHOW_BROWSER_PATH } : {}) });
-  for (const width of [390, 1440]) {
+  for (const width of [320, 390, 1440]) {
     const context = await browser.newContext({ viewport: { width, height: 900 } });
     const page = await context.newPage(), calls = [], errors = [], unexpected = [];
     const item = quantity => ({ id: 1, productId: 1, materialName: "合成商品", productLine: "调味品", quantity, casePrice: 10, lineAmount: quantity * 10 });
@@ -52,11 +52,29 @@ try {
     await page.getByLabel("手机号", { exact: true }).fill("13900000001");
     await page.getByRole("button", { name: "验证并进入订货" }).click();
     await page.getByRole("heading", { name: "修改申请待审核" }).waitFor();
-    assert.equal(await page.getByRole("button", { name: /刷新/ }).count(), 0);
+    const refresh = page.getByRole("button", { name: "刷新订单状态", exact: true });
+    assert.equal(await refresh.count(), 1);
+    assert.equal(await refresh.isDisabled(), true);
     assert.doesNotMatch(await page.locator(".submitted-page").innerText(), /不会自动更新|最后同步|刷新状态（\d+秒）/);
     const count = () => calls.filter(c => /\/(order|order-change-requests\/current)$/.test(c.path)).length;
     const loaded = count(); await page.clock.fastForward(65_000);
     assert.equal(count(), loaded, "A pending application must not poll");
+    await refresh.click();
+    await page.waitForFunction(() => document.querySelector(".submitted-refresh")?.getAttribute("aria-busy") === "false");
+    assert.equal(count(), loaded + 2, "Manual refresh reads only the order and application");
+    assert.equal(await refresh.isDisabled(), true);
+    await page.clock.fastForward(15_000);
+    assert.equal(await refresh.isDisabled(), false);
+    assert.equal(count(), loaded + 2, "The countdown must not query the server");
+    const layout = await refresh.evaluate(button => {
+      const face = button.querySelector(".submitted-refresh-face").getBoundingClientRect();
+      const target = button.getBoundingClientRect();
+      const card = button.closest(".submitted-state-card").getBoundingClientRect();
+      return { targetHeight: target.height, faceHeight: face.height, faceWidth: face.width,
+        fits: target.left >= card.left && target.right <= card.right };
+    });
+    assert.ok(layout.targetHeight >= 44 && layout.faceHeight <= 32 && layout.faceWidth <= 110 && layout.fits,
+      `Compact refresh must fit at ${width}px: ${JSON.stringify(layout)}`);
     await page.screenshot({ path: fileURLToPath(new URL(`pending-${width}.png`, output)) });
 
     // Approval is discovered by the edit action, even without clicking refresh.
@@ -69,7 +87,7 @@ try {
 
     // A direct admin edit is also checked, even within the ordinary refresh cooldown.
     formal = makeOrder(3, 8); application = null;
-    assert.equal(await page.getByRole("button", { name: /刷新/ }).count(), 0);
+    assert.equal(await refresh.count(), 1);
     await page.getByRole("button", { name: "修改订单", exact: true }).click();
     await page.getByLabel("合成商品订货箱数").waitFor();
     assert.equal(await page.getByLabel("合成商品订货箱数").inputValue(), "8");
@@ -154,5 +172,5 @@ try {
     assert.deepEqual(errors, []); assert.deepEqual(unexpected, []);
     await context.close();
   }
-  console.log("PASS: 390px/1440px StrictMode H5; 65s idle, fresh edit checks, shared reads, 503 preservation, local reload, lock-only invalidation, preview without HTTP, direct submit/cleanup and blocked storage. Zero draft/lottery HTTP. Synthetic data only.");
+  console.log("PASS: 320px/390px/1440px StrictMode H5; compact refresh, 15s cooldown, 65s idle, fresh edit checks, shared reads, 503 preservation, local reload, lock-only invalidation, preview without HTTP, direct submit/cleanup and blocked storage. Zero draft/lottery HTTP. Synthetic data only.");
 } finally { if (browser) await browser.close(); await server.close(); }

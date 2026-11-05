@@ -1,17 +1,19 @@
 "use client";
 
+import { deleteConfirmedRows } from "./delete-confirmed-rows";
+
 import { saveFailure, saveRequestFailure, type DrawerSaveResult } from "../../components/drawer-save-result";
 import { positiveProductNumber, productCompletenessStatus } from "../../domain/product-completeness";
 
 import { useState } from "react";
 import {
   ApiError, createAdminProduct, updateAdminProduct, updateImportRow, deleteImportRows, deleteAdminProduct,
-  addAdminProductImage, updateAdminProductImage, deleteAdminProductImage, selectProductImageReview,
-  excludeProductImageReview, loadAdminProducts, loadProductImageReviews,
+  loadAdminProductEditorState,
 } from "../../api";
 import { productMaterialNameKey, type ProductImportRow } from "../../domain/import-domain";
 import { productImageRelationStatus, productImageStatusForAssets, synchronizeProductImageAssetStatuses, revokeProductImageAssets } from "../../domain/product-images";
 import { mergeProductImageReviews, runtimeProductToImportRow } from "./admin-utils";
+import { saveProductImages } from "./product-editor-images";
 import type { ProductModuleOptions } from "./product-module-types";
 import type { useProductImport } from "./useProductImport";
 
@@ -92,43 +94,22 @@ export function useProductEditor({
             ...productBody, bottlePriceSet: true, casePriceSet: true, tonCaseFactorSet: true, priceTierSet: true,
           });
           if (!saved) return saveFailure("商品保存结果异常，请刷新列表核对。", true);
-          savedRow = { ...savedRow, id: String(saved.id), serverVersion: saved.version,
-            status: saved.dataStatus === "INCOMPLETE" ? "待完善" : "有效" };
           detailsSaved = true;
-          const desiredImages = savedRow.images ?? [];
-          const selectedReview = desiredImages.find((image) => image.reviewCandidateId
-            && productImageRelationStatus(image) === "CONFIRMED");
-          const originalReviewIds = (editingProductRow.images ?? []).map((image) => image.reviewCandidateId)
-            .filter((id): id is number => id !== undefined);
-          if (selectedReview?.reviewCandidateId) {
-            await selectProductImageReview(Number(activityId), selectedReview.reviewCandidateId);
-          } else {
-            const retainedReviewIds = new Set(desiredImages.map((image) => image.reviewCandidateId).filter((id): id is number => id !== undefined));
-            for (const candidateId of originalReviewIds.filter((id) => !retainedReviewIds.has(id))) {
-              await excludeProductImageReview(Number(activityId), candidateId);
-            }
+          savedRow = { ...nextRow, id: String(saved.id), serverVersion: saved.version };
+          savedRow = { ...nextRow, ...runtimeProductToImportRow(saved), dealerScope: nextRow.dealerScope,
+            effectiveDealerCount: nextRow.effectiveDealerCount, dealerScopeRestricted: nextRow.dealerScopeRestricted,
+            images: nextRow.images, imageStatus: nextRow.imageStatus, manuallyEdited: true };
+          const groupNames = [editingProductRow.materialName, nextRow.materialName];
+          const imageState = await saveProductImages(Number(activityId), productId, nextRow.images ?? [], editingProductRow.images ?? [], groupNames);
+          const scopeChanged = nextRow.dealerScopeEdited || nextRow.branchScope !== editingProductRow.branchScope
+            || nextRow.customerType !== editingProductRow.customerType || nextRow.materialName !== editingProductRow.materialName;
+          const state = imageState ?? (scopeChanged ? await loadAdminProductEditorState(Number(activityId), productId) : null);
+          if (state) {
+            refreshedCatalogRows = mergeProductImageReviews(state.products.map(runtimeProductToImportRow), state.reviews);
+            const refreshed = refreshedCatalogRows.find(product => product.id === nextRow.id);
+            if (!refreshed) throw new Error("商品状态读取不完整");
+            savedRow = { ...refreshed, manuallyEdited: true };
           }
-          const desiredPersistedIds = new Set(desiredImages.map((image) => Number(image.id)).filter(Number.isSafeInteger));
-          const originalPersistedIds = (editingProductRow.images ?? []).map((image) => Number(image.id)).filter(Number.isSafeInteger);
-          for (const imageId of originalPersistedIds.filter((imageId) => !desiredPersistedIds.has(imageId))) {
-            await deleteAdminProductImage(Number(activityId), productId, imageId);
-          }
-          const uploadedIds = new Map<string, number>();
-          for (const image of desiredImages.filter((item) => !Number.isSafeInteger(Number(item.id)) && item.file)) {
-            const uploaded = await addAdminProductImage(Number(activityId), productId, image.file!, false);
-            uploadedIds.set(image.id, uploaded.id);
-          }
-          const orderedImageIds = desiredImages.map((image) => Number.isSafeInteger(Number(image.id)) ? Number(image.id) : uploadedIds.get(image.id))
-            .filter((imageId): imageId is number => imageId !== undefined);
-          for (let index = 0; index < orderedImageIds.length; index += 1) {
-            await updateAdminProductImage(Number(activityId), productId, orderedImageIds[index], index === 0, index);
-          }
-          const [refreshedProducts, refreshedReviews] = await Promise.all([
-            loadAdminProducts(Number(activityId)), loadProductImageReviews(Number(activityId)),
-          ]);
-          refreshedCatalogRows = mergeProductImageReviews(refreshedProducts.map(runtimeProductToImportRow), refreshedReviews);
-          const refreshed = refreshedProducts.find((product) => product.id === productId);
-          if (refreshed) savedRow = { ...runtimeProductToImportRow(refreshed), manuallyEdited: true };
         } catch (error) {
           if (detailsSaved) {
             setProductRows((current) => current.map((item) => item.id === savedRow.id ? savedRow : item));
@@ -153,8 +134,12 @@ export function useProductEditor({
         return { ...item, images: images?.length ? images : undefined, imageStatus: productImageStatusForAssets(images) };
       };
       if (refreshedCatalogRows) {
-        setProductRows(refreshedCatalogRows);
+        const replacements = new Map(refreshedCatalogRows.map(item => [item.id, item]));
+        replacements.set(savedRow.id, savedRow);
+        setProductRows(current => current.map(item => replacements.get(item.id) ?? item));
         revokeProductImageAssets(nextRow.images ?? []);
+      } else if (productImportCompleted) {
+        setProductRows(current => current.map(item => item.id === savedRow.id ? savedRow : item));
       } else {
         setProductRows((current) => current.map(applySavedPreviewImage));
         const previewRowsAfterSave = productRows.map(applySavedPreviewImage);
@@ -177,25 +162,17 @@ export function useProductEditor({
     if (productImportCompleted) {
       try {
         const saved = await createAdminProduct(Number(activityId), productBody);
-        manualRow = { ...manualRow, id: String(saved.id), serverVersion: saved.version, sequence: saved.sortNo,
-          status: saved.dataStatus === "INCOMPLETE" ? "待完善" : "有效" };
         productCreated = true;
-        const desiredImages = nextRow.images ?? [];
-        if (desiredImages.length > 0) {
-          const uploadedIds = new Map<string, number>();
-          for (const image of desiredImages.filter((item) => item.file)) {
-            const uploaded = await addAdminProductImage(Number(activityId), Number(saved.id), image.file!, false);
-            uploadedIds.set(image.id, uploaded.id);
-          }
-          const orderedImageIds = desiredImages.map((image) => Number.isSafeInteger(Number(image.id)) ? Number(image.id) : uploadedIds.get(image.id))
-            .filter((imageId): imageId is number => imageId !== undefined);
-          for (let index = 0; index < orderedImageIds.length; index += 1) {
-            await updateAdminProductImage(Number(activityId), Number(saved.id), orderedImageIds[index], index === 0, index);
-          }
-          const refreshedProducts = await loadAdminProducts(Number(activityId));
-          const refreshed = refreshedProducts.find((product) => product.id === Number(saved.id));
-          if (refreshed) manualRow = { ...runtimeProductToImportRow(refreshed), manuallyEdited: true };
-        }
+        manualRow = { ...manualRow, id: String(saved.id), serverVersion: saved.version };
+        manualRow = { ...runtimeProductToImportRow(saved), source: "manual", manuallyEdited: true };
+        const state = await saveProductImages(Number(activityId), Number(saved.id), nextRow.images ?? [], [], [nextRow.materialName]);
+        const details = state ?? await loadAdminProductEditorState(Number(activityId), Number(saved.id));
+        const replacements = mergeProductImageReviews(details.products.map(runtimeProductToImportRow), details.reviews);
+        const refreshed = replacements.find(item => item.id === String(saved.id));
+        if (!refreshed) throw new Error("新增商品状态读取不完整");
+        manualRow = { ...refreshed, source: "manual", manuallyEdited: true };
+        const byId = new Map(replacements.map(item => [item.id, item]));
+        setProductRows(current => current.map(item => byId.get(item.id) ?? item));
       } catch (error) {
         if (productCreated) {
           setProductRows((current) => [...current.filter((item) => item.id !== manualRow.id), manualRow]);
@@ -224,10 +201,17 @@ export function useProductEditor({
         if (targets.length > 0) await deleteImportRows(Number(activityId), serverImportTasks.PRODUCT, targets.map((row) => row.serverRowId!));
       } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "商品预览删除失败"); return; }
     } else if (productImportCompleted) {
-      const targets = productRows.filter((row) => ids.includes(row.id) && row.serverVersion !== undefined);
-      try {
-        for (const row of targets) await deleteAdminProduct(Number(activityId), Number(row.id), row.serverVersion!);
-      } catch (error) { setActionNotice(error instanceof ApiError ? error.message : "商品移除失败"); return; }
+      const result = await deleteConfirmedRows(ids, async id => {
+        const row = productRows.find(item => item.id === id);
+        if (!row || row.serverVersion === undefined) throw new Error("记录版本缺失，请刷新列表核对。");
+        await deleteAdminProduct(Number(activityId), Number(id), row.serverVersion);
+      });
+      if (result.deleted.length) setProductRows(current => current.filter(row => !result.deleted.includes(row.id)));
+      setEditingProductRow(current => current && result.deleted.includes(current.id) ? null : current);
+      if (result.deleted.length) recordOperation("删除商品", result.deleted.length + " 条", "已同步移除服务器确认删除的记录。");
+      setActionNotice(result.error ? "已删除 " + result.deleted.length + " 条，其余记录未确认删除：" + result.error
+        : "已删除 " + result.deleted.length + " 条商品，已有订单不会被删除。");
+      return;
     }
     setProductRows((current) => current.filter((row) => !ids.includes(row.id)));
     if (!productImportCompleted) await refreshServerImportPreview("PRODUCT");

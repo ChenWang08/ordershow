@@ -19,7 +19,7 @@ public class AuditBatchWriter {
   private static final String INSERT = """
       INSERT INTO audit_log(activity_id,actor_type,admin_user_id,action_code,object_type,object_id,reason,
         result,error_code,trace_id,ip_address,user_agent,occurred_at,actor_identity_snapshot,actor_role_snapshot)
-      VALUES (?,?,?,?,?,?,?,?,?,?,INET6_ATON(?),?,?,?,?)
+      VALUES ((SELECT id FROM activity WHERE id=? AND deletion_requested_at IS NULL FOR SHARE),?,?,?,?,?,?,?,?,?,INET6_ATON(?),?,?,?,?)
       """;
   private final JdbcTemplate jdbc;
   private final TransactionOperations transactions;
