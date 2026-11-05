@@ -18,7 +18,7 @@
 
 ## 当前本机交付完成：20261105.1
 
-同步 main `5aa082b`，保留 ACK 云端适配及 `ebe891b` 配置。本轮范围为本机合并、构建两份镜像、隔离验证和交付包；用户自行推送，部署团队上线。本机构建与隔离验收已完成，最终身份与结果见 [20261105.1 交付记录](local-images-20261105.1.md)。前端使用同域 `/api/v1`，worker 复用同摘要后端镜像，新增 [worker Deployment](k8s/export-worker.yaml)。
+同步 main `5aa082b`，保留 ACK 云端适配及 `ebe891b` 配置。本机构建、隔离验证和交付包已完成；2026-11-05 前后端均已上传 CODING，并独立核验远端摘要与交付记录一致、运行平台为 linux/amd64，未部署真实云端。最终身份与结果见 [20261105.1 交付记录](local-images-20261105.1.md)。前端使用同域 `/api/v1`，worker 复用同摘要后端镜像，新增 [worker Deployment](k8s/export-worker.yaml)。
 
 数据库目标 V053：已有 V049 由 DBA 使用 `dba/generated/upgrade-v049-v053.sql`，新空库使用最新 fresh-install.sql；先核对目标实际版本。云端 Flyway、旧数据启动迁移和演示初始化继续关闭。
 

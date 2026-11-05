@@ -7,7 +7,7 @@
 - 合并提交：f90eb225b9526461741cf8ab9613625aec9d82b4。
 - 最终镜像源码及 OCI revision：c48e69c7d877c9d137df0dfecea0681c14866be8。后续交付文档和隔离入口配置提交不改变镜像源码身份。
 - 两份 linux/amd64 镜像、非 root，前端同域 /api/v1；worker 复用后端镜像的 --export-worker 模式。
-- 仅准备本地镜像和 CODING 别名，未 docker push、未推送 Git、未访问或部署真实云资源。用户负责推送，部署团队负责 UAT/上线。
+- 2026-11-05 前后端均已上传 CODING；用户确认后续前端上传成功，本次只读查询已独立核验两份远端摘要与交付记录一致、运行平台为 linux/amd64。本次核验未重新构建、上传镜像或重跑隔离验收，未推送 Git、未部署真实云端或执行数据库脚本。部署团队负责 UAT/上线。
 
 ## 镜像身份
 
@@ -21,7 +21,9 @@
 - g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261105.1
 - g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261105.1
 
-这些是本地身份，尚无本轮独立验证的远端摘要。推送后团队应读取仓库摘要并把 API/worker 固定为同一个后端摘要，测试和生产使用同一摘要。
+2026-11-05 经 `docker buildx imagetools inspect` 分别只读查询两个远端标签，均成功：后端远端摘要为 `sha256:d0a0e4fee6c89b46f9ffd57107e098e61ffb3477619cd29c6bf9ff93776ed73f`，前端为 `sha256:b15d1d7192d4fabc07d6622e5164f897051cdaaf1e2936fada140d1ead046356`，均与上表本地交付摘要一致，业务运行平台均为 linux/amd64。索引中的 unknown/unknown 条目为构建证明，不是额外的业务运行平台。团队应把 API/worker 固定为同一个后端摘要，测试和生产使用同一摘要。
+
+历史上传问题：前端首次及一次重试曾长时间停在 `d1da716beebb` 层，未返回最终成功摘要，当时远端查询为 `not found`，挂起进程已停止。用户随后确认上传成功，上述远端核验已确认最终结果；此前停滞原因仍未确定。
 
 ## 本轮适配与部署要求
 

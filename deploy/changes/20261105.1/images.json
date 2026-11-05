@@ -14,8 +14,9 @@
       "revision": "c48e69c7d877c9d137df0dfecea0681c14866be8",
       "platform": "linux/amd64",
       "user": "ordershow",
-      "pushed": false,
-      "remoteDigestVerified": false
+      "pushed": true,
+      "remoteDigestVerified": true,
+      "remoteDigest": "sha256:d0a0e4fee6c89b46f9ffd57107e098e61ffb3477619cd29c6bf9ff93776ed73f"
     },
     {
       "component": "frontend",
@@ -28,8 +29,9 @@
       "revision": "c48e69c7d877c9d137df0dfecea0681c14866be8",
       "platform": "linux/amd64",
       "user": "node",
-      "pushed": false,
-      "remoteDigestVerified": false
+      "pushed": true,
+      "remoteDigestVerified": true,
+      "remoteDigest": "sha256:b15d1d7192d4fabc07d6622e5164f897051cdaaf1e2936fada140d1ead046356"
     }
   ]
 }
