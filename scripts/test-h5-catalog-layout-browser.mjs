@@ -28,6 +28,7 @@ const products = [
   { ...base, id: "zero", name: "金龙鱼福运添香芝麻油225mL（特渠）", price: 144 },
   { ...base, id: "multi", name: "多档分段计价长名称商品（组合礼盒与超长规格说明）", description: "商品说明，验证两行名称及说明不会遮挡阶梯价和数量按钮。", price: 100, priceTiers: [{ minQuantity: 1, casePrice: 100 }, { minQuantity: 10, casePrice: 90 }, { minQuantity: 100, casePrice: 80 }, { minQuantity: 1000, casePrice: 70 }], tierPricingMode: "INCREMENTAL" },
   { ...base, id: "legacy", name: "旧版阶梯价商品", price: 200, tierMinQuantity: 10, tierCasePrice: 180, tierPricingMode: "WHOLE_ORDER" },
+  { ...base, id: "long", name: "多档整批阶梯价（长说明自动换行）", description: "验证长阶梯说明完整显示，不遮挡商品名称、介绍、价格和数量。", priceTiers: [{ minQuantity: 1, casePrice: 140 }, { minQuantity: 100, casePrice: 130 }, { minQuantity: 1000, casePrice: 120 }, { minQuantity: 10000, casePrice: 110 }, { minQuantity: 100000, casePrice: 100 }, { minQuantity: 200000, casePrice: 90 }, { minQuantity: 500000, casePrice: 80 }, { minQuantity: 999999, casePrice: 70 }], tierPricingMode: "WHOLE_ORDER" },
   { ...base, id: "incomplete", name: "价格待完善商品", price: 0, isOrderable: false },
 ];
 const params = new URLSearchParams(location.search);
@@ -85,27 +86,33 @@ try {
         const tier = card.querySelector(".product-tier-label");
         return { name: card.querySelector("h3").textContent, card: bounds(card), stepper: bounds(card.querySelector(".stepper")),
           price: bounds(card.querySelector(".product-price-block")), priceText: bounds(card.querySelector(".product-price-block strong")),
-          tier: tier ? bounds(tier) : null, overflow: card.scrollWidth > card.clientWidth + 1 };
+          tier: tier ? { ...bounds(tier), lineHeight: parseFloat(getComputedStyle(tier).lineHeight), clipped: tier.scrollHeight > tier.clientHeight + 1, fontSize: getComputedStyle(tier).fontSize, fontWeight: getComputedStyle(tier).fontWeight } : null, overflow: card.scrollWidth > card.clientWidth + 1 };
       }));
-      assert.equal(measurements.length, 6);
+      assert.equal(measurements.length, 7);
       for (const item of measurements) {
         const label = width + "px " + item.name;
         assert.ok(Math.abs(item.card.right - item.stepper.right - 10) <= 1, label + ": quantity control must stay at the right edge");
-        assert.ok(Math.abs(item.card.bottom - item.stepper.bottom - 10) <= 1, label + ": quantity control must stay at the bottom edge");
-        assert.ok(Math.abs(item.price.bottom - item.stepper.bottom) <= 1, label + ": price and quantity must share the bottom row");
+        assert.ok(Math.abs(item.card.bottom - (item.tier ?? item.stepper).bottom - 10) <= 1, label + ": final action row must stay inside bottom padding");
+        assert.ok(Math.abs(item.price.bottom - item.stepper.bottom) <= 1, label + ": price and quantity must share a row");
         assert.ok(item.priceText.right <= item.stepper.left - 5, label + ": price must not overlap quantity");
         assert.ok(!item.overflow, label + ": card must not overflow horizontally");
         if (item.tier) {
-          assert.ok(item.tier.bottom <= item.stepper.top - 5, label + ": tier text must stay above the controls");
+          assert.ok(item.tier.top >= Math.max(item.price.bottom, item.stepper.bottom) + 5, label + ": tier text must stay below price and controls");
+          assert.ok(Math.abs(item.tier.left - item.price.left) <= 1, label + ": tier text must align with the price");
           assert.ok(item.tier.left >= item.card.left && item.tier.right <= item.card.right, label + ": tier text must wrap inside the card");
+          assert.equal(item.tier.clipped, false, label + ": complete tier text must remain visible");
+          assert.equal(item.tier.fontSize, "7px", label + ": tier text must keep its original size");
+          assert.equal(item.tier.fontWeight, "400", label + ": tier text must keep regular weight");
         }
       }
       assert.ok(measurements.every(item => Math.abs(item.stepper.width - measurements[0].stepper.width) <= 1), "All quantity controls must have equal widths");
+      assert.ok(measurements[5].tier.height > measurements[5].tier.lineHeight + 1, "Long tier text must wrap onto multiple lines");
       return measurements;
     };
     const measurements = await checkLayout();
     await cards.first().scrollIntoViewIfNeeded();
     await page.screenshot({ path: fileURLToPath(new URL("catalog-" + width + ".png", output)) });
+    if (width === 402) await cards.nth(5).screenshot({ path: fileURLToPath(new URL("long-tier-402.png", output)) });
 
     const whole = cards.nth(0), zero = cards.nth(2), multi = cards.nth(3), legacy = cards.nth(4);
     const quantity = card => card.locator(".stepper input");
@@ -154,7 +161,7 @@ try {
     assert.deepEqual(errors, []);
     assert.deepEqual(unexpectedRequests, []);
     reports.push({ width, measurements });
-    console.log("PASS " + width + "px: tier/plain alignment, wrapping, 6-digit quantity, quantity editing, both pricing modes, legacy tiers, disabled states and cart");
+    console.log("PASS " + width + "px: tiers below price, complete multiline wrapping, unchanged tier typography, 6-digit quantity, quantity editing, both pricing modes, legacy tiers, disabled states and cart");
     await page.close();
   }
   await writeFile(new URL("measurements.json", output), JSON.stringify(reports, null, 2));

@@ -94,13 +94,13 @@ export function H5CatalogPage({ model }: { model: H5OrderModel }) {
                       {catalogSearch.searching && <small className="catalog-product-location">{product.rebate === true ? "返利产品" : product.rebate === false ? "非返利产品" : "不区分返利"} · {product.line || "未分类"}</small>}
                       {product.description && <p className="product-description" title={product.description}>{product.description}</p>}
                       <div className="product-action">
-                        {product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small className="product-tier-label">{tierPriceLabel(product, quantities[product.id] || 0)}</small>}
                         <div className="product-price-block"><strong>{product.isOrderable ? <>¥{unitPriceText(priceBreakdown(product, quantities[product.id] || 0).displayPrice)}<small>/箱</small></> : "价格待完善"}</strong></div>
                         <div className="stepper">
                           <button aria-label={`${product.name}减少一箱`} onClick={() => changeQty(product.id, -1)} disabled={editingDisabled || !product.isOrderable || !quantities[product.id]}>−</button>
                           <QuantityInput label={`${product.name}订货箱数`} disabled={editingDisabled || !product.isOrderable} value={quantities[product.id] || 0} onChange={(value) => setQuantities((old) => ({ ...old, [product.id]: value }))} />
                           <button aria-label={`${product.name}增加一箱`} onClick={() => changeQty(product.id, 1)} disabled={editingDisabled || !product.isOrderable}>＋</button>
                         </div>
+                        {product.isOrderable && tierPriceLabel(product, quantities[product.id] || 0) && <small className="product-tier-label">{tierPriceLabel(product, quantities[product.id] || 0)}</small>}
                       </div>
                     </div>
                   </article>
