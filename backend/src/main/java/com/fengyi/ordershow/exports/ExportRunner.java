@@ -43,7 +43,8 @@ public class ExportRunner implements AutoCloseable {
       claim=tasks.claim();if(claim==null)return;
       final Claim active=claim;final Instant deadline=Instant.now().plusSeconds(600);
       pulse=heartbeat.scheduleWithFixedDelay(()->{
-        try{if(Instant.now().isAfter(deadline) || !tasks.heartbeat(active))lost.set(true);}catch(Exception error){lost.set(true);}
+        try{if(Instant.now().isAfter(deadline) || !tasks.heartbeat(active))lost.set(true);}
+        catch(Exception error){lost.set(true);log.warn("Order export heartbeat failed for task {}",active.task().id(),error);}
       },10,10,TimeUnit.SECONDS);
       policy.requireCreator(claim.task().createdBy());policy.requireTask(claim.task());
       Files.createDirectories(root);
