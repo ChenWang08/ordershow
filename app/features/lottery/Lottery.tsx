@@ -8,6 +8,7 @@ import type { AttendanceCustomerType, AttendanceRow } from "../../domain/import-
 import { FestivalDecor } from "../shared/components/FestivalDecor";
 import { Thumbnail } from "../shared/components/Thumbnail";
 import { normalizeSearchText } from "../shared/utils";
+import { useManualRefresh } from "../shared/useManualRefresh";
 
 export type CandidateScope = "all" | "attended" | "ordered";
 export type QualificationMetric = "AMOUNT" | "BOX_COUNT" | "TONS";
@@ -535,6 +536,8 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
     + (selectedIndex === 0 ? "第一轮不涉及历史中奖" : selected.excludeWinners ? "排除已中奖" : "允许重复中奖");
   const completedCount = ["DRAWN","COMPLETED"].includes(selected.serverStatus ?? "") ? selected.candidateCount : undefined;
   const resolvedCandidateCount = preview?.candidateCount ?? completedCount;
+  const manualPreview = useManualRefresh(active ? String(activityId) : null,
+    previewLoading || !validVarieties || completedCount != null, () => candidateQuery.refresh());
   const candidateSteps: [string, number][] = [["当前有效白名单", customerCount], [selected.scope === "attended" ? "已匹配到场客户" : selected.scope === "ordered" ? "有效订单客户" : "客户类型匹配", resolvedCandidateCount ?? 0], ...(selectedIndex > 0 && selected.excludeWinners ? [["排除已中奖", resolvedCandidateCount ?? 0] as [string, number]] : [])];
   return (
     <div className="admin-panel lottery-settings">
@@ -626,7 +629,7 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
           <div className="candidate-preview"><div><span>候选客户人数</span><strong>{previewLoading ? "试算中…" : resolvedCandidateCount == null ? "待试算" : <>{resolvedCandidateCount}<small> 人</small></>}</strong>
             {preview && preview.unawardedCount > 0 && <small className="field-error">候选不足，当前可中奖{preview.actualWinnerCount}人，空缺{preview.unawardedCount}人</small>}
             {preview && (preview.missingTonnageCustomers ?? 0) > 0 && <small className="field-help">{preview.missingTonnageCustomers}名客户的匹配商品缺少部分吨数换算信息，缺失部分按0计；吨数加权排除合计为0的客户</small>}
-          </div><div className="candidate-preview-actions"><button type="button" disabled={previewLoading || !validVarieties || completedCount != null} onClick={() => void candidateQuery.refresh()}>手动试算</button><button type="button" disabled={previewLoading || !preview} onClick={() => setPreviewOpen(true)}>查看候选名单</button></div></div>
+          </div><div className="candidate-preview-actions"><button type="button" disabled={previewLoading || !validVarieties || completedCount != null || manualPreview.coolingDown} onClick={() => void manualPreview.refresh()}>手动试算</button><button type="button" disabled={previewLoading || !preview} onClick={() => setPreviewOpen(true)}>查看候选名单</button></div></div>
         </section>
       </div>
       {previewOpen && preview && <div className="order-drawer-backdrop"><aside className="order-drawer candidate-drawer" onClick={(e) => e.stopPropagation()}><header><div><span>本次试算候选名单</span><h2>{selected.name} · {resolvedCandidateCount} 人</h2></div><button onClick={() => setPreviewOpen(false)}>×</button></header><div className="candidate-funnel">{candidateSteps.map(([label, count]) => <div key={label}><span>{label}</span><b>{count}</b></div>)}</div><div className="candidate-table">{preview.candidates.map((candidate, index) => <div key={candidate.activityCustomerId}><span>{String(index + 1).padStart(3, "0")}</span><b>{candidate.dealerFullName}</b><em>{candidate.customerType === "SPECIAL" ? "特渠" : candidate.customerType === "GENERAL" ? "综合" : "全部客户"}</em><small>ID {candidate.activityCustomerId} · {candidate.branchName || candidate.regionCode || "—"}{qualifyingOrderDisplay(candidate, selected)}</small></div>)}{preview.candidates.length === 0 && <div className="table-empty">当前没有符合条件的候选客户</div>}</div><footer><small>权重占比为首位抽中概率；正式候选将在开始抽奖时重新计算</small><button className="admin-primary" onClick={() => setPreviewOpen(false)}>关闭</button></footer></aside></div>}

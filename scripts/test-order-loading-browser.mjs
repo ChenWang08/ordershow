@@ -44,6 +44,7 @@ try {
       unexpected.push(method+" "+path);return route.fulfill({status:500,json:{message:"Unexpected synthetic request"}});
     });
     const page=await context.newPage();page.on("pageerror",e=>errors.push(e.message));page.on("dialog",d=>d.accept(d.type()==="prompt"?"合成测试作废":undefined));
+    await page.clock.install();
     await page.goto("http://127.0.0.1:4191/tests/fixtures/order-loading.html");
     const settle=async()=>{
       await page.waitForTimeout(300);
@@ -61,11 +62,13 @@ try {
     await table.getByRole("button",{name:"变更审核中",exact:true}).first().click();await page.locator(".review-drawer").waitFor();await settle();verify(3,1);
     await page.locator(".review-drawer").getByRole("button",{name:"关闭",exact:true}).click();await settle();verify(3,1);
     await page.getByRole("button",{name:"刷新订单",exact:true}).click();await settle();verify(4,2);
+    assert.equal(await page.getByRole("button",{name:"刷新订单",exact:true}).isDisabled(),true);
+    await page.clock.fastForward(10_000);
     failSummary=true;await page.getByRole("button",{name:"刷新订单",exact:true}).click();await settle();verify(5,3);
     assert.ok(await page.getByText(/数量更新失败/).isVisible());assert.equal(await table.locator(".clickable-row").count(),50);
     failSummary=false;await page.getByRole("button",{name:"重试数量"}).click();await settle();verify(5,4);
-    failList=true;await page.getByRole("button",{name:"刷新订单",exact:true}).click();await settle();verify(6,5);assert.equal(await table.locator(".clickable-row").count(),50);
-    failList=false;await page.getByRole("button",{name:"刷新订单",exact:true}).click();await settle();verify(7,6);
+    await page.clock.fastForward(10_000);failList=true;await page.getByRole("button",{name:"刷新订单",exact:true}).click();await settle();verify(6,5);assert.equal(await table.locator(".clickable-row").count(),50);
+    await page.clock.fastForward(10_000);failList=false;await page.getByRole("button",{name:"刷新订单",exact:true}).click();await settle();verify(7,6);
     const search=page.getByPlaceholder("搜索订单号、经销商名称或手机号（完整号码/后四位）");await search.fill("dealer");await settle();verify(8,6);assert.equal(await table.locator(".clickable-row").count(),50);await search.fill("");await settle();verify(9,6);
     await page.getByRole("button",{name:/^变更审核 /}).click();await settle();assert.equal(count("/order-change-requests/page"),1);assert.equal(count("/orders/summary"),7);
     await pager.getByLabel("选择页码").selectOption("3");await settle();assert.equal(count("/order-change-requests/page"),2);assert.equal(count("/orders/summary"),7);

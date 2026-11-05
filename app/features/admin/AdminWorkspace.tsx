@@ -39,6 +39,7 @@ import { useAdminWorkspaceProps } from "../workspace/useAdminWorkspaceProps";
 import { DepartmentAdminPanel } from "./DepartmentAdminPanel";
 import { AdminLayout } from "./AdminLayout";
 import { useActivityWorkspace } from "../workspace/ActivityWorkspace";
+import { useManualRefresh } from "../shared/useManualRefresh";
 
 export function AdminWorkspace({ activities }: { activities?: AdminActivitySummary[] } = {}) {
   const activityRuntime = useActivityWorkspace();
@@ -218,7 +219,10 @@ export function AdminWorkspace({ activities }: { activities?: AdminActivitySumma
     if (["商品导入", "白名单", "现场到场"].includes(tab) && listEditing) return;
     await Promise.all([moduleLoad?.refresh(), moduleQuery.refresh()]);
   };
-  const refreshListAction = moduleLoad?.loaded ? <button type="button" className="secondary-button" disabled={listEditing || moduleLoad.loading || moduleQuery.loading} onClick={() => void retryModule()}>刷新列表</button> : null;
+  const listRefreshBlocked = listEditing || !moduleLoad?.loaded || moduleLoad.loading || moduleQuery.loading;
+  const listRefresh = useManualRefresh(["商品导入", "白名单", "现场到场"].includes(tab)
+    ? JSON.stringify([activityId, cacheScope, tab]) : null, listRefreshBlocked, retryModule);
+  const refreshListAction = moduleLoad?.loaded ? <button type="button" className="secondary-button" disabled={listRefreshBlocked || listRefresh.coolingDown} onClick={() => void listRefresh.refresh()}>刷新列表</button> : null;
   useEffect(() => {
     let active = true;
     if (activityOverview.updatedAt) void Promise.resolve().then(() => { if (active) setStatisticsStale(false); });

@@ -80,6 +80,7 @@ try {
       if(label==="商品导入")assert.equal(count("/product-dealer-candidates"),candidateReads,"second editor shares candidates");
       if(label!=="商品导入")assert.ok(await page.getByText(value,{exact:true}).isVisible());
       await page.getByRole("button",{name:"刷新列表",exact:true}).click();await waitCount(suffix,2);await settle();
+      assert.equal(await page.getByRole("button",{name:"刷新列表",exact:true}).isDisabled(),true,"completed refresh keeps its cooldown");
       await page.screenshot({path:fileURLToPath(new URL(label+"-"+width+".png",output)),fullPage:true});
     }
     await nav.getByRole("button",{name:/商品导入/}).click();await waitCount("/products",3);await settle();

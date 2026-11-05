@@ -37,6 +37,7 @@ try {
   const { chromium } = await import(process.env.ORDER_SHOW_PLAYWRIGHT_MODULE || new URL("../work/lottery-order/browser/node_modules/playwright/index.mjs", import.meta.url).href);
   browser = await chromium.launch({ headless: true, executablePath: process.env.ORDER_SHOW_BROWSER_PATH || "C:/Users/Chen/AppData/Local/ms-playwright/chromium-1223/chrome-win64/chrome.exe" });
   page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  await page.clock.install();
   const errors = [], requests = [];
   let fail = false, optionsFail = false, slowGeneral = false, status = "ACTIVE", companyCount = 90, branchCount = 30;
   const options = { customers: [
@@ -80,6 +81,8 @@ try {
   const confirm = page.getByRole("button", { name: "确认查询", exact: true });
   const refresh = page.getByRole("button", { name: "手动刷新", exact: true });
   async function readRanking(button = confirm) {
+    if (button === confirm && await confirm.isDisabled()) button = refresh;
+    if (button === refresh) await page.clock.fastForward(10_000);
     await Promise.all([page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/ranking")), button.click()]);
     await page.waitForFunction(() => document.querySelector(".ranking-refresh-controls")?.getAttribute("aria-busy") === "false");
   }
@@ -87,6 +90,9 @@ try {
   assert.equal(stats().length, 0);
   assert.equal(await refresh.isDisabled(), true);
   await readRanking();
+  assert.equal(stats().length,1);
+  assert.equal(await confirm.isDisabled(),true);
+  await confirm.evaluate(button => button.click());
   assert.equal(stats().length,1);
   const applied = await page.locator(".ranking-layout").innerText();
   await page.getByLabel("大区", {exact:true}).selectOption({label:"华西"});

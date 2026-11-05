@@ -47,7 +47,7 @@ export function ActivityOverview({
           <>
             <div className="admin-refresh-bar" aria-live="polite">
               <span>{overview.updatedAt ? `最后更新时间：${formatBeijingTime(overview.updatedAt)}` : overview.loading ? "正在加载统计…" : "尚未加载统计，请点击刷新统计"}</span>
-              <button type="button" className="admin-primary" disabled={overview.loading} onClick={() => void overview.refresh()}>{overview.loading ? "正在刷新…" : "刷新统计"}</button>
+              <button type="button" className="admin-primary" disabled={overview.loading || overview.coolingDown} onClick={() => void overview.manualRefresh()}>{overview.loading ? "正在刷新…" : "刷新统计"}</button>
               {overview.error && <span role="alert">统计刷新失败：{overview.error}{overview.loaded ? "；当前保留上次成功的数据" : ""}</span>}
               {statisticsStale && overview.loaded && <span>相关数据有变化，请点击刷新统计。</span>}
             </div>

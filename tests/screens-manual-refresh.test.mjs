@@ -27,6 +27,8 @@ function screenHarness(screen, optionLoader) {
   const effects = [];
   const requests = [];
   const timers = [];
+  const timeouts = new Map();
+  let timeoutId = 0;
   const subscriptions = [];
   const optionRequests = [];
   let cursor = 0;
@@ -86,7 +88,9 @@ function screenHarness(screen, optionLoader) {
     ApiError: class extends Error {}, loadOrderDashboard: request, loadDashboard: request, loadDashboardReport: request,
     apiBase: () => "http://test/api", getActiveActivityCode: () => "fixture" };
   const globals = {
-    window: { setInterval: (...args) => timers.push(args), clearInterval() {}, addEventListener: (...args) => subscriptions.push(args) },
+    window: { setInterval: (...args) => timers.push(args), clearInterval() {}, addEventListener: (...args) => subscriptions.push(args),
+      setTimeout(callback, ms) { const id = ++timeoutId; timeouts.set(id, { callback, ms }); return id; },
+      clearTimeout(id) { timeouts.delete(id); } },
     EventSource: class { constructor(...args) { subscriptions.push(args); } addEventListener() {} close() {} },
   };
   const filename = screen === "dashboard" ? "useOrderDashboard.ts" : screen === "ranking" ? "RankingBoard.tsx" : "ReportBoard.tsx";
@@ -105,6 +109,7 @@ function screenHarness(screen, optionLoader) {
     return findElement(tree, node => node.type.name === "ScreenRefreshControls").props.onRefresh();
   }
   return { requests, optionRequests, timers, subscriptions, render, refresh,
+    finishCooldown() { const pending = [...timeouts.values()]; timeouts.clear(); pending.forEach(({ callback, ms }) => { assert.equal(ms, 10_000); callback(); }); render(); },
     response: screen === "ranking" ? rankingData : reportData,
     get model() { return tree; },
     get html() { return renderToStaticMarkup(tree); },
@@ -179,6 +184,12 @@ for (const screen of ["dashboard", "report"]) {
     harness.requests[1].resolve(harness.response());
     await settle();
     assert.equal(harness.requests.length, 2);
+    harness.render(); harness.refresh(); await settle();
+    assert.equal(harness.requests.length, 2, "a fast response does not end the cooldown early");
+    harness.finishCooldown(); await settle();
+    assert.equal(harness.requests.length, 2, "cooldown completion does not schedule a read");
+    harness.refresh(); await settle();
+    assert.equal(harness.requests.length, 3);
     harness.cleanup();
   });
 
@@ -208,8 +219,10 @@ for (const screen of ["dashboard", "report"]) {
       assert.equal(controls().refreshedAt, refreshedAt);
       assert.equal(controls().refreshing, false);
     }
-    harness.refresh();
-    await settle();
+    harness.refresh(); await settle();
+    assert.equal(harness.requests.length, 2, "failed manual reads remain inside the cooldown");
+    harness.finishCooldown();
+    harness.refresh(); await settle();
     assert.equal(harness.requests.length, 3);
     harness.requests[2].resolve(harness.response(200));
     await settle();
@@ -262,6 +275,9 @@ for (const status of ["ACTIVE", "FINISHED", "ARCHIVED"]) {
     await settle(); harness.render();
     assert.match(harness.html, /100.00/);
     assert.doesNotMatch(harness.html, /当前结果：|历史回看|<h1/);
+    assert.equal(harness.find(node => node.type === "button" && node.props.children === "确认查询").props.disabled, true);
+    rankingConfirm(harness); await settle();
+    assert.equal(harness.requests.length, 1, "same confirmed conditions cannot bypass manual refresh");
     harness.refresh(); await settle();
     assert.equal(harness.requests.length, 2);
     assert.equal(harness.timers.length, 0);

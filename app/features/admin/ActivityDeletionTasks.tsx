@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { loadActivityDeletionTasks, retryActivityDeletionTask, type ActivityDeletionTask } from "../../api";
 import { formatBeijingTime } from "../shared/time";
 
@@ -12,28 +12,41 @@ export function ActivityDeletionTasks({ onClose }: { onClose: () => void }) {
   const [loading, setLoading] = useState(true);
   const [retrying, setRetrying] = useState<number | null>(null);
   const [revision, setRevision] = useState(0);
+  const reading = useRef(false);
   const refresh = useCallback(() => setRevision(v => v + 1), []);
+  const manualRefresh = () => {
+    if (reading.current) return;
+    reading.current = true;
+    setLoading(true);
+    refresh();
+  };
   useEffect(() => {
     let active = true;
+    let running = false;
     let timer: number | undefined;
     let controller: AbortController | undefined;
     const cancelRead = () => {
       window.clearTimeout(timer);
       timer = undefined;
       controller?.abort();
+      running = false;
+      reading.current = false;
     };
     const load = async () => {
-      cancelRead();
       if (!active || document.visibilityState === "hidden") return;
+      if (running) return;
+      cancelRead();
       const request = new AbortController();
       controller = request;
+      reading.current = true; running = true;
+      setLoading(true);
       try {
         const result = await loadActivityDeletionTasks(page, request.signal);
         if (!active || request.signal.aborted) return;
         setTasks(result); setError("");
         if (result.some(task => task.status === "QUEUED" || task.status === "RUNNING")) timer = window.setTimeout(() => void load(), 3000);
       } catch (e) { if (active && !request.signal.aborted) setError(e instanceof Error ? e.message : "进度加载失败，请刷新重试"); }
-      finally { if (active && !request.signal.aborted) setLoading(false); }
+      finally { if (active && controller === request) { running = false; reading.current = false; setLoading(false); } }
     };
     const visible = () => {
       cancelRead();
@@ -53,7 +66,7 @@ export function ActivityDeletionTasks({ onClose }: { onClose: () => void }) {
     <header><h2>删除进度</h2><button type="button" aria-label="关闭删除进度" onClick={onClose}>×</button></header>
     <div className="drawer-body" aria-live="polite">
       <p>任务在后台执行，关闭页面不影响清理。已删除的数据无法撤销。</p>
-      <button type="button" onClick={refresh}>刷新进度</button>
+      <button type="button" disabled={loading} onClick={manualRefresh}>刷新进度</button>
       {loading && <p role="status">正在加载进度…</p>}
       {error && <p role="alert">{error}</p>}
       {!loading && !tasks.length && <p>暂无删除任务</p>}

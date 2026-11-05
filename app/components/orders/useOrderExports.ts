@@ -20,6 +20,7 @@ export function useOrderExports(activityId: number, owner: number | undefined, a
   const mutation = useRef<AbortController | null>(null);
   const pending = useRef(false);
   const request = useRef<{ signature: string; key: string } | null>(null);
+  const reading = useRef(false);
 
   useEffect(() => {
     const version = ++epoch.current;
@@ -29,11 +30,13 @@ export function useOrderExports(activityId: number, owner: number | undefined, a
 
   useEffect(() => {
     if (!allowed || !active) return;
-    let stopped = false, timer: number | undefined, controller: AbortController | undefined;
-    const stopRequest = () => { controller?.abort(); window.clearTimeout(timer); };
+    let stopped = false, running = false, timer: number | undefined, controller: AbortController | undefined;
+    const stopRequest = () => { controller?.abort(); running = false; reading.current = false; window.clearTimeout(timer); };
     const load = async () => {
       if (stopped || document.visibilityState === "hidden") return;
+      if (running) return;
       stopRequest(); controller = new AbortController(); const current = controller;
+      reading.current = true; running = true;
       setLoading(true);
       try {
         const rows = await loadOrderExports(activityId, current.signal);
@@ -49,7 +52,7 @@ export function useOrderExports(activityId: number, owner: number | undefined, a
         setError(message(reason));
         // Back off on a temporary error; permissions and missing activities must be refreshed by the workspace.
         if (!(reason instanceof ApiError) || reason.status >= 500) timer = window.setTimeout(() => void load(), 15000);
-      } finally { if (!stopped && !current.signal.aborted) setLoading(false); }
+      } finally { if (!stopped && controller === current) { running = false; reading.current = false; setLoading(false); } }
     };
     const visibility = () => { if (document.visibilityState === "hidden") stopRequest(); else void load(); };
     document.addEventListener("visibilitychange", visibility); void load();
@@ -82,7 +85,13 @@ export function useOrderExports(activityId: number, owner: number | undefined, a
     const result = await mutate(signal => createOrderExport(activityId, normalized, key, signal));
     if (result && request.current?.key === key) request.current = null;
   }
-  return { tasks, error, busy, loading, checkedAt, create, cancel: (id: number) => mutate(signal => cancelOrderExport(activityId, id, signal)), refresh: () => setReload(value => value + 1) };
+  const refresh = () => {
+    if (!allowed || !active || reading.current) return;
+    reading.current = true;
+    setLoading(true);
+    setReload(value => value + 1);
+  };
+  return { tasks, error, busy, loading, checkedAt, create, cancel: (id: number) => mutate(signal => cancelOrderExport(activityId, id, signal)), refresh };
 }
 function message(reason: unknown) {
   const detail = reason instanceof Error ? reason.message : "导出请求失败，请稍后重试";

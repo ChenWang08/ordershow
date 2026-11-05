@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { loadDashboard, loadRankingOptions, type RuntimeActivity } from "../../api";
 import { FestivalDecor } from "../shared/components/FestivalDecor";
 import { useManualScreenData } from "./useManualScreenData";
+import { useManualRefresh } from "../shared/useManualRefresh";
 import { formatBeijingTime } from "../shared/time";
 import { initialRankingSelection, changeRankingSelection, rankingChoices, rankingFilters, rankingOptionText, rankingSelectionKey, type RankingSelection } from "./ranking-filters";
 
@@ -39,7 +40,11 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
     && (selection.productLine === "all" || choices.lines.some(([value]) => value === selection.productLine))
     && (selection.varieties === null || selection.varieties.every(variety => choices.varieties.some(([value]) => value === variety)));
   const labels: Record<string, string> = { ALL: "全部客户", GENERAL: "综合客户", SPECIAL: "特渠专业客户" };
-  const confirm = () => { if (validSelection && optionsReady && !optionsLoading && !refreshing) { void refresh(selection); void refreshOptions(); } };
+  const canConfirm = (!dashboard || pendingSelection) && validSelection && optionsReady && !optionsLoading && !refreshing;
+  const confirm = () => { if (canConfirm) { void refresh(selection); void refreshOptions(); } };
+  const manual = useManualRefresh(activity ? String(activity.id) : null, !dashboard || refreshing, () => {
+    if (parameters) return Promise.all([refresh(parameters), refreshOptions()]);
+  });
   const ranking = dashboard?.companies ?? [];
   const branchRanking = dashboard?.branches ?? [];
   const chunkSize = Math.max(1, Math.ceil(ranking.length / 3));
@@ -78,10 +83,10 @@ export function RankingBoard({ activity }: { activity: RuntimeActivity | null })
                 {choices.varieties.map(([value, label]) => <label key={value}><input type="checkbox" checked={selection.varieties?.includes(value) ?? false} onChange={e => updateSelection({ varieties: e.target.checked ? [...(selection.varieties ?? []), value] : (selection.varieties ?? []).filter(v => v !== value) })} />{label}</label>)}
               </fieldset>
             </details>
-            <button type="button" className="ranking-confirm" disabled={!activity || !optionsReady || optionsLoading || refreshing || !validSelection} onClick={confirm}>{refreshing ? "查询中…" : "确认查询"}</button>
+            <button type="button" className="ranking-confirm" disabled={!activity || !canConfirm} onClick={confirm}>{refreshing ? "查询中…" : "确认查询"}</button>
             <button type="button" disabled={refreshing} onClick={() => updateSelection(initialRankingSelection)}>重置</button>
             <div className="screen-refresh-controls ranking-refresh-controls" aria-busy={refreshing}>
-              <button type="button" aria-label="手动刷新" disabled={!activity || !dashboard || refreshing} onClick={() => { if (parameters) { void refresh(parameters); void refreshOptions(); } }}>{refreshing ? "刷新中…" : "↻ 手动刷新"}</button>
+              <button type="button" aria-label="手动刷新" disabled={!activity || !dashboard || refreshing || manual.coolingDown} onClick={() => void manual.refresh()}>{refreshing ? "刷新中…" : "↻ 手动刷新"}</button>
               <small aria-live="polite">{refreshedAt ? `最近刷新 ${formatBeijingTime(refreshedAt)}` : refreshing ? "正在加载数据" : "尚未加载数据"}</small>
             </div>
           </div>

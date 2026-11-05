@@ -76,6 +76,8 @@ test("choosing another round does not calculate it until explicitly requested",a
   await h.click("02第二轮奖品草稿10 人");
   assert.equal(h.calls.filter(c=>c[0]==="preview").length,1);
   assert.match(h.text(),/待试算/);
+  assert.equal(h.button("手动试算").props.disabled,true);
+  await h.runTimers();
   await h.click("手动试算");
   assert.deepEqual(h.calls.filter(c=>c[0]==="preview").map(c=>c[2].roundNo),[1,2]);
   assert.equal(h.calls.filter(c=>c[0]==="statistics").length,1); h.unmount();
@@ -86,7 +88,7 @@ test("obsolete requests are cancelled on edits and navigation, and late names ca
   h.find(n=>n.type==="input"&&n.props.type==="number"&&n.props.value===10).props.onChange({target:{value:"3"}});await h.flush();
   assert.equal(pending[0].signal.aborted,true);assert.match(h.text(),/待试算/);
   pending[0].resolve({candidateCount:999,candidates:[]});await h.flush();assert.doesNotMatch(h.text(),/999/);
-  await h.click("手动试算");h.props.active=false;h.render([h.props]);assert.equal(pending[1].signal.aborted,true);h.unmount();
+  await h.runTimers();await h.click("手动试算");h.props.active=false;h.render([h.props]);assert.equal(pending[1].signal.aborted,true);h.unmount();
 });
 
 test("small tonnage thresholds and candidate values retain all six decimal places",async()=>{
@@ -115,7 +117,7 @@ test("weighting selection binds the matching threshold without automatic calcula
     assert.equal(h.props.rounds[0].probabilityMode,mode);assert.equal(h.props.rounds[0].qualificationMetric,metric);
     assert.equal(h.field("门槛依据").props.value,metric);assert.equal(h.field("门槛依据").props.disabled,true);
     assert.equal(h.calls.filter(c=>c[0]==="preview").length,previousPreviews);
-    await h.click("手动试算");const input=h.calls.filter(c=>c[0]==="preview").at(-1)[2];
+    await h.runTimers();await h.click("手动试算");const input=h.calls.filter(c=>c[0]==="preview").at(-1)[2];
     assert.equal(input.probabilityMode,mode);assert.equal(input.qualificationMetric,metric);
   }
   h.field("抽取方式").props.onChange({target:{value:"EQUAL"}});await h.flush();

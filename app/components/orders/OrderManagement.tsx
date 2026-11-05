@@ -14,10 +14,12 @@ import { useAdminIdentity } from "../../admin-context";
 import { useOrderExports } from "./useOrderExports";
 import { OrderExportPanel } from "./OrderExportPanel";
 import { useOrderSummary } from "./useOrderSummary";
+import { useManualRefresh } from "../../features/shared/useManualRefresh";
 
 export type OrderManagementModel = OrderManagementProps & ReturnType<typeof useOrderList> & ReturnType<typeof useOrderEditor>
   & { changeRequests: ReturnType<typeof useOrderChangeRequests>; refreshOrders: () => void;
     summary: ReturnType<typeof useOrderSummary>; orderCounts: ReturnType<typeof useOrderSummary>["data"]; refreshReview: () => void;
+    ordersCoolingDown: boolean; reviewCoolingDown: boolean;
     canExport: boolean; exports: ReturnType<typeof useOrderExports> };
 
 type Props = OrderManagementProps & { active?: boolean; revision?: number; onChanged?: () => void; onDirtyChange?: (dirty: boolean) => void };
@@ -44,9 +46,14 @@ function OrderWorkbench(props: Props) {
   const dirty = Boolean(editor.editorMode || changeRequests.reason.trim());
   const onDirtyChange = props.onDirtyChange;
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  const ordersRefresh = useManualRefresh(`${props.activityId}:orders`, list.loading || summary.loading,
+    () => list.setReloadKey(value => value + 1));
+  const reviewRefresh = useManualRefresh(`${props.activityId}:review`, changeRequests.loading || summary.loading,
+    () => Promise.all([changeRequests.reload(), summary.refresh()]));
   const model = { ...props, ...list, setReloadKey: changed, ...editor, changeRequests, canExport, exports, summary, orderCounts: summary.data,
-    refreshOrders: () => { if (!list.loading && !summary.loading) list.setReloadKey(value => value + 1); },
-    refreshReview: () => { if (!changeRequests.loading && !summary.loading) { void changeRequests.reload(); void summary.refresh(); } } };
+    ordersCoolingDown: ordersRefresh.coolingDown, reviewCoolingDown: reviewRefresh.coolingDown,
+    refreshOrders: () => { void ordersRefresh.refresh(); },
+    refreshReview: () => { void reviewRefresh.refresh(); } };
   return <div className="admin-panel order-management-panel">
     <nav className="order-workbench-tabs"><button className={tab==="orders"?"active":""} onClick={()=>setTab("orders")}>订单列表</button><button className={tab==="review"?"active":""} onClick={()=>setTab("review")}>变更审核 <b title="进入页面、手动刷新或操作完成后更新">{summary.data?.pending ?? "—"}</b></button></nav>
     {summary.loading && <p role="status">正在更新数量…</p>}
