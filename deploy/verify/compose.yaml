@@ -22,6 +22,8 @@ x-backend-env: &backend-env
   DB_USERNAME: ack_smoke
   DB_PASSWORD: isolated_smoke_password
   DB_MIGRATION_ENABLED: "false"
+  ORDER_SHOW_LEGACY_MIGRATION_ENABLED: "false"
+  ORDER_SHOW_PRICE_BACKFILL_ENABLED: "false"
   REDIS_HOST: redis
   REALTIME_CHANNEL: order-show:ack-smoke:events
   H5_CATALOG_MAX_LOADS: "4"

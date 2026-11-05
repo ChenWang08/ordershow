@@ -32,6 +32,8 @@ class RealtimeOutboxDatabaseIntegrationTest {
     root.execute("CREATE DATABASE IF NOT EXISTS "+DATABASE);
     source = new DriverManagerDataSource(HOST+DATABASE+OPTIONS,"root","isolated_smoke_root");
     jdbc = new JdbcTemplate(source);
+    jdbc.execute("CREATE TABLE IF NOT EXISTS activity (id BIGINT PRIMARY KEY,deletion_requested_at DATETIME(3) NULL)");
+    jdbc.update("INSERT IGNORE INTO activity(id) VALUES(1)");
     jdbc.execute("""
         CREATE TABLE IF NOT EXISTS domain_event_outbox (
           id BIGINT PRIMARY KEY, activity_id BIGINT, event_type VARCHAR(64), aggregate_type VARCHAR(64),
@@ -41,7 +43,7 @@ class RealtimeOutboxDatabaseIntegrationTest {
         """);
   }
 
-  @BeforeEach void reset() { jdbc.update("DELETE FROM domain_event_outbox"); }
+  @BeforeEach void reset() { jdbc.update("DELETE FROM domain_event_outbox"); jdbc.update("UPDATE activity SET deletion_requested_at=NULL"); }
 
   private void insert(long id) {
     jdbc.update("""
@@ -128,5 +130,13 @@ class RealtimeOutboxDatabaseIntegrationTest {
     assertThat(status(9)).isEqualTo("PUBLISHED");
     assertThat(status(3)).isEqualTo("PUBLISHED");
     verify(redis,times(2)).convertAndSend(anyString(),anyString());
+  }
+  @Test void deletionRequestedActivityDoesNotPublishPendingEvents() {
+    insert(99);
+    jdbc.update("UPDATE activity SET deletion_requested_at=UTC_TIMESTAMP(3) WHERE id=1");
+    var redis=mock(StringRedisTemplate.class);
+    publisher(jdbc,redis).publishOutbox();
+    verifyNoInteractions(redis);
+    assertThat(status(99)).isEqualTo("PENDING");
   }
 }
