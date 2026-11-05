@@ -22,9 +22,11 @@ public class OrderChangeRequestController {
   private final AuthService auth;
   private final DepartmentAccessService access;
   private final OrderChangeRequestRepository requests;
+  private final H5CustomerWriteGuard writeGuard;
 
-  public OrderChangeRequestController(OrderService orders, AuthService auth, DepartmentAccessService access, OrderChangeRequestRepository requests) {
+  public OrderChangeRequestController(OrderService orders, AuthService auth, DepartmentAccessService access, OrderChangeRequestRepository requests, H5CustomerWriteGuard writeGuard) {
     this.requests = requests;
+    this.writeGuard = writeGuard;
     this.orders = orders;
     this.auth = auth;
     this.access = access;
@@ -63,6 +65,7 @@ public class OrderChangeRequestController {
     if (expectedCustomerId != null && expectedCustomerId.longValue() != customer.customerId()) {
       throw DomainException.forbidden("H5_CUSTOMER_CHANGED", "客户身份已变化，请重新验证原客户后提交变更");
     }
+    writeGuard.changeRequest(activityCode, customer, body, idempotencyKey);
     return ApiResponse.of(orders.createH5ChangeRequest(activityCode, customer, body, idempotencyKey, TraceFilter.id(request)), TraceFilter.id(request));
   }
 

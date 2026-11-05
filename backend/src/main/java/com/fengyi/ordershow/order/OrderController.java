@@ -22,11 +22,13 @@ public class OrderController {
   private final OrderService service;
   private final OrderDraftService drafts;
   private final AuthService auth;
+  private final H5CustomerWriteGuard writeGuard;
 
-  public OrderController(OrderService service, OrderDraftService drafts, AuthService auth) {
+  public OrderController(OrderService service, OrderDraftService drafts, AuthService auth, H5CustomerWriteGuard writeGuard) {
     this.service = service;
     this.drafts = drafts;
     this.auth = auth;
+    this.writeGuard = writeGuard;
   }
 
   @GetMapping("/h5/activities/{activityCode}/order-draft")
@@ -60,6 +62,7 @@ public class OrderController {
     var customer = auth.requireH5(request);
     if (expectedCustomerId != null && expectedCustomerId.longValue() != customer.customerId())
       throw com.fengyi.ordershow.common.DomainException.forbidden("H5_CUSTOMER_CHANGED", "客户身份已变化，请重新验证原客户后确认提交结果");
+    writeGuard.submit(activityCode, customer, body, idempotencyKey, includeHistory);
     return ApiResponse.of(service.submit(activityCode, customer, body, idempotencyKey, TraceFilter.id(request),
         includeHistory, () -> request.setAttribute(AuditService.IDEMPOTENT_REPLAY_ATTRIBUTE, true)), TraceFilter.id(request));
   }
@@ -67,7 +70,9 @@ public class OrderController {
   @PostMapping("/h5/activities/{activityCode}/order/withdraw")
   ApiResponse<OrderService.OrderView> withdraw(@PathVariable String activityCode, @RequestBody OrderService.WithdrawRequest body,
       @RequestHeader("Idempotency-Key") String idempotencyKey, @RequestParam(defaultValue = "true") boolean includeHistory, HttpServletRequest request) {
-    return ApiResponse.of(service.withdraw(activityCode, auth.requireH5(request), body.expectedVersion(), idempotencyKey, TraceFilter.id(request), includeHistory), TraceFilter.id(request));
+    var customer = auth.requireH5(request);
+    writeGuard.withdraw(activityCode, customer, body, idempotencyKey);
+    return ApiResponse.of(service.withdraw(activityCode, customer, body.expectedVersion(), idempotencyKey, TraceFilter.id(request), includeHistory), TraceFilter.id(request));
   }
 
   @GetMapping("/admin/activities/{activityId}/orders/summary")

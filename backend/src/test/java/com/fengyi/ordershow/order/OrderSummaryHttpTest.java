@@ -13,7 +13,7 @@ class OrderSummaryHttpTest {
   void summaryRouteBindsTheActivityAndReturnsCountsWithoutInvokingTheDetailRoute() throws Exception {
     var service = mock(OrderService.class);
     when(service.adminOrderCounts(7)).thenReturn(new OrderQueryService.OrderCounts(10, 6, 3, 1, 2));
-    var mvc = MockMvcBuilders.standaloneSetup(new OrderController(service, mock(OrderDraftService.class), mock(AuthService.class))).build();
+    var mvc = MockMvcBuilders.standaloneSetup(new OrderController(service, mock(OrderDraftService.class), mock(AuthService.class), mock(H5CustomerWriteGuard.class))).build();
     mvc.perform(get("/admin/activities/7/orders/summary"))
         .andExpect(status().isOk()).andExpect(jsonPath("$.data.all").value(10))
         .andExpect(jsonPath("$.data.submitted").value(6)).andExpect(jsonPath("$.data.withdrawn").value(3))

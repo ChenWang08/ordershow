@@ -33,6 +33,7 @@ export function sameH5Order(left: RuntimeOrder | null, right: RuntimeOrder | nul
 export function useH5OrderSync() {
   const [busy, setBusy] = useState(false);
   const [lastSuccessAt, setLastSuccessAt] = useState<number | null>(null);
+  const [cooldownUntil, setCooldownUntil] = useState(0);
   const deadline = useRef(0);
   const flight = useRef<{ key: string; controller: AbortController; promise: Promise<H5OrderSnapshot | null> } | null>(null);
   const mounted = useRef(true);
@@ -41,6 +42,7 @@ export function useH5OrderSync() {
     flight.current?.controller.abort();
     flight.current = null;
     deadline.current = 0;
+    setCooldownUntil(0);
     setBusy(false); setLastSuccessAt(null);
   }, []);
   useEffect(() => {
@@ -50,6 +52,7 @@ export function useH5OrderSync() {
   const markSynced = useCallback(() => {
     const time = Date.now();
     deadline.current = time + COOLDOWN_MS;
+    setCooldownUntil(deadline.current);
     setLastSuccessAt(time);
   }, []);
   const readLatest = useCallback((scope: Scope, force = false): Promise<H5OrderSnapshot | null> => {
@@ -59,6 +62,7 @@ export function useH5OrderSync() {
     if (!force && Date.now() < deadline.current) return Promise.resolve(null);
     const time = Date.now();
     deadline.current = time + COOLDOWN_MS;
+    setCooldownUntil(deadline.current);
     setBusy(true);
     const controller = new AbortController();
     const promise = readH5OrderSnapshot(scope.activityCode, controller.signal).then(snapshot => {
@@ -80,5 +84,5 @@ export function useH5OrderSync() {
     return promise;
   }, []);
   const confirmSynced = useCallback(() => setLastSuccessAt(Date.now()), []);
-  return { busy, lastSuccessAt, readLatest, markSynced, confirmSynced, reset };
+  return { busy, lastSuccessAt, cooldownUntil, readLatest, markSynced, confirmSynced, reset };
 }

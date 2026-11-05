@@ -36,7 +36,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
   const entryBusy = useRef(false);
   const orderActionBusy = useRef(false);
   const identityGeneration = useRef(0);
-  const { busy: orderSyncBusy, lastSuccessAt, readLatest, markSynced, confirmSynced, reset: resetOrderSync } = useH5OrderSync();
+  const { busy: orderSyncBusy, lastSuccessAt, cooldownUntil: orderRefreshCooldownUntil, readLatest, markSynced, confirmSynced, reset: resetOrderSync } = useH5OrderSync();
   const changeAttempt = useRef({ signature: "", key: "" });
   const changeKey = (value: unknown) => {
     const signature = JSON.stringify(value);
@@ -510,7 +510,7 @@ export function useH5OrderFlow({ activityStatus, importedRows, importedWhitelist
     }
     return true;
   };
-  return { orderSyncBusy, lastSuccessAt, refreshOrderStatus, identityChoice, cancelIdentityChoice, resetEntry,
+  return { orderSyncBusy, lastSuccessAt, orderRefreshCooldownUntil, refreshOrderStatus, identityChoice, cancelIdentityChoice, resetEntry,
     directEntry, catalogSearch, prepareLiveRoomExit, catalog, requiresReview, pendingSubmission, pendingChangeRequest,
     recoverSubmission: () => submitOrder(true), activityStatus, runtimeActivity, activityClosed, activityNotStarted,
     unspecifiedWhitelist, runtimeOrder, runtimeBusy, runtimeMessage, orderNeedsRefresh, step, setStep, channel, setChannel,

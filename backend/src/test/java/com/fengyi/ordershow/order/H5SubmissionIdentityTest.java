@@ -17,7 +17,7 @@ class H5SubmissionIdentityTest {
     var request = new MockHttpServletRequest();
     var customer = new H5Principal(1,2,3,"A","GENERAL","R","B","short","full","masked");
     when(auth.requireH5(request)).thenReturn(customer);
-    var controller = new OrderController(service,mock(OrderDraftService.class),auth);
+    var controller = new OrderController(service,mock(OrderDraftService.class),auth,mock(H5CustomerWriteGuard.class));
     var body = new OrderService.SubmitRequest(0,List.of(new OrderService.SubmitItem(4,5)));
     assertEquals("H5_CUSTOMER_CHANGED",assertThrows(DomainException.class,
         () -> controller.submit("A",body,"key",9L,false,request)).code());

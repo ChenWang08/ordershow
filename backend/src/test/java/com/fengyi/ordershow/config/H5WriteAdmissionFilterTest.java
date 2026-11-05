@@ -8,6 +8,39 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 class H5WriteAdmissionFilterTest {
+  @Test void capsTheActual36Active50WaitingAndRejectsTheNextWithoutWaiting() throws Exception {
+    var filter=new H5WriteAdmissionFilter(36,50,12000);
+    var entered=new CountDownLatch(36);var release=new CountDownLatch(1);
+    var chain=mock(jakarta.servlet.FilterChain.class);
+    doAnswer(call->{entered.countDown();assertThat(release.await(5,TimeUnit.SECONDS)).isTrue();return null;})
+        .when(chain).doFilter(any(),any());
+    try(var pool=Executors.newVirtualThreadPerTaskExecutor()) {
+      var calls=new java.util.ArrayList<Future<?>>();
+      for(int i=0;i<36;i++)calls.add(pool.submit(()->{filter.doFilter(request("PUT","/h5/activities/A/order"),new MockHttpServletResponse(),chain);return null;}));
+      assertThat(entered.await(3,TimeUnit.SECONDS)).isTrue();
+      for(int i=0;i<50;i++)calls.add(pool.submit(()->{filter.doFilter(request("POST","/h5/activities/A/order-change-requests"),new MockHttpServletResponse(),chain);return null;}));
+      long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(3);
+      while(filter.waitingCount()!=50 && System.nanoTime()<deadline)Thread.sleep(2);
+      assertThat(filter.activeCount()).isEqualTo(36);assertThat(filter.waitingCount()).isEqualTo(50);
+      var response=new MockHttpServletResponse();var rejected=mock(jakarta.servlet.FilterChain.class);
+      long before=System.nanoTime();
+      filter.doFilter(request("PUT","/h5/activities/A/order"),response,rejected);
+      assertThat(TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-before)).isLessThan(1000);
+      assertThat(response.getStatus()).isEqualTo(503);assertThat(response.getHeader("Retry-After")).isEqualTo("1");
+      verifyNoInteractions(rejected);assertThat(filter.waitingCount()).isEqualTo(50);
+      release.countDown();for(var call:calls)call.get(4,TimeUnit.SECONDS);
+      assertThat(filter.activeCount()).isZero();assertThat(filter.waitingCount()).isZero();assertThat(filter.availablePermits()).isEqualTo(36);
+    }finally{release.countDown();}
+  }
+
+  @Test void aBusinessExceptionReleasesTheActivePermit() throws Exception {
+    var filter=new H5WriteAdmissionFilter(1,0,100);
+    var chain=mock(jakarta.servlet.FilterChain.class);
+    doThrow(new jakarta.servlet.ServletException("synthetic failure")).when(chain).doFilter(any(),any());
+    assertThatThrownBy(()->filter.doFilter(request("PUT","/h5/activities/A/order"),new MockHttpServletResponse(),chain))
+        .isInstanceOf(jakarta.servlet.ServletException.class);
+    assertThat(filter.activeCount()).isZero();assertThat(filter.waitingCount()).isZero();assertThat(filter.availablePermits()).isEqualTo(1);
+  }
   private static MockHttpServletRequest request(String method,String path) {
     var request=new MockHttpServletRequest(method,"/api/v1"+path);request.setContextPath("/api/v1");return request;
   }

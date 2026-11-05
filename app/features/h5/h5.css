@@ -241,6 +241,14 @@
 .submitted-page .simple-header { background: linear-gradient(135deg, #9e1819, #c1322a); }
 .submitted-state-card { margin: 14px 13px 10px; padding: 16px 17px 15px; border: 1px solid #cbe3d2; border-radius: 14px; background: linear-gradient(135deg, #f4fbf5, #e8f6eb); }
 .submitted-status { display: inline-block; padding: 4px 8px; color: #237847; border-radius: 999px; background: #d4efdc; font-size: 9px; font-weight: 700; }
+.submitted-state-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.submitted-refresh { flex: none; min-width: 96px; min-height: 44px; margin: -7px -4px -7px 0; padding: 7px 4px; border: 0; background: transparent; color: #2e7952; font: inherit; font-size: 12px; }
+.submitted-refresh-face { display: inline-flex; align-items: center; justify-content: center; gap: 5px; box-sizing: border-box; min-width: 90px; min-height: 30px; padding: 4px 9px; border: 1px solid #cbe3d2; border-radius: 6px; background: #fffdf9; white-space: nowrap; }
+.submitted-refresh-face > span { font-size: 16px; line-height: 1; }
+.submitted-refresh:disabled { color: #88766a; cursor: default; }
+.submitted-refresh:disabled .submitted-refresh-face { border-color: #dedfd8; background: transparent; }
+.submitted-state-card.withdrawn .submitted-refresh { color: #95621d; }
+.submitted-state-card.withdrawn .submitted-refresh-face { border-color: #ead6b5; }
 .submitted-state-card.withdrawn { border-color: #ead6b5; background: linear-gradient(135deg, #fff8ec, #f9ecd8); }
 .submitted-state-card.withdrawn .submitted-status { color: #95621d; background: #f5e1bb; }
 .submitted-state-card.withdrawn h2 { color: #6c4b2c; }

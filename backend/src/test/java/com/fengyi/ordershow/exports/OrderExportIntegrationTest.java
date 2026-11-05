@@ -210,7 +210,7 @@ class OrderExportIntegrationTest {
   }
   @Test void controllerChecksRoleEndedAndRetiresOldEndpointAndGenericFileBypass()throws Exception {
     long id=activity("FINISHED");var auth=mock(AuthService.class);when(auth.requireAdmin(any())).thenReturn(ROOT);
-    var mvc=MockMvcBuilders.standaloneSetup(new OrderExportController(tasks,policy,auth,storage),new OrderController(mock(OrderService.class),mock(OrderDraftService.class),auth),new FileController(storage,jdbc,auth,new DepartmentAccessService(jdbc),mock(ImageVariantService.class))).setControllerAdvice(new GlobalExceptionHandler()).build();
+    var mvc=MockMvcBuilders.standaloneSetup(new OrderExportController(tasks,policy,auth,storage),new OrderController(mock(OrderService.class),mock(OrderDraftService.class),auth,mock(com.fengyi.ordershow.order.H5CustomerWriteGuard.class)),new FileController(storage,jdbc,auth,new DepartmentAccessService(jdbc),mock(ImageVariantService.class))).setControllerAdvice(new GlobalExceptionHandler()).build();
     String base="/admin/activities/"+id;
     mvc.perform(post(base+"/exports").header("Idempotency-Key","mvc-request-key").contentType("application/json").content("{\"exportType\":\"ORDER_PACKAGE\",\"filters\":{}}")).andExpect(status().isAccepted()).andExpect(jsonPath("$.data.status").value("PENDING"));
     mvc.perform(get(base+"/orders/export")).andExpect(status().isGone());
