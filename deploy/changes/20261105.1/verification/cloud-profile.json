@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "apiCloudReadiness": 200,
+  "workerCloudProfileStarts": true,
+  "workerCloudGuardRejectsBootstrap": true,
+  "workerNonRoot": true,
+  "workerReadOnlyRoot": true,
+  "workerRemainsRunning": true,
+  "realCloudResources": false,
+  "ossSdkConfigurationOnly": true,
+  "checkedAt": "2026-11-05T07:27:36.642Z"
+}

@@ -1,6 +1,6 @@
 # 订购会业务系统
 
-> ACK 工作目录：本轮正在同步 main `5aa082b`，保留 `ebe891b` 的 4 后端副本及每副本 20 个业务池连接。云端配置、DBA 升级及交付状态以 [deploy/README.md](deploy/README.md) 为准；下方本地 Docker 记录属于 main 环境，不能视为 ACK 已上线。
+> ACK 工作目录：已同步 main `5aa082b`，保留 `ebe891b`；本机 ACK 镜像 `20261105.1` 构建及隔离验收完成，镜像源码 `c48e69c`。本轮未上传、未部署云端。交付包与真实云端待验项见 [deploy/README.md](deploy/README.md)。下方本地 Docker 记录属于 main 环境。
 
 ## 当前本地部署：手动刷新 10 秒冷却（2026-11-05 14:29）
 

@@ -1,0 +1,29 @@
+{
+  "frontend": {
+    "total": 482,
+    "passed": 482,
+    "skipped": 0,
+    "failures": 0,
+    "typecheck": true
+  },
+  "backendDefault": {
+    "total": 487,
+    "passed": 323,
+    "skipped": 164,
+    "failures": 0,
+    "errors": 0
+  },
+  "realMysqlOutbox": {
+    "total": 6,
+    "passed": 6,
+    "skipped": 0
+  },
+  "backendDeduplicated": {
+    "total": 488,
+    "passed": 329,
+    "skipped": 159,
+    "failures": 0,
+    "errors": 0
+  },
+  "notes": "Conditional skips are not counted as passing. Frontend production source unchanged between f90eb22 and c48e69c; full suite used f90eb22, final image pages used c48e69c."
+}

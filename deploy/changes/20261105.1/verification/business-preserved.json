@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "containers": 7,
+  "containerIdsImagesStartsMountsUnchanged": true,
+  "mainEnvSha256Unchanged": true,
+  "ackEnvSha256Unchanged": true,
+  "oldAck20261102ImagesPreserved": true,
+  "isolatedProjectRemoved": true,
+  "checkedAt": "2026-11-05T07:50:27.087Z"
+}

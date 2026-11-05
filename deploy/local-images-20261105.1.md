@@ -1,21 +1,70 @@
 # ACK 本地镜像交付：20261105.1
 
-## 范围与源码
+## 完成状态与源码
 
-本轮在 E:\fengyi\order_show-ack 的 codex/ack-cloud-adaptation 分支同步 main 5aa082b58d5606dc6a36069c7f0c6586ac867fb8，保留 ebe891ba001b1c9ea03cebccb6bb3cf37ec17f00 及既有云端适配。最终 ACK 源码提交、镜像 ID 和验证结果将在完成后补录；当前处于本机构建验收阶段。
+本机构建、隔离验收及交付文件整理完成。工作目录 E:\fengyi\order_show-ack，分支 codex/ack-cloud-adaptation；合入 main 5aa082b58d5606dc6a36069c7f0c6586ac867fb8，保留 ebe891ba001b1c9ea03cebccb6bb3cf37ec17f00 及既有云端适配。
 
-目标镜像为 order-show-ack-backend:20261105.1 和 order-show-ack-frontend:20261105.1，linux/amd64、非 root，前端同域 /api/v1。导出 worker 复用后端同一镜像，通过 --export-worker 启动；本轮只准备本机镜像及部署包，用户负责推送、部署团队负责上线。
+- 合并提交：f90eb225b9526461741cf8ab9613625aec9d82b4。
+- 最终镜像源码及 OCI revision：c48e69c7d877c9d137df0dfecea0681c14866be8。后续交付文档和隔离入口配置提交不改变镜像源码身份。
+- 两份 linux/amd64 镜像、非 root，前端同域 /api/v1；worker 复用后端镜像的 --export-worker 模式。
+- 仅准备本地镜像和 CODING 别名，未 docker push、未推送 Git、未访问或部署真实云资源。用户负责推送，部署团队负责 UAT/上线。
 
-## 配套要求
+## 镜像身份
 
-- API 4 副本，每副本业务池 20、配置复制池最多 1；worker 1 副本最多 2 连接。常态预算 86，滚动同时运行 5 个 API 时 107，另留终止中的 Pod、维护及监控余量。H5 每 API 36 处理/50 等待/12 秒上限，共享 Redis 10 秒 3 个新操作和 20 次总请求。
-- 数据库目标 V053。已有 V049 使用 dba/generated/upgrade-v049-v053.sql；新空库用 fresh-install.sql，不能交叉使用。保持 cloud profile、关闭自动迁移/演示初始化、保留 UTC 与安全 Cookie。
-- k8s/apps.yaml 保留 ebe891b 的 4 API 和每 API 2 CPU/4Gi 资源上限、2 前端；另交付 k8s/export-worker.yaml。worker 使用 SPRING_MAIN_KEEP_ALIVE=true、0.5 CPU/512Mi、256Mi Java 堆、磁盘型 2Gi emptyDir 和 1Gi 导出预算，fsGroup=10001。worker 无 HTTP 接口，startupProbe 仅检查进程与临时目录，需监控任务状态、租约、失败和导出耗时。
-- OSS 的复制/删除与流式导出保留 SDK 错误分类；只有 NoSuchKey 视为对象缺失。需要读取源、写入目标和删除对象权限，真实 OSS 行为待团队 UAT 验证。对象恢复单独制定，不以 SQL 备份替代。
-- 最新手动刷新 10 秒冷却、排行条件确认、导出/删除进度在途禁用均纳入；H5 沿用 15 秒刷新规则。冷却仅为当前页面交互限制，不宣称为服务端或跨用户统计限流。
+| 组件 | 本机标签 | 本地 ID / RepoDigest | 用户 |
+| --- | --- | --- | --- |
+| 后端（含 worker） | order-show-ack-backend:20261105.1 | sha256:d0a0e4fee6c89b46f9ffd57107e098e61ffb3477619cd29c6bf9ff93776ed73f | ordershow |
+| 前端 | order-show-ack-frontend:20261105.1 | sha256:b15d1d7192d4fabc07d6622e5164f897051cdaaf1e2936fada140d1ead046356 | node |
 
-## 发布与回退
+已创建本地仓库别名：
 
-先记录目标 ACK 镜像、DBA 结构版本、实际配置及备份。按维护窗口停写/停任务、DBA 升级、更新全部 API 与 worker、更新前端的顺序发布。测试和生产使用同一镜像摘要；线上地址、密钥、imagePullSecrets、Ingress 与 namespace 由团队在私有副本中填写。
+- g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261105.1
+- g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261105.1
 
-保留 20261102.1 镜像；应用/结构/对象恢复须一起评估，尤其不能通过换旧镜像撤销永久删除。真实 ACK、PolarDB、Redis TLS/Lua、OSS、Ingress HTTPS/缓存头与持续高峰容量属于团队待验项，本机隔离结果不代替这些检查。
+这些是本地身份，尚无本轮独立验证的远端摘要。推送后团队应读取仓库摘要并把 API/worker 固定为同一个后端摘要，测试和生产使用同一摘要。
+
+## 本轮适配与部署要求
+
+- 业务更新包括活动配置复用、归档/永久删除、异步 CSV ZIP 导出、21 列商品明细、抽奖轮次修订/排序、H5 写保护及手动刷新。最新后台/大屏 10 秒冷却和排行同条件不重复确认已纳入；导出记录/删除进度仅在请求期间禁用，H5 仍为 15 秒。冷却是页面交互限制，不代表跨用户统计限流。
+- 保留 MinIO/OSS 双实现、OSS V4 签名和 SDK 超时；只有 NoSuchKey 视为对象缺失。保留 ACK outbox 的 READ COMMITTED 与 FOR UPDATE SKIP LOCKED，并排除待删除活动。独立 worker 也加载 CloudConfigurationGuard，防止非 Web 启动绕过云端禁用项。
+- API 4 副本，每副本业务池 20、复制专用池最多 1；worker 1 副本最多 2 连接。常态预算 86，滚动同时运行 5 个 API 时 107，另留终止中的 Pod、维护及监控余量。实际四副本业务池最大值已通过运行时指标核对。
+- 保留 ebe891b 的 API 每副本 2 CPU/4Gi、前端 2 副本。H5 每 API 36 处理/50 等待/12 秒上限，共享 Redis 每活动+客户 10 秒 3 个新操作、20 次总请求。
+- 新 worker 为 1 副本/Recreate，0.5 CPU/512Mi、256Mi Java 堆、磁盘型 2Gi emptyDir、1Gi 导出临时文件预算、fsGroup=10001、只读根目录、SPRING_MAIN_KEEP_ALIVE=true、Flyway 关闭。无 HTTP 接口；startupProbe 仅查进程和临时目录，另需监控任务队列、租约、失败和耗时。
+- 数据库目标 V053；现有 V049 用 deploy/dba/generated/upgrade-v049-v053.sql，空库用 fresh-install.sql，先核对目标实际版本。云端自动迁移、历史启动迁移和演示初始化继续关闭；保持 UTC、安全 Cookie 和原业务密钥。
+- OSS 新增复制与删除需求：源对象读取、目标写入及 DeleteObject；需要单独验证真实对象权限和恢复策略。
+
+## 已完成的验证
+
+| 范围 | 结果 |
+| --- | --- |
+| 前端全量与类型检查 | 482/482 通过，类型检查通过。全量测试使用 f90eb22；它与最终 c48e69c 的前端生产源码及依赖逐项无差异，最终镜像另做真实页面检查。 |
+| 后端默认测试 | 487 项：323 通过、164 条件跳过、0 失败/错误。 |
+| 真实 MySQL outbox | 6/6 通过，包括并发领取、重试/回滚与待删除活动过滤。与默认集去重后共 488 项，329 通过、159 条件跳过，不能把跳过算通过。 |
+| DBA 升级与空库 | 真实 V049 基线升级至 V053；48 张原业务表的原列/数据无变化，57 张表结构与 V053 新空库一致，无 Flyway 历史表，worker 初始行正确。使用合成数据，非线上数据迁移演练。 |
+| 四副本真实 HTTP | 167 项断言通过：登录/CSRF、跨副本会话、真实表导入、图片/派生图字节与 304、私有源文件保护、下单、同一请求并发复制仅 1 任务、归档/恢复、永久删除及源文件保留。 |
+| 真实 Redis | 8 组检查通过：共享额度、幂等冲突/重放、并发原子限制、客户和活动隔离、真实 TTL、短时中断降级与恢复。 |
+| 最终镜像浏览器 | 后台概览/订单、看板/排行/战报 10 秒冷却、同条件确认、到期不自动查询通过；H5 15 秒及 320/390/1440 布局通过，截图已检查，无页面异常或 5xx。使用浏览器时钟推进校验冷却，HTTP 由真实镜像响应。 |
+| 云端配置加载 | test/cloud API readiness 正常，非 Web worker 能保持运行，禁止 bootstrap 的云端校验生效。使用带密码测试 Redis 和假 OSS 参数；不代表真实 OSS 可用。 |
+| 重启恢复 | 原会话在 API B 重启后继续可用于四副本。导出 worker 在 READING 中被中断，真实 90 秒租约到期后第 2 次尝试完成，耗时 105799ms，20 万明细及下载通过，未改租约时间。 |
+| 配置与交付 | linux/amd64、镜像 revision、非 root、只读 worker/磁盘卷、四副本业务池 20、YAML 解析、DBA 来源与包哈希检查通过。未执行严格 Kubernetes schema 校验或真实集群 server-side dry-run。 |
+
+## 短时混合负载
+
+隔离栈：4 个 API，每个 2 CPU/768Mi，业务池 20，H5 并发 36、共享限流开启；MySQL 2 CPU/768Mi；worker 0.5 CPU/512Mi。使用 1000 个逻辑读取客户端、30 个持续写客户端（约每 4 秒一次）和 30 个同时提交客户端，约 60 秒，并行导出 4000 单 × 50 行。
+
+- 活动读取：2000 次（200/304 各 1000），P95 13.11ms。
+- 持续写：450 次，P95 1149.68ms；同时提交 30 次，P95 180.09ms；合计 480 次写入全部成功。
+- 导出 10189ms，4 个 CSV，4000 单、200000 明细、21 列表头核对通过。
+- 60 张当前订单的数量 480、金额 4800、版本 480，与明细和版本记录一致，差异 0。合成读取是分散请求，不能称为 1000 请求同时在途；本机短时结果不构成云端容量结论。
+
+## 验收期间的问题与处理
+
+保留首轮记录：负载有 9 次客户端 fetch 失败，入口未记录 5xx；改用明确的 127.0.0.1 后最终复测无失败。首轮没有采集底层连接异常原因，根因未确定，不能把首轮算通过或宣称已证明网络问题。中间复测遗漏新合成活动版本绑定，补齐后重跑。HTTP 重跑遇旧合成活动时间冲突，改为每次新建独立部门；复制完成后中间映射会清理，取值改用正式文件记录。真实页面初次登录因隔离 PUBLIC_ORIGIN 缺失被拒，已补齐测试入口，未放宽生产校验。
+
+## 交付、清理与真实云端待验
+
+版本化部署补丁、worker、SQL 引用、镜像清单、结果 JSON、校验清单和发布/回退步骤见 [20261105.1 交付包](changes/20261105.1/README.md)。原始日志和截图保留在主项目被忽略的 outputs/ack-release-20261105.1，未提交合成会话或任何真实凭证。
+
+隔离环境及匿名测试卷已清理。核对原有 7 个日常业务容器的 ID、镜像、启动时间、挂载，主项目与 ACK 的 .env 哈希及旧 20261102.1 镜像，均与操作前一致。
+
+真实 PolarDB 版本/TLS/锁与 SQL、云 Redis TLS/Lua/重连、OSS 真实读写复制删除、ACK 拉取/资源/探针、Ingress HTTPS/缓存头、持续高峰与滚动发布、备份恢复仍由团队 UAT 验收。SQL/对象备份要分别保留；永久删除不能靠换旧镜像或仅恢复 SQL 撤销。

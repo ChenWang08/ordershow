@@ -3,6 +3,7 @@
 name: order-show-ack-smoke
 x-backend-env: &backend-env
   DB_URL: jdbc:mysql://mysql:3306/ack_smoke?allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC
+  PUBLIC_ORIGIN: http://127.0.0.1:18031
   DB_POOL_SIZE: "20"
   DB_POOL_MIN_IDLE: "2"
   H5_SESSION_CACHE_TTL_MS: "0"

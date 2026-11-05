@@ -1,2 +1,5 @@
 # DBA package checksums must remain reproducible across Windows/Linux checkouts.
 deploy/dba/generated/* text eol=lf
+
+# Keep the versioned handoff SHA256SUMS stable on Windows/Linux.
+deploy/changes/20261105.1/** text eol=lf

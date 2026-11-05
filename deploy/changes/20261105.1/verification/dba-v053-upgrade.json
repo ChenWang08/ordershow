@@ -1,0 +1,14 @@
+{
+  "passed": true,
+  "from": "V049",
+  "to": "V053",
+  "originalTablesCompared": 48,
+  "originalColumnsAndRowsUnchanged": true,
+  "syntheticOrders": 1,
+  "syntheticItems": 1,
+  "freshAndUpgradeSchemasMatch": true,
+  "tables": 57,
+  "flywayHistoryAbsent": true,
+  "workerRowsInitialized": true,
+  "checkedAt": "2026-11-05T07:03:02.986Z"
+}

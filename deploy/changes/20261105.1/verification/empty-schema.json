@@ -1,0 +1,7 @@
+{
+  "passed": true,
+  "version": "V053",
+  "tables": 57,
+  "flywayHistoryAbsent": true,
+  "applicationDmlOnly": true
+}

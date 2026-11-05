@@ -1,0 +1,6 @@
+{
+  "passed": true,
+  "replicas": 4,
+  "restartedOnly": "order-show-ack-smoke-backend-b-1",
+  "originalSessionPreserved": true
+}

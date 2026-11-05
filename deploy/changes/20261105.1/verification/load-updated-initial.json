@@ -1,0 +1,120 @@
+{
+  "passed": false,
+  "label": "updated",
+  "durationMs": 61855,
+  "readerClients": 1000,
+  "continuousWriterClients": 30,
+  "simultaneousBurstClients": 30,
+  "metrics": {
+    "activityRead": {
+      "count": 1997,
+      "p95Ms": 13.980299999995623,
+      "maxMs": 683.5922999999966,
+      "statuses": {
+        "200": 1000,
+        "304": 997
+      }
+    },
+    "write": {
+      "count": 444,
+      "p95Ms": 650.8492999999999,
+      "maxMs": 949.6262999999999,
+      "statuses": {
+        "200": 444
+      }
+    },
+    "burst": {
+      "count": 30,
+      "p95Ms": 785.4110000000001,
+      "maxMs": 785.6369000000013,
+      "statuses": {
+        "200": 30
+      }
+    },
+    "ranking": {
+      "count": 12,
+      "p95Ms": 215.68769999999995,
+      "maxMs": 215.68769999999995,
+      "statuses": {
+        "200": 12
+      }
+    }
+  },
+  "exported": {
+    "elapsedMs": 19035,
+    "bytes": 1318121,
+    "rows": {
+      "订单汇总.csv": 4000,
+      "订单商品明细.csv": 200000,
+      "有效商品汇总.csv": 50,
+      "有效分公司汇总.csv": 1
+    },
+    "detailHeader": [
+      "订单编号",
+      "状态",
+      "来源",
+      "客户类型",
+      "大区",
+      "分公司",
+      "经销商",
+      "电话",
+      "订单版本",
+      "行号",
+      "物料代码",
+      "物料名称",
+      "品种",
+      "规格",
+      "项目组",
+      "订货箱数",
+      "基础箱价（元/箱）",
+      "是否命中阶梯",
+      "金额",
+      "吨数",
+      "最后提交（北京时间）"
+    ]
+  },
+  "data": {
+    "orders": 60,
+    "quantity": 474,
+    "amount": 4740,
+    "versions": 474
+  },
+  "failures": [
+    {
+      "kind": "read",
+      "error": "TypeError: fetch failed"
+    },
+    {
+      "kind": "write",
+      "error": "TypeError: fetch failed"
+    },
+    {
+      "kind": "read",
+      "error": "TypeError: fetch failed"
+    },
+    {
+      "kind": "write",
+      "error": "TypeError: fetch failed"
+    },
+    {
+      "kind": "write",
+      "error": "TypeError: fetch failed"
+    },
+    {
+      "kind": "write",
+      "error": "TypeError: fetch failed"
+    },
+    {
+      "kind": "write",
+      "error": "TypeError: fetch failed"
+    },
+    {
+      "kind": "write",
+      "error": "TypeError: fetch failed"
+    },
+    {
+      "kind": "read",
+      "error": "TypeError: fetch failed"
+    }
+  ]
+}

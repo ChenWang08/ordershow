@@ -1,0 +1,35 @@
+{
+  "tag": "20261105.1",
+  "main": "5aa082b58d5606dc6a36069c7f0c6586ac867fb8",
+  "ackImageSource": "c48e69c7d877c9d137df0dfecea0681c14866be8",
+  "images": [
+    {
+      "component": "backend",
+      "localTag": "order-show-ack-backend:20261105.1",
+      "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261105.1",
+      "localImageId": "sha256:d0a0e4fee6c89b46f9ffd57107e098e61ffb3477619cd29c6bf9ff93776ed73f",
+      "localRepoDigests": [
+        "order-show-ack-backend@sha256:d0a0e4fee6c89b46f9ffd57107e098e61ffb3477619cd29c6bf9ff93776ed73f"
+      ],
+      "revision": "c48e69c7d877c9d137df0dfecea0681c14866be8",
+      "platform": "linux/amd64",
+      "user": "ordershow",
+      "pushed": false,
+      "remoteDigestVerified": false
+    },
+    {
+      "component": "frontend",
+      "localTag": "order-show-ack-frontend:20261105.1",
+      "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261105.1",
+      "localImageId": "sha256:b15d1d7192d4fabc07d6622e5164f897051cdaaf1e2936fada140d1ead046356",
+      "localRepoDigests": [
+        "order-show-ack-frontend@sha256:b15d1d7192d4fabc07d6622e5164f897051cdaaf1e2936fada140d1ead046356"
+      ],
+      "revision": "c48e69c7d877c9d137df0dfecea0681c14866be8",
+      "platform": "linux/amd64",
+      "user": "node",
+      "pushed": false,
+      "remoteDigestVerified": false
+    }
+  ]
+}

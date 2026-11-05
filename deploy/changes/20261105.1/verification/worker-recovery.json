@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "task": 4,
+  "interruptedStage": "READING",
+  "attempts": 2,
+  "realLeaseExpiry": true,
+  "timestampsModified": false,
+  "elapsedAfterKillMs": 105799,
+  "details": 200000,
+  "download": 200
+}

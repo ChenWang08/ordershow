@@ -1,0 +1,55 @@
+# Use exactly the same backend image digest as the API Deployment.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: export-worker
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: order-show-export-worker}
+  template:
+    metadata:
+      labels: {app: order-show-export-worker}
+    spec:
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 70
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: export-worker
+          image: g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261105.1
+          args: ["--export-worker"]
+          envFrom:
+            - configMapRef: {name: order-show-config}
+            - secretRef: {name: order-show-secrets}
+          env:
+            - {name: SPRING_MAIN_KEEP_ALIVE, value: "true"}
+            - {name: SPRING_FLYWAY_ENABLED, value: "false"}
+            - {name: JAVA_TOOL_OPTIONS, value: "-Xms64m -Xmx256m -XX:ActiveProcessorCount=1"}
+            - {name: ORDER_SHOW_EXPORT_TEMP_DIR, value: "/tmp/order-exports"}
+            - {name: ORDER_SHOW_EXPORT_MAX_TEMP_BYTES, value: "1073741824"}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi, ephemeral-storage: 1Gi}
+            limits: {cpu: 500m, memory: 512Mi, ephemeral-storage: 2Gi}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          volumeMounts:
+            - {name: export-temp, mountPath: /tmp}
+          # Non-web process. This probes only process/temp access, not successful task execution.
+          startupProbe:
+            exec:
+              command: [sh, -c, "kill -0 1 && test -w /tmp"]
+            periodSeconds: 5
+            failureThreshold: 36
+      volumes:
+        - name: export-temp
+          emptyDir:
+            sizeLimit: 2Gi

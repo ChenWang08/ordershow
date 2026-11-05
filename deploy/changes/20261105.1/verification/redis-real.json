@@ -1,0 +1,27 @@
+{
+  "passed": true,
+  "checks": [
+    "four backend replicas share the three-operation budget and return 429/Retry-After",
+    "same key/body replays without extra operation; changed body conflicts",
+    "customer and activity budgets are isolated",
+    "ten concurrent new keys across replicas admit three operations atomically",
+    "twenty replay requests permitted; twenty-first is bounded by request budget",
+    "isolated Redis pause triggers fail-open degradation and does not fail the order",
+    "Redis recovery resumes enforcement",
+    "real TTL expires all short-lived keys; persisted old receipt replays without consuming a new operation or duplicating order"
+  ],
+  "concurrentStatuses": [
+    429,
+    409,
+    200,
+    409,
+    429,
+    429,
+    429,
+    429,
+    429,
+    429
+  ],
+  "redisFaultOrderMs": 297.32129999999984,
+  "checkedAt": "2026-11-05T07:31:25.163Z"
+}

@@ -1,0 +1,37 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "name": "order-show-ack-smoke-backend-a-1",
+      "running": true,
+      "oomKilled": false,
+      "errorLines": 0
+    },
+    {
+      "name": "order-show-ack-smoke-backend-b-1",
+      "running": true,
+      "oomKilled": false,
+      "errorLines": 0
+    },
+    {
+      "name": "order-show-ack-smoke-backend-c-1",
+      "running": true,
+      "oomKilled": false,
+      "errorLines": 0
+    },
+    {
+      "name": "order-show-ack-smoke-backend-d-1",
+      "running": true,
+      "oomKilled": false,
+      "errorLines": 0
+    },
+    {
+      "name": "order-show-ack-smoke-export-worker-1",
+      "running": true,
+      "oomKilled": false,
+      "errorLines": 0
+    }
+  ],
+  "productionSourceUnchangedFromFullSuite": true,
+  "businessUnchanged": true
+}
