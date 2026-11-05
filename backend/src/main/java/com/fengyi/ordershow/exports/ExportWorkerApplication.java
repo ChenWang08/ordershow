@@ -36,7 +36,12 @@ public class ExportWorkerApplication {
   }
   @Bean CsvExportGenerator generator(@Qualifier("exportReadDataSource") DataSource ds,OrderShowProperties properties,Environment env) {
     var jdbc=new JdbcTemplate(ds);jdbc.setQueryTimeout(30);
-    return new CsvExportGenerator(jdbc,new DataSourceTransactionManager(ds),new OrderQueryService(jdbc,new CryptoService(properties)),
+    var snapshot=new DataSourceTransactionManager(ds);
+    // The read transaction still owns its repeatable-read connection. Do not enlist the
+    // separate control pool in its synchronization: that would pin its only connection
+    // until all CSVs finish and prevent the heartbeat thread from renewing the lease.
+    snapshot.setTransactionSynchronization(DataSourceTransactionManager.SYNCHRONIZATION_NEVER);
+    return new CsvExportGenerator(jdbc,snapshot,new OrderQueryService(jdbc,new CryptoService(properties)),
         env.getProperty("order-show.export.batch-size",Integer.class,2000),env.getProperty("order-show.export.read-timeout-seconds",Integer.class,120),
         env.getProperty("order-show.export.max-temp-bytes",Long.class,1073741824L));
   }
