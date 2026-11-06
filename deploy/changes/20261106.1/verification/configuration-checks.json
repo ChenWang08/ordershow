@@ -1,0 +1,98 @@
+{
+  "passed": true,
+  "pools": [
+    {
+      "replica": "a",
+      "effectiveBusinessPoolMaximum": 20,
+      "copyPoolExtraMaximumFromSource": 1
+    },
+    {
+      "replica": "b",
+      "effectiveBusinessPoolMaximum": 20,
+      "copyPoolExtraMaximumFromSource": 1
+    },
+    {
+      "replica": "c",
+      "effectiveBusinessPoolMaximum": 20,
+      "copyPoolExtraMaximumFromSource": 1
+    },
+    {
+      "replica": "d",
+      "effectiveBusinessPoolMaximum": 20,
+      "copyPoolExtraMaximumFromSource": 1
+    }
+  ],
+  "worker": {
+    "sameBackendImage": true,
+    "user": "ordershow",
+    "readOnlyRoot": true,
+    "diskTemporaryVolume": true,
+    "storage": "10001\nFilesystem     Type  1K-blocks      Used Available Use% Mounted on\n/dev/sdd       ext4 1055762868 102846000 899213396  11% /tmp"
+  },
+  "yamlParsed": [
+    {
+      "file": "apps.yaml",
+      "kind": "Deployment",
+      "name": "backend"
+    },
+    {
+      "file": "apps.yaml",
+      "kind": "Service",
+      "name": "backend"
+    },
+    {
+      "file": "apps.yaml",
+      "kind": "Deployment",
+      "name": "frontend"
+    },
+    {
+      "file": "apps.yaml",
+      "kind": "Service",
+      "name": "frontend"
+    },
+    {
+      "file": "configmap.yaml",
+      "kind": "ConfigMap",
+      "name": "order-show-config"
+    },
+    {
+      "file": "export-worker.yaml",
+      "kind": "Deployment",
+      "name": "export-worker"
+    },
+    {
+      "file": "ingress.yaml",
+      "kind": "Ingress",
+      "name": "order-show"
+    },
+    {
+      "file": "namespace.yaml",
+      "kind": "Namespace",
+      "name": "order-show-test"
+    },
+    {
+      "file": "secret.example.yaml",
+      "kind": "Secret",
+      "name": "order-show-secrets"
+    }
+  ],
+  "strictKubernetesSchemaValidation": false,
+  "serverSideDryRun": false,
+  "dba": [
+    {
+      "file": "manifest.json",
+      "bundle": "fresh-install.sql",
+      "sha256": "9a91bf7db6e87140070bacbc3dee5cdd4110ebdfb12c0079fe0ed10816e7b40f"
+    },
+    {
+      "file": "upgrade-v049-v053.manifest.json",
+      "bundle": "upgrade-v049-v053.sql",
+      "sha256": "a7d78b2573e6953ae4c778b8370248ba6c7c8d47f981d837b3f95870ba426672"
+    },
+    {
+      "file": "upgrade-v053-v054.manifest.json",
+      "bundle": "upgrade-v053-v054.sql",
+      "sha256": "75f52bf5f00fba7f8f4b18d01b48da3e09b853a4d5f9b3e157cea8fe4c7b1f0e"
+    }
+  ]
+}

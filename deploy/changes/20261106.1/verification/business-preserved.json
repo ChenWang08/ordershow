@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "originalContainers": 43,
+  "containerIdsImagesStateStartedAtRestartsMountsAndEnvHashesUnchanged": true,
+  "envFilesUnchanged": 2,
+  "oldAckImagesUnchanged": 2,
+  "temporaryStacksRemoved": true,
+  "publicMavenCachePreserved": true
+}

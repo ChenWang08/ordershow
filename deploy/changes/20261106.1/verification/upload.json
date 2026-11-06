@@ -1,0 +1,46 @@
+{
+  "passed": true,
+  "pushed": true,
+  "remoteDigestVerified": true,
+  "purpose": "Test environment deployment",
+  "tag": "20261106.1",
+  "source": "cecc235691196cbb916814feacb985f941b41e57",
+  "transport": {
+    "backend": "Standard Registry chunked upload preserving original OCI bytes",
+    "frontend": "skopeo copy --all --preserve-digests from the original OCI archive",
+    "credentials": "Existing Docker Desktop login kept in memory"
+  },
+  "retryNotes": "Native Docker pushes failed or stalled on its proxy connection, including after the user restarted Docker. Frontend chunked upload failed at large-layer finalization; standard skopeo copy then completed with exit code 0. Failed/interrupted logs are retained locally.",
+  "oldTagsPreserved": true,
+  "cloudDeploymentExecuted": false,
+  "cloudSqlExecuted": false,
+  "businessContainersModified": false,
+  "testsRerunDuringPush": false,
+  "checkedAt": "2026-11-06T04:56:43.117Z",
+  "backend": {
+    "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261106.1",
+    "digest": "sha256:56fe173cec548d316a26faf65f89e341a7c2b2f1480b6c16f1d89ddfb2ad5e41",
+    "platforms": [
+      "linux/amd64"
+    ],
+    "revision": "cecc235691196cbb916814feacb985f941b41e57",
+    "user": "ordershow",
+    "oldRegistryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261105.1",
+    "oldDigest": "sha256:d0a0e4fee6c89b46f9ffd57107e098e61ffb3477619cd29c6bf9ff93776ed73f",
+    "uploadCompleted": true,
+    "independentRemoteDigestMatches": true
+  },
+  "frontend": {
+    "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261106.1",
+    "digest": "sha256:51301830290dc14beb174b9710add23ca6136f750eb5b04f66eb59ac1eb21056",
+    "platforms": [
+      "linux/amd64"
+    ],
+    "revision": "cecc235691196cbb916814feacb985f941b41e57",
+    "user": "node",
+    "oldRegistryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261105.1",
+    "oldDigest": "sha256:b15d1d7192d4fabc07d6622e5164f897051cdaaf1e2936fada140d1ead046356",
+    "uploadCompleted": true,
+    "independentRemoteDigestMatches": true
+  }
+}

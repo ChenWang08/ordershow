@@ -1,0 +1,39 @@
+{
+  "frontend": {
+    "total": 486,
+    "passed": 486,
+    "failed": 0,
+    "skipped": 0,
+    "currentBuild": true,
+    "fileConcurrency": 4,
+    "typecheck": true
+  },
+  "backendDefault": {
+    "total": 504,
+    "passed": 324,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 180
+  },
+  "backendFocused": {
+    "heartbeat": {
+      "total": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0
+    },
+    "lotteryAndReview": {
+      "total": 72,
+      "passed": 72,
+      "failed": 0,
+      "skipped": 0
+    },
+    "activityLifecycleAndStorage": {
+      "total": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0
+    }
+  },
+  "notes": "Backend groups overlap and are not summed as unique test cases. Conditional skips are not counted as passing. All production sources match cecc235; this release also changes documentation and verification scripts only."
+}

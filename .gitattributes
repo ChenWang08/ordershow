@@ -3,3 +3,4 @@ deploy/dba/generated/* text eol=lf
 
 # Keep the versioned handoff SHA256SUMS stable on Windows/Linux.
 deploy/changes/20261105.1/** text eol=lf
+deploy/changes/20261106.1/** text eol=lf

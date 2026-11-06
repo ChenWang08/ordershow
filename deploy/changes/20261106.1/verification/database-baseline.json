@@ -1,0 +1,9 @@
+{
+  "currentCloudVersion": "V053",
+  "source": "User confirmation in this chat",
+  "queriedCloudDatabase": false,
+  "targetVersion": "V054",
+  "upgradeFile": "dba/upgrade-v053-v054.sql",
+  "rerunHistoricalMigrations": false,
+  "freshInstallRequired": false
+}

@@ -1,0 +1,12 @@
+{
+  "passed": true,
+  "checks": [
+    "UTC round trip with MySQL +08:00 and replica B Asia/Shanghai",
+    "Shared session and CSRF",
+    "Cross-replica MinIO uploads/private files",
+    "Single import publication across schedulers",
+    "Redis event fanout",
+    "Isolated replica B restart and session survival"
+  ],
+  "cloudResources": false
+}

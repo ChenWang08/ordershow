@@ -67,7 +67,7 @@ services:
       MINIO_ROOT_PASSWORD: isolated_smoke_minio_password
     tmpfs: [/data]
   backend-a:
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261105.1}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261106.1}
     mem_limit: 768m
     cpus: 2
     environment: *backend-env
@@ -77,7 +77,7 @@ services:
       redis: {condition: service_started}
       minio: {condition: service_started}
   backend-b:
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261105.1}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261106.1}
     mem_limit: 768m
     cpus: 2
     environment:
@@ -88,7 +88,7 @@ services:
     depends_on:
       backend-a: {condition: service_healthy}
   backend-c:
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261105.1}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261106.1}
     mem_limit: 768m
     cpus: 2
     environment:
@@ -98,7 +98,7 @@ services:
     depends_on:
       backend-a: {condition: service_healthy}
   backend-d:
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261105.1}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261106.1}
     mem_limit: 768m
     cpus: 2
     environment:
@@ -108,7 +108,7 @@ services:
     depends_on:
       backend-a: {condition: service_healthy}
   export-worker:
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261105.1}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261106.1}
     command: ["--export-worker"]
     read_only: true
     mem_limit: 512m
@@ -134,7 +134,7 @@ services:
       backend-d: {condition: service_healthy}
       frontend: {condition: service_started}
   frontend:
-    image: order-show-ack-frontend:${ACK_IMAGE_TAG:-20261105.1}
+    image: order-show-ack-frontend:${ACK_IMAGE_TAG:-20261106.1}
     ports: ["127.0.0.1:18030:3000"]
   redis-cloud-check:
     profiles: [cloud-check]
@@ -143,7 +143,7 @@ services:
     tmpfs: [/data]
   cloud-check:
     profiles: [cloud-check]
-    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261105.1}
+    image: order-show-ack-backend:${ACK_IMAGE_TAG:-20261106.1}
     mem_limit: 768m
     cpus: 2
     ports: ["127.0.0.1:18083:8080"]

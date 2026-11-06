@@ -14,7 +14,7 @@ data:
   ACTIVITY_DELETION_BATCH_SIZE: "500"
   ACTIVITY_DELETION_MAX_RETRIES: "5"
   ACTIVITY_DELETION_BATCH_INTERVAL_MS: "500"
-  # Source now requires V054. The published 20261105.1 images still require V053.
+  # 20261106.1 requires V054; 20261105.1 requires V053. DBA upgrades before rollout.
   # Summary reads also require repair/check for existing orders.
   DASHBOARD_SUMMARY_ENABLED: "true"
   DASHBOARD_SUMMARY_ACTIVITIES: ""

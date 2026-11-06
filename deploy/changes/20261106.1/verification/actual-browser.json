@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "checks": [
+    "actual image admin login and requested activity",
+    "admin overview: 10-second cooldown, repeated click blocked, expiry makes no query",
+    "admin orders: 10-second cooldown, repeated click blocked, expiry makes no query",
+    "screen dashboard: 10-second cooldown, repeated click blocked, expiry makes no query",
+    "ranking unchanged conditions cannot confirm twice",
+    "screen ranking: 10-second cooldown, repeated click blocked, expiry makes no query",
+    "screen report: 10-second cooldown, repeated click blocked, expiry makes no query",
+    "actual lottery screen loads",
+    "actual H5 login/order, 15-second cooldown remains, no read on cooldown expiry",
+    "H5 refresh touch target and layouts at 320/390/1440"
+  ],
+  "errors": [],
+  "failures": [],
+  "timerCheck": "browser clock advanced; real image HTTP responses"
+}

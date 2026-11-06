@@ -1,0 +1,14 @@
+{
+  "cloudSqlExecuted": false,
+  "cloudDeploymentExecuted": false,
+  "pending": [
+    "DBA PolarDB V053 to V054 upgrade and recovery rehearsal",
+    "Real OSS read/write/copy/delete permissions and latency",
+    "Managed Redis TLS and Lua",
+    "Ingress HTTPS and cache behavior",
+    "Preview/draw HTTP performance and mixed H5/admin/screen scenarios",
+    "Real multi-Pod operation and manual API/worker scaling",
+    "Target-cluster server-side dry-run"
+  ],
+  "capacityClaim": false
+}

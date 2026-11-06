@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "from": "V053",
+  "to": "V054",
+  "baselineSource": "c48e69c7d877c9d137df0dfecea0681c14866be8",
+  "preservedTasks": 4,
+  "allOriginalTaskColumnsPreserved": true,
+  "preservedWorkers": [
+    "activity_deletion_worker",
+    "activity_copy_worker",
+    "order_export_worker"
+  ],
+  "backfilledLastProgress": 4,
+  "pausedConstraint": true,
+  "identicalTables": 57,
+  "bundleAndSourceChecksums": true,
+  "flywayHistoryAbsent": true,
+  "cloudExecuted": false,
+  "checkedAt": "2026-11-06T02:27:14.966Z"
+}

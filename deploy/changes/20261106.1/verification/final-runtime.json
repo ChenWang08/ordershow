@@ -1,0 +1,63 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "name": "order-show-ack-smoke-backend-a-1",
+      "running": true,
+      "oomKilled": false,
+      "errorLines": 0
+    },
+    {
+      "name": "order-show-ack-smoke-backend-b-1",
+      "running": true,
+      "oomKilled": false,
+      "errorLines": 0
+    },
+    {
+      "name": "order-show-ack-smoke-backend-c-1",
+      "running": true,
+      "oomKilled": false,
+      "errorLines": 0
+    },
+    {
+      "name": "order-show-ack-smoke-backend-d-1",
+      "running": true,
+      "oomKilled": false,
+      "errorLines": 0
+    },
+    {
+      "name": "order-show-ack-smoke-export-worker-1",
+      "running": true,
+      "oomKilled": false,
+      "errorLines": 0
+    }
+  ],
+  "exportZip": {
+    "download": 200,
+    "csvFiles": 4,
+    "sheets": [
+      {
+        "name": "订单汇总.csv",
+        "rows": 4000,
+        "columns": 15
+      },
+      {
+        "name": "订单商品明细.csv",
+        "rows": 200000,
+        "columns": 21
+      },
+      {
+        "name": "有效商品汇总.csv",
+        "rows": 50,
+        "columns": 9
+      },
+      {
+        "name": "有效分公司汇总.csv",
+        "rows": 1,
+        "columns": 6
+      }
+    ]
+  },
+  "productionSourceRevision": "cecc235691196cbb916814feacb985f941b41e57",
+  "realCloudResources": false
+}

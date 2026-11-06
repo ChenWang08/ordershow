@@ -1,0 +1,24 @@
+{
+  "frontendInitialDefaultConcurrency": {
+    "passed": 483,
+    "failed": 3,
+    "failedFile": "tests/public-activity-snapshot.test.mjs",
+    "symptoms": "Local loopback fetch failures/timeouts; not counted as passing."
+  },
+  "frontendRepeatedDefaultConcurrency": {
+    "passed": 483,
+    "failed": 3
+  },
+  "isolatedHttpFile": {
+    "passed": 3,
+    "failed": 0
+  },
+  "finalBoundedFullSuite": {
+    "passed": 486,
+    "failed": 0,
+    "fileConcurrency": 4
+  },
+  "applicationCodeChangedToResolveTheseFailures": false,
+  "rootCauseConfirmed": false,
+  "shellParameterAttempt": "The first heartbeat invocation stopped at PowerShell parsing before execution; quoted test list succeeded."
+}
