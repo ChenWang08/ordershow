@@ -1,6 +1,8 @@
 package com.fengyi.ordershow.lottery;
 
 import static org.mockito.Mockito.*;
+import static org.assertj.core.api.Assertions.*;
+import com.fengyi.ordershow.common.DomainException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.storage.StorageService;
@@ -15,6 +17,20 @@ import org.springframework.jdbc.core.PreparedStatementCreator;
 import org.springframework.jdbc.core.RowMapper;
 
 class LotteryQueryTimeoutTest {
+  @SuppressWarnings("unchecked")
+  @Test void candidateTimeoutHasAnExplicitRetryableError() {
+    var jdbc=mock(JdbcTemplate.class);
+    when(jdbc.query(any(PreparedStatementCreator.class),any(RowMapper.class)))
+        .thenThrow(new org.springframework.dao.QueryTimeoutException("query deadline exceeded"));
+    var service=new LotteryService(jdbc,mock(StringRedisTemplate.class),new ObjectMapper(),mock(ActivityService.class),mock(StorageService.class));
+    assertThatThrownBy(() -> service.preview(1,new LotteryService.PreviewRequest(2,10,"VALID_ORDERS","ALL",
+        BigDecimal.ZERO,"AMOUNT","ORDER_AMOUNT_WEIGHTED",0,true,BigDecimal.ZERO,null,List.of(),false,false)))
+        .isInstanceOfSatisfying(DomainException.class,e -> {
+          assertThat(e.code()).isEqualTo("LOTTERY_QUERY_TIMEOUT");
+          assertThat(e.status()).isEqualTo(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE);
+        });
+  }
+
   @SuppressWarnings("unchecked")
   @Test void bothHeavyReadPathsSetStatementTimeoutWithoutChangingSharedJdbcSettings() throws Exception {
     var jdbc=mock(JdbcTemplate.class);var connection=mock(Connection.class);var statement=mock(PreparedStatement.class);

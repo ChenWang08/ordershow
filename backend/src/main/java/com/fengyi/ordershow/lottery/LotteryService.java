@@ -36,6 +36,7 @@ import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.EmptyResultDataAccessException;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.dao.QueryTimeoutException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -45,6 +46,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @Service
 public class LotteryService {
+  private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(LotteryService.class);
   private static final Set<String> SCOPES = Set.of("ALL_CUSTOMERS", "ATTENDEES", "VALID_ORDERS");
   private static final Set<String> CUSTOMER_TYPES = Set.of("ALL", "GENERAL", "SPECIAL");
   private static final Set<String> QUALIFICATION_METRICS = Set.of("AMOUNT", "BOX_COUNT", "TONS");
@@ -603,7 +605,6 @@ public class LotteryService {
     String customerType = "";
     if (!"ALL".equals(round.customerType())) {
       customerType = " AND c.customer_type=?";
-      args.add(round.customerType());
     }
     String attendance = "ATTENDEES".equals(round.candidateScope()) ? """
         AND EXISTS (SELECT 1 FROM activity_attendee a
@@ -630,40 +631,49 @@ public class LotteryService {
     boolean details = filter.filtered() || "ORDER_TONS_WEIGHTED".equals(round.probabilityMode())
         || "VALID_ORDERS".equals(round.candidateScope()) && "TONS".equals(round.qualificationMetric());
     String matched = details ? """
-        SELECT STRAIGHT_JOIN i.order_id,SUM(i.line_amount) amount,SUM(i.quantity) boxes,
+        , matched_items AS (
+        SELECT i.order_id,SUM(i.line_amount) amount,SUM(i.quantity) boxes,
           SUM(CASE WHEN i.ton_case_factor IS NOT NULL OR i.line_tons>0 THEN i.line_tons END) tons,
           SUM(CASE WHEN i.ton_case_factor IS NULL AND (i.line_tons IS NULL OR i.line_tons=0) THEN 1 ELSE 0 END) missing_tons
-        FROM scoped_orders o STRAIGHT_JOIN order_item i ON i.order_id=o.id WHERE
-        """ + productWhere + " GROUP BY i.order_id"
-        : "SELECT id order_id,total_amount amount,total_quantity boxes,total_tons tons,0 missing_tons FROM scoped_orders";
+        FROM scoped_orders o JOIN order_item i ON i.order_id=o.id WHERE
+        """ + productWhere + " GROUP BY i.order_id)" : "";
     String orderJoin = "VALID_ORDERS".equals(round.candidateScope()) || !"EQUAL".equals(round.probabilityMode()) ? "JOIN" : "LEFT JOIN";
+    // Keep customers and winner exclusion in the final query only. Reusing a customer CTE
+    // with STRAIGHT_JOIN can produce a Cartesian intermediate when MySQL merges the CTEs.
+    args.add(round.activityId());
+    if (!customerType.isEmpty()) args.add(round.customerType());
     String query = """
-        WITH scoped_customers AS (
-          SELECT c.id,c.activity_id,c.dealer_short_name,c.dealer_full_name,c.customer_type,c.region_code,c.branch_name,c.phone_masked
-          FROM activity_customer c
-          JOIN activity_data_binding wb ON wb.activity_id=c.activity_id AND wb.data_type='WHITELIST'
-            AND wb.current_version_id=c.data_version_id
-          WHERE c.activity_id=? AND c.is_active=TRUE
-        """ + customerType + "\n" + attendance + previous + """
-        ), scoped_orders AS (
-          SELECT STRAIGHT_JOIN o.id,o.activity_customer_id,o.total_amount,o.total_quantity,o.total_tons
-          FROM scoped_customers c STRAIGHT_JOIN customer_order o
-            ON o.activity_id=c.activity_id AND o.activity_customer_id=c.id WHERE o.status='SUBMITTED'
-        ), matched_items AS (
+        WITH scoped_orders AS (
+          SELECT id,activity_customer_id,total_amount,total_quantity,total_tons
+          FROM customer_order WHERE activity_id=? AND status='SUBMITTED'
+        )
         """ + matched + """
-        ) SELECT c.id,c.dealer_short_name,c.dealer_full_name,c.customer_type,c.region_code,c.branch_name,c.phone_masked,
-          o.id,m.amount,m.boxes,m.tons,COALESCE(m.missing_tons,0)
-        FROM scoped_customers c %s scoped_orders o ON o.activity_customer_id=c.id
-        %s matched_items m ON m.order_id=o.id
-        ORDER BY c.id
-        """.formatted(orderJoin, orderJoin);
-    List<Candidate> values = jdbc.query(connection -> {
-      var ps = connection.prepareStatement(query); ps.setQueryTimeout(queryTimeoutSeconds);
-      for (int i=0; i<args.size(); i++) ps.setObject(i+1,args.get(i));
-      return ps;
-    }, (rs,n) -> new Candidate(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),
-        rs.getString(6),rs.getString(7),rs.getObject(8)==null?null:rs.getLong(8),rs.getBigDecimal(9),
-        rs.getObject(10)==null?null:rs.getLong(10),null,rs.getBigDecimal(11),rs.getInt(12)));
+        SELECT c.id,c.dealer_short_name,c.dealer_full_name,c.customer_type,c.region_code,c.branch_name,c.phone_masked,
+          o.id,
+        """ + (details ? "m.amount,m.boxes,m.tons,COALESCE(m.missing_tons,0)" : "o.total_amount,o.total_quantity,o.total_tons,0") + "\n" + """
+        FROM activity_customer c
+        JOIN activity_data_binding wb ON wb.activity_id=c.activity_id AND wb.data_type='WHITELIST'
+          AND wb.current_version_id=c.data_version_id
+        """ + orderJoin + " scoped_orders o ON o.activity_customer_id=c.id\n"
+        + (details ? orderJoin + " matched_items m ON m.order_id=o.id\n" : "")
+        + "WHERE c.activity_id=? AND c.is_active=TRUE\n" + customerType + "\n" + attendance + previous + " ORDER BY c.id";
+    List<Candidate> values;
+    long started = System.nanoTime();
+    try {
+      values = jdbc.query(connection -> {
+        var ps = connection.prepareStatement(query); ps.setQueryTimeout(queryTimeoutSeconds);
+        for (int i=0; i<args.size(); i++) ps.setObject(i+1,args.get(i));
+        return ps;
+      }, (rs,n) -> new Candidate(rs.getLong(1),rs.getString(2),rs.getString(3),rs.getString(4),rs.getString(5),
+          rs.getString(6),rs.getString(7),rs.getObject(8)==null?null:rs.getLong(8),rs.getBigDecimal(9),
+          rs.getObject(10)==null?null:rs.getLong(10),null,rs.getBigDecimal(11),rs.getInt(12)));
+    } catch (QueryTimeoutException exception) {
+      LOG.warn("Lottery candidate query timed out: requestId={}, activityId={}, roundNo={}, scope={}, mode={}, excludeWinners={}, details={}, elapsedMs={}",
+          org.slf4j.MDC.get("traceId"),round.activityId(),round.roundNo(),round.candidateScope(),round.probabilityMode(),round.excludePreviousWinners(),details,
+          (System.nanoTime()-started)/1_000_000,exception);
+      throw new DomainException(org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE,
+          "LOTTERY_QUERY_TIMEOUT", "抽奖候选查询超时，请稍后重试");
+    }
     return qualifiedOnly ? values.stream().filter(c -> qualifies(round,c)).toList() : values;
   }
 
