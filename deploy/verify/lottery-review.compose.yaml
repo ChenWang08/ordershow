@@ -30,7 +30,7 @@ services:
     cpus: 2
     depends_on:
       mysql: {condition: service_healthy}
-    command: [mvn, -o, -B, -ntp, -f, backend/pom.xml, "-DargLine=-Xmx512m", "-Dtest=LotteryIntegrationTest,LotteryOrderTest,LotteryWeightingTest,LotteryQueryTimeoutTest,LotteryOrderHttpTest,OrderReviewConcurrencyIntegrationTest,OrderSubmitWritePathTest,OrderSubmissionReadReuseTest,PriceSyncServiceTest,TonnageSyncServiceTest", test]
+    command: [mvn, -o, -B, -ntp, -f, backend/pom.xml, "-DargLine=-Xmx512m", "-Dtest=ActivityWriteConfigurationTest,ActivityWriteHttpConcurrencyIntegrationTest,LotteryIntegrationTest,LotteryOrderTest,LotteryWeightingTest,LotteryQueryTimeoutTest,LotteryOrderHttpTest,OrderReviewConcurrencyIntegrationTest,OrderSubmitWritePathTest,OrderSubmissionReadReuseTest,PriceSyncServiceTest,TonnageSyncServiceTest", test]
 volumes:
   maven-cache:
     external: true
