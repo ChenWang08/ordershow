@@ -51,12 +51,18 @@ public class ActivityWriteConfiguration {
           || ("POST".equals(request.getMethod()) && path.matches("/admin/activities/[0-9]+/imports")))
         return invocation.proceed();
       boolean lifecycle = path.matches("/admin/activities/[0-9]+/(archive|unarchive|permanent-deletion)");
-      boolean readOnly = path.matches("/screen/activities/[^/]+/ranking")
-          || path.matches("/admin/activities/[0-9]+/(orders|lottery/candidates)/preview")
+      boolean adminPreview = path.matches("/admin/activities/[0-9]+/(orders|lottery/candidates)/preview");
+      boolean allowArchiveRead = path.matches("/screen/activities/[^/]+/ranking")
+          || adminPreview
           || path.matches("/admin/activities/[0-9]+/exports(?:/[0-9]+/cancel)?");
+      // Previews don't change activity-wide state; reviews already serialize their customer's writes.
+      // Keep the outer transaction/status checks, sharing its activity lock with H5 submissions.
+      // Every other admin mutation (including draw/price/lifecycle changes) remains exclusive.
+      boolean shared = !path.contains("/admin/") || ("POST".equals(request.getMethod())
+          && (adminPreview || path.matches("/admin/activities/[0-9]+/order-change-requests/[0-9]+/(approve|reject)")));
       try {
         return tx.execute(status -> {
-          policy.lockWrite(activityId, lifecycle, readOnly, path.endsWith("/permanent-deletion"), !path.contains("/admin/"));
+          policy.lockWrite(activityId, lifecycle, allowArchiveRead, path.endsWith("/permanent-deletion"), shared);
           try { return invocation.proceed(); }
           catch (RuntimeException | Error error) { throw error; }
           catch (Throwable error) { throw new InvocationFailure(error); }
