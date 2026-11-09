@@ -237,6 +237,15 @@ test("a stale board confirms the latest order before a second click can draw",as
   assert.match(h.text(),/轮次顺序已更新/);assert.match(h.text(),/奖品3/);assert.equal(h.calls.filter(c=>c[0]==="draw").length,1);
   await h.click();assert.equal(h.serverRounds.find(r=>r.id===3).status,"DRAWN");assert.deepEqual(h.versions,[4,5]);h.unmount();
 });
+
+test("execution position is displayed separately from a round name after sorting",async()=>{
+  const h=harness(["COMPLETED","PUBLISHED","PUBLISHED"]);await h.flush();
+  h.reorder([1,3,2]);await h.click();await h.flush();
+  assert.match(h.text(),/执行第2轮 · 第3轮/);
+  assert.match(h.text(),/执行顺序：第2轮/);
+  assert.match(h.text(),/第3轮 幸运抽奖/);
+  assert.equal(h.serverRounds.find(r=>r.id===3).name,"第3轮");h.unmount();
+});
 test("completion reads the latest future order once and never automatically draws the next round",async()=>{
   const h=harness(["COMPLETED","PUBLISHED","PUBLISHED","PUBLISHED"]);await h.flush();await h.click();await h.click();
   h.reorder([1,2,4,3]);const reads=h.calls.filter(c=>c[0]==="load").length;

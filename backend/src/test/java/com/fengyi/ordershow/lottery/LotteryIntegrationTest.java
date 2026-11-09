@@ -110,6 +110,113 @@ class LotteryIntegrationTest {
     var current = service.rule(activity,ruleId);
     return new LotteryService.RuleWrite(name,rounds,current.revision(),current.rounds().stream().map(LotteryService.RoundView::id).toList());
   }
+  @ParameterizedTest @ValueSource(strings={"EQUAL","ORDER_AMOUNT_WEIGHTED","ORDER_BOX_COUNT_WEIGHTED","ORDER_TONS_WEIGHTED"})
+  void winnerExclusionPreservesFilteredValuesAndIgnoresInvalidatedWinners(String mode) {
+    String metric=mode.equals("ORDER_TONS_WEIGHTED")?"TONS":mode.equals("ORDER_BOX_COUNT_WEIGHTED")?"BOX_COUNT":"AMOUNT";
+    var rule=publish(round(metric,"0","项目A",List.of("品种A"),mode));
+    long roundId=rule.rounds().getFirst().id();
+    jdbc.update("UPDATE lottery_round SET winner_count=1 WHERE id=?",roundId);
+    var draw=tx.execute(s -> service.draw(activity,roundId,admin));
+    assertThat(draw.candidateCount()).isEqualTo(2);
+    long winner=draw.winners().getFirst().activityCustomerId();
+    var input=new LotteryService.PreviewRequest(2,10,"VALID_ORDERS","ALL",BigDecimal.ZERO,metric,mode,0,true,
+        BigDecimal.ZERO,"项目A",List.of("品种A"),false,false);
+    var preview=service.preview(activity,input);
+    assertThat(preview.candidates()).extracting(LotteryService.CandidatePreviewItem::activityCustomerId)
+        .containsExactly(winner==base+1?base+2:base+1);
+    var remaining=preview.candidates().getFirst();
+    assertThat(remaining.qualifyingOrderAmount()).isEqualByComparingTo(winner==base+1?"50":"100");
+    assertThat(remaining.qualifyingOrderBoxCount()).isEqualTo(winner==base+1?5:1);
+    assertThat(remaining.qualifyingOrderTons()).isEqualByComparingTo(winner==base+1?"0.5":"0.1");
+    jdbc.update("UPDATE lottery_winner SET status='INVALIDATED' WHERE activity_id=?",activity);
+    assertThat(service.preview(activity,input).candidateCount()).isEqualTo(2);
+  }
+
+  @Test void exclusionAtUatScaleAvoidsCartesianWorkForBothPreviewAndDraw() throws Exception {
+    var customers=new java.util.ArrayList<Object[]>();var orders=new java.util.ArrayList<Object[]>();
+    for(int n=1;n<=4996;n++) {
+      long id=base*100000+n;String name="synthetic-"+id;
+      customers.add(new Object[]{id,name,name});
+      if(n<=1710) orders.add(new Object[]{id,activity,id,"SYNTHETIC-"+id});
+    }
+    jdbc.batchUpdate("INSERT INTO customer(id,customer_type,dealer_full_name,normalized_dealer_full_name) VALUES(?,'GENERAL',?,?)",customers);
+    var bindings=new java.util.ArrayList<Object[]>();
+    for(var row:customers)bindings.add(new Object[]{row[0],activity,row[0],row[1],row[2],base+2,base+2,row[1]});
+    jdbc.batchUpdate("INSERT INTO activity_customer(id,activity_id,customer_id,customer_type,dealer_full_name,normalized_dealer_full_name,source_import_task_id,data_version_id,phone_masked,phone_lookup_hash) VALUES(?,?,?,'GENERAL',?,?,?,?,'000****0000',UNHEX(SHA2(?,256)))",bindings);
+    jdbc.batchUpdate("INSERT INTO customer_order(id,activity_id,activity_customer_id,order_no,status,customer_type,dealer_full_name_snapshot,current_version_no,total_quantity,total_tons,total_amount,first_submitted_at,last_submitted_at,last_modified_at) VALUES(?,?,?,?,'SUBMITTED','GENERAL','synthetic',1,50,0.5,1000,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3),UTC_TIMESTAMP(3))",orders);
+    jdbc.execute("ANALYZE TABLE activity_customer,customer_order,lottery_winner");
+    var config=round("AMOUNT","0",null,List.of(),"ORDER_AMOUNT_WEIGHTED");
+    var rule=tx.execute(s -> {var created=service.create(activity,new LotteryService.RuleWrite("scale",List.of(config,config,config)),admin);return service.publish(activity,created.id(),admin);});
+    jdbc.update("UPDATE lottery_round SET exclude_previous_winners=TRUE WHERE lottery_rule_id=? AND round_no>1",rule.id());
+    for(int n=0;n<2;n++) {
+      long id=rule.rounds().get(n).id();
+      var result=tx.execute(s -> service.draw(activity,id,admin));
+      assertThat(result.candidateCount()).isEqualTo(1712-n*10);
+      tx.executeWithoutResult(s -> service.complete(activity,id));
+    }
+    var observed=spy(jdbc);
+    var measured=new LotteryService(observed,mock(StringRedisTemplate.class),JSON,mock(ActivityService.class),mock(StorageService.class));
+    var input=new LotteryService.PreviewRequest(3,10,"VALID_ORDERS","ALL",BigDecimal.ZERO,"AMOUNT","ORDER_AMOUNT_WEIGHTED",0,true,BigDecimal.ZERO,null,List.of(),false,false);
+    long start=System.nanoTime();
+    var result=measured.preview(activity,input);
+    long elapsedMs=(System.nanoTime()-start)/1_000_000;
+    assertThat(result.candidateCount()).isEqualTo(1692);
+    assertThat(elapsedMs).as("5000 customers / 1713 submitted orders / 20 winners").isLessThan(2000);
+    var factory=org.mockito.ArgumentCaptor.forClass(PreparedStatementCreator.class);
+    verify(observed).query(factory.capture(),any(RowMapper.class));
+    var connection=mock(java.sql.Connection.class);var statement=mock(java.sql.PreparedStatement.class);
+    when(connection.prepareStatement(anyString())).thenReturn(statement);
+    factory.getValue().createPreparedStatement(connection);
+    var query=org.mockito.ArgumentCaptor.forClass(String.class);verify(connection).prepareStatement(query.capture());
+    var index=org.mockito.ArgumentCaptor.forClass(Integer.class);var value=org.mockito.ArgumentCaptor.forClass(Object.class);
+    verify(statement,times(2)).setObject(index.capture(),value.capture());
+    var plan=jdbc.queryForObject("EXPLAIN ANALYZE "+query.getValue(),String.class,value.getAllValues().toArray());
+    assertThat(plan).doesNotContain("join (no condition)");
+    System.out.println("LOTTERY_SCALE previewMs="+elapsedMs+" candidates="+result.candidateCount()+"\n"+plan);
+    var third=tx.execute(s -> service.draw(activity,rule.rounds().get(2).id(),admin));
+    assertThat(third.candidateCount()).isEqualTo(1692);
+    assertThat(jdbc.queryForObject("SELECT COUNT(DISTINCT activity_customer_id) FROM lottery_winner WHERE activity_id=? AND status='VALID'",Integer.class,activity)).isEqualTo(30);
+  }
+
+  @Test void allCustomerAndAttendeeScopesKeepCustomersWithoutSubmittedOrders() {
+    var rule=publish(round("AMOUNT","0",null,List.of(),"EQUAL"));
+    long id=rule.rounds().getFirst().id();
+    jdbc.update("UPDATE lottery_round SET candidate_scope='ALL_CUSTOMERS',winner_count=1 WHERE id=?",id);
+    for(long customer:List.of(base+1,base+4)) jdbc.update("INSERT INTO activity_attendee(activity_id,activity_customer_id,match_status,dealer_name_snapshot) VALUES(?,?,'MATCHED','synthetic')",activity,customer);
+    var all=new LotteryService.PreviewRequest(2,10,"ALL_CUSTOMERS","ALL",BigDecimal.ZERO,"AMOUNT","EQUAL",0,false,BigDecimal.ZERO,null,List.of(),false,false);
+    assertThat(service.preview(activity,all).candidateCount()).isEqualTo(4);
+    var drawn=tx.execute(s -> service.draw(activity,id,admin));
+    assertThat(drawn.candidateCount()).isEqualTo(4);
+    long winner=drawn.winners().getFirst().activityCustomerId();
+    var attendees=new LotteryService.PreviewRequest(2,10,"ATTENDEES","ALL",BigDecimal.ZERO,"AMOUNT","EQUAL",0,true,BigDecimal.ZERO,null,List.of(),false,false);
+    var expected=new java.util.ArrayList<>(List.of(base+1,base+4));expected.remove(winner);
+    assertThat(service.preview(activity,attendees).candidates()).extracting(LotteryService.CandidatePreviewItem::activityCustomerId).containsExactlyElementsOf(expected);
+    var excluded=new LotteryService.PreviewRequest(2,10,"ALL_CUSTOMERS","ALL",BigDecimal.ZERO,"AMOUNT","EQUAL",0,true,BigDecimal.ZERO,null,List.of(),false,false);
+    assertThat(service.preview(activity,excluded).candidateCount()).isEqualTo(3);
+    jdbc.update("UPDATE activity_customer SET is_active=FALSE WHERE activity_id=? AND id<>?",activity,winner);
+    assertThat(service.preview(activity,excluded).candidateCount()).isZero();
+  }
+
+  @SuppressWarnings("unchecked")
+  @Test void realJdbcTimeoutReturnsRetryableErrorAndRollsBackDraw() throws Exception {
+    var rule=publish(round("AMOUNT","0",null,List.of(),"EQUAL"));
+    var slow=spy(jdbc);
+    doAnswer(call -> jdbc.query(connection -> {
+      var ps=connection.prepareStatement("SELECT SLEEP(3)");ps.setQueryTimeout(1);return ps;
+    },call.<RowMapper<Object>>getArgument(1))).when(slow).query(any(PreparedStatementCreator.class),any(RowMapper.class));
+    var activities=mock(ActivityService.class);
+    when(activities.byId(activity)).thenReturn(JSON.readValue("{\"id\":"+activity+",\"status\":\"ACTIVE\",\"regions\":[]}",ActivityService.ActivityView.class));
+    var timed=new LotteryService(slow,mock(StringRedisTemplate.class),JSON,activities,mock(StorageService.class));
+    assertThatThrownBy(() -> tx.execute(s -> timed.draw(activity,rule.rounds().getFirst().id(),admin)))
+        .isInstanceOfSatisfying(DomainException.class,e -> assertThat(e.code()).isEqualTo("LOTTERY_QUERY_TIMEOUT"));
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM lottery_draw_attempt WHERE activity_id=?",Integer.class,activity)).isZero();
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM lottery_winner WHERE activity_id=?",Integer.class,activity)).isZero();
+    assertThat(service.rule(activity,rule.id()).revision()).isEqualTo(rule.revision());
+    assertThat(service.rule(activity,rule.id()).rounds().getFirst().status()).isEqualTo("READY");
+    // The failed transaction must release its rule/round locks for another request.
+    assertThat(tx.execute(s -> service.draw(activity,rule.rounds().getFirst().id(),admin)).actualWinnerCount()).isGreaterThan(0);
+  }
+
   @Test void sameItemIntersectionAndLiteralCommaNamesAndCustomerTypes() {
     var result=service.preview(activity,preview("AMOUNT","100","ALL","项目A",List.of("品种A"),"ORDER_AMOUNT_WEIGHTED"));
     assertThat(result.candidates()).extracting(LotteryService.CandidatePreviewItem::activityCustomerId).containsExactly(base+1);

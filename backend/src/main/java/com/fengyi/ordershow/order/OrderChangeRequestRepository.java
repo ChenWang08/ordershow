@@ -26,8 +26,18 @@ public class OrderChangeRequestRepository {
   }
 
   OrderChangeRequestRow byIdForUpdate(long activityId, long requestId) {
-    return jdbc.query(baseSelect() + " WHERE r.activity_id = ? AND r.id = ? FOR UPDATE",
+    // Lock only the request. A locking join would also exclusively lock its reviewer,
+    // accidentally serializing unrelated reviews performed by the same administrator.
+    var ids = jdbc.queryForList("SELECT id FROM order_change_request WHERE activity_id=? AND id=? FOR UPDATE",
+        Long.class, activityId, requestId);
+    if (ids.isEmpty()) return null;
+    return jdbc.query(baseSelect() + " WHERE r.activity_id = ? AND r.id = ?",
         this::map, activityId, requestId).stream().findFirst().orElse(null);
+  }
+
+  Long customerId(long activityId, long requestId) {
+    return jdbc.queryForList("SELECT activity_customer_id FROM order_change_request WHERE activity_id=? AND id=?",
+        Long.class, activityId, requestId).stream().findFirst().orElse(null);
   }
 
   OrderChangeRequestRow byIdempotency(long activityId, long customerId, String key) {

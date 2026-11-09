@@ -267,11 +267,12 @@ export function LotteryBoard({ rounds, attendanceRows, activityId, activityFinis
       <div className="lottery-controls">
         <label htmlFor="lottery-round-selector">查看轮次</label>
         <select id="lottery-round-selector" aria-label="选择要查看的抽奖轮次" value={String(currentRound.id)} disabled={submitting || status === "rolling"} onChange={(event) => selectRound(Number(event.target.value))}>
-          {availableRounds.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.status === "completed" ? "已完成" : item.serverStatus === "DRAWN" ? "已开奖" : !activityFinished && item.id === executionRound?.id ? "当前轮次" : "未开奖"}</option>)}
+          {availableRounds.map((item, index) => <option key={item.id} value={item.id}>执行第{item.roundNo ?? index + 1}轮 · {item.name} · {item.status === "completed" ? "已完成" : item.serverStatus === "DRAWN" ? "已开奖" : !activityFinished && item.id === executionRound?.id ? "当前轮次" : "未开奖"}</option>)}
         </select>
       </div>
       <div className="lottery-title">
         <b>{currentRound.name} 幸运抽奖</b>
+        <span>执行顺序：第{currentRound.roundNo ?? availableRounds.findIndex(item => item.id === currentRound.id) + 1}轮</span>
         <span>本轮奖品：{currentRound.prize}</span>
         {currentRound.prizeImageUrl && <div className="lottery-prize-display">
           <div className="lottery-prize-image"><Thumbnail src={currentRound.prizeImageUrl} variant="display" alt={currentRound.prize} /></div>
@@ -573,7 +574,7 @@ export function LotterySettings({ active = true, revision = "", rounds, attendan
             <span className="round-move-actions"><button type="button" aria-label={`上移${item.name}`} disabled={orderDisabled || index <= lockedThrough + 1} onClick={() => void moveRound(item.id, index - 1)}>↑</button><button type="button" aria-label={`下移${item.name}`} disabled={orderDisabled || index <= lockedThrough || index === rounds.length - 1} onClick={() => void moveRound(item.id, index + 1)}>↓</button></span>
           </div>)}<button className="add-round" disabled={readOnly || saving || orderSaving || orderNeedsReload} onClick={addRound}>＋ 新增抽奖轮次</button></section>
         <section className="round-form">
-          <div className="round-form-heading"><div><h3>{selected.name}</h3><span className={`round-status ${selected.status}`}>{statusLabel[selected.status]}</span></div><div><button onClick={duplicateRound} disabled={readOnly || saving || orderSaving || orderNeedsReload}>复制</button><button onClick={removeRound} disabled={selectedLocked}>删除</button></div></div>
+          <div className="round-form-heading"><div><h3>执行第{selectedIndex + 1}轮 · {selected.name}</h3><span className={`round-status ${selected.status}`}>{statusLabel[selected.status]}</span></div><div><button onClick={duplicateRound} disabled={readOnly || saving || orderSaving || orderNeedsReload}>复制</button><button onClick={removeRound} disabled={selectedLocked}>删除</button></div></div>
           <label><span>轮次名称</span><input value={selected.name} disabled={selectedLocked} onChange={(e) => updateSelected({ name: e.target.value })} /></label>
           <label><span>奖品名称</span><input value={selected.prize} disabled={selectedLocked} onChange={(e) => updateSelected({ prize: e.target.value })} /></label>
           <div className="lottery-prize-image-setting">

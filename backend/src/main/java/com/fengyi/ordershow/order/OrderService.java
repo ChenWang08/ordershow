@@ -287,8 +287,7 @@ public class OrderService {
   @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public ChangeRequestView approveChangeRequest(long activityId, long requestId, String reviewReason, AdminPrincipal admin,
                                                 String idempotencyKey, String traceId) {
-    ActivityService.ActivityView activity = requireAdminOrderWritable(activityId);
-    repository.lockPricing(activityId);
+    ActivityService.ActivityView activity = lockChangeReview(activityId, requestId);
     String note = optionalReason(reviewReason);
     IdempotencyResult replay = repository.beginIdempotency(activityId, "ADMIN", admin.id(), "ORDER_CHANGE_APPROVE",
         idempotencyKey, hash(Map.of("requestId", requestId, "reason", note == null ? "" : note)));
@@ -335,9 +334,8 @@ public class OrderService {
   @Transactional(isolation = org.springframework.transaction.annotation.Isolation.READ_COMMITTED)
   public ChangeRequestView rejectChangeRequest(long activityId, long requestId, String reviewReason, AdminPrincipal admin,
                                                String idempotencyKey, String traceId) {
-    ActivityService.ActivityView activity = requireAdminOrderWritable(activityId);
+    lockChangeReview(activityId, requestId);
     String reason = requireReason(reviewReason);
-    repository.lockPricing(activityId);
     IdempotencyResult replay = repository.beginIdempotency(activityId, "ADMIN", admin.id(), "ORDER_CHANGE_REJECT",
         idempotencyKey, hash(Map.of("requestId", requestId, "reason", reason)));
     if (replay.replay()) {
@@ -533,6 +531,16 @@ public class OrderService {
     return new OrderPreview(calculated.totalQuantity(), calculated.totalTons(), calculated.totalAmount(), items);
   }
 
+  private ActivityService.ActivityView lockChangeReview(long activityId, long requestId) {
+    requireAdminOrderWritable(activityId);
+    Long customerId = changeRequests.customerId(activityId, requestId);
+    if (customerId == null) throw DomainException.notFound("ORDER_CHANGE_REQUEST_NOT_FOUND", "订单变更申请不存在");
+    // Same order as H5: activity S -> customer X -> idempotency/request/order.
+    // Recheck state after waiting for a close, archive or price update to commit.
+    repository.lockCustomerReview(activityId, customerId);
+    return requireAdminOrderWritable(activityId);
+  }
+
   private ActivityService.ActivityView requireAdminOrderWritable(long activityId) {
     ActivityService.ActivityView activity = activities.byId(activityId);
     if ("ARCHIVED".equals(activity.status())) throw DomainException.conflict("ACTIVITY_ARCHIVED_READ_ONLY", "活动已归档，请先解除归档后维护订单");
@@ -608,8 +616,6 @@ public class OrderService {
     }
   }
 
-
-  // All order writers take this lock before reading catalog prices or locking orders.
 
   @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
   public AdminOrderView adminOrder(long activityId, long orderId) { return repository.adminOrder(activityId, orderId); }

@@ -215,6 +215,10 @@ public class OrderRepository {
     OrderWriteLock.acquire(jdbc, activityId, customerId);
   }
 
+  void lockCustomerReview(long activityId, long customerId) {
+    OrderWriteLock.acquireReview(jdbc, activityId, customerId);
+  }
+
   /** Freeze the still-current version before its lines or its version number change. An existing snapshot is left as-is. */
   void snapshotCurrentVersion(long orderId) {
     snapshotCurrentVersions(List.of(orderId));
