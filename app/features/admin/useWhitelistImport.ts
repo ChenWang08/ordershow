@@ -19,13 +19,14 @@ type WhitelistImportOptions = CustomerImportOptions & {
   refreshProductScopes?: () => Promise<void>;
   regionCodesByName?: Record<string, string>;
   onReadbackFailed?: () => void;
+  onPublishedListChanged?: () => void;
 };
 
 // The admin shell owns mounting so switching tabs retains the current preview.
 export function useWhitelistImport({
   activityId, activityStatus, whitelistRows, setWhitelistRows, whitelistImportHasRun,
   setWhitelistImportCompleted, onWhitelistImportCommitted, serverImportTasks, serverImportBlocking, setServerImportTasks,
-  setServerImportBlocking, setActionNotice, recordOperation, refreshProductScopes, importWaitOptions, regionCodesByName = {}, onReadbackFailed,
+  setServerImportBlocking, setActionNotice, recordOperation, refreshProductScopes, importWaitOptions, regionCodesByName = {}, onReadbackFailed, onPublishedListChanged,
 }: WhitelistImportOptions) {
   const activityPublished = activityStatus !== "draft";
   const [whitelistImportStage, setWhitelistImportStage] = useState<"preview" | "publishing" | "cancelling" | null>(null);
@@ -77,6 +78,7 @@ export function useWhitelistImport({
       setWhitelistImportError("");
       setWhitelistImportInputCount(0);
       setWhitelistImportCompleted(hadConfirmedImport);
+      onPublishedListChanged?.();
       setActionNotice("已取消本次白名单替换，当前白名单保持不变。" );
     } finally {
       whitelistImportBusyRef.current = false;
@@ -102,17 +104,21 @@ export function useWhitelistImport({
         catch (error) { setActionNotice(error instanceof ApiError ? error.message : "白名单导入发布失败，请处理异常数据后重试。"); return; }
       }
       let readbackError = false;
-      if (taskId) {
+      if (taskId && !onPublishedListChanged) {
         try {
           const regions = new Map(Object.entries(regionCodesByName).map(([name, code]) => [code, name]));
           setWhitelistRows(mapAdminWhitelistRows(await loadAdminCustomers(Number(activityId)), regions));
         } catch { readbackError = true; setWhitelistRows([]); }
+      }
+      if (taskId) {
         setServerImportTasks(current => ({ ...current, WHITELIST: undefined }));
         setServerImportBlocking(current => ({ ...current, WHITELIST: 0 }));
       }
+      if (onPublishedListChanged) setWhitelistRows([]);
       setPendingWhitelistRollbackRows(null);
       setWhitelistImportCompleted(true);
       onWhitelistImportCommitted();
+      onPublishedListChanged?.();
       try { await refreshProductScopes?.(); } catch { readbackError = true; }
       recordOperation("替换白名单 Excel", whitelistFileName || "客户白名单 Excel", `共 ${whitelistImportStats.total} 名；有效 ${whitelistImportStats.valid} 名，待处理 ${whitelistImportStats.pending} 名。`);
       if (readbackError) onReadbackFailed?.();

@@ -1,5 +1,9 @@
 # ACK 适配验证与交付记录
 
+## 2026-11-10 白名单／现场到场分页源码
+
+详见 [名单分页验证记录](../docs/testing/roster-pagination-2026-11-10.md)。本次为待发布源码，独立于下文既有 `20261110.1` 镜像交付；无 SQL 或配置模板变更。真实 ACK、PolarDB、阿里云 Redis/OSS 与滚动升级验证仍待执行。验证只使用 `order-show-ack-smoke` 隔离项目，不操作业务容器。
+
 ## 2026-11-10 本机后端增量：20261110.1
 
 固定源码 fbc9f39 的 Git archive 构建新后端，linux/amd64、非 root，version/revision 标签已核验；API 与 worker 同一镜像，前端复用 cecc235 / 20261106.1 原镜像。新后端 JAR 内 ActivityWriteConfiguration 的字节码哈希与本轮专项测试编译产物一致。

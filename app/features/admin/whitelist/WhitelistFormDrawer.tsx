@@ -7,7 +7,7 @@ import { useDrawerClose } from "../../../components/useDrawerClose";
 import { createImportRowId, normalizeWhitelistName, whitelistIdentityKey, whitelistPhoneIsValid, type WhitelistCustomerTypeMode, type WhitelistRow } from "../../../domain/import-domain";
 import { normalizePhone } from "../../shared/utils";
 
-export function WhitelistFormDrawer({ rows, initialRow, customerTypeMode = "TYPED", activityStarted = false, onClose, onSave }: { rows: WhitelistRow[]; initialRow?: WhitelistRow; customerTypeMode?: WhitelistCustomerTypeMode; activityStarted?: boolean; onClose: () => void; onSave: (row: WhitelistRow, reason?: string) => Promise<DrawerSaveResult> }) {
+export function WhitelistFormDrawer({ rows, initialRow, customerTypeMode = "TYPED", activityStarted = false, serverPaged = false, onClose, onSave }: { rows: WhitelistRow[]; initialRow?: WhitelistRow; customerTypeMode?: WhitelistCustomerTypeMode; activityStarted?: boolean; serverPaged?: boolean; onClose: () => void; onSave: (row: WhitelistRow, reason?: string) => Promise<DrawerSaveResult> }) {
   const isEditing = Boolean(initialRow);
   const [form, setForm] = useState<WhitelistRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("whitelist"), sequence: 0, customerType: customerTypeMode === "UNSPECIFIED" ? "" : "综合客户", region: "", branch: "", dealerShort: "", dealerFull: "", dealerType: "", dealerName: "", dealerPhone: "", confirmerName: "", confirmerPhone: "", status: "有效", source: "manual" });
   const [editReason, setEditReason] = useState("");
@@ -23,7 +23,7 @@ export function WhitelistFormDrawer({ rows, initialRow, customerTypeMode = "TYPE
     <div className="order-drawer-backdrop">
       <aside className="order-drawer form-drawer" onClick={(event) => event.stopPropagation()}>
         <header><div><span>客户身份</span><h2>{isEditing ? "编辑白名单" : "手动添加白名单客户"}</h2></div><button aria-label="关闭" disabled={saving} onClick={requestClose}>×</button></header>
-        <div className="auto-sequence-note"><span>{isEditing ? "当前客户" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>{form.customerType || "不区分客户类型"}分组</small></div>
+        <div className="auto-sequence-note"><span>{isEditing ? "当前客户" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : serverPaged ? "保存后由服务器生成" : `保存后编号：${nextSequence}`}</b><small>{form.customerType || "不区分客户类型"}分组</small></div>
         <div className="drawer-form-body"><div className="drawer-form-grid">
           <label><span>客户类型</span><select value={form.customerType} disabled={customerTypeMode === "UNSPECIFIED"} onChange={(e) => { const type = e.target.value as WhitelistRow["customerType"]; setForm((current) => ({ ...current, customerType: type })); }}>
             {customerTypeMode === "UNSPECIFIED" ? <option value="">不区分客户类型</option> : <><option>综合客户</option><option>特渠专业客户</option></>}

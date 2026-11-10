@@ -13,6 +13,7 @@ type AttendanceManagementOptions = CustomerImportOptions & {
   setAttendanceRows: Dispatch<SetStateAction<AttendanceRow[]>>;
   attendanceImportError: string;
   onReadbackFailed?: () => void;
+  onPublishedListChanged?: () => void;
   onAttendanceFileNameChange: (name: string) => void;
   onAttendanceWarningsChange: (warnings: string[]) => void;
   onAttendanceSheetCountsChange: (counts: Array<{ name: string; count: number }>) => void;
@@ -23,7 +24,7 @@ export function useAttendanceManagement({
   activityId, activityStatus, setAttendanceRows, attendanceImportError,
   onAttendanceFileNameChange, onAttendanceWarningsChange, onAttendanceSheetCountsChange, onAttendanceImportErrorChange,
   serverImportTasks, serverImportBlocking, setServerImportTasks, setServerImportBlocking,
-  setActionNotice, recordOperation, refreshServerImportPreview, importWaitOptions, onReadbackFailed,
+  setActionNotice, recordOperation, refreshServerImportPreview, importWaitOptions, onReadbackFailed, onPublishedListChanged,
 }: AttendanceManagementOptions) {
   const activityStarted = activityStatus === "running" || activityStatus === "closed" || activityStatus === "finished";
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
@@ -107,6 +108,7 @@ export function useAttendanceManagement({
     onAttendanceImportErrorChange("");
     setAttendanceFormOpen(false);
     setEditingAttendanceRow(null);
+    onPublishedListChanged?.();
     setActionNotice("已取消本次现场到场名单导入，当前名单保持不变。" );
   };
   const confirmAttendanceImport = async () => {
@@ -139,12 +141,13 @@ export function useAttendanceManagement({
       const imported = pendingAttendanceImport;
       let publishedRows = cloneAttendanceRows(imported.rows), readbackError = false;
       if (taskId) {
-        try { publishedRows = mapAdminAttendanceRows(await loadAdminAttendees(Number(activityId))); }
+        try { publishedRows = onPublishedListChanged ? [] : mapAdminAttendanceRows(await loadAdminAttendees(Number(activityId))); }
         catch { readbackError = true; publishedRows = []; }
         setServerImportTasks(current => ({ ...current, ATTENDANCE: undefined }));
         setServerImportBlocking(current => ({ ...current, ATTENDANCE: 0 }));
       }
       setAttendanceRows(publishedRows);
+      onPublishedListChanged?.();
       onAttendanceFileNameChange(imported.fileName);
       onAttendanceWarningsChange(imported.warnings);
       onAttendanceSheetCountsChange(imported.sheetCounts);
