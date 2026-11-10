@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "checks": [
+    "POST order preview through final image",
+    "POST lottery candidates preview through final image",
+    "POST approve and cross-replica order read",
+    "POST reject preserves order across replicas",
+    "Dedicated worker completed ORDER_PACKAGE; authenticated cross-replica ZIP download with four CSV files"
+  ],
+  "replicas": 4,
+  "export": {
+    "taskId": 1,
+    "status": "COMPLETED",
+    "download": 200,
+    "csvFiles": [
+      {
+        "name": "订单汇总.csv",
+        "rows": 1
+      },
+      {
+        "name": "订单商品明细.csv",
+        "rows": 1
+      },
+      {
+        "name": "有效商品汇总.csv",
+        "rows": 1
+      },
+      {
+        "name": "有效分公司汇总.csv",
+        "rows": 1
+      }
+    ]
+  },
+  "usesFinalBackendImage": true,
+  "cloudResources": false
+}

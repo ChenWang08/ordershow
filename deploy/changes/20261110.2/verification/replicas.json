@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "replicas": 4,
+  "checks": [
+    "Shared database and Redis sessions/CSRF",
+    "Single import publication with concurrent schedulers",
+    "Redis fanout across isolated replicas",
+    "Isolated replica B restart retains login session",
+    "UTC instant round trip with MySQL +08:00 and JVM B Asia/Shanghai",
+    "MinIO read/write and private file protection"
+  ],
+  "cloudResources": false
+}

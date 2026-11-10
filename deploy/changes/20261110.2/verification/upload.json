@@ -1,0 +1,86 @@
+{
+  "pushed": true,
+  "remoteDigestVerified": true,
+  "checkedAt": "2026-11-10T06:25:53.383Z",
+  "targetEnvironment": "test",
+  "samePreviouslyAcceptedImages": true,
+  "rebuildPerformed": false,
+  "cloudDeploymentExecuted": false,
+  "cloudSqlExecuted": false,
+  "images": [
+    {
+      "component": "backend",
+      "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261110.2",
+      "digest": "sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60",
+      "matchesVerifiedLocalImage": true,
+      "linuxAmd64": true,
+      "descriptor": {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "digest": "sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60",
+        "size": 856,
+        "manifests": [
+          {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:133e2bd348e8ac55e27a80613cfa8ca84d90a2c31cbbc7cb5db4e2e659280164",
+            "size": 2003,
+            "platform": {
+              "architecture": "amd64",
+              "os": "linux"
+            }
+          },
+          {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:1006ca385a898df3b9590c41d5896fe8af7c86cae94119b16e34f46e7feb2d7b",
+            "size": 837,
+            "annotations": {
+              "vnd.docker.reference.digest": "sha256:133e2bd348e8ac55e27a80613cfa8ca84d90a2c31cbbc7cb5db4e2e659280164",
+              "vnd.docker.reference.type": "attestation-manifest"
+            },
+            "platform": {
+              "architecture": "unknown",
+              "os": "unknown"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "component": "frontend",
+      "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261110.2",
+      "digest": "sha256:c38290b90c15844b7e90b322562a161be9680b7c32a20454104bd73a38d5803d",
+      "matchesVerifiedLocalImage": true,
+      "linuxAmd64": true,
+      "descriptor": {
+        "schemaVersion": 2,
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "digest": "sha256:c38290b90c15844b7e90b322562a161be9680b7c32a20454104bd73a38d5803d",
+        "size": 856,
+        "manifests": [
+          {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:8dc2e982936d24c554e37d53af1247d69a7f44c41aeaeab97ce30d5af80bc94f",
+            "size": 2009,
+            "platform": {
+              "architecture": "amd64",
+              "os": "linux"
+            }
+          },
+          {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:3ea6f651bc7613400bbf525b6f0f87cfe7405e3a8dd98259bfeca34b3f93b20c",
+            "size": 837,
+            "annotations": {
+              "vnd.docker.reference.digest": "sha256:8dc2e982936d24c554e37d53af1247d69a7f44c41aeaeab97ce30d5af80bc94f",
+              "vnd.docker.reference.type": "attestation-manifest"
+            },
+            "platform": {
+              "architecture": "unknown",
+              "os": "unknown"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

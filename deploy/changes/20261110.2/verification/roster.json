@@ -1,0 +1,21 @@
+{
+  "passed": true,
+  "rowsPerImportedRoster": 5006,
+  "pageSizes": [
+    20,
+    50,
+    100
+  ],
+  "defaultPageSize": 50,
+  "defaultTotalPages": 101,
+  "lastPageRows": 6,
+  "globalSearchAndFilters": true,
+  "globalSummaries": true,
+  "crossReplicaDeletion": true,
+  "crossPageSelection": true,
+  "selectAllExclusions": true,
+  "sameTimestampEditConflicts": true,
+  "departmentAndModulePermissions": true,
+  "emptyPublishedRosterPreserved": true,
+  "realCloudResources": false
+}

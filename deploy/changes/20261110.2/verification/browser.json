@@ -1,0 +1,32 @@
+{
+  "errors": [],
+  "requests": [
+    "/api/v1/admin/activities/2/customers/page?page=1&size=50",
+    "/api/v1/admin/activities/2/customers/page?page=2&size=50",
+    "/api/v1/admin/activities/2/customers/page?page=1&size=20",
+    "/api/v1/admin/activities/2/customers/page?page=1&size=20&keyword=%E8%81%94%E7%B3%BB%E4%BA%BA4000",
+    "/api/v1/admin/activities/2/customers/page?page=1&size=20&customerType=GENERAL&keyword=%E8%81%94%E7%B3%BB%E4%BA%BA4000",
+    "/api/v1/admin/activities/2/customers/page?page=1&size=20&keyword=%E8%81%94%E7%B3%BB%E4%BA%BA4000",
+    "/api/v1/admin/activities/2/customers/page?page=1&size=20",
+    "/api/v1/admin/activities/2/customers/page?page=2&size=20",
+    "/api/v1/admin/activities/2/attendees/page?page=1&size=50",
+    "/api/v1/admin/activities/2/attendees/page?page=1&size=50",
+    "/api/v1/admin/activities/2/attendees/page?page=1&size=50&keyword=%E5%88%86%E9%A1%B5%E7%BC%96%E8%BE%91%E9%AA%8C%E8%AF%81",
+    "/api/v1/admin/activities/2/attendees/page?page=1&size=50",
+    "/api/v1/admin/activities/2/attendees/page?page=2&size=50",
+    "/api/v1/admin/activities/2/attendees/page?page=2&size=50"
+  ],
+  "verified": [
+    "entry-one-page",
+    "page-size",
+    "global-search",
+    "empty-filter-keeps-published",
+    "cross-page-selection",
+    "select-all-exclusions",
+    "delete-preview",
+    "global-branch-options",
+    "global-summary",
+    "edit-refresh",
+    "cross-page-delete"
+  ]
+}

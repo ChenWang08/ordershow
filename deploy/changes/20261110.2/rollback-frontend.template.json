@@ -1,0 +1,19 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "frontend"
+  },
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "frontend",
+            "image": "REPLACE_WITH_CAPTURED_PRE_DEPLOYMENT_IMAGE_DIGEST"
+          }
+        ]
+      }
+    }
+  }
+}

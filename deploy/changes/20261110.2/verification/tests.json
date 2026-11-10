@@ -1,0 +1,27 @@
+{
+  "backendImageBuild": {
+    "total": 539,
+    "passed": 350,
+    "skipped": 189,
+    "failed": 0,
+    "errors": 0,
+    "skipTests": false
+  },
+  "frontendImageBuild": {
+    "passed": true,
+    "apiBase": "/api/v1",
+    "platform": "linux/amd64"
+  },
+  "priorCommittedSourceChecks": {
+    "revision": "7eba9c2b35acfa7e1f3c8ab0d8f424404f58464f",
+    "frontendTests": 492,
+    "backendFocusedTests": 25,
+    "typecheck": true,
+    "lint": true,
+    "rerunAllFrontendTestsThisRelease": false,
+    "reference": "../../../../docs/testing/roster-pagination-2026-11-10.md"
+  },
+  "finalImageHttpChecks": 172,
+  "groupsOverlapDoNotSum": true,
+  "capacityTestThisRun": false
+}

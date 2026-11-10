@@ -1,0 +1,15 @@
+{
+  "cloudSqlExecuted": false,
+  "cloudDeploymentExecuted": false,
+  "pending": [
+    "Capture actual current API/worker/frontend images for rollback",
+    "Target namespace, database V054 and connection headroom verification",
+    "Server-side dry-run and backend-first rolling deployment",
+    "Real ACK/PolarDB, managed Redis/OSS, Ingress and manual scaling acceptance",
+    "Real workload paging/search/batch-operation latency and connection budgets"
+  ],
+  "localSubstitutesAreNotCloudAcceptance": true,
+  "capacityClaim": false,
+  "registryUploadCompleted": true,
+  "remoteDigestsVerified": true
+}

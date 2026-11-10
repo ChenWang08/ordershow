@@ -1,0 +1,81 @@
+{
+  "passed": true,
+  "images": [
+    "order-show-ack-backend:20261110.2",
+    "order-show-ack-frontend:20261110.2"
+  ],
+  "checks": [
+    {
+      "role": "backend-a",
+      "image": "sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0,
+      "nonRoot": true,
+      "configuredPool": 20,
+      "readOnlyRoot": false
+    },
+    {
+      "role": "backend-b",
+      "image": "sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0,
+      "nonRoot": true,
+      "configuredPool": 20,
+      "readOnlyRoot": false
+    },
+    {
+      "role": "backend-c",
+      "image": "sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0,
+      "nonRoot": true,
+      "configuredPool": 20,
+      "readOnlyRoot": false
+    },
+    {
+      "role": "backend-d",
+      "image": "sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0,
+      "nonRoot": true,
+      "configuredPool": 20,
+      "readOnlyRoot": false
+    },
+    {
+      "role": "export-worker",
+      "image": "sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0,
+      "nonRoot": true,
+      "configuredPool": 20,
+      "readOnlyRoot": true
+    },
+    {
+      "role": "frontend",
+      "image": "sha256:c38290b90c15844b7e90b322562a161be9680b7c32a20454104bd73a38d5803d",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0,
+      "nonRoot": true,
+      "configuredPool": null,
+      "readOnlyRoot": false
+    }
+  ],
+  "expectedReplicaBRestart": true,
+  "businessConnectionBudget": {
+    "normal": 86,
+    "rollingFiveApi": 107
+  },
+  "cloudResources": false
+}

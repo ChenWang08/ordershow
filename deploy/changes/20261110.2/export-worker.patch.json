@@ -1,0 +1,19 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "export-worker"
+  },
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "export-worker",
+            "image": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend@sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60"
+          }
+        ]
+      }
+    }
+  }
+}

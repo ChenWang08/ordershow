@@ -1,0 +1,63 @@
+{
+  "release": "20261110.2",
+  "branch": "codex/ack-cloud-adaptation",
+  "source": "7eba9c2b35acfa7e1f3c8ab0d8f424404f58464f",
+  "databaseVersion": "V054",
+  "schemaChanged": false,
+  "newJavaMigration": false,
+  "uploadStatus": "pushed-and-remote-digest-verified",
+  "cloudDeployed": false,
+  "images": [
+    {
+      "component": "backend",
+      "roles": [
+        "API",
+        "export-worker"
+      ],
+      "builtThisRun": true,
+      "reused": false,
+      "localTag": "order-show-ack-backend:20261110.2",
+      "plannedRegistryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261110.2",
+      "localImageId": "sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60",
+      "localRepoDigests": [
+        "order-show-ack-backend@sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60",
+        "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend@sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60"
+      ],
+      "revision": "7eba9c2b35acfa7e1f3c8ab0d8f424404f58464f",
+      "platform": "linux/amd64",
+      "user": "ordershow",
+      "sizeBytes": 631664906,
+      "pushed": true,
+      "remoteDigestVerified": true,
+      "remoteDigest": "sha256:38016ce4590f6f583523bad91b3bf2bb57491df65306976152663674d9c74e60",
+      "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261110.2",
+      "remoteVerifiedAt": "2026-11-10T06:25:53.383Z"
+    },
+    {
+      "component": "frontend",
+      "roles": [
+        "frontend"
+      ],
+      "builtThisRun": true,
+      "reused": false,
+      "localTag": "order-show-ack-frontend:20261110.2",
+      "plannedRegistryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261110.2",
+      "localImageId": "sha256:c38290b90c15844b7e90b322562a161be9680b7c32a20454104bd73a38d5803d",
+      "localRepoDigests": [
+        "order-show-ack-frontend@sha256:c38290b90c15844b7e90b322562a161be9680b7c32a20454104bd73a38d5803d",
+        "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend@sha256:c38290b90c15844b7e90b322562a161be9680b7c32a20454104bd73a38d5803d"
+      ],
+      "revision": "7eba9c2b35acfa7e1f3c8ab0d8f424404f58464f",
+      "platform": "linux/amd64",
+      "user": "node",
+      "sizeBytes": 1309994985,
+      "pushed": true,
+      "remoteDigestVerified": true,
+      "remoteDigest": "sha256:c38290b90c15844b7e90b322562a161be9680b7c32a20454104bd73a38d5803d",
+      "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261110.2",
+      "remoteVerifiedAt": "2026-11-10T06:25:53.383Z"
+    }
+  ],
+  "targetEnvironment": "test",
+  "registryVerifiedAt": "2026-11-10T06:25:53.383Z"
+}

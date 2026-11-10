@@ -1,0 +1,9 @@
+{
+  "baseline": "V054",
+  "isolatedDatabase": "ack_smoke",
+  "newSql": false,
+  "newJavaMigration": false,
+  "cloudSqlExecuted": false,
+  "cloudDatabaseQueried": false,
+  "existingTargetAtV054RequiresNoSql": true
+}
