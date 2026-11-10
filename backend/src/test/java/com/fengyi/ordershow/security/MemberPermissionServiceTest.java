@@ -40,6 +40,19 @@ class MemberPermissionServiceTest {
     for(var actor:List.of(member(),member(AdminPermission.WHITELIST),member(AdminPermission.ORDER)))
       assertThatThrownBy(() -> check(actor,"GET",path)).isInstanceOf(DomainException.class);
   }
+  @Test void pagedRosterAndBatchDeletionRequireTheCorrespondingModulePermission() {
+    for(var module:List.of("customers","attendees")) {
+      var granted=module.equals("customers") ? AdminPermission.WHITELIST : AdminPermission.ATTENDANCE;
+      var other=module.equals("customers") ? AdminPermission.ATTENDANCE : AdminPermission.WHITELIST;
+      for(var suffix:List.of("page","deletion-preview","batch-delete")) {
+        String method=suffix.equals("page") ? "GET" : "POST";
+        String path="/admin/activities/17/"+module+"/"+suffix;
+        check(member(granted),method,path);
+        assertThatThrownBy(()->check(member(other),method,path)).isInstanceOf(DomainException.class);
+        assertThatThrownBy(()->check(member(),method,path)).isInstanceOf(DomainException.class);
+      }
+    }
+  }
   @Test void orderSummaryAndReviewRoutesRequireOrderPermission() {
     for (String resource : List.of("orders/summary", "orders", "order-change-requests/page", "order-change-requests/42")) {
       String path = "/admin/activities/7/" + resource;

@@ -300,6 +300,7 @@ public class CustomerService {
     return attendee(activityId, attendeeId);
   }
 
+  @Transactional
   public void deleteAttendee(long activityId, long attendeeId) {
     requireAttendanceWritable(activityId);
     int changed = jdbc.update("UPDATE activity_attendee SET is_active = FALSE WHERE id = ? AND activity_id = ? AND is_active = TRUE", attendeeId, activityId);
@@ -356,10 +357,11 @@ public class CustomerService {
   }
 
   private void requireAttendanceWritable(long activityId) {
+    jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);
     if (List.of("CLOSED", "FINISHED", "ARCHIVED").contains(activities.byId(activityId).status())) throw DomainException.conflict("ACTIVITY_READ_ONLY", "订货截止后到场名单只读");
   }
 
-  private CustomerView mapCustomer(ResultSet rs, int rowNum) throws SQLException {
+  CustomerView mapCustomer(ResultSet rs, int rowNum) throws SQLException {
     String phone = rs.getString(9) == null ? decrypt(rs.getBytes(10)) : rs.getString(9);
     String confirmerPhone = rs.getString(13) == null ? decrypt(rs.getBytes(14)) : rs.getString(13);
     return new CustomerView(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4), rs.getString(5),
@@ -367,7 +369,7 @@ public class CustomerService {
         confirmerPhone, rs.getString(15), rs.getObject(16) == null ? null : rs.getInt(16), rs.getBoolean(17),
         rs.getInt(18), UtcTime.read(rs, 19));
   }
-  private AttendeeView mapAttendee(ResultSet rs, int rowNum) throws SQLException {
+  AttendeeView mapAttendee(ResultSet rs, int rowNum) throws SQLException {
     return new AttendeeView(rs.getLong(1), rs.getObject(2) == null ? null : rs.getLong(2), rs.getString(3), rs.getString(4), rs.getString(5),
         rs.getString(6), rs.getString(7), rs.getString(8), rs.getString(9), rs.getString(10), rs.getString(11), rs.getString(12),
         rs.getString(13), rs.getBoolean(14), UtcTime.read(rs, 15), UtcTime.read(rs, 16));
@@ -390,7 +392,7 @@ public class CustomerService {
   private record VersionSource(long versionId, long taskId) {}
   private record PhoneCandidate(long id, byte[] ciphertext) {}
 
-  private void reassociateAttendance(long activityId) {
+  void reassociateAttendance(long activityId) {
     Long whitelistVersion = attendanceMatching.currentWhitelistVersion(activityId);
     if (whitelistVersion != null) attendanceMatching.reassociateCurrentAttendance(activityId, whitelistVersion);
   }

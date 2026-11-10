@@ -18,16 +18,23 @@ type WhitelistPageProps = {
   whitelistImport: ReturnType<typeof useWhitelistImport>;
   whitelistEditor: ReturnType<typeof useWhitelistEditor>;
   refreshAction?: ReactNode;
+  publishedTable?: ReactNode;
+  publishedSummary?: Record<string, number>;
+  publishedCustomerTypeMode?: "TYPED" | "UNSPECIFIED";
 };
 
 export function WhitelistPage({
   activityStatus, whitelistRows, whitelistImportCompleted, serverImportBlocking, whitelistImport, whitelistEditor, refreshAction,
+  publishedTable, publishedSummary, publishedCustomerTypeMode,
 }: WhitelistPageProps) {
   const activityStarted = activityStatus === "running" || activityStatus === "closed" || activityStatus === "finished";
   const activityClosed = activityStatus === "closed" || activityStatus === "finished";
   const activityPublished = activityStatus !== "draft";
   const baseDataReadOnly = activityStatus === "scheduled" || activityClosed || whitelistImport.whitelistImportBusy;
-  const whitelistMode = whitelistCustomerTypeMode(whitelistRows);
+  const whitelistMode = whitelistImportCompleted && publishedCustomerTypeMode ? publishedCustomerTypeMode : whitelistCustomerTypeMode(whitelistRows);
+  const totalCount = publishedSummary?.total ?? whitelistRows.length;
+  const validCount = publishedSummary?.valid ?? whitelistRows.filter(row => row.status === "有效").length;
+  const pendingCount = publishedSummary?.pending ?? whitelistRows.filter(row => row.status === "待处理").length;
   const { whitelistImportBusy, whitelistPreviewLoading, whitelistPublishing, whitelistFileName, whitelistImportWarnings, whitelistImportError, whitelistSheetCounts, whitelistImportInputCount, whitelistImportStats, beginWhitelistImport, cancelWhitelistImport, confirmWhitelistImport, handleWhitelistFile } = whitelistImport;
   const { openWhitelistForm, setEditingWhitelistRow, deleteWhitelistRows } = whitelistEditor;
   const importControlsDisabled = activityPublished || whitelistImportBusy;
@@ -47,7 +54,7 @@ export function WhitelistPage({
               </article>
             </div>}
             {!whitelistImportCompleted && whitelistFileName && <div className="import-result"><div className="import-summary"><span className="success-icon">✓</span><p><b>{whitelistImportError ? "文件解析失败" : "Excel 预览完成 · 等待确认替换"}</b><small>{whitelistImportError ? "请修正文件后重新选择" : `Excel 原始 ${parsedWhitelistCount} 名、已移除 ${removedWhitelistCount} 名、待发布 ${whitelistImportStats.total} 名；有效 ${whitelistImportStats.valid} 名、待处理 ${whitelistImportStats.pending} 名`}</small></p><strong>{whitelistImportStats.total} 名待发布</strong></div>{whitelistImportError && <div className="warning-box"><b>文件无法导入</b><span>{whitelistImportError}</span></div>}{!whitelistImportError && whitelistImportWarnings.length > 0 && <div className="warning-box"><b>导入前检查提示</b>{whitelistImportWarnings.map((warning) => <span key={warning}>{warning}</span>)}</div>}{!whitelistImportError && <><div className="sheet-counts">{whitelistSheetCounts.map((item) => <span key={item.name}>{item.name}<b>{item.count}</b></span>)}</div><div className="product-import-stats">{[["待发布客户", whitelistImportStats.total], ["有效", whitelistImportStats.valid], ["待处理", whitelistImportStats.pending]].map(([label, count]) => <span key={label as string}><b>{count}</b><small>{label}</small></span>)}</div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} readOnly={baseDataReadOnly} allowDelete={!importControlsDisabled} onDelete={deleteWhitelistRows} /><button className="admin-primary wide" disabled={whitelistImportBusy || !whitelistImportStats.total || activityPublished || whitelistImportStats.pending > 0 || (serverImportBlocking.WHITELIST ?? 0) > 0} onClick={confirmWhitelistImport}>{whitelistPublishing ? "正在发布…" : whitelistImportBusy ? "正在处理…" : whitelistImportStats.pending > 0 || (serverImportBlocking.WHITELIST ?? 0) > 0 ? `请先处理 ${Math.max(whitelistImportStats.pending, serverImportBlocking.WHITELIST ?? 0)} 条待处理白名单` : `确认替换当前白名单 ${whitelistImportStats.total} 名`}</button></>}</div>}
-            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单替换完成</b><small>{activityClosed ? "活动已截止，白名单数据只读。" : activityStatus === "scheduled" ? "活动已发布，白名单已锁定；如需修改请先撤回发布。" : activityStarted ? "活动已开始，白名单 Excel 导入已锁定；紧急修改单条客户会记录操作日志。" : "当前白名单来自最近一次确认的完整 Excel；重新导入后以新文件为准，历史订单不会被删除。"}</small></p><div><strong>{whitelistRows.length}</strong><small>客户总数</small></div><div><strong>{whitelistRows.filter((row) => row.status === "有效").length}</strong><small>有效</small></div><div><strong>{whitelistRows.filter((row) => row.status === "待处理").length}</strong><small>待处理</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>{whitelistFileName} · {whitelistMode === "UNSPECIFIED" ? "不区分客户类型" : "综合客户和特渠客户"}共 {whitelistRows.length} 名 · {activityClosed ? "活动已截止，只读" : activityStatus === "scheduled" ? "活动已发布，只读" : activityStarted ? "活动已锁定，仅可改单条" : "可编辑、单条/批量删除"}</span></div></div><CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} readOnly={baseDataReadOnly} allowDelete={!importControlsDisabled} allowDeleteAll={!importControlsDisabled} onDelete={deleteWhitelistRows} /></>}
+            {whitelistImportCompleted && <><div className="import-completed-banner"><span className="success-icon">✓</span><p><b>本次白名单替换完成</b><small>{activityClosed ? "活动已截止，白名单数据只读。" : activityStatus === "scheduled" ? "活动已发布，白名单已锁定；如需修改请先撤回发布。" : activityStarted ? "活动已开始，白名单 Excel 导入已锁定；紧急修改单条客户会记录操作日志。" : "当前白名单来自最近一次确认的完整 Excel；重新导入后以新文件为准，历史订单不会被删除。"}</small></p><div><strong>{totalCount}</strong><small>客户总数</small></div><div><strong>{validCount}</strong><small>有效</small></div><div><strong>{pendingCount}</strong><small>待处理</small></div></div><div className="data-section-title"><div><b>当前客户白名单</b><span>{whitelistFileName} · {whitelistMode === "UNSPECIFIED" ? "不区分客户类型" : "综合客户和特渠客户"}共 {totalCount} 名 · {activityClosed ? "活动已截止，只读" : activityStatus === "scheduled" ? "活动已发布，只读" : activityStarted ? "活动已锁定，仅可改单条" : "可编辑、单条/批量删除"}</span></div></div>{publishedTable ?? <CustomerWhitelistTable rows={whitelistRows} onEdit={setEditingWhitelistRow} readOnly={baseDataReadOnly} allowDelete={!importControlsDisabled} allowDeleteAll={!importControlsDisabled} onDelete={deleteWhitelistRows} />}</>}
           </div>
   );
 }

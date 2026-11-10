@@ -5,9 +5,9 @@ export function cloneAttendanceRows(rows: AttendanceRow[]) {
   return rows.map((row) => ({ ...row }));
 }
 
-export function mapAdminAttendanceRows(attendees: AdminAttendee[]): AttendanceRow[] {
+export function mapAdminAttendanceRows(attendees: AdminAttendee[], offset = 0): AttendanceRow[] {
   return attendees.map((attendee, index) => ({
-    id: String(attendee.id), activityCustomerId: attendee.activityCustomerId ?? null, sequence: index + 1,
+    id: String(attendee.id), activityCustomerId: attendee.activityCustomerId ?? null, sequence: offset + index + 1,
     dealerName: attendee.participantName || "", gender: attendee.gender || "", contactPhone: attendee.phone || attendee.phoneMasked || "",
     branch: attendee.branchName || "", dealerCompany: attendee.dealerName, participantType: attendee.participantType || "",
     customerType: attendee.participantType?.includes("特渠") ? "特渠专业客户" : attendee.participantType?.includes("综合") ? "综合客户" : "",

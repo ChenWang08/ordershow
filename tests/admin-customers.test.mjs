@@ -16,6 +16,22 @@ const attendee = (id = "preview") => ({
 });
 const draft = () => ({ rows: [attendee()], fileName: "attendance.xlsx", warnings: [], sheetCounts: [], inputCount: 1 });
 
+test("paged publication and cancellation request a bounded list refresh without legacy full readbacks", async () => {
+  let reloads = 0;
+  const harness = customerHarness({ onPublishedListChanged: () => reloads++ });
+  await harness.render().whitelist.handleWhitelistFile({ name: "white.xlsx" });
+  await harness.render().whitelist.confirmWhitelistImport();
+  assert.equal(reloads, 1); assert.ok(!harness.calls.includes("customers"));
+  assert.equal(harness.options.whitelistImportCompleted, true);
+  harness.render().attendance.setPendingAttendanceImport(draft());
+  harness.render().attendance.setAttendanceMatchPreview({ whitelistVersionId: 17, rows: [], totalCount: 1, matchedCount: 1, pendingCount: 0, unmatchedCount: 0, eligibleCustomerCount: 1 });
+  await harness.render().attendance.confirmAttendanceImport();
+  assert.equal(reloads, 2); assert.ok(!harness.calls.includes("attendees"));
+  harness.render().attendance.setPendingAttendanceImport(draft());
+  await harness.render().attendance.cancelAttendanceImport();
+  assert.equal(reloads, 3);
+});
+
 function customerHarness(overrides = {}, apiOverrides = {}, domainOverrides = {}) {
   const calls = [];
   const notices = [];

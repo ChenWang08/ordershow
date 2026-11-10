@@ -22,6 +22,106 @@ tags:
   - name: Exports
   - name: Audit
 paths:
+  /admin/activities/{activityId}/{rosterKind}/page:
+    get:
+      operationId: getPublishedRosterPage
+      tags: [Customers]
+      summary: 按页读取已发布白名单或现场到场名单及全量统计
+      description: 仅管理员及对应模块成员可访问。data 只含当前页；page.totalElements 为筛选结果数，summary 为当前活动整份名单统计，branches/customerTypes 为整份名单的筛选选项。空筛选结果不会将已发布名单误判为未导入。白名单按 Excel 顺序及 ID 稳定排序，到场按 ID 倒序。名单导入预览不使用此接口。
+      security: [{adminCookie: []}]
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/RosterKind'
+        - name: page
+          in: query
+          schema: {type: integer, minimum: 1, default: 1}
+          description: 超出末页时返回最后一个有效页；空名单页码为 1。
+        - name: size
+          in: query
+          schema: {type: integer, minimum: 1, maximum: 100, default: 50}
+          description: 后台提供 20/50/100 三档，后端上限 100。
+        - name: customerType
+          in: query
+          schema: {type: string, enum: [GENERAL, SPECIAL, ALL]}
+          description: ALL 表示不区分客户类型，省略表示不限类型。
+        - name: branch
+          in: query
+          schema: {type: string}
+        - name: status
+          in: query
+          schema: {type: string, enum: [有效, 待处理]}
+          description: 白名单状态；已发布名单均有效，待处理查询为空。
+        - name: matchStatus
+          in: query
+          schema: {type: string, enum: [MATCHED, PENDING_CONFIRMATION, UNMATCHED]}
+        - name: keyword
+          in: query
+          schema: {type: string}
+          description: 对整份名单搜索；白名单支持名称、姓名及规范化手机号，到场支持姓名、电话、分公司、经销商和参会人员类型。
+      responses:
+        '200':
+          description: 当前页和完整名单元数据
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/RosterPageResponse'}
+        '403': {description: 未获对应模块权限}
+        '404': {description: 活动不存在或不属于当前部门}
+  /admin/activities/{activityId}/{rosterKind}/deletion-preview:
+    post:
+      operationId: previewRosterDeletion
+      tags: [Customers]
+      summary: 核对跨页选中记录或全部筛选结果的删除范围
+      description: 写请求须携带管理员 X-CSRF-Token。rows 为明确 ID 和不透明 revision 列表；rows 为 null 表示按 filters 选择全部结果，空 filters 表示整份当前名单。返回确认数量和 snapshot，不返回完整名单或依赖单 Pod 保存选择。
+      security: [{adminCookie: []}]
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/RosterKind'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RosterSelection'}
+      responses:
+        '200':
+          description: 确认数量与删除快照
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      count: {type: integer, format: int64}
+                      snapshot: {type: string}
+                  traceId: {type: string}
+        '409': {description: 明确选中的记录已变化，须刷新后重新选择}
+  /admin/activities/{activityId}/{rosterKind}/batch-delete:
+    post:
+      operationId: deleteRosterSelection
+      tags: [Customers]
+      summary: 在事务中复核快照并删除已确认的名单范围
+      description: 使用 deletion-preview 相同的 filters/rows 并提交 snapshot，须携带管理员 X-CSRF-Token。活动与所选记录锁定后复核快照，发生并发修改、导入换版或删除时返回 409 且不部分删除。白名单仅草稿可删除，到场名单截止或结束后禁止删除。保留历史订单；白名单删除同时撤销相关 H5 会话并更新到场关联及目录缓存。
+      security: [{adminCookie: []}]
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+        - $ref: '#/components/parameters/RosterKind'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/RosterSelection'}
+      responses:
+        '200':
+          description: 实际删除数量
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: {type: integer, format: int64}
+                  traceId: {type: string}
+        '409': {description: ROSTER_CHANGED 或 ACTIVITY_READ_ONLY；重新核对范围或活动状态}
   /public/files/{fileId}/thumbnail:
     get:
       operationId: getImageThumbnail
@@ -3527,6 +3627,11 @@ components:
       in: query
       name: screenToken
   parameters:
+    RosterKind:
+      name: rosterKind
+      in: path
+      required: true
+      schema: {type: string, enum: [customers, attendees]}
     ActivityCode:
       name: activityCode
       in: path
@@ -3608,6 +3713,55 @@ components:
           schema:
             $ref: '#/components/schemas/Problem'
   schemas:
+    RosterSelection:
+      type: object
+      required: [rows]
+      properties:
+        filters:
+          type: object
+          properties:
+            customerType: {type: string}
+            branch: {type: string}
+            status: {type: string}
+            matchStatus: {type: string}
+            keyword: {type: string}
+        rows:
+          type: [array, 'null']
+          maxItems: 10000
+          items:
+            type: object
+            required: [id, revision]
+            properties:
+              id: {type: integer, format: int64}
+              revision: {type: string}
+        snapshot:
+          type: string
+          description: deletion-preview 返回的不透明快照，batch-delete 必填。
+        excludedIds:
+          type: array
+          maxItems: 10000
+          items: {type: integer, format: int64, minimum: 1}
+          description: 全选筛选结果后取消勾选的 ID；确认与删除须提交相同排除范围。
+    RosterPageResponse:
+      allOf:
+        - $ref: '#/components/schemas/GenericPageResponse'
+        - type: object
+          required: [summary, branches, customerTypes, revisions]
+          properties:
+            summary:
+              type: object
+              additionalProperties: {type: integer, format: int64}
+              description: 全量统计。白名单含 total/valid/pending；到场含 total/comprehensive/special/blankType/phone/linked/eligible/pending/unmatched，eligible 按客户去重；published 为 0 或 1，表示是否存在已发布数据绑定。
+            branches:
+              type: array
+              items: {type: string}
+            customerTypes:
+              type: array
+              items: {type: string, enum: [GENERAL, SPECIAL, ALL]}
+            revisions:
+              type: object
+              additionalProperties: {type: string}
+              description: 当前页 ID 对应的不透明记录版本，用于跨页选择删除校验。
     MemberPermission:
       type: string
       enum: [OVERVIEW, PRODUCT, WHITELIST, ATTENDANCE, ORDER, LOTTERY]

@@ -104,7 +104,7 @@ test("creation failure leaves the drawer open and allows retry", async () => {
 });
 
 
-function initializationHarness(apiOverrides = {}, identity = { roleCode: "SUPER_ADMIN" }) {
+function initializationHarness(apiOverrides = {}, identity = { roleCode: "SUPER_ADMIN" }, rosterOptions = {}) {
   const state = {}, calls = [], notices = [], reads = [];
   const base = {
     loadAdminProducts: async () => [{ id: 42, images: [], materialName: "已发布商品", version: 3 }],
@@ -126,7 +126,7 @@ function initializationHarness(apiOverrides = {}, identity = { roleCode: "SUPER_
   let options = Object.fromEntries(setterNames.map(name => [name, value => {
     calls.push(name); state[name] = typeof value === "function" ? value(state[name]) : value;
   }]));
-  options = { ...options, activityId: "1", activity: { regions: [{code:"EAST",name:"华东"}] }, tab: "活动概览", logsOpen:false,
+  options = { ...options, ...rosterOptions, activityId: "1", activity: { regions: [{code:"EAST",name:"华东"}] }, tab: "活动概览", logsOpen:false,
     onProductImportCommitted: () => calls.push("productCommitted"), onWhitelistImportCommitted: () => calls.push("whitelistCommitted"),
     setActionNotice: notice => notices.push(notice) };
   const h = hookHarness("app/features/admin/useAdminInitialization.ts", "useAdminInitialization", [options], {
@@ -141,6 +141,20 @@ function initializationHarness(apiOverrides = {}, identity = { roleCode: "SUPER_
     }}; h.render([options]); await h.flush(); },
   };
 }
+
+test("published roster initialization reads one requested page and keeps empty filters published", async () => {
+  const query={page:3,size:50,keyword:"no match",customerType:"",branch:"",status:"",matchStatus:""};
+  const applied=[];
+  const h=initializationHarness({loadRosterPage:async()=>({data:[],page:{number:1,size:50,totalElements:0,totalPages:0},summary:{total:5006,published:1},branches:[],customerTypes:["GENERAL"],revisions:{}})},
+    {roleCode:"SUPER_ADMIN"},{whitelistRoster:{query,entryKey:JSON.stringify(query),apply:(...args)=>applied.push(args)}});
+  await h.show("白名单");
+  assert.equal(h.reads.filter(r=>r[0]==="loadRosterPage").length,1);
+  assert.equal(h.reads.some(r=>r[0]==="loadAdminCustomers"),false);
+  assert.equal(h.state.onWhitelistImportCompleted,true);
+  assert.equal(h.state.setWhitelistImportInputCount,5006);
+  assert.equal(applied.length,1); assert.equal(applied[0][1],query);
+  h.unmount();
+});
 
 test("overview initialization performs no module reads; each whole module reads on every entry", async () => {
   const h=initializationHarness(); await h.flush(); assert.deepEqual(h.reads,[]);

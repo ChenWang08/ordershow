@@ -6,7 +6,7 @@ import type { DrawerSaveResult } from "../../../components/drawer-save-result";
 import { useDrawerClose } from "../../../components/useDrawerClose";
 import { attendanceCustomerType, createImportRowId, type AttendanceFieldKey, type AttendanceRow } from "../../../domain/import-domain";
 
-export function AttendanceFormDrawer({ rows, initialRow, onClose, onSave }: { rows: AttendanceRow[]; initialRow?: AttendanceRow; onClose: () => void; onSave: (row: AttendanceRow) => Promise<DrawerSaveResult> }) {
+export function AttendanceFormDrawer({ rows, initialRow, serverPaged = false, onClose, onSave }: { rows: AttendanceRow[]; initialRow?: AttendanceRow; serverPaged?: boolean; onClose: () => void; onSave: (row: AttendanceRow) => Promise<DrawerSaveResult> }) {
   const isEditing = Boolean(initialRow);
   const [form, setForm] = useState<AttendanceRow>(() => initialRow ? { ...initialRow } : { id: createImportRowId("attendance-manual"), sequence: 0, dealerName: "", gender: "", contactPhone: "", branch: "", dealerCompany: "", participantType: "", customerType: "" });
   const { saving, saveError, requiresReload, save } = useDrawerSave(onClose);
@@ -17,7 +17,7 @@ export function AttendanceFormDrawer({ rows, initialRow, onClose, onSave }: { ro
     <div className="order-drawer-backdrop">
       <aside className="order-drawer form-drawer attendance-form-drawer" onClick={(event) => event.stopPropagation()}>
         <header><div><span>现场到场客户</span><h2>{isEditing ? "编辑到场客户" : "手动添加到场客户"}</h2></div><button type="button" aria-label="关闭" disabled={saving} onClick={requestClose}>×</button></header>
-        <div className="auto-sequence-note"><span>{isEditing ? "当前记录" : "序号自动生成"}</span><b>{isEditing ? `原序号：${form.sequence}` : `保存后编号：${nextSequence}`}</b><small>当前仅用于到场名单页面展示</small></div>
+        <div className="auto-sequence-note"><span>{isEditing ? "当前记录" : "序号自动生成"}</span><b>{isEditing ? `当前显示序号：${form.sequence}` : serverPaged ? "保存后按列表顺序显示" : `保存后编号：${nextSequence}`}</b><small>当前仅用于到场名单页面展示</small></div>
         <div className="drawer-form-body"><div className="drawer-form-grid">
           <label><span>分公司</span><input value={form.branch} onChange={(event) => update("branch", event.target.value)} placeholder="请输入分公司" /></label>
           <label><span>参会人姓名</span><input value={form.dealerName} onChange={(event) => update("dealerName", event.target.value)} placeholder="请输入参会人姓名" /></label>

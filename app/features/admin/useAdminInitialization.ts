@@ -6,7 +6,8 @@ import { canUse, isManager } from "./permissions";
 import { type Dispatch, type SetStateAction } from "react";
 import { loadAdminProducts, loadProductImageReviews, loadAdminCustomers, loadAdminAttendees,
   loadLotteryRules, loadAuditLogs, loadImportTasks, loadImportRows, loadAttendanceMatchPreview, waitForImport,
-  type RuntimeActivity, type ImportTask } from "../../api";
+  loadRosterPage, type AdminCustomer, type AdminAttendee, type RuntimeActivity, type ImportTask } from "../../api";
+import type { RosterState } from "./useRosterState";
 import { cloneProductRows, cloneWhitelistRows } from "../../domain/import-domain";
 import { initialLotteryRounds, mapLotteryRule } from "../lottery/Lottery";
 import { mergeProductImageReviews, runtimeProductToImportRow, restoreProductPreview, restoreWhitelistPreview,
@@ -33,6 +34,8 @@ type AdminInitializationOptions = Pick<AdminWorkspaceProps,
   tab: string;
   cacheScope?: string;
   onWhitelistLoaded?: () => void;
+  whitelistRoster?: RosterState<AdminCustomer>;
+  attendanceRoster?: RosterState<AdminAttendee>;
   logsOpen: boolean;
   activity: RuntimeActivity | null;
   preservePreviews?: { product: boolean; whitelist: boolean; attendance: boolean; lottery: boolean };
@@ -90,15 +93,20 @@ export function useAdminInitialization(options: AdminInitializationOptions) {
   }, commit, o.preservePreviews?.product, undefined, "entry");
   const whitelist = useLazyAdminQuery((o.cacheScope ?? "") + o.activityId + ":WHITELIST", enabled("白名单", "WHITELIST"), async signal => {
     const pending = await preview("WHITELIST", signal);
-    const customers = await loadAdminCustomers(id, signal);
+    const query = o.whitelistRoster?.query;
+    const page = query ? await loadRosterPage<AdminCustomer>(id, "customers", query, signal) : null;
+    const customers = page?.data ?? await loadAdminCustomers(id, signal);
+    const count = page?.summary.total ?? customers.length;
+    const completed = page ? Boolean(page.summary.published) : count > 0;
     const regions = new Map(o.activity?.regions.map(region => [region.code, region.name]) ?? []);
     const published = mapAdminWhitelistRows(customers, regions);
     return () => {
       o.onWhitelistLoaded?.();
-      o.setWhitelistRows(published); o.onWhitelistImportCompleted(customers.length > 0);
-      if (customers.length > 0) o.onWhitelistImportCommitted();
-      o.setWhitelistFileName(customers.length ? "当前已发布白名单" : "");
-      o.setWhitelistImportInputCount(customers.length); o.setWhitelistSheetCounts([]);
+      if (page && query) o.whitelistRoster?.apply(page, query);
+      o.setWhitelistRows(published); o.onWhitelistImportCompleted(completed);
+      if (completed) o.onWhitelistImportCommitted();
+      o.setWhitelistFileName(completed ? "当前已发布白名单" : "");
+      o.setWhitelistImportInputCount(count); o.setWhitelistSheetCounts([]);
       o.setPendingWhitelistRollbackRows(null); importState("WHITELIST", pending?.task);
       if (pending) {
         o.setPendingWhitelistRollbackRows(cloneWhitelistRows(published));
@@ -107,14 +115,18 @@ export function useAdminInitialization(options: AdminInitializationOptions) {
         o.setWhitelistSheetCounts(restoredSheetCounts(pending.rows));
       }
     };
-  }, commit, o.preservePreviews?.whitelist, undefined, "entry");
+  }, commit, o.preservePreviews?.whitelist, o.whitelistRoster?.entryKey, "entry");
   const attendance = useLazyAdminQuery((o.cacheScope ?? "") + o.activityId + ":ATTENDANCE", enabled("现场到场", "ATTENDANCE"), async signal => {
     const pending = await preview("ATTENDANCE", signal);
-    const attendees = await loadAdminAttendees(id, signal);
+    const query = o.attendanceRoster?.query;
+    const page = query ? await loadRosterPage<AdminAttendee>(id, "attendees", query, signal) : null;
+    const attendees = page?.data ?? await loadAdminAttendees(id, signal);
+    const count = page?.summary.total ?? attendees.length;
     const match = pending ? await loadAttendanceMatchPreview(id, pending.task.id, signal) : null;
     return () => {
-      o.setAttendanceRows(mapAdminAttendanceRows(attendees));
-      o.onAttendanceFileNameChange(attendees.length ? "当前已发布现场到场名单" : "");
+      if (page && query) o.attendanceRoster?.apply(page, query);
+      o.setAttendanceRows(mapAdminAttendanceRows(attendees, page ? (page.page.number - 1) * page.page.size : 0));
+      o.onAttendanceFileNameChange(count ? "当前已发布现场到场名单" : "");
       o.setPendingAttendanceImport(null); o.setAttendanceMatchPreview(null); o.setAttendanceImportAttemptName("");
       importState("ATTENDANCE", pending?.task);
       if (pending && match) {
@@ -124,7 +136,7 @@ export function useAdminInitialization(options: AdminInitializationOptions) {
           inputCount: pending.task.inputCount });
       }
     };
-  }, commit, o.preservePreviews?.attendance, undefined, "entry");
+  }, commit, o.preservePreviews?.attendance, o.attendanceRoster?.entryKey, "entry");
   const lottery = useLazyAdminQuery((o.cacheScope ?? "") + o.activityId + ":LOTTERY", enabled("抽奖规则", "LOTTERY"), async signal => {
     const rules = await loadLotteryRules(id, signal);
     const rule = rules.find(item => item.status === "PUBLISHED") ?? rules[0];
