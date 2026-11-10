@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "checks": [
+    "UTC round trip across two API replicas under MySQL +08:00 and a non-UTC JVM",
+    "Shared login session and CSRF",
+    "Cross-replica object upload/read and private file protection through MinIO",
+    "Shared database task claim and single import publication",
+    "Redis event fanout",
+    "Session remains valid after restarting isolated replica B"
+  ],
+  "finalBackendImage": "order-show-ack-backend:20261110.1",
+  "cloudResources": false
+}

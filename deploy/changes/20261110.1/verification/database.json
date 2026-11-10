@@ -1,0 +1,10 @@
+{
+  "requiredVersion": "V054",
+  "newSqlMigrations": [],
+  "newJavaMigrations": [],
+  "cloudDatabaseQueried": false,
+  "cloudSqlExecuted": false,
+  "existingV054NeedsNoSql": true,
+  "olderDatabaseMustFollowCanonicalDbaOrderedUpgrade": true,
+  "rerunHistoricalMigrations": false
+}

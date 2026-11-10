@@ -1,0 +1,24 @@
+{
+  "firstTargetHttpAttempt": {
+    "passed": false,
+    "failedAt": "Creating export for an active synthetic activity",
+    "httpStatus": 409,
+    "code": "EXPORT_ACTIVITY_NOT_FINISHED",
+    "applicationBehaviorCorrect": true
+  },
+  "correction": "Mark only the isolated synthetic fixture FINISHED during export acceptance, then restore its original active schedule in finally; replay target checks with a fresh reduction request.",
+  "finalTargetHttpAttempt": {
+    "passed": true,
+    "log": "target-http-final.log"
+  },
+  "applicationCodeChanged": false,
+  "firstAttemptCountedAsPassing": false,
+  "firstBrowserAttempt": {
+    "passed": false,
+    "reason": "Historical script expected the first-submission heading after the new review test had already rejected a withdrawal request.",
+    "symptom": "Timeout waiting for the old heading",
+    "correction": "Assert the explicit rejected-request heading matching the current synthetic fixture, retaining all page, refresh and layout checks.",
+    "finalPassed": true,
+    "finalLog": "browser-final.log"
+  }
+}

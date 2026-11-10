@@ -1,0 +1,47 @@
+{
+  "release": "20261110.1",
+  "branch": "codex/ack-cloud-adaptation",
+  "ackImageSource": "fbc9f39991c6c56f3278deba4950b18ad3cc6779",
+  "databaseVersion": "V054",
+  "schemaChanged": false,
+  "newJavaMigration": false,
+  "uploadStatus": "local-only-at-user-request",
+  "cloudDeployed": false,
+  "images": [
+    {
+      "component": "backend",
+      "roles": [
+        "API",
+        "export-worker"
+      ],
+      "builtThisRun": true,
+      "reused": false,
+      "localTag": "order-show-ack-backend:20261110.1",
+      "plannedRegistryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261110.1",
+      "localImageId": "sha256:5fe52ba6ccfe352fabf16397b5505c0d40750083c4ca0ebb8456829100c58884",
+      "localRepoDigests": [
+        "order-show-ack-backend@sha256:5fe52ba6ccfe352fabf16397b5505c0d40750083c4ca0ebb8456829100c58884"
+      ],
+      "revision": "fbc9f39991c6c56f3278deba4950b18ad3cc6779",
+      "platform": "linux/amd64",
+      "user": "ordershow",
+      "pushed": false,
+      "remoteDigestVerified": false,
+      "remoteDigest": null
+    },
+    {
+      "component": "frontend",
+      "builtThisRun": false,
+      "reused": true,
+      "localTag": "order-show-ack-frontend:20261106.1",
+      "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261106.1",
+      "localImageId": "sha256:51301830290dc14beb174b9710add23ca6136f750eb5b04f66eb59ac1eb21056",
+      "revision": "cecc235691196cbb916814feacb985f941b41e57",
+      "platform": "linux/amd64",
+      "user": "node",
+      "historicalRemoteDigest": "sha256:51301830290dc14beb174b9710add23ca6136f750eb5b04f66eb59ac1eb21056",
+      "historicalVerificationSource": "../20261106.1/images.json",
+      "registryRecheckedThisRun": false
+    }
+  ]
+}

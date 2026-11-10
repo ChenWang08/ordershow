@@ -1,0 +1,16 @@
+{
+  "cloudSqlExecuted": false,
+  "cloudDeploymentExecuted": false,
+  "pending": [
+    "Upload backend after user authorization and independently verify remote digest",
+    "Replace planned tag references with independently verified remote digest before cloud rollout",
+    "Target-cluster server-side dry-run",
+    "Real ACK/PolarDB lock behavior, preview and mixed H5/review performance",
+    "Real OSS permissions/read/write/copy/delete and latency",
+    "Managed Redis TLS/Lua and Ingress HTTPS behavior",
+    "Actual multi-Pod rollout, session continuity, event fanout and manual scaling",
+    "Target database version and connection headroom verification"
+  ],
+  "localSubstitutesAreNotCloudAcceptance": true,
+  "capacityClaim": false
+}

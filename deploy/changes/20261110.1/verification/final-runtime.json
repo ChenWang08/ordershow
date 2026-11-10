@@ -1,0 +1,42 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "role": "backend-a",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0
+    },
+    {
+      "role": "backend-b",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0
+    },
+    {
+      "role": "backend-c",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0
+    },
+    {
+      "role": "backend-d",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0
+    },
+    {
+      "role": "export-worker",
+      "running": true,
+      "oomKilled": false,
+      "restarts": 0,
+      "errorLines": 0
+    }
+  ],
+  "productionSourceRevision": "fbc9f39991c6c56f3278deba4950b18ad3cc6779",
+  "cloudResources": false
+}

@@ -1,0 +1,8 @@
+{
+  "pushed": false,
+  "remoteDigestVerified": false,
+  "cloudDeploymentExecuted": false,
+  "reason": "User explicitly requested local build and packaging without uploading to CODING.",
+  "plannedBackendTarget": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261110.1",
+  "frontendReusedWithoutUpload": true
+}

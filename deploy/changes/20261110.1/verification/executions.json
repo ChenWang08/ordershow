@@ -1,0 +1,196 @@
+{
+  "attempts": [
+    {
+      "name": "backend-build",
+      "exe": "docker",
+      "args": [
+        "build",
+        "--platform",
+        "linux/amd64",
+        "--progress",
+        "plain",
+        "--build-arg",
+        "SKIP_TESTS=false",
+        "--label",
+        "org.opencontainers.image.version=20261110.1",
+        "--label",
+        "org.opencontainers.image.revision=fbc9f39991c6c56f3278deba4950b18ad3cc6779",
+        "-f",
+        "outputs/ack-release-20261110.1/source/backend/Dockerfile",
+        "-t",
+        "order-show-ack-backend:20261110.1",
+        "outputs/ack-release-20261110.1/source"
+      ],
+      "start": "2026-11-10T01:29:54.056Z",
+      "finished": "2026-11-10T01:33:00.112Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "browser",
+      "exe": "node",
+      "args": [
+        "outputs/ack-release-20261110.1/browser-final.mjs"
+      ],
+      "start": "2026-11-10T01:38:23.946Z",
+      "finished": "2026-11-10T01:39:10.800Z",
+      "exitCode": 1,
+      "signal": null
+    },
+    {
+      "name": "browser-final",
+      "exe": "node",
+      "args": [
+        "outputs/ack-release-20261110.1/browser-final.mjs"
+      ],
+      "start": "2026-11-10T01:40:33.916Z",
+      "finished": "2026-11-10T01:40:46.321Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "cloud-profile",
+      "exe": "node",
+      "args": [
+        "outputs/ack-release-20261110.1/cloud-check.mjs"
+      ],
+      "start": "2026-11-10T01:40:46.417Z",
+      "finished": "2026-11-10T01:41:26.526Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "configuration",
+      "exe": "node",
+      "args": [
+        "outputs/ack-release-20261110.1/validate.mjs"
+      ],
+      "start": "2026-11-10T01:41:26.639Z",
+      "finished": "2026-11-10T01:41:35.758Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "focused",
+      "exe": "docker",
+      "args": [
+        "compose",
+        "-p",
+        "order-show-ack-smoke-lottery-review",
+        "-f",
+        "deploy/verify/lottery-review.compose.yaml",
+        "-f",
+        "outputs/ack-release-20261110.1/focused.override.json",
+        "run",
+        "--rm",
+        "tests"
+      ],
+      "start": "2026-11-10T01:24:16.509Z",
+      "finished": "2026-11-10T01:29:07.955Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "http-verification",
+      "exe": "node",
+      "args": [
+        "outputs/ack-release-20261110.1/http-verify.mjs"
+      ],
+      "start": "2026-11-10T01:36:03.884Z",
+      "finished": "2026-11-10T01:36:43.770Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "replicas",
+      "exe": "node",
+      "args": [
+        "scripts/test-ack-replicas.mjs"
+      ],
+      "start": "2026-11-10T01:35:41.759Z",
+      "finished": "2026-11-10T01:36:03.774Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "smoke-cleanup",
+      "exe": "docker",
+      "args": [
+        "compose",
+        "-p",
+        "order-show-ack-smoke",
+        "-f",
+        "deploy/verify/compose.yaml",
+        "-f",
+        "outputs/ack-release-20261110.1/smoke.override.json",
+        "--profile",
+        "cloud-check",
+        "down",
+        "-v",
+        "--remove-orphans"
+      ],
+      "start": "2026-11-10T01:42:08.393Z",
+      "finished": "2026-11-10T01:42:14.063Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "smoke-up",
+      "exe": "docker",
+      "args": [
+        "compose",
+        "-p",
+        "order-show-ack-smoke",
+        "-f",
+        "deploy/verify/compose.yaml",
+        "-f",
+        "outputs/ack-release-20261110.1/smoke.override.json",
+        "up",
+        "-d",
+        "--no-build",
+        "--pull",
+        "never",
+        "--wait",
+        "--wait-timeout",
+        "240"
+      ],
+      "start": "2026-11-10T01:33:36.626Z",
+      "finished": "2026-11-10T01:34:56.520Z",
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "name": "target-http",
+      "exe": "node",
+      "args": [
+        "outputs/ack-release-20261110.1/target-http.mjs"
+      ],
+      "start": "2026-11-10T01:36:43.867Z",
+      "finished": "2026-11-10T01:36:44.843Z",
+      "exitCode": 1,
+      "signal": null
+    },
+    {
+      "name": "target-http-final",
+      "exe": "node",
+      "args": [
+        "outputs/ack-release-20261110.1/target-http.mjs"
+      ],
+      "start": "2026-11-10T01:38:21.045Z",
+      "finished": "2026-11-10T01:38:23.857Z",
+      "exitCode": 0,
+      "signal": null
+    }
+  ],
+  "failedAttempts": [
+    {
+      "name": "browser",
+      "exitCode": 1
+    },
+    {
+      "name": "target-http",
+      "exitCode": 1
+    }
+  ],
+  "notes": "Failed or partial verification attempts are retained and are not counted as passing. Paths point to local logs; logs and private fixture sessions are not included."
+}

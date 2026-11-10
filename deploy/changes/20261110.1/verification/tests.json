@@ -1,0 +1,111 @@
+{
+  "passed": true,
+  "backendDefault": {
+    "total": 535,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 189,
+    "passed": 346
+  },
+  "backendFocused": {
+    "passed": true,
+    "total": 115,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "passedTests": 115,
+    "classes": [
+      {
+        "name": "com.fengyi.ordershow.activity.ActivityWriteConfigurationTest",
+        "total": 22,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.lottery.LotteryIntegrationTest",
+        "total": 22,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.lottery.LotteryOrderHttpTest",
+        "total": 1,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.lottery.LotteryOrderTest",
+        "total": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.lottery.LotteryQueryTimeoutTest",
+        "total": 2,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.lottery.LotteryWeightingTest",
+        "total": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.order.ActivityWriteHttpConcurrencyIntegrationTest",
+        "total": 21,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.order.OrderReviewConcurrencyIntegrationTest",
+        "total": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.order.OrderSubmissionReadReuseTest",
+        "total": 7,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.order.OrderSubmitWritePathTest",
+        "total": 9,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.order.PriceSyncServiceTest",
+        "total": 8,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      {
+        "name": "com.fengyi.ordershow.order.TonnageSyncServiceTest",
+        "total": 5,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      }
+    ],
+    "sourceRevision": "fbc9f39991c6c56f3278deba4950b18ad3cc6779",
+    "isolatedMySql": true,
+    "cloudResources": false
+  },
+  "groupsOverlapDoNotSum": true,
+  "frontendRebuilt": false,
+  "frontendFullRegressionRerun": false,
+  "conditionalSkipsCountAsPassing": false
+}

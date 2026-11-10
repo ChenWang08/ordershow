@@ -1,0 +1,91 @@
+{
+  "passed": true,
+  "pools": [
+    {
+      "replica": "a",
+      "effectiveBusinessPoolMaximum": 20,
+      "copyPoolExtraMaximumFromSource": 1
+    },
+    {
+      "replica": "b",
+      "effectiveBusinessPoolMaximum": 20,
+      "copyPoolExtraMaximumFromSource": 1
+    },
+    {
+      "replica": "c",
+      "effectiveBusinessPoolMaximum": 20,
+      "copyPoolExtraMaximumFromSource": 1
+    },
+    {
+      "replica": "d",
+      "effectiveBusinessPoolMaximum": 20,
+      "copyPoolExtraMaximumFromSource": 1
+    }
+  ],
+  "connectionBudget": {
+    "fourApiOneWorker": 86,
+    "rollingFiveApiOneWorker": 107,
+    "additionalMaintenanceHeadroomRequired": true
+  },
+  "worker": {
+    "sameBackendImage": true,
+    "nonRoot": true,
+    "readOnlyRoot": true,
+    "diskTemporaryVolume": true
+  },
+  "frontend": {
+    "reused": true,
+    "version": "20261106.1",
+    "sameOriginalImage": true
+  },
+  "yamlParsed": [
+    {
+      "file": "apps.yaml",
+      "kind": "Deployment",
+      "name": "backend"
+    },
+    {
+      "file": "apps.yaml",
+      "kind": "Service",
+      "name": "backend"
+    },
+    {
+      "file": "apps.yaml",
+      "kind": "Deployment",
+      "name": "frontend"
+    },
+    {
+      "file": "apps.yaml",
+      "kind": "Service",
+      "name": "frontend"
+    },
+    {
+      "file": "configmap.yaml",
+      "kind": "ConfigMap",
+      "name": "order-show-config"
+    },
+    {
+      "file": "export-worker.yaml",
+      "kind": "Deployment",
+      "name": "export-worker"
+    },
+    {
+      "file": "ingress.yaml",
+      "kind": "Ingress",
+      "name": "order-show"
+    },
+    {
+      "file": "namespace.yaml",
+      "kind": "Namespace",
+      "name": "order-show-test"
+    },
+    {
+      "file": "secret.example.yaml",
+      "kind": "Secret",
+      "name": "order-show-secrets"
+    }
+  ],
+  "strictKubernetesSchemaValidation": false,
+  "serverSideDryRun": false,
+  "cloudResources": false
+}
