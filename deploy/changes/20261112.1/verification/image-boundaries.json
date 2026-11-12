@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "apiChecks": 16,
+  "exact2MiBManualAndZip": true,
+  "overByOneByteManualAndZipRejected": true,
+  "failedZipReportsPath": true,
+  "identicalBytesRetainBothProductLinks": true,
+  "fourReplicaStoredBytesEqual": true,
+  "failedImportPreservesPublishedProducts": true,
+  "original110Fixture": "pending: original source assets not located"
+}

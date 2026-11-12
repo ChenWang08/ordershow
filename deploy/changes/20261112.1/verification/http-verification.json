@@ -1,0 +1,63 @@
+{
+  "passed": true,
+  "apiChecks": 177,
+  "replicas": 4,
+  "derivatives": [
+    {
+      "id": 3,
+      "kind": "thumbnail",
+      "width": 320,
+      "height": 160,
+      "bytes": 609,
+      "crossReplicaBytesEqual": true,
+      "conditionalStatus": 304
+    },
+    {
+      "id": 4,
+      "kind": "display",
+      "width": 960,
+      "height": 480,
+      "bytes": 7829,
+      "crossReplicaBytesEqual": true,
+      "conditionalStatus": 304
+    },
+    {
+      "id": 5,
+      "kind": "display",
+      "width": 640,
+      "height": 320,
+      "bytes": 1569,
+      "crossReplicaBytesEqual": true,
+      "conditionalStatus": 304
+    },
+    {
+      "id": 6,
+      "kind": "thumbnail",
+      "width": 320,
+      "height": 160,
+      "bytes": 1429,
+      "crossReplicaBytesEqual": true,
+      "conditionalStatus": 304
+    }
+  ],
+  "sharedSessionAndCsrf": true,
+  "activity200And304": true,
+  "oneSyntheticOrder": true,
+  "copy": {
+    "task": 1,
+    "sameKeyRequests": 4,
+    "createdTasks": 1,
+    "copiedFiles": 2,
+    "sharedCopiedImagesMatch": true
+  },
+  "archiveAndUnarchive": true,
+  "pauseAcrossFourReplicas": true,
+  "pausedProgressStable": true,
+  "resumeCompleted": true,
+  "deletion": {
+    "task": 1,
+    "completed": true,
+    "deletedFiles": 3,
+    "sourcePreserved": true
+  }
+}

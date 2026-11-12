@@ -7,7 +7,6 @@ import com.fengyi.ordershow.activity.ActivityService;
 import com.fengyi.ordershow.common.DomainException;
 import com.fengyi.ordershow.storage.StorageService;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
@@ -27,6 +26,8 @@ import org.springframework.web.multipart.MultipartFile;
 public class ProductImageService {
   private static final Set<String> IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp", "gif", "bmp");
   private static final int MAX_IMAGES_PER_PRODUCT = 10;
+  private static final int MAX_IMAGE_SIZE_MIB = 2;
+  private static final int MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MIB * 1024 * 1024;
   private final JdbcTemplate jdbc;
   private final ActivityService activities;
   private final StorageService storage;
@@ -222,16 +223,17 @@ public class ProductImageService {
     boolean explicitDecisionMode = !decisions.isEmpty();
     Map<String, ZipDecision> decisionsByPath = decisions.stream().collect(java.util.stream.Collectors.toMap(
         decision -> normalizeArchivePath(decision.entryPath()), decision -> decision, (first, ignored) -> first));
-    Set<String> hashes = new HashSet<>();
+    Set<String> autoMatchHashes = new HashSet<>();
     try (ZipInputStream input = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
       ZipEntry entry;
       while ((entry = input.getNextEntry()) != null) {
         if (entry.isDirectory() || !isImage(entry.getName())) continue;
-        byte[] content = readLimited(input, 10 * 1024 * 1024);
+        byte[] content = input.readNBytes(MAX_IMAGE_SIZE_BYTES + 1);
+        validateImageSize(entry.getName(), content.length);
         images++;
         byte[] digest = MessageDigest.getInstance("SHA-256").digest(content);
-        String hash = java.util.HexFormat.of().formatHex(digest);
-        if (!hashes.add(hash)) continue;
+        // Explicit decisions belong to ZIP paths. Matching bytes can still share one stored file.
+        if (!explicitDecisionMode && !autoMatchHashes.add(java.util.HexFormat.of().formatHex(digest))) continue;
         String materialName = baseName(entry.getName());
         ZipDecision decision = decisionsByPath.get(normalizeArchivePath(entry.getName()));
         // 一旦管理端提交了整批决定，未出现在决定清单中的 ZIP 图片也不得在 Worker 阶段重新自动匹配。
@@ -330,18 +332,20 @@ public class ProductImageService {
     }
   }
 
-  private static byte[] readLimited(ZipInputStream input, int max) throws Exception {
-    ByteArrayOutputStream output = new ByteArrayOutputStream();
-    byte[] buffer = new byte[8192]; int total = 0, read;
-    while ((read = input.read(buffer)) >= 0) { total += read; if (total > max) throw DomainException.badRequest("IMAGE_TOO_LARGE", "ZIP 内单张图片不能超过 10MB"); output.write(buffer, 0, read); }
-    return output.toByteArray();
-  }
-
   private static boolean isImage(String name) { int dot = name.lastIndexOf('.'); return dot > 0 && IMAGE_EXTENSIONS.contains(name.substring(dot + 1).toLowerCase(Locale.ROOT)); }
 
   private static String contentType(String name) { String ext = name.substring(name.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT); return switch (ext) { case "png" -> "image/png"; case "webp" -> "image/webp"; case "gif" -> "image/gif"; case "bmp" -> "image/bmp"; default -> "image/jpeg"; }; }
 
-  private static void validateImage(String name, long size) { if (name == null || !isImage(name)) throw DomainException.badRequest("IMAGE_TYPE_INVALID", "仅支持 JPG、PNG、WEBP、GIF、BMP"); if (size > 10L * 1024 * 1024) throw DomainException.badRequest("IMAGE_TOO_LARGE", "单张图片不能超过 10MB"); }
+  private static void validateImage(String name, long size) {
+    if (name == null || !isImage(name)) throw DomainException.badRequest("IMAGE_TYPE_INVALID", "仅支持 JPG、PNG、WEBP、GIF、BMP");
+    validateImageSize(name, size);
+  }
+
+  private static void validateImageSize(String name, long size) {
+    if (size > MAX_IMAGE_SIZE_BYTES) {
+      throw DomainException.badRequest("IMAGE_TOO_LARGE", "单张商品图片不能超过 " + MAX_IMAGE_SIZE_MIB + " MiB，请压缩后重新上传：" + name);
+    }
+  }
 
   private void requireImageWritable(long activityId) {
     jdbc.queryForList("SELECT id FROM activity WHERE id=? FOR UPDATE", activityId);

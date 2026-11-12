@@ -1,0 +1,24 @@
+{
+  "frontend": {
+    "passed": 498,
+    "failed": 0,
+    "skipped": 0,
+    "typecheck": true,
+    "changedFileLint": true
+  },
+  "backend": {
+    "total": 541,
+    "passed": 352,
+    "skipped": 189,
+    "failed": 0,
+    "errors": 0
+  },
+  "replicas": {
+    "passed": true,
+    "evidence": "outputs/ack-release-20261112.1/replicas.log"
+  },
+  "pending": [
+    "Original 110-product/image Docker replay: original assets not located",
+    "Real ACK, PolarDB, Alibaba Redis/OSS, Ingress, rolling upgrade, capacity and manual scaling"
+  ]
+}

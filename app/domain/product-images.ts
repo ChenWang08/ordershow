@@ -2,6 +2,7 @@ import JSZip from "jszip";
 import { registerLocalImage, releaseLocalImage } from "./local-image-preview";
 import {
   createImportRowId,
+  productMaterialNameKey,
   type ProductImageAsset,
   type ProductImageRelationStatus,
   type ProductImageStats,
@@ -166,20 +167,39 @@ export function matchProductImages(rows: ProductImportRow[], assets: ProductImag
     if (name) groupsByName.set(name, [...(groupsByName.get(name) ?? []), row]);
   });
   const groups = [...groupsByName.values()];
+  const assetsWithExactGroups = assets.map((asset) => ({
+    asset,
+    exactGroup: groupsByName.get(normalizeProductImageName(asset.fileName)),
+  }));
+  const exactImageCounts = new Map<ProductImportRow[], number>();
+  for (const { exactGroup } of assetsWithExactGroups) {
+    if (exactGroup) exactImageCounts.set(exactGroup, (exactImageCounts.get(exactGroup) ?? 0) + 1);
+  }
+
   const proposedByRow = new Map<string, Array<{ asset: ProductImageAsset; autoConfirmed: boolean }>>();
-  const baseAssets = assets.map((asset) => {
-    const names = asset.matchingNames?.length ? asset.matchingNames : [asset.fileName];
-    const scored = groups.map((group) => ({
-      group,
-      score: Math.max(...names.map((name) => scoreProductImageMatch(group[0].materialName, name))),
-    })).filter((item) => item.score > 0).sort((a, b) => b.score - a.score);
-    const best = scored[0];
-    const second = scored[1];
-    const status: ProductImageAsset["matchStatus"] = !best || best.score < 0.55 ? "未匹配"
-      : best.score >= 0.9 && (!second || best.score - second.score >= 0.08) ? "已匹配" : "待确认";
+  const baseAssets = assetsWithExactGroups.map(({ asset, exactGroup }) => {
+    let status: ProductImageAsset["matchStatus"];
+    let candidateGroups: ProductImportRow[][];
+    if (exactGroup) {
+      const materialNames = new Set(exactGroup.map((row) => productMaterialNameKey(row.materialName)));
+      status = exactImageCounts.get(exactGroup) === 1 && materialNames.size === 1 ? "已匹配" : "待确认";
+      candidateGroups = [exactGroup];
+    } else {
+      const names = asset.matchingNames?.length ? asset.matchingNames : [asset.fileName];
+      const scored = groups.map((group) => ({
+        group,
+        score: Math.max(...names.map((name) => scoreProductImageMatch(group[0].materialName, name))),
+      })).filter((item) => item.score > 0).sort((a, b) => b.score - a.score);
+      const best = scored[0];
+      const second = scored[1];
+      status = !best || best.score < 0.55 ? "未匹配"
+        : best.score >= 0.9 && (!second || best.score - second.score >= 0.08) ? "已匹配" : "待确认";
+      candidateGroups = status === "已匹配" && best ? [best.group]
+        : status === "待确认" && best ? scored.filter((item) => best.score - item.score <= 0.08).map((item) => item.group) : [];
+      // Calculate the score gap against the full catalog before reserving the exact-name groups.
+      candidateGroups = candidateGroups.filter((group) => !exactImageCounts.has(group));
+    }
     const nextAsset = { ...asset, matchStatus: status };
-    const candidateGroups = status === "已匹配" && best ? [best.group]
-      : status === "待确认" && best ? scored.filter((item) => best.score - item.score <= 0.08).map((item) => item.group) : [];
     candidateGroups.flat().forEach((row) => proposedByRow.set(row.id, [
       ...(proposedByRow.get(row.id) ?? []),
       { asset: nextAsset, autoConfirmed: status === "已匹配" },
@@ -231,7 +251,8 @@ export function revokeProductImageAssets(assets: ProductImageAsset[]) {
   });
 }
 
-export const maxManualProductImageSize = 10 * 1024 * 1024;
+export const maxProductImageSizeMiB = 2;
+export const maxManualProductImageSize = maxProductImageSizeMiB * 1024 * 1024;
 
 export function readManualProductImage(file: File) {
   return new Promise<ProductImageAsset>((resolve, reject) => {
@@ -240,7 +261,7 @@ export function readManualProductImage(file: File) {
       return;
     }
     if (file.size > maxManualProductImageSize) {
-      reject(new Error(`${file.name} 超过 10MB，请压缩图片后再上传。`));
+      reject(new Error(`${file.name} 超过 ${maxProductImageSizeMiB} MiB，请压缩图片后再上传。`));
       return;
     }
       resolve({

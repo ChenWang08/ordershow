@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { type ProductImageAsset, type ProductImageStatus } from "../../../domain/import-domain";
-import { createManualProductImageAssets, productImageRelationStatus, productImageStatusForAssets } from "../../../domain/product-images";
+import { createManualProductImageAssets, maxProductImageSizeMiB, productImageRelationStatus, productImageStatusForAssets } from "../../../domain/product-images";
 import { ProductImageViewer } from "../../shared/components/ProductImageViewer";
 import { Thumbnail } from "../../shared/components/Thumbnail";
 
@@ -94,7 +94,7 @@ export function ProductImageEditor({ materialName, images, onChange }: { materia
       <div className="product-image-editor-actions">
         <label className="product-image-upload-button"><input type="file" multiple accept=".jpg,.jpeg,.png,.webp,.gif,.bmp" disabled={uploading || currentImages.length >= MAX_PRODUCT_IMAGES} onChange={(event) => { const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; void handleFiles(files); }} />{uploading ? "读取中…" : "添加图片"}</label>
       </div>
-      <small className="product-image-editor-hint">{currentImages.length ? `已配置 ${currentImages.length} 张 · 主图 ${confirmedCount > 0 ? "1" : "待选择"}${pendingCount > 0 ? ` · 待确认 ${pendingCount} 张` : ""}` : "未匹配"} · 最多 {MAX_PRODUCT_IMAGES} 张 · 单张不超过 10MB</small>
+      <small className="product-image-editor-hint">{currentImages.length ? `已配置 ${currentImages.length} 张 · 主图 ${confirmedCount > 0 ? "1" : "待选择"}${pendingCount > 0 ? ` · 待确认 ${pendingCount} 张` : ""}` : "未匹配"} · 最多 {MAX_PRODUCT_IMAGES} 张 · 单张不超过 {maxProductImageSizeMiB} MiB</small>
       {error && <small className="product-image-editor-error">{error}</small>}
       {previewIndex !== null && currentImages.length > 0 && <ProductImageViewer productName={materialName} images={currentImages} initialIndex={previewIndex} status={`${currentImages.length} 张`} onClose={() => setPreviewIndex(null)} />}
     </div>

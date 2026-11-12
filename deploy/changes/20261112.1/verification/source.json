@@ -1,0 +1,8 @@
+{
+  "head": "4101a7851dde5e49634c50ecbc2adc25e4929329",
+  "dirty": true,
+  "patchSha256": "4b77b0389508d33b26446a24d54b911237d503c8bafb7617ac7315dedb10bfe8",
+  "businessDiffUnchangedSinceBuild": true,
+  "sourceArchive": "outputs/ack-release-20261112.1/source-head.tar",
+  "patch": "outputs/ack-release-20261112.1/source.patch"
+}

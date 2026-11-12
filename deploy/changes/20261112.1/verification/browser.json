@@ -1,0 +1,10 @@
+{
+  "passed": true,
+  "adminProductPage": true,
+  "h5Page": true,
+  "browserImageLoaded": {
+    "width": 320,
+    "height": 160
+  },
+  "pageErrors": []
+}
