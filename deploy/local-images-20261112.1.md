@@ -7,7 +7,7 @@
 | API / export-worker | `order-show-ack-backend:20261112.1` | `sha256:5fef572c23c712756f4a7c9bf06a304304a976114ff2d35434b6cda9b4ec009a` |
 | 前端 | `order-show-ack-frontend:20261112.1` | `sha256:268657eb8edb8548df9f2543409ee0aa51580c52eb01094123cf2ef725748371` |
 
-两者均为 `linux/amd64`、非 root，前端构建参数 `NEXT_PUBLIC_API_BASE=/api/v1`。上一版前后端 `20261110.2` 均保留，镜像 ID 未变。本轮仅本机构建与隔离验收，未推送仓库、未部署真实 ACK。
+两者均为 `linux/amd64`、非 root，前端构建参数 `NEXT_PUBLIC_API_BASE=/api/v1`。上一版前后端 `20261110.2` 均保留，镜像 ID 未变。按用户后续授权，两个相同已验镜像已推送 CODING，独立查询远端摘要与上表一致，供测试环境部署。上传阶段未重新构建、未部署真实 ACK。
 
 ## 修改内容
 
@@ -38,6 +38,8 @@
 
 隔离 Compose 默认前后端均为 `20261112.1`，也可分别使用 `ACK_BACKEND_IMAGE_TAG` / `ACK_FRONTEND_IMAGE_TAG` 指定版本。重新验收只使用独立 smoke 项目，不操作现有业务容器。本轮未将 smoke 栈作为常驻业务部署。
 
-后续云端部署使用同一已验镜像，先上传并核验远端摘要，再保存目标部署的实际旧镜像与配置。顺序保持全部 API 就绪 → export-worker → 前端；回滚先前端再后端/worker。连接预算沿用 4 API + 1 worker 常态 86、滚动新增一个 API 时 107，另留终止中 Pod 与运维连接余量，无 HPA。
+后续云端部署使用同一已验镜像，上传及独立摘要核验已完成，部署前保存目标部署的实际旧镜像与配置。顺序保持全部 API 就绪 → export-worker → 前端；回滚先前端再后端/worker。连接预算沿用 4 API + 1 worker 常态 86、滚动新增一个 API 时 107，另留终止中 Pod 与运维连接余量，无 HPA。
 
 验证摘要见 [版本目录](changes/20261112.1/README.md)。
+
+CODING 仓库标签为 `g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261112.1` 和 `g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261112.1`。推送前均不存在，上传新增标签并复用已有层。上传证据见 `changes/20261112.1/verification/upload.json`；三份部署补丁固定到已验摘要，未执行环境更新。

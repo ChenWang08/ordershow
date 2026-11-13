@@ -1,7 +1,7 @@
 {
   "version": "20261112.1",
   "previousVersion": "20261110.2",
-  "localOnly": true,
+  "localOnly": false,
   "images": [
     {
       "reference": "order-show-ack-backend:20261112.1",
@@ -9,7 +9,9 @@
       "platform": "linux/amd64",
       "user": "ordershow",
       "version": "20261112.1",
-      "revision": "4101a7851dde5e49634c50ecbc2adc25e4929329-dirty"
+      "revision": "4101a7851dde5e49634c50ecbc2adc25e4929329-dirty",
+      "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend:20261112.1",
+      "registryDigest": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend@sha256:5fef572c23c712756f4a7c9bf06a304304a976114ff2d35434b6cda9b4ec009a"
     },
     {
       "reference": "order-show-ack-frontend:20261112.1",
@@ -17,7 +19,11 @@
       "platform": "linux/amd64",
       "user": "node",
       "version": "20261112.1",
-      "revision": "4101a7851dde5e49634c50ecbc2adc25e4929329-dirty"
+      "revision": "4101a7851dde5e49634c50ecbc2adc25e4929329-dirty",
+      "registryTag": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend:20261112.1",
+      "registryDigest": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend@sha256:268657eb8edb8548df9f2543409ee0aa51580c52eb01094123cf2ef725748371"
     }
-  ]
+  ],
+  "pushed": true,
+  "remoteDigestVerified": true
 }

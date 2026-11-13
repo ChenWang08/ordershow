@@ -1,0 +1,19 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "backend"
+  },
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "backend",
+            "image": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-backend@sha256:5fef572c23c712756f4a7c9bf06a304304a976114ff2d35434b6cda9b4ec009a"
+          }
+        ]
+      }
+    }
+  }
+}

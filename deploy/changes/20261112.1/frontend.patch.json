@@ -1,0 +1,19 @@
+{
+  "apiVersion": "apps/v1",
+  "kind": "Deployment",
+  "metadata": {
+    "name": "frontend"
+  },
+  "spec": {
+    "template": {
+      "spec": {
+        "containers": [
+          {
+            "name": "frontend",
+            "image": "g-ttsu8985-docker.pkg.coding.net/devops-admin/wilmar-docker/order-show-frontend@sha256:268657eb8edb8548df9f2543409ee0aa51580c52eb01094123cf2ef725748371"
+          }
+        ]
+      }
+    }
+  }
+}
